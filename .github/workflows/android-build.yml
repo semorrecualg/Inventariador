@@ -1,4 +1,4 @@
-name: Build Android APK (Native Ready v2.7)
+name: Build Android APK (versão lida do package.json)
 
 on:
   push:
@@ -12,6 +12,15 @@ jobs:
   build:
     name: Generate APK 
     runs-on: ubuntu-latest
+
+    env:
+      # Identidade do admin: sem isto o APK nasce sem soberania (isAdminEmail
+      # sempre false). Sobrescreva em Settings → Variables.
+      VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
+      # Enquanto estes secrets não forem cadastrados, o build cai em INTERNAL
+      # (offline) — comportamento idêntico ao anterior, sem quebrar o build.
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
     defaults:
       run:
@@ -41,7 +50,7 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
 
-      - name: Construção e Sincronização da Plataforma Nativa (GBR Protocol v2.7)
+      - name: Construção e Sincronização da Plataforma Nativa
         run: |
           set -euo pipefail
 

@@ -8,7 +8,7 @@ import { Capacitor } from '@capacitor/core';
 import { startSecurityMonitor, checkRuntimeIntegrity } from './services/securityService';
 import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
-import { getAssetUnit, normalizeKey, matchUnitKeys } from './utils/schema';
+import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
@@ -4041,7 +4041,7 @@ useEffect(() => {
       tenantid: updatedUser.tenantid
     });
     await pushScreen(target);
-  }, [user, databaseMode, isInternalMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
+  }, [user, databaseMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
 
   // 🎯 TELA ÚNICA PÓS-LOGIN (Etapa 3 do FLUXO_ACESSO_INICIAL):
   // contrato (tenantid) + filial + módulo num único passo. A escolha persiste
@@ -4105,7 +4105,7 @@ useEffect(() => {
     } else {
       await pushScreen(AppScreen.UNIT_SELECTION); // sem filial definida → escolher depois
     }
-  }, [user, databaseMode, isInternalMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
+  }, [user, databaseMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
 
   // Sincroniza a ref usada pelo dispatcher pós-login (Etapa 4).
   useEffect(() => {
@@ -4464,7 +4464,7 @@ useEffect(() => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [databaseMode, isEngineReady, pushScreen, setHistory, syncFromCloud]); // Removido 'user' para evitar loops infinitos de re-processamento de sessão
+  }, [databaseMode, isEngineReady, pushScreen, setHistory, syncFromCloud, workContextFiliais]); // Removido 'user' para evitar loops infinitos de re-processamento de sessão
 
   const handleClearMultipleCompanies = async (companiesToClear: string[]) => {
     if (companiesToClear.length === 0) return;

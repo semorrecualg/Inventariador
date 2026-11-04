@@ -1,0 +1,62 @@
+name: CI — Qualidade (lint · tipos · testes · build)
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # O projeto vive em Inventariador-main/ (ver docs/GOVERNANCA.md § 2).
+  NODE_OPTIONS: "--max-old-space-size=4096"
+  # Obrigatório: rbacService captura VITE_ADMIN_EMAIL no load do módulo. Sem
+  # isto, 3 testes de soberania caem. O valor pode ser sobrescrito pela
+  # variável de repositório VITE_ADMIN_EMAIL (Settings → Variables).
+  VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
+
+jobs:
+  quality:
+    name: Lint · Tipos · Testes · Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: Inventariador-main
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js (.nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: Inventariador-main/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci --legacy-peer-deps
+
+      - name: Lint (zero warnings)
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Testes unitários
+        run: npm test
+        env:
+          VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
+
+      - name: Build de produção
+        run: npm run build
+        env:
+          VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
+          # Opcionais: enquanto não cadastrados, o build cai em modo INTERNAL.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}

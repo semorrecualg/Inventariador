@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db, sqliteService } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen, Asset } from '../types';
@@ -208,7 +208,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     }
   };
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       // SRE ISOLAMENTO: com tenant ativo, conta apenas os ativos DO contrato.
       let tid = activeTenantid;
@@ -229,17 +229,17 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
       console.error("[SRE STATS ERR]", err);
     }
-  };
-
-  // Recalcula as estatísticas quando o tenant ativo é detectado (após o boot).
-  useEffect(() => {
-    if (activeTenantid) loadStats();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTenantid]);
+
+  // Recalcula as estatísticas no boot E quando o tenant ativo é detectado:
+  // loadStats muda de identidade junto com activeTenantid, então um único
+  // efeito cobre os dois casos sem diretiva de supressão.
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
 
   useEffect(() => {
     addLog("[SRE BOOT] Inicializando painel de gestão de base de dados...");
-    loadStats();
   }, []);
 
   // Carga central de planilha (usada pelo input de arquivo E pela listagem de

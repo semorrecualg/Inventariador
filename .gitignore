@@ -22,6 +22,9 @@ create_junction.bat
 .env
 .env.*
 !*.env.example
+# Exceção: ambiente de TESTE do Vitest (sem segredos) precisa ser versionado
+# para a suíte ser hermética em qualquer clone/CI. Ver docs/GOVERNANCA.md § 6.
+!Inventariador-main/.env.test
 
 # Node dependencies — never commit
 node_modules/

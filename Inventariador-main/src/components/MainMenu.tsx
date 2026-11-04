@@ -1,9 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { ADMIN_EMAIL } from '../utils/authUtils';
 import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
-import { AppScreen, User, ScanFeedbackMode, DatabaseMode, UserRole, NavigationParams } from '../types';
+import { AppScreen, User, ScanFeedbackMode, DatabaseMode, NavigationParams } from '../types';
 import { isAdminUser, isAuditorUser } from '../services/rbacService';
 import { canAccessDatabaseManager } from '../utils/authUtils';
 import Modal from './Modal';
