@@ -8,6 +8,22 @@ import type { User, UnitConfig } from '../types';
 
 const ADMIN: User = { tenantid: 'CICOPAL', email: 'admin@gbr.com', role: 'ADMIN' } as unknown as User;
 
+/**
+ * Aguarda até a sonda devolver um valor ou expirar o tempo total.
+ * Substitui sleeps fixos: runners lentos (CI 2 vCPU) derrubavam o teste que
+ * dava 1200ms exatos ao fluxo assíncrono do handleSave.
+ */
+async function until<T>(probe: () => T | undefined, timeoutMs = 6000, stepMs = 50): Promise<T> {
+  const start = Date.now();
+  let last: T | undefined;
+  while (Date.now() - start < timeoutMs) {
+    last = probe();
+    if (last !== undefined) return last;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  return probe() as T;
+}
+
 describe('UnitConfigurator mount repro (reading lng)', () => {
   it('mounts without throwing when a unit with invalid stored coords is selected', async () => {
     // Seeds mimic stale drafts/anchor records that could break the map pipeline
@@ -40,6 +56,11 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
       console.error('>>> REPRO CRASH:', (caught as Error).stack);
     }
     expect(caught).toBeNull();
+
+    // Limpeza: desmonta a instância — dois roots montados compartilham DOM,
+    // sessionStorage e o Dexie do worker; o próximo teste não pode herdar isso.
+    root.unmount();
+    container.remove();
   });
 
   it('notifica onUpdateConfigs com a lista JÁ atualizada após FIXAR ÂNCORA GPS', async () => {
@@ -76,16 +97,22 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
       })
     );
 
-    // Espera o load assíncrono de configs + seed do currentConfig
-    await new Promise((r) => setTimeout(r, 400));
-
-    const buttons = Array.from(container.querySelectorAll('button'));
-    const fixar = buttons.find((b) => (b.textContent || '').toUpperCase().includes('FIXAR ÂNCORA GPS'));
+    // Espera o load assíncrono de configs + seed do currentConfig — polling com o
+    // MARCADOR DOM correto: o HUD exibe currentConfig.lat em texto. O estado inicial
+    // do componente já nasce com Brasília (-15.794200), então esperar só o botão não
+    // garante o seed: clicando cedo, o handleSave grava Brasília e descarta os rascunhos.
+    const fixar = await until(() =>
+      container.textContent?.includes('-16.706719')
+        ? Array.from(container.querySelectorAll('button')).find((b) =>
+            (b.textContent || '').toUpperCase().includes('FIXAR ÂNCORA GPS'),
+          )
+        : undefined,
+    );
     expect(fixar).toBeTruthy();
     fixar!.click();
 
     // Espera o fluxo assíncrono do handleSave (geolocalização + persistência local)
-    await new Promise((r) => setTimeout(r, 1200));
+    await until(() => (received.length > 0 ? true : undefined));
 
     expect(received.length).toBeGreaterThan(0);
     const saved = received.find((c) => c.unit_id === '010101 CICOPAL GO');
@@ -93,5 +120,9 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     expect(Number(saved?.lat)).not.toBe(0);
     expect(Number(saved?.lng)).not.toBe(0);
     expect(Number(saved?.lat)).toBeCloseTo(-16.706719, 3);
+
+    // Limpeza final: sem raízes órfãs afetando o restante da suíte
+    root.unmount();
+    container.remove();
   });
 });
