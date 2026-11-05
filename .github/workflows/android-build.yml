@@ -15,7 +15,7 @@ jobs:
 
     env:
       # Identidade do admin: sem isto o APK nasce sem soberania (isAdminEmail
-      # sempre false). Sobrescreva em Settings → Variables.
+      # sempre false). Sobrescreva em Settings → Variables. 
       VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
       # Enquanto estes secrets não forem cadastrados, o build cai em INTERNAL
       # (offline) — comportamento idêntico ao anterior, sem quebrar o build.
