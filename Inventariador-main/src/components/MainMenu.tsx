@@ -130,6 +130,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   initialDataMenuOpen = false,
   initialOpenPanel = null,
   databaseMode,
+  onUpdateDatabaseMode,
   selectedUnit,
   darkMode,
   onUpdateDarkMode,
@@ -945,6 +946,41 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </div>
 
             <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar pr-1">
+              {/* Alternador de base: LOCAL (dispositivo) ↔ OFICIAL (nuvem) */}
+              <div className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Modo de Base</h4>
+                    <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Base ativa neste dispositivo</p>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-wider border ${databaseMode === DatabaseMode.INTERNAL ? 'bg-blue-500/15 text-blue-300 border-blue-400/30' : 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30'}`}>
+                    {databaseMode === DatabaseMode.INTERNAL ? 'Base Local' : 'Base Oficial'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => onUpdateDatabaseMode(DatabaseMode.INTERNAL)}
+                    disabled={isSyncing}
+                    className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all active:scale-[0.98] disabled:opacity-40 ${databaseMode === DatabaseMode.INTERNAL ? 'bg-blue-600 text-white border-blue-400' : 'bg-white/5 text-white/70 border-white/10'}`}
+                  >
+                    <Database size={16} />
+                    Base Local
+                  </button>
+                  <button
+                    onClick={() => onUpdateDatabaseMode(DatabaseMode.SUPABASE)}
+                    disabled={isSyncing || !hasSupabase}
+                    title={!hasSupabase ? 'Build sem chaves do Supabase' : 'Base oficial na nuvem'}
+                    className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all active:scale-[0.98] disabled:opacity-40 ${databaseMode !== DatabaseMode.INTERNAL ? 'bg-emerald-600 text-white border-emerald-400' : 'bg-white/5 text-white/70 border-white/10'}`}
+                  >
+                    <Cloud size={16} />
+                    Base Oficial
+                  </button>
+                </div>
+                {!hasSupabase && (
+                  <p className="text-[8px] font-bold text-amber-400/80 uppercase tracking-widest mt-2">Build sem chaves do Supabase: apenas a Base Local está disponível.</p>
+                )}
+              </div>
+
               {/* Working Directory Status Card */}
               <div className="w-full p-5 bg-blue-600 rounded-2xl shadow-xl shadow-blue-500/20 mb-4 border border-blue-400 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 p-4 opacity-10">

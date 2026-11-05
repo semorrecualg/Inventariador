@@ -60,6 +60,17 @@ export function readLocalTenantId(): string {
 }
 
 /**
+ * Contrato de trabalho efetivo do operador: perfil → sessão → armazenamento
+ * local. O admin global (sem tenantid no perfil) herda o contrato da filial
+ * escolhida na Unidade Operacional; sem essa cadeia, ações como criar campanha
+ * eram bloqueadas com "tenant não identificado".
+ */
+export function resolveWorkingTenantId(user: object | null | undefined): string {
+  const candidato = (resolveTenantId(user) || readSessionTenantId() || readLocalTenantId() || '').trim();
+  return ['NULL', 'UNDEFINED', 'N/A'].includes(candidato.toUpperCase()) ? '' : candidato;
+}
+
+/**
  * Limpa o contexto de trabalho (contrato/filial/unidade) do sessionStorage e
  * localStorage. Usado no LOGOUT: o próximo login NUNCA deve herdar o contrato
  * de uma sessão anterior (bug clássico: dono global logava como CLIENTETESTE

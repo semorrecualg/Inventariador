@@ -51,7 +51,6 @@ interface UnitSelectorProps {
   isAuditor?: boolean;
   databaseMode?: DatabaseMode;
   isImportingBatch?: boolean; // UX v2.6 Isolated state
-  onForceToggleView?: () => void;
   /** Navegação para o MainMenu com painel pré-aberto (tool grid da Unidade Operacional). */
   onNavigate?: (target: AppScreen, params?: NavigationParams) => void;
 }
@@ -77,7 +76,6 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   isAuditor = false, 
   databaseMode,
   isImportingBatch = false,
-  onForceToggleView,
   onNavigate
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -213,15 +211,10 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
 
   // Refs para estabilizar as funções callbacks externas e evitar loops infinitos de render
   const onSelectRef = React.useRef(onSelect);
-  const onForceToggleViewRef = React.useRef(onForceToggleView);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
   }, [onSelect]);
-
-  useEffect(() => {
-    onForceToggleViewRef.current = onForceToggleView;
-  }, [onForceToggleView]);
 
   // 4. Coleta a coordenada geográfica real do terminal móvel via GPS de alta precisão (Depende apenas da contagem de configs)
   useEffect(() => {
@@ -462,13 +455,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           {/* Back Button Alinhado à Esquerda */}
           <div className="flex-shrink-0 flex items-center">
             <BackButton 
-              onClick={() => {
-                if (onForceToggleView) {
-                  onForceToggleView();
-                } else {
-                  onBack();
-                }
-              }} 
+              onClick={onBack} 
               label="Voltar" 
               subLabel={isAdmin ? "Módulos" : "Sair"} 
             />

@@ -2087,8 +2087,11 @@ useEffect(() => {
 
 
   const currentTenantid = useMemo(() => {
-    // 1. Prioridade: Tenant do usuário logado
-    let t = (user?.tenantid || '').trim();
+    // 1. Prioridade: Tenant do usuário logado → sessão → armazenamento local.
+    // O admin global (ex.: admin/admin) não tem tenantid no perfil: sem esta
+    // cadeia o contrato da filial escolhida na Unidade Operacional se perdia e
+    // telas como Campanhas/Gestor de Base bloqueavam com "tenant não identificado".
+    let t = (user?.tenantid || readSessionTenantId() || readLocalTenantId() || '').trim();
     
     // 2. Governança: o tenant é dado — vem 100% do fluxo de dados (perfil/sessão).
     // Ausência não é preenchida com valor fixo; é sinalizada como vazio.
@@ -4651,6 +4654,51 @@ useEffect(() => {
     }
   };
 
+  /**
+   * Pedido de troca de modo vindo do hub (painel DADOS). Confirma antes de
+   * aplicar: as bases LOCAL e NUVEM são independentes e a troca salva o estado
+   * atual no modo de origem antes de recarregar o outro banco.
+   */
+  const handleRequestDatabaseModeSwitch = (mode: DatabaseMode) => {
+    const atual = databaseMode === DatabaseMode.INTERNAL ? 'Base Local' : 'Base Oficial (Nuvem)';
+    const destino = mode === DatabaseMode.INTERNAL ? 'Base Local' : 'Base Oficial (Nuvem)';
+
+    if (mode === databaseMode) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Modo já ativo',
+        message: `O sistema já está operando na ${atual}.`,
+        type: 'info'
+      });
+      return;
+    }
+
+    if (mode !== DatabaseMode.INTERNAL && isInternalMode) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Nuvem indisponível',
+        message: 'Este build não foi compilado com as chaves do Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). A Base Oficial só pode ser aberta em um APK/versão web com essas chaves configuradas.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    const precisaAutenticar = mode !== DatabaseMode.INTERNAL;
+    setModalConfig({
+      isOpen: true,
+      title: `Trocar para ${destino}?`,
+      message: `As bases são independentes: o progresso da ${atual} fica salvo e não é enviado automaticamente para a ${destino}. ` +
+        (precisaAutenticar
+          ? 'Na Base Oficial os dados vêm da nuvem e exigem sessão autenticada no Supabase — se ainda não autenticou, você verá a base vazia até fazer login. '
+          : 'A Base Local mostra apenas os ativos gravados neste dispositivo. ') +
+        'Deseja continuar?',
+      type: 'confirm',
+      onConfirm: () => {
+        handleUpdateDatabaseMode(mode);
+      }
+    });
+  };
+
   const handleResetGPS = () => {
     localStorage.removeItem('gbr_gps_bypass');
     setModalConfig({
@@ -4669,7 +4717,11 @@ useEffect(() => {
 
   const popScreen = useCallback(() => {
     setHistory(prev => {
-      const newHistory = prev.length > 1 ? prev.slice(0, -1) : [AppScreen.MAIN_MENU];
+      // Sem histórico para voltar não existe hub de filial válido: sem unidade
+      // selecionada o único destino coerente é a seleção de módulos (antes caía
+      // em MAIN_MENU sem filial, estado inconsistente que disparava a guarda).
+      const fallback = selectedUnit ? AppScreen.MAIN_MENU : AppScreen.MODULE_SELECTION;
+      const newHistory = prev.length > 1 ? prev.slice(0, -1) : [fallback];
       const newScreen = newHistory[newHistory.length - 1];
       logger.info(`>>> [Navigation] Popping screen back to: ${newScreen}`);
       if (newScreen !== AppScreen.ASSET_DETAIL) {
@@ -4677,7 +4729,7 @@ useEffect(() => {
       }
       return newHistory;
     });
-  }, [setHistory]);
+  }, [setHistory, selectedUnit]);
 
   const handleUpdateUnitConfigs = useCallback((configs: UnitConfig[]) => {
     setInventory(prev => ({ ...prev, unitConfigs: configs }));
@@ -6660,7 +6712,7 @@ useEffect(() => {
             user={user}
             units={fullCompaniesWithStatus.map(c => ({ name: c.name, hasData: c.hasData }))}
             databaseMode={databaseMode}
-            onUpdateDatabaseMode={handleUpdateDatabaseMode}
+            onUpdateDatabaseMode={handleRequestDatabaseModeSwitch}
             inventoryInfo={{ count: activeUnitAssetCount, totalDatabase: selectedUnit ? activeUnitAssetCount : inventory.assets.length, date: inventory.lastUpdated }}
             autoConfirmOnScan={inventory.autoConfirmOnScan || false}
             onUpdateAutoConfirm={(val) => updateConfig({ autoConfirmOnScan: val })}
@@ -7005,9 +7057,6 @@ useEffect(() => {
               onSync={syncFromCloud}
               isSyncing={isSyncing}
               lastSyncTime={lastSyncTime}
-              onForceToggleView={() => {
-                pushScreen(AppScreen.DATABASE_MANAGER);
-              }}
               onConfigGPS={(u) => {
                 setSelectedUnit(u);
                 pushScreen(AppScreen.UNIT_CONFIGURATOR);

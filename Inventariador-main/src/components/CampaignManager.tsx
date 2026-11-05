@@ -21,8 +21,10 @@ import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
 import { isAdminUser } from '../utils/authUtils';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot, fetchCampaigns, fetchAllCampaigns } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
+import { db } from '../services/sqliteService';
 import { Device } from '@capacitor/device';
 import { logger } from '../utils/logger';
+import { resolveTenantId, resolveWorkingTenantId } from '../utils/tenantUtils';
 
 interface CampaignManagerProps {
   user: User | null;
@@ -195,10 +197,28 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       return;
     }
     
-    let tenantid = (propsTenantid || user?.tenantid || '').trim();
+    // SRE: o contrato da campanha é o da FILIAL de trabalho. O admin global loga
+    // sem tenantid no perfil, então a cadeia desce até a sessão (definida no
+    // onSelect da Unidade Operacional) e, por último, ao dono real da filial na
+    // base local — antes isso bloqueava a criação com "Tenant não identificado".
+    let tenantid = (propsTenantid || resolveWorkingTenantId(user) || '').trim();
     // v25.70: apenas sentinelas de valor ausente contam como vazio; qualquer
     // tenant real da base é honrado literalmente (nenhum valor fixo).
     if (['NULL', 'UNDEFINED'].includes(tenantid.trim().toUpperCase())) tenantid = '';
+
+    if (!tenantid || tenantid === 'N/A') {
+      const unitDaCampanha = (newCampaignUnit || initialUnit || '').trim().toUpperCase();
+      if (unitDaCampanha) {
+        try {
+          const amostra = await db.local_assets
+            .filter((a) => String(a.filial || '').trim().toUpperCase() === unitDaCampanha && !!resolveTenantId(a))
+            .first();
+          if (amostra) tenantid = resolveTenantId(amostra);
+        } catch (err) {
+          logger.warn('>>> [Governance] Falha ao resolver o contrato da filial na base local:', err);
+        }
+      }
+    }
 
     if (!tenantid || tenantid === 'N/A') {
       setErrorMessage('ERRO DE GOVERNANÇA: Tenant não identificado. Ação bloqueada.');

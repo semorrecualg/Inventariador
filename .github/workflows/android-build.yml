@@ -42,6 +42,20 @@ jobs:
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
 
+      # Sem as duas credenciais o build continua "verde", mas o APK nasce em
+      # modo INTERNAL (100% offline) — foi o sintoma do selo "MOBILE (LOCAL)".
+      - name: Validar credenciais do Supabase
+        run: |
+          set -euo pipefail
+          faltando=""
+          [ -n "${VITE_SUPABASE_URL:-}" ] || faltando="VITE_SUPABASE_URL"
+          [ -n "${VITE_SUPABASE_ANON_KEY:-}" ] || faltando="${faltando:+$faltando, }VITE_SUPABASE_ANON_KEY"
+          if [ -n "$faltando" ]; then
+            echo "::error::Secret(s) ausente(s): $faltando. Cadastre em Settings -> Secrets and variables -> Actions; sem eles o APK sai em modo INTERNAL (offline)."
+            exit 1
+          fi
+          echo "Credenciais do Supabase presentes (URL e chave publica)."
+
       - name: Build Web Application
         run: npm run build
 
