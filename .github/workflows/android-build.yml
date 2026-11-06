@@ -3,10 +3,14 @@ name: Build Android APK (versão lida do package.json)
 on:
   push:
     branches: [ "main", "master" ]
+  # Também em PR: permite revisar o APK antes do merge. PRs vindos de fork não
+  # recebem secrets, então a guarda de credenciais abaixo falha — por design.
+  pull_request:
+    branches: [ "main", "master" ]
   workflow_dispatch:
 
 env:
-  NODE_OPTIONS: '--max-old-space-size=4096' 
+  NODE_OPTIONS: '--max-old-space-size=4096'
 
 jobs:
   build:
