@@ -39,7 +39,7 @@ O modo de banco é definido pelas credenciais de ambiente:
 |---|---|
 | `npm run dev` | Dev server (porta 3000) |
 | `npm run build` | Build de produção (`dist/`) |
-| `npm test` | Vitest — 366 testes / 36 arquivos |
+| `npm test` | Vitest — 373 testes / 38 arquivos |
 | `npx tsc --noEmit` | Typecheck (deve estar zerado) |
 | `npm run lint` | ESLint (zero warnings) |
 | `npm run verify:governanca` | Audita dev ↔ GitHub ↔ Supabase (ver `docs/GOVERNANCA.md` § 8) |

@@ -125,7 +125,7 @@ Obrigatório estar verde **localmente e no CI** antes de abrir PR:
 |---|---|
 | `npm run lint` | 0 erros, 0 warnings (`--max-warnings 0`) |
 | `npx tsc --noEmit` | 0 erros |
-| `npm test` | **366 testes / 36 arquivos** verdes |
+| `npm test` | **373 testes / 38 arquivos** verdes |
 | `npm run build` | `dist/` gerado, PWA com 28 entradas de precache |
 
 ### Suíte hermética (importante)
@@ -139,6 +139,18 @@ Por isso **`Inventariador-main/.env.test` é versionado** com apenas
 
 > Regra: todo teste novo que dependa de configuração de ambiente usa `.env.test`.
 > **Nunca** resolva isso com `eslint-disable` nem com `process.env` espalhado.
+
+### Web Storage do Node × jsdom (não remover)
+
+Node ≥ 22.4 expõe `localStorage`/`sessionStorage` experimentais como globais. Sem
+`--localstorage-file`, `globalThis.localStorage` é `undefined` — e, como já existe em
+`globalThis`, o jsdom não registra o seu. Em Vitest `window` **é** `globalThis`, então
+todo teste com `// @vitest-environment jsdom` fica sem `localStorage` e a suíte cai em
+massa (72 falhas em 10 arquivos com Node 26).
+
+Por isso `vitest.config.ts` passa `execArgv: ['--no-experimental-webstorage']` aos
+workers, devolvendo a implementação ao jsdom. Não troque isso por polyfill manual nem
+por mock de `localStorage` nos testes.
 
 ---
 
