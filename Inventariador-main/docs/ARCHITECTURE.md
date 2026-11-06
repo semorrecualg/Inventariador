@@ -17,7 +17,7 @@ PWA mobile-first para **auditoria física de ativos imobilizados em campo** (con
 | Estado | React local no `App.tsx` (máquina de telas) + Zustand (`stores/`) |
 | Persistência local | **Dexie.js (IndexedDB)** — banco `InventoryLocalStore` (tabelas em §7) |
 | Nuvem (híbrida) | **Supabase** (Postgres multi-tenant, schema padronizado `tenantid` + `filial`) + Gemini (`@google/genai`) — ver §10 |
-| Testes | Vitest (36 arquivos / 366 testes) — ver §13 |
+| Testes | Vitest (38 arquivos / 373 testes) — ver §13 |
 | CI | GitHub Actions (APK Android) + PWA |
 
 **Localização:** o app vive em `Inventariador-main/` (subdiretório do workspace; raiz do repo GitHub `semorrecualg/Inventariador`).
@@ -284,7 +284,7 @@ schema multi-tenant padronizado (`tenantid` + `filial`) e login por contrato.
    isolamento por tenant (`[tenantid+filial]` — helpers em `utils/tenantUtils.ts`);
    alterações de schema local = nova `version(n)` no Dexie; alterações no Supabase via
    `scripts/migrate-*-supabase.sql`.
-5. **Valide**: `npx tsc --noEmit` (zero erros em `src/`) + `npx vitest run` (366 testes).
+5. **Valide**: `npx tsc --noEmit` (zero erros em `src/`) + `npx vitest run` (373 testes).
 6. **Reproduza** no navegador (Playwright headless) quando o bug for de fluxo/UI.
 
 ---
