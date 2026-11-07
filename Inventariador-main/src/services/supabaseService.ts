@@ -11,6 +11,7 @@ import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../util
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { isAdminEmail } from '../utils/authUtils';
 import { pullDedupKey } from '../utils/syncDedup';
+import { normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 
 export class SupabaseNetworkException extends Error {
@@ -2669,6 +2670,19 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
       
       await sqliteService.saveCampaign(updated as unknown as Record<string, unknown>);
       await sqliteService.persist();
+
+      // Consistência do chip CAMPANHA no cartão da unidade: encerrar/arquivar
+      // apaga o cache local que habilita o botão; ativar reescreve-o.
+      const unitKey = String(currentCampaign.filial || currentCampaign.unit_id || '').trim();
+      if (unitKey) {
+        const cacheKey = `kardek_campanha_ativa_${normalizeKey(unitKey)}`;
+        if (status === CampaignStatus.ACTIVE) {
+          localStorage.setItem(cacheKey, 'true');
+        } else {
+          localStorage.removeItem(cacheKey);
+        }
+      }
+
       localFound = true;
     }
   } catch (err) {

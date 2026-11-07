@@ -6009,7 +6009,9 @@ useEffect(() => {
     campaigns.forEach(c => {
       // REGRA DE GOVERNANÇA: Apenas campanhas com status exatamente igual a 'ACTIVE' habilitam o botão visual
       if (String(c.status) === 'ACTIVE') {
-        const uId = c._unitid || c.unit_id;
+        // `filial` é o campo canónico da unidade; `_unitid`/`unit_id` são legado e
+        // podem trazer outro valor, o que deixava o chip CAMPANHA desabilitado.
+        const uId = c.filial || c._unitid || c.unit_id;
         if (uId) {
           const norm = normalizeKey(uId);
           unitsWithDirectCampaign.add(norm);
@@ -7236,16 +7238,19 @@ useEffect(() => {
                 sessionStorage.setItem('activeCampaignStatus', 'ACTIVE');
                 localStorage.setItem('app_current_campaign', id);
 
+                // Cache do chip CAMPANHA no cartão da unidade: vale para os DOIS modos.
+                // Antes só era gravado no ramo da nuvem; em INTERNAL (APK offline) o
+                // cartão continuava com o chip apagado mesmo com a campanha ATIVA.
+                if (selectedUnit) {
+                  localStorage.setItem(`kardek_campanha_ativa_${normalizeKey(selectedUnit)}`, 'true');
+                }
+
                 if (selectedUnit && databaseMode === DatabaseMode.INTERNAL) {
                   try {
                     await sqliteService.salvarCampanhaAtiva(selectedUnit, id);
                   } catch (err) {
                     logger.error(">>> [App] Erro ao salvar campanha ativa corporativa no sqlite:", err);
                   }
-                } else if (selectedUnit) {
-                  // Fallback para modo nuvem no localStorage para manter consistência rápida
-                  const normUnit = normalizeKey(selectedUnit);
-                  localStorage.setItem(`kardek_campanha_ativa_${normUnit}`, 'true');
                 }
 
                 setInventory(prev => ({ 
