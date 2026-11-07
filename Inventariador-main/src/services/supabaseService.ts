@@ -43,14 +43,36 @@ export interface ProvisionResult {
 // ALERTA: Se os Secrets (VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY) estiverem presentes na build do GitHub,
 // o modo de nuvem com Supabase Auth deve assumir a soberania do fluxo imediatamente.
 // As credenciais são lidas do ambiente (API Keys). Se ausentes, caem para placeholders inofensivos.
-const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// Normalização defensiva: valores vindos de secrets/env podem trazer espaços,
+// aspas acidentais ou vir sem o esquema ("projeto.supabase.co"). Sem isto, um
+// valor inválido chega ao createClient, que lança "Invalid supabaseUrl" no load
+// do módulo e derruba a aplicação inteira (error boundary "OPS! ALGO DEU ERRADO").
+const sanitizeCredential = (value: unknown): string =>
+  typeof value === 'string' ? value.trim().replace(/^["']|["']$/g, '').trim() : '';
+
+const normalizeSupabaseUrl = (value: string): string => {
+  if (!value) return '';
+  const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+    if (!parsed.hostname.includes('.')) return '';
+    return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return '';
+  }
+};
+
+const rawSupabaseUrl = normalizeSupabaseUrl(sanitizeCredential(import.meta.env.VITE_SUPABASE_URL));
+const rawSupabaseAnonKey = sanitizeCredential(import.meta.env.VITE_SUPABASE_ANON_KEY);
 // SUPABASE_PLUS ativa automaticamente quando as credenciais estão presentes
 // (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY via API Keys). Sem chaves → INTERNAL
 // (offline-first preservado). `SUPABASE_PLUS` habilita a nuvem com o schema
 // multi-tenant padronizado (`tenantid` + `filial`) — ver docs/ARCHITECTURE.md §10/§14.
 // Credenciais NUNCA hard-codadas no código-fonte: lidas de VITE_SUPABASE_URL /
-// VITE_SUPABASE_ANON_KEY (API Keys / env).
+// VITE_SUPABASE_ANON_KEY (API Keys / env). Um valor presente mas inutilizável
+// (URL não http/https) conta como ausente: o build cai para INTERNAL em vez de
+// rebentar no arranque do APK.
 export const isInternalMode = !(rawSupabaseUrl && rawSupabaseAnonKey);
 
 const supabaseUrl = rawSupabaseUrl || 'https://placeholder-project.supabase.co';

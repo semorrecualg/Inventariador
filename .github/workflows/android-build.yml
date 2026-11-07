@@ -54,6 +54,11 @@ jobs:
             exit 1
           fi
           echo "Credenciais do Supabase presentes (URL e chave publica)."
+          # Presente mas malformado é pior que ausente: gera APK que abre com
+          # "Invalid supabaseUrl". A app já cai para INTERNAL, mas avisamos aqui.
+          if ! printf '%s' "$VITE_SUPABASE_URL" | grep -Eq '^https?://[A-Za-z0-9._-]+/?$'; then
+            echo "::warning::VITE_SUPABASE_URL não é um URL http(s) válido (falta o esquema ou tem caracteres estranhos). O APK vai arrancar em modo INTERNAL (offline)."
+          fi
 
       - name: Build Web Application
         run: npm run build
