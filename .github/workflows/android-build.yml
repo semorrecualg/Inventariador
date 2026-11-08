@@ -164,6 +164,28 @@ jobs:
             gradle-cache-${{ runner.os }}-8.11.1-
             gradle-cache-${{ runner.os }}-
 
+      # Sem isto, cada execução do runner gera um debug.keystore novo e o APK
+      # sai assinado por uma chave diferente a cada build: o Android recusa a
+      # instalação por cima da versão anterior ("O app não foi instalado").
+      - name: Keystore de assinatura estável — cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
+
+      - name: Keystore de assinatura estável — secret (prioritário)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "Sem secret ANDROID_DEBUG_KEYSTORE_BASE64 — vale o keystore do cache."
+            exit 0
+          fi
+          mkdir -p "$HOME/.android"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          echo "Keystore restaurado do secret ANDROID_DEBUG_KEYSTORE_BASE64."
+
       - name: Build Debug APK
         run: |
           cd android
@@ -179,10 +201,48 @@ jobs:
           cp "$APK_PATH" "android/app/build/outputs/apk/debug/${NEW_NAME}"
           echo "✅ APK gerado: ${NEW_NAME}"
 
+      # Verificação explícita: se o APK sair inválido ou com assinatura trocada,
+      # o job falha aqui em vez de entregar um ficheiro que o telemóvel recusa.
+      - name: Verificar APK e publicar SHA-256
+        run: |
+          set -euo pipefail
+          APK="$(ls -1 android/app/build/outputs/apk/debug/gbr-kardek-*.apk | head -1)"
+          unzip -t "$APK" > /dev/null
+
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          APKSIGNER="$(ls -1 "$SDK_ROOT"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -n "${APKSIGNER:-}" ]; then
+            "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/apksigner.txt
+            CERT_SHA256="$(grep -m1 'SHA-256 digest' /tmp/apksigner.txt | sed 's/.*: //' || true)"
+          else
+            echo "::warning::apksigner não encontrado; verificação de assinatura ignorada."
+            CERT_SHA256="desconhecido"
+          fi
+
+          sha256sum "$APK" | tee "$APK.sha256"
+          APK_SHA256="$(cut -d' ' -f1 "$APK.sha256")"
+          SIZE="$(stat -c %s "$APK")"
+
+          {
+            echo "### APK Android"
+            echo ""
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| Ficheiro | \`$(basename "$APK")\` |"
+            echo "| Tamanho | ${SIZE} bytes |"
+            echo "| SHA-256 do APK | \`${APK_SHA256}\` |"
+            echo "| SHA-256 do certificado | \`${CERT_SHA256}\` |"
+            echo ""
+            echo "O certificado deve ser o mesmo entre builds; se mudar, a instalação"
+            echo "por cima da versão anterior é recusada com \"O app não foi instalado\"."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload Android Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: gbr-kardek-apk
-          path: ${{ github.workspace }}/Inventariador-main/android/app/build/outputs/apk/debug/gbr-kardek-*.apk
+          path: |
+            ${{ github.workspace }}/Inventariador-main/android/app/build/outputs/apk/debug/gbr-kardek-*.apk
+            ${{ github.workspace }}/Inventariador-main/android/app/build/outputs/apk/debug/gbr-kardek-*.apk.sha256
           retention-days: 7
           if-no-files-found: error
