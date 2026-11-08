@@ -4655,6 +4655,63 @@ useEffect(() => {
   };
 
   /**
+   * CARGA LOCAL → MODO LOCAL.
+   *
+   * A carga de planilha (e a restauração de backup) do Gestor de Base grava na
+   * BASE LOCAL do dispositivo — é essa base que o Gestor conta ao mostrar os
+   * ativos do contrato. Se o app estivesse em "Base Oficial", a Unidade
+   * Operacional e o Inventário liam a nuvem e a tela dizia "nenhum dado
+   * importado" com a base local cheia (ex.: 7.061 ativos do CICOPAL).
+   *
+   * Aqui o modo acompanha onde os dados estão e o inventário é recarregado na
+   * hora, sem reload do app.
+   */
+  const handleLocalBaseLoaded = async (info: { count: number; tenantids: string[] }) => {
+    const switched = databaseMode !== DatabaseMode.INTERNAL;
+    if (switched) {
+      logger.info('>>> [ModeSwitch] Carga na base local detectada. Alternando para BASE LOCAL.');
+      setDatabaseMode(DatabaseMode.INTERNAL);
+      localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
+    }
+
+    const loaded = await loadInventory(DatabaseMode.INTERNAL);
+    if (loaded && loaded.assets.length > 0) {
+      setInventory(loaded);
+    } else {
+      // Fallback: o guard de soberania pode recusar o loadInventory quando o
+      // arquivo físico está bloqueado, mas a carga acabou de gravar no Dexie.
+      const assets = await sqliteService.getAllAssets();
+      if (assets.length > 0) {
+        const companies = Array.from(new Set(
+          assets.map((a) => String((a as { filial?: unknown }).filial ?? '').toUpperCase().trim()).filter(Boolean)
+        ));
+        setInventory(prev => ({
+          ...prev,
+          databaseMode: DatabaseMode.INTERNAL,
+          assets: assets as unknown as Asset[],
+          companies
+        }));
+      }
+    }
+
+    setIsDataLoaded(true);
+    setSqliteStatus('ACTIVE');
+    setRefreshVersion(prev => prev + 1);
+
+    if (switched) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Operando na Base Local',
+        message: `A carga de ${info.count.toLocaleString('pt-BR')} ativos foi gravada na base deste dispositivo` +
+          `${info.tenantids[0] ? ` (contrato ${info.tenantids[0]})` : ''}. ` +
+          'O sistema passou para o modo BASE LOCAL para que a Unidade Operacional e o Inventário leiam esses ativos. ' +
+          'Para operar na Base Oficial, espelhe a base para a nuvem e troque o modo em Gestão e Manutenção.',
+        type: 'success'
+      });
+    }
+  };
+
+  /**
    * Pedido de troca de modo vindo do hub (painel DADOS). Confirma antes de
    * aplicar: as bases LOCAL e NUVEM são independentes e a troca salva o estado
    * atual no modo de origem antes de recarregar o outro banco.
@@ -6759,7 +6816,10 @@ useEffect(() => {
             campaignsCount={campaigns.length}
             currentCampaignId={inventory.currentCampaignId}
           />} />
-          <Route path="/db-manager" element={<DatabaseManagerScreen onBack={() => pushScreen(AppScreen.MODULE_SELECTION)} />} />
+          <Route path="/db-manager" element={<DatabaseManagerScreen
+            onBack={() => pushScreen(AppScreen.MODULE_SELECTION)}
+            onLocalBaseLoaded={handleLocalBaseLoaded}
+          />} />
           <Route path="/dashboard" element={<Dashboard
             assets={filteredAssetsByUnit}
             allAssets={inventory.assets}
