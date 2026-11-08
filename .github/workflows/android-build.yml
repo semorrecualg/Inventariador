@@ -259,6 +259,18 @@ jobs:
           APK="$(ls -1 android/app/build/outputs/apk/debug/gbr-kardek-*.apk | head -1)"
           unzip -t "$APK" > /dev/null
 
+          # A credencial tem de ter ficado embutida no bundle: se não estiver, a
+          # app arranca em INTERNAL (offline) — foi o que chegou ao campo na
+          # 2.7.1. Falha aqui em vez de publicar um APK sem nuvem.
+          HOST="$(node -e 'const b = (process.env.VITE_SUPABASE_URL || "").trim().replace(/^["\x27]|["\x27]$/g, "");
+            const c = /^https?:\/\//i.test(b) ? b : `https://${b}`;
+            try { console.log(new URL(c).host); } catch { process.exit(1); }')"
+          if ! unzip -p "$APK" 'assets/public/assets/*.js' 2>/dev/null | grep -qF "$HOST"; then
+            echo "::error::APK saiu em modo INTERNAL: a URL do Supabase (${HOST}) não está embutida no bundle. Confirme o secret VITE_SUPABASE_URL."
+            exit 1
+          fi
+          echo "Credencial do Supabase embutida no APK (${HOST})."
+
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
           APKSIGNER="$(ls -1 "$SDK_ROOT"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
           if [ -n "${APKSIGNER:-}" ]; then
