@@ -71,7 +71,8 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
     onSelect(address);
   };
 
-  const purifiedUnitName = selectedUnit ? selectedUnit.toUpperCase().trim() : 'UNIDADE NÃO ESPECIFICADA';
+  // Espelha a coluna 'filial' como veio da base — sem uppercase.
+  const purifiedUnitName = selectedUnit ? selectedUnit.trim() : 'UNIDADE NÃO ESPECIFICADA';
 
   return (
     <div id="address-selector-container" className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">

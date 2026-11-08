@@ -11,6 +11,10 @@ export interface DexieAsset {
   id: string; // matches primarykey
   tenantid: string;
   filial: string; // Canônico (Índice 1) — substitui a coluna legada _unitid
+  // Texto exato da coluna 'filial' vindo da planilha (sem trim/uppercase), usado
+  // na exibição da Unidade Operacional. `filial` continua normalizada porque é a
+  // chave indexada das consultas [tenantid+filial].
+  filial_raw?: string;
   // @deprecated Legado (somente leitura): registros locais antigos podem conter
   // _unitid; a coluna canônica é 'filial' (a coluna _unitid foi removida no
   // Supabase pela migração scripts/migrate-unitid-supabase.sql).
@@ -487,9 +491,15 @@ export class SqliteService {
           String(a.tenantid || '').toUpperCase().trim() === t
         );
         const checkedAssets = filialAssets.filter(a => a._conferido === 1);
+        // O rótulo espelha a coluna 'filial' da planilha (filial_raw), sem uppercase
+        // nem reformatação. A chave (f) segue normalizada — é identidade, não texto.
+        const rotulo = filialAssets.find(a => String(a.filial || '').trim() !== '');
+        const displayName = rotulo
+          ? String((rotulo as { filial_raw?: string }).filial_raw || rotulo.filial)
+          : f;
         return {
-          filial: f,
-          displayName: f,
+          filial: displayName,
+          displayName,
           tenantid: t,
           total: filialAssets.length,
           checked: checkedAssets.length
