@@ -271,6 +271,86 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
 **INTERNAL** (sem rede, offline puro); com credenciais → **SUPABASE** (Web/Desktop),
 schema multi-tenant padronizado (`tenantid` + `filial`) e login por contrato.
 
+### 10.1 Fluxo build-time → `isInternalMode` (credencial → modo → rede)
+
+`VITE_*` **não são lidas em runtime**. O Vite substitui cada `import.meta.env.VITE_*`
+literalmente no bundle durante o `build`, portanto a credencial fica **congelada dentro do
+`dist/` e, por consequência, dentro do APK**. É esta cadeia que os workflows controlam:
+
+```
+GitHub → Settings → Secrets and variables → Actions
+   VITE_SUPABASE_URL · VITE_SUPABASE_ANON_KEY
+         │  (o expression engine do Actions resolve ${{ secrets.NOME }})
+         ▼
+env do job (android-build.yml)  /  env do passo "Build de produção" (ci.yml)
+         ▼
+vite build  →  substitui import.meta.env.VITE_*  (VITE_ADMIN_EMAIL idem)
+         ▼
+dist/assets/App-<hash>.js      ← credencial congelada no bundle
+         ▼  npx cap sync android
+android/app/src/main/assets/public/…
+         ▼  ./gradlew assembleDebug
+APK gbr-kardek-v<versão do package.json>-<data>.apk
+```
+
+No arranque da app, `services/supabaseService.ts` avalia **uma vez** (nível de módulo):
+
+```
+sanitizeCredential(url | key)     trim + remove aspas acidentais
+normalizeSupabaseUrl(url)         exige http/https e hostname com ponto; inválido → ''
+isInternalMode = !(url && key)
+   true  → cliente Supabase com placeholders inofensivos; ZERO rede (INTERNAL)
+   false → cliente real; databaseMode default SUPABASE_PLUS
+```
+
+A normalização existe porque `createClient('<valor inválido>')` lança `Invalid supabaseUrl`
+**no load do módulo** — antes de qualquer error boundary útil — e derruba a app inteira
+(ecrã "OPS! ALGO DEU ERRADO"). URL presente mas inutilizável conta como **ausente**:
+cai para INTERNAL em vez de rebentar.
+
+**Onde o modo é consumido** (contrato: a credencial decide o modo, o modo decide a rede):
+
+| Local | Efeito |
+|---|---|
+| `App.tsx` — init de `databaseMode` | `localStorage['app_database_mode']` ou `isInternalMode ? INTERNAL : SUPABASE_PLUS` |
+| `App.tsx` — guards de sync | `if (mode === INTERNAL \|\| isInternalMode) return` (nenhuma chamada de rede) |
+| `App.tsx` — Base Oficial | modal "build não compilado com as chaves" e recusa de abertura |
+| `components/Login.tsx` — badge | `AMBIENTE: MOBILE (LOCAL)` (âmbar) vs `SUPABASE (WEB)` (verde) |
+| `screens/DatabaseManagerScreen.tsx` | botão de espelhamento para a nuvem `disabled` em INTERNAL |
+
+**Modos de falha da credencial** (diagnóstico rápido):
+
+| Causa | Sintoma | Onde se vê |
+|---|---|---|
+| Secret não cadastrado | `::error::Secret(s) ausente(s): …` e job falha | passo *Validar credenciais* (`android-build.yml`) |
+| Secret presente mas malformado | `::warning::VITE_SUPABASE_URL não é um URL http(s) válido`; APK abre em INTERNAL | idem + anotações da run |
+| Valor **colado dentro** de `${{ … }}` | workflow inteiro inválido: a run falha em segundos e aparece com o caminho (`.github/workflows/…`) em vez do `name:` — nada corre | lista de runs do Actions |
+| Credencial válida | `Credenciais do Supabase presentes (URL e chave publica).` sem warnings | passo *Validar credenciais* |
+
+`${{ … }}` só aceita contexto (`secrets.`, `vars.`, `github.`, `env.`, `runner.`) e operadores.
+No YAML entra apenas o **nome** do secret; o valor vive em Settings (§5 da governança).
+
+**Rodar a chave obriga a reconstruir.** Como a substituição é estática, o APK já publicado
+mantém a chave antiga e passa a falhar a autenticação (`Invalid API key`) ou cai para
+INTERNAL. Caminhos de rebuild, por ordem de preferência:
+
+1. **Re-run all jobs** na run do *Build Android APK* — os secrets são lidos no momento da
+   execução, logo o APK novo sai com o valor atualizado, sem commit novo;
+2. `push` para `main` (qualquer commit) ou `workflow_dispatch` no Actions.
+
+**Como provar que a credencial entrou no APK** (sem imprimir valores):
+
+```bash
+gh run download <run_id> -n gbr-kardek-apk -D .tmp
+unzip -o -q .tmp/*.apk 'assets/public/assets/*' -d .tmp/x
+grep -rlo 'mpulmonxbcpqjxouzvuc.supabase.co' .tmp/x   # host inlined no bundle
+gh api /repos/semorrecualg/Inventariador/check-runs/<job_id>/annotations \
+  --jq '.[] | "\(.annotation_level): \(.message)"'          # sem ::warning:: de URL malformada
+```
+
+O `iat` do JWT inlined no bundle também serve para confirmar rotação de chave (data de
+emissão posterior à rotação), sem revelar o valor.
+
 ---
 
 ## 11. Guia de análise e correção (checklist SRE)
