@@ -1,4 +1,4 @@
-import { normalizeKey } from './schema';
+import { matchUnitKeys, normalizeKey } from './schema';
 
 /**
  * LIBERAÇÃO DA UNIDADE OPERACIONAL PARA O INVENTÁRIO (GBR KARDEK)
@@ -119,6 +119,82 @@ export const readUnitRelease = (
     if (entryKey.endsWith(suffix)) return status;
   }
   return null;
+};
+
+/**
+ * CAMPANHA: leitura única (GBR KARDEK)
+ *
+ * A campanha é uma propriedade da UNIDADE, não do ecrã que a mostrou. Antes o
+ * mapa de liberação saía de uma lista filtrada/paginada por ecrã, então uma
+ * campanha ACTIVE gravada no banco podia não chegar ao chip do contrato de
+ * trabalho. Estas funções leem o registro persistido (SQLite/Dexie) e reduzem
+ * tudo a um conjunto de unidades — mesma regra para chip, trava e gestão.
+ */
+
+/** Unidade de uma campanha, aceitando os três nomes de campo usados na base. */
+export const campaignUnitOf = (campaign: {
+  filial?: unknown;
+  unit_id?: unknown;
+  _unitid?: unknown;
+} | null | undefined): string =>
+  String(campaign?.filial || campaign?.unit_id || campaign?._unitid || '').trim();
+
+/** Campanha aberta para inventário: só `ACTIVE` libera a unidade. */
+export const isActiveCampaign = (campaign: { status?: unknown } | null | undefined): boolean =>
+  String(campaign?.status || '').trim().toUpperCase() === 'ACTIVE';
+
+/** Conjunto de unidades (normalizadas) com campanha ACTIVE persistida. */
+export const collectActiveCampaignUnits = (
+  campaigns: ReadonlyArray<{ filial?: unknown; unit_id?: unknown; _unitid?: unknown; status?: unknown }> | null | undefined
+): Set<string> => {
+  const units = new Set<string>();
+  for (const campaign of campaigns || []) {
+    if (!isActiveCampaign(campaign)) continue;
+    const unit = normalizeKey(campaignUnitOf(campaign));
+    if (unit) units.add(unit);
+  }
+  return units;
+};
+
+/**
+ * A unidade está no conjunto? Exato primeiro (O(1)) e depois tolerante — a
+ * mesma base convive com `010101_CICOPAL_GO` e `010101 CICOPAL GO`.
+ */
+export const isUnitInReleaseSet = (
+  units: ReadonlySet<string> | null | undefined,
+  filial: string | null | undefined
+): boolean => {
+  if (!units || units.size === 0) return false;
+  const unit = normalizeKey(filial || '');
+  if (!unit) return false;
+  if (units.has(unit)) return true;
+  for (const entry of units) {
+    if (matchUnitKeys(entry, unit)) return true;
+  }
+  return false;
+};
+
+/** Prefixo do cache local que espelha campanha activa por unidade. */
+export const ACTIVE_CAMPAIGN_CACHE_PREFIX = 'kardek_campanha_ativa_';
+
+/** Unidades marcadas no cache local (ativação feita em qualquer ecrã). */
+export const readActiveCampaignCache = (
+  storage: { key: (i: number) => string | null; length: number; getItem: (k: string) => string | null } | null | undefined
+): Set<string> => {
+  const units = new Set<string>();
+  if (!storage) return units;
+  try {
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key || !key.startsWith(ACTIVE_CAMPAIGN_CACHE_PREFIX)) continue;
+      if (storage.getItem(key) !== 'true') continue;
+      const unit = normalizeKey(key.slice(ACTIVE_CAMPAIGN_CACHE_PREFIX.length));
+      if (unit) units.add(unit);
+    }
+  } catch {
+    return units;
+  }
+  return units;
 };
 
 /** Rótulo curto do que falta para liberar a unidade. */

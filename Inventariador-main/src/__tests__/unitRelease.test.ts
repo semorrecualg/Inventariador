@@ -5,8 +5,14 @@
 // e pela entrada do módulo.
 import { describe, it, expect } from 'vitest';
 import {
+  ACTIVE_CAMPAIGN_CACHE_PREFIX,
   buildUnitReleaseMap,
+  campaignUnitOf,
+  collectActiveCampaignUnits,
   describeUnitReleaseMissing,
+  isActiveCampaign,
+  isUnitInReleaseSet,
+  readActiveCampaignCache,
   readUnitRelease,
   resolveUnitReleaseStatus,
   unitReleaseKey
@@ -83,5 +89,55 @@ describe('unitRelease · mapa por contrato + filial', () => {
     expect(describeUnitReleaseMissing(resolveUnitReleaseStatus({}))).toBe('âncora GPS e campanha');
     expect(describeUnitReleaseMissing(resolveUnitReleaseStatus({ hasAnchor: true }))).toBe('campanha');
     expect(describeUnitReleaseMissing(resolveUnitReleaseStatus({ hasAnchor: true, hasCampaign: true }))).toBe('');
+  });
+});
+
+describe('unitRelease · campanha lida do banco persistido', () => {
+  it('aceita os três nomes de campo da unidade', () => {
+    expect(campaignUnitOf({ filial: '010101 CICOPAL GO' })).toBe('010101 CICOPAL GO');
+    expect(campaignUnitOf({ unit_id: '010101_CICOPAL_GO' })).toBe('010101_CICOPAL_GO');
+    expect(campaignUnitOf({ _unitid: '010101 CICOPAL GO' })).toBe('010101 CICOPAL GO');
+    expect(campaignUnitOf({})).toBe('');
+  });
+
+  it('só ACTIVE libera a unidade', () => {
+    expect(isActiveCampaign({ status: 'ACTIVE' })).toBe(true);
+    expect(isActiveCampaign({ status: ' active ' })).toBe(true);
+    expect(isActiveCampaign({ status: 'CREATED' })).toBe(false);
+    expect(isActiveCampaign({ status: 'CLOSED' })).toBe(false);
+    expect(isActiveCampaign({})).toBe(false);
+  });
+
+  it('reduz as campanhas ACTIVE ao conjunto de unidades', () => {
+    const units = collectActiveCampaignUnits([
+      { filial: '010101_CICOPAL_GO', status: 'ACTIVE' },
+      { unit_id: '020202 CICOPAL RJ', status: 'CLOSED' },
+      { status: 'ACTIVE' }
+    ]);
+    expect(Array.from(units)).toEqual(['010101 CICOPAL GO']);
+  });
+
+  it('encontra a unidade mesmo com grafia diferente', () => {
+    const units = collectActiveCampaignUnits([{ filial: '010101_CICOPAL_GO', status: 'ACTIVE' }]);
+    expect(isUnitInReleaseSet(units, '010101 CICOPAL GO')).toBe(true);
+    expect(isUnitInReleaseSet(units, '010101')).toBe(true);
+    expect(isUnitInReleaseSet(units, '020202 CICOPAL RJ')).toBe(false);
+    expect(isUnitInReleaseSet(new Set(), '010101 CICOPAL GO')).toBe(false);
+  });
+
+  it('lê o cache local de activação gravado por qualquer ecrã', () => {
+    const store = new Map<string, string>([
+      [`${ACTIVE_CAMPAIGN_CACHE_PREFIX}010101_CICOPAL_GO`, 'true'],
+      [`${ACTIVE_CAMPAIGN_CACHE_PREFIX}020202 CICOPAL RJ`, 'false'],
+      ['outra_chave', 'true']
+    ]);
+    const storage = {
+      get length() { return store.size; },
+      key: (i: number) => Array.from(store.keys())[i] ?? null,
+      getItem: (k: string) => store.get(k) ?? null
+    };
+    const units = readActiveCampaignCache(storage);
+    expect(Array.from(units)).toEqual(['010101 CICOPAL GO']);
+    expect(readActiveCampaignCache(null).size).toBe(0);
   });
 });
