@@ -53,12 +53,34 @@ jobs:
         env:
           VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
 
+      # Sem as duas credenciais o build continua "verde", mas o bundle nasce em
+      # modo INTERNAL (100% offline). Falha aqui para não publicar artefato offline.
+      - name: Validar credenciais do Supabase
+        run: |
+          set -euo pipefail
+          faltando=""
+          [ -n "${VITE_SUPABASE_URL:-}" ] || faltando="VITE_SUPABASE_URL"
+          [ -n "${VITE_SUPABASE_ANON_KEY:-}" ] || faltando="${faltando:+$faltando, }VITE_SUPABASE_ANON_KEY"
+          if [ -n "$faltando" ]; then
+            echo "::error::Secret(s) ausente(s): $faltando. Cadastre em Settings -> Secrets and variables -> Actions; sem eles o build sai em modo INTERNAL (offline)."
+            exit 1
+          fi
+          echo "Credenciais do Supabase presentes (URL e chave publica)."
+          # Presente mas malformado é pior que ausente: gera bundle que abre com
+          # "Invalid supabaseUrl". A app já cai para INTERNAL, mas avisamos aqui.
+          if ! printf '%s' "$VITE_SUPABASE_URL" | grep -Eq '^https?://[A-Za-z0-9._-]+/?$'; then
+            echo "::warning::VITE_SUPABASE_URL não é um URL http(s) válido (falta o esquema ou tem caracteres estranhos). O build vai arrancar em modo INTERNAL (offline)."
+          fi
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
       - name: Build de produção
         run: npm run build
         env:
           VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
-          # Opcionais: enquanto não cadastrados, o build cai em modo INTERNAL.
-          # Nomes de secret esperados (Settings → Secrets and variables → Actions).
-          # Sem eles o build segue em modo INTERNAL, mas o workflow continua válido.
+          # Secrets do Supabase (Settings → Secrets and variables → Actions).
+          # O passo acima falha se algum faltar, então o build nunca sai
+          # silenciosamente em modo INTERNAL.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
