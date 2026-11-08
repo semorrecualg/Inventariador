@@ -291,6 +291,66 @@ export function persistWorkContext(ctx: WorkContext): void {
   }
 }
 
+// ============================================================================
+// Opções de filial do seletor de contrato (FLUXO ÚNICO de acesso)
+// ----------------------------------------------------------------------------
+// A filial é escolhida na tela de contrato de trabalho (/contexto), não mais no
+// login. A lista é ABERTA entre as filiais autorizadas do perfil — um auditor
+// pode receber várias filiais do administrador e precisa poder alternar entre
+// elas — e NUNCA inclui filiais de outro contrato (isolamento SRE).
+//
+// Fontes, em ordem de prioridade:
+//   1. `contexts` do usuário (autorização explícita do perfil) para o contrato.
+//   2. Filiais REAIS da base local do contrato (`baseFiliais`) — usadas quando o
+//      perfil não declara unidade (dono/admin com autorização do contrato todo).
+//   3. Nada — o contrato não tem filial conhecida: a tela deixa seguir sem
+//      filtro e a unidade é escolhida na etapa seguinte.
+// ============================================================================
+
+export interface FilialOption {
+  /** Valor persistido em `filial` (sempre uma filial concreta). */
+  filial: string;
+  /** Texto exibido ao usuário. */
+  label: string;
+}
+
+/**
+ * Monta as opções de filial do contrato escolhido.
+ *
+ * A lista é ABERTA entre as filiais autorizadas: o dono/admin do contrato (sem
+ * unidades declaradas) recebe as filiais REAIS da base; o auditor recebe as que
+ * o administrador liberou. Não existe opção "contrato inteiro": a esteira de
+ * campo (CONTRATO → hub → ENDEREÇO FÍSICO) sempre parte de uma unidade
+ * concreta, senão cada perfil cairia numa tela diferente depois do contrato.
+ */
+export function buildFilialOptions(params: {
+  tenantid: string;
+  contexts: WorkContext[];
+  baseFiliais?: string[];
+}): FilialOption[] {
+  const tenant = normalizeWorkTenant(params.tenantid);
+  if (isInvalidTenant(tenant)) return [];
+
+  const authorized: string[] = [];
+  for (const ctx of params.contexts || []) {
+    if (normalizeWorkTenant(ctx.tenantid) !== tenant) continue;
+    const f = normalizeWorkFilial(ctx.filial);
+    if (!f || isInvalidFilial(f) || f === tenant) continue;
+    if (!authorized.includes(f)) authorized.push(f);
+  }
+
+  const fromBase: string[] = [];
+  for (const raw of params.baseFiliais || []) {
+    const f = normalizeWorkFilial(raw);
+    if (!f || isInvalidFilial(f) || f === tenant) continue;
+    if (!fromBase.includes(f)) fromBase.push(f);
+  }
+
+  // Autorização explícita manda: sem ela, valem as filiais reais da base.
+  const filiais = authorized.length ? authorized : fromBase;
+  return filiais.map((f) => ({ filial: f, label: f }));
+}
+
 /** Agrupa os contextos por contrato para renderização em cards. */
 export function groupContextsByTenant(contexts: WorkContext[]): Array<{ tenantid: string; filiais: string[] }> {
   const map = new Map<string, string[]>();

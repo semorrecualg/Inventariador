@@ -4,9 +4,9 @@
 // NOVO contexto: base vazia do contrato → primeira carga (GESTOR); auditor com
 // base pronta → hub da filial direto (sem repetir a seleção de unidade).
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { resolvePostSelectionScreen } from '../utils/routingUtils';
+import { resolveModuleEntryScreen, resolvePostSelectionScreen } from '../utils/routingUtils';
 import { sqliteService } from '../services/sqliteService';
-import { AppScreen, UserRole } from '../types';
+import { AppModule, AppScreen, UserRole } from '../types';
 
 vi.mock('../services/sqliteService', () => ({
   sqliteService: {
@@ -65,5 +65,26 @@ describe('resolvePostSelectionScreen — roteamento após escolher contrato/fili
   it('DEMO → dashboard de demonstração', async () => {
     const screen = await resolvePostSelectionScreen(profile(UserRole.DEMO, 'demo@gbr.com', null));
     expect(screen).toBe(AppScreen.DASHBOARD);
+  });
+});
+
+describe('resolveModuleEntryScreen — trilha única após o contrato (todos os perfis)', () => {
+  it('INVENTARIADOR com filial → hub operacional (menu principal)', () => {
+    expect(resolveModuleEntryScreen(AppModule.INVENTORY, '010101 CICOPAL GO')).toBe(AppScreen.MAIN_MENU);
+  });
+
+  it('CONTROLE DE ATIVO → hub do controle, sem endereço de campo', () => {
+    expect(resolveModuleEntryScreen(AppModule.ASSET_CONTROL, '010101 CICOPAL GO')).toBe(AppScreen.ASSET_CONTROL_HOME);
+  });
+
+  it('INVENTARIADOR sem filial → seleção de unidade (base sem unidade conhecida)', () => {
+    expect(resolveModuleEntryScreen(AppModule.INVENTORY, '')).toBe(AppScreen.UNIT_SELECTION);
+    expect(resolveModuleEntryScreen(AppModule.INVENTORY, null)).toBe(AppScreen.UNIT_SELECTION);
+  });
+
+  it('a entrada NÃO depende do papel: mesma assinatura, mesma tela', () => {
+    // A função só recebe módulo + filial — não existe parâmetro de perfil que
+    // possa desviar admin/auditor para telas diferentes depois do contrato.
+    expect(resolveModuleEntryScreen.length).toBe(2);
   });
 });

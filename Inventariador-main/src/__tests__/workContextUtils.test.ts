@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import type { User } from '../types';
 import { UserRole } from '../types';
 import {
+  buildFilialOptions,
   buildWorkContexts,
   groupContextsByTenant,
   persistWorkContext,
@@ -275,6 +276,51 @@ describe('lembrar escolha (Etapa 4 FLUXO_ACESSO_INICIAL)', () => {
     expect(isValidLastContext(stored, contexts, { ...auditor, role: 'AUXILIARY_AUDITOR' })).toBe(false);
     const owner = { role: 'ADMIN', tenantid: 'CICOPAL', units: [], filial: 'TODAS' };
     expect(isValidLastContext(stored, contexts, owner)).toBe(true);
+  });
+});
+
+describe('buildFilialOptions — escolha de filial na tela de contrato', () => {
+  const contexts: WorkContext[] = [
+    { tenantid: 'CICOPAL', filial: '010101 CICOPAL GO' },
+    { tenantid: 'CICOPAL', filial: '010102 CICOPAL SP' },
+    { tenantid: 'OUTRO', filial: '020202 OUTRO GO' }
+  ];
+
+  it('lista ABERTA com todas as filiais autorizadas do contrato (auditor multi-filial)', () => {
+    const opts = buildFilialOptions({ tenantid: 'CICOPAL', contexts, baseFiliais: ['030303 CICOPAL MG'] });
+    // Só filiais concretas do contrato (nunca de outro contrato)
+    expect(opts.map(o => o.filial)).toEqual(['010101 CICOPAL GO', '010102 CICOPAL SP']);
+  });
+
+  it('sem autorização explícita usa as filiais reais da base do contrato', () => {
+    const opts = buildFilialOptions({ tenantid: 'CICOPAL', contexts: [], baseFiliais: ['010101 CICOPAL GO', '010102 CICOPAL SP'] });
+    expect(opts.map(o => o.filial)).toEqual(['010101 CICOPAL GO', '010102 CICOPAL SP']);
+  });
+
+  it('nunca oferece opção sem filial ("contrato inteiro") — a trilha exige unidade concreta', () => {
+    const opts = buildFilialOptions({
+      tenantid: 'CICOPAL',
+      contexts: [{ tenantid: 'CICOPAL', filial: '010101 CICOPAL GO' }],
+      baseFiliais: ['010102 CICOPAL SP']
+    });
+    expect(opts.every((o) => o.filial.length > 0)).toBe(true);
+  });
+
+  it('ignora sentinelas e filiais de outros contratos', () => {
+    const opts = buildFilialOptions({
+      tenantid: 'CICOPAL',
+      contexts: [
+        { tenantid: 'CICOPAL', filial: 'TODAS' },
+        { tenantid: 'CICOPAL', filial: '010101 CICOPAL GO' },
+        { tenantid: 'OUTRO', filial: '020202 OUTRO GO' }
+      ],
+      baseFiliais: ['NULL', '0']
+    });
+    expect(opts.map(o => o.filial)).toEqual(['010101 CICOPAL GO']);
+  });
+
+  it('contrato sem filial conhecida devolve lista vazia (unidade escolhida depois)', () => {
+    expect(buildFilialOptions({ tenantid: 'CICOPAL', contexts: [], baseFiliais: [] })).toEqual([]);
   });
 });
 

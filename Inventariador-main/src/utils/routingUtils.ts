@@ -1,4 +1,4 @@
-import { AppScreen, UserRole } from '../types';
+import { AppModule, AppScreen, UserRole } from '../types';
 import { sqliteService } from '../services/sqliteService';
 import { isAdminEmail } from './authUtils';
 import { logger } from './logger';
@@ -101,4 +101,24 @@ export async function resolvePostSelectionScreen(
   // Base preenchida → painel para admin/master, hub direto para auditor
   if (isSuperAdmin || isMaster || role === 'ADMIN') return AppScreen.MODULE_SELECTION;
   return AppScreen.MAIN_MENU;
+}
+
+/**
+ * TRILHA ÚNICA (todos os perfis): tela de entrada DEPOIS do contrato de
+ * trabalho. Depende apenas do MÓDULO e da filial escolhidos no contrato —
+ * nunca do papel do usuário (admin, auditor, auxiliar seguem o mesmo caminho).
+ *
+ *  LOGIN → BIOMÉTRICA → CONTRATO → [hub do módulo] → ENDEREÇO FÍSICO → INVENTÁRIO
+ *
+ * - ASSET_CONTROL  → hub de controle de ativo (sem endereço de campo)
+ * - INVENTORY      → hub operacional da filial (Menu Principal), cujo primeiro
+ *                    item é o ENDEREÇO FÍSICO
+ * - INVENTORY sem filial → seleção de unidade (a base ainda não tem unidade)
+ */
+export function resolveModuleEntryScreen(
+  module: AppModule | null | undefined,
+  filial: string | null | undefined
+): AppScreen {
+  if (module === AppModule.ASSET_CONTROL) return AppScreen.ASSET_CONTROL_HOME;
+  return String(filial || '').trim() ? AppScreen.MAIN_MENU : AppScreen.UNIT_SELECTION;
 }

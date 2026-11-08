@@ -80,6 +80,23 @@ describe('Contrato de navegação (docs/FLOW_GRAPH.md)', () => {
     expect(qrConfigPaths).toHaveLength(1);
   });
 
+  it('o RouteGuard de inicialização não rebate a trilha para /unit', () => {
+    // Bug real: /contexto (contrato) não estava na lista de telas liberadas e o
+    // guard (que exige `selectedUnit`) mandava todo mundo para a Unidade
+    // Operacional logo após o login — e de novo a cada "trocar filial".
+    const block = APP_TSX.match(/const publicScreens = \[([\s\S]*?)\];/);
+    expect(block).toBeTruthy();
+    expect(block![1]).toContain('AppScreen.WORK_CONTEXT_SELECTION');
+    // O hub é a outra tela que existe antes de unidade ativa.
+    expect(APP_TSX).toContain('screen !== AppScreen.MAIN_MENU');
+  });
+
+  it('o "Sair" do hub volta para o contrato, não para a Unidade Operacional', () => {
+    const tag = APP_TSX.match(/<MainMenu[\s\S]*?onLogout=\{([^}]*\}\})/);
+    expect(tag).toBeTruthy();
+    expect(tag![1]).toContain('pushScreen(AppScreen.WORK_CONTEXT_SELECTION)');
+  });
+
   it('os 34 nós do grafo estão cobertos pelo enum', () => {
     const enumValues = Object.values(AppScreen) as string[];
     const missing = GRAPH_NODES.filter((n) => !enumValues.includes(n));
