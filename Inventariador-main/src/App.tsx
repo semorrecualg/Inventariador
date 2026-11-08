@@ -7158,6 +7158,7 @@ useEffect(() => {
               user={user}
               contexts={workContexts}
               onSelect={handleWorkContextModuleSelect}
+              onOpenDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
               onLogout={async () => {
                 if (supabase) {
                   await logAuditEvent({

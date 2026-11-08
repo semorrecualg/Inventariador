@@ -29,6 +29,12 @@ interface WorkContextSelectorProps {
   contexts: WorkContext[];
   onSelect: (ctx: WorkContext, module: AppModule) => void;
   onLogout: () => void;
+  /**
+   * Saída para o Gestor de Base quando o dono global ainda não tem contrato
+   * na base (primeira instalação). Sem isso a tela era um beco sem saída:
+   * "0 contextos" + botão ACESSAR desabilitado + só sair da conta.
+   */
+  onOpenDatabase?: () => void;
 }
 
 /**
@@ -45,7 +51,8 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   user,
   contexts,
   onSelect,
-  onLogout
+  onLogout,
+  onOpenDatabase
 }) => {
   const groups = groupContextsByTenant(contexts);
 
@@ -173,10 +180,22 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
               </div>
 
               {baseContracts.length === 0 ? (
-                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
-                  <p className="text-[9px] font-extrabold text-amber-700 uppercase tracking-widest leading-relaxed text-center">
-                    Nenhum contrato encontrado na base local. Carregue a base no Gestor de Base.
-                  </p>
+                <div className="space-y-3">
+                  <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+                    <p className="text-[9px] font-extrabold text-amber-700 uppercase tracking-widest leading-relaxed text-center">
+                      Nenhum contrato encontrado na base local. Carregue a base no Gestor de Base.
+                    </p>
+                  </div>
+                  {onOpenDatabase && (
+                    <button
+                      type="button"
+                      onClick={onOpenDatabase}
+                      className="w-full py-3.5 rounded-xl bg-accent text-white font-extrabold uppercase text-[10px] tracking-[0.15em] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Building2 size={15} />
+                      Abrir Gestor de Base
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-2">
