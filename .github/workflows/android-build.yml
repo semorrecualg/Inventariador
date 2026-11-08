@@ -186,6 +186,27 @@ jobs:
           printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
           echo "Keystore restaurado do secret ANDROID_DEBUG_KEYSTORE_BASE64."
 
+      # O AGP só gera o keystore quando assina e, neste runner, não o deixa em
+      # ~/.android — por isso o cache anterior salvava nada. Criar aqui garante
+      # que o ficheiro existe ANTES do build e é guardado para as próximas
+      # execuções, mantendo a mesma assinatura em todos os APKs.
+      - name: Keystore de assinatura estável — criar se ausente
+        run: |
+          set -euo pipefail
+          KS="$HOME/.android/debug.keystore"
+          mkdir -p "$HOME/.android"
+          if [ -f "$KS" ]; then
+            echo "Keystore já presente (cache ou secret) — reutilizado."
+          else
+            keytool -genkeypair -noprompt \
+              -keystore "$KS" \
+              -storepass android -keypass android \
+              -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Keystore de debug criado; será guardado no cache para os próximos builds."
+          fi
+
       - name: Build Debug APK
         run: |
           cd android
@@ -217,6 +238,18 @@ jobs:
           else
             echo "::warning::apksigner não encontrado; verificação de assinatura ignorada."
             CERT_SHA256="desconhecido"
+          fi
+
+          # O APK tem de estar assinado com o keystore estável; se não estiver,
+          # o build falha aqui em vez de gerar um APK que o telemóvel recusa.
+          normalize() { printf '%s' "$1" | tr -d ':' | tr 'A-F' 'a-f'; }
+          EXPECTED="$(normalize "$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey 2>/dev/null | grep -m1 'SHA256:' | sed 's/.*SHA256: *//')")"
+          ACTUAL="$(normalize "$CERT_SHA256")"
+          echo "Certificado esperado (keystore): ${EXPECTED}"
+          echo "Certificado do APK:              ${ACTUAL}"
+          if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::O APK não foi assinado com o keystore estável — a instalação por cima da versão anterior vai falhar."
+            exit 1
           fi
 
           sha256sum "$APK" | tee "$APK.sha256"
