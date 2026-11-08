@@ -14,7 +14,7 @@ import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors'
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
-import { userHasPermission } from './services/rbacService';
+import { isAdminUser, isAuditorUser, userHasPermission } from './services/rbacService';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -57,10 +57,11 @@ import ModuleSelector from './components/ModuleSelector';
 import AssetControlModule from './components/AssetControlModule';
 import TenantWorkSelector from './components/TenantWorkSelector';
 import WorkContextSelector from './components/WorkContextSelector';
-import { processarRoteamentoPosLoginSaas, resolvePostSelectionScreen, SupabaseUserProfile } from './utils/routingUtils';
+import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, SupabaseUserProfile } from './utils/routingUtils';
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, isValidLastContext } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
+import { buildUnitReleaseMap, describeUnitReleaseMissing, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
 import {
   readSyncCheckpoint,
@@ -448,6 +449,9 @@ const App: React.FC = () => {
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
   const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
+  // "Novo usuário" a partir do CONTRATO DE TRABALHO: a tela de Acessos abre já
+  // com o formulário de cadastro, e o voltar regressa ao contrato.
+  const [openAddUserOnEntry, setOpenAddUserOnEntry] = useState(false);
   const [isSafeMode, setIsSafeMode] = useState(true);
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
@@ -741,6 +745,10 @@ useEffect(() => {
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ filial: string; displayName: string; total: number; checked: number; tenantid: string }>>([]);
   const [isDatabaseEmpty, setIsDatabaseEmpty] = useState<boolean>(false);
+  // Etapa 2 da trilha única: "segurança biométrica" é um passo da esteira.
+  // Fica true quando o usuário registra a biometria OU a dispensa na tela —
+  // sem isso, voltar ao LOGIN depois de dispensar reabriria a tela em loop.
+  const [biometricGateDone, setBiometricGateDone] = useState(false);
 
   const [sqlDashboardStats, setSqlDashboardStats] = useState<{
     totalAtivos: number;
@@ -2364,11 +2372,28 @@ useEffect(() => {
       AppScreen.STRESS_TEST,
       AppScreen.CHANGE_PASSWORD,
       AppScreen.TENANT_WORK_SELECTION,
+      // CONTRATO DE TRABALHO (/contexto): é a tela onde a unidade é ESCOLHIDA,
+      // portanto existe antes de existir `selectedUnit`. Sem esta exceção o
+      // guard devolvia todo mundo para a Unidade Operacional logo após o login
+      // (auditor nunca via o contrato) e o "trocar filial" (hub → /contexto)
+      // era rebatido de volta para /unit.
+      AppScreen.WORK_CONTEXT_SELECTION,
       // Gestão de acessos é administrativa e transversal: criar o auditor da
       // filial acontece ANTES de existir unidade selecionada. Sem esta exceção
       // o guard devolvia o dono para a Unidade Operacional e a tela nunca abria.
       AppScreen.USER_MANAGEMENT
     ];
+
+    // UNIDADE OPERACIONAL (/unit) NÃO faz parte da trilha do auditor: é a tela
+    // ADMINISTRATIVA onde o admin/master cadastra a unidade e configura âncora
+    // GPS + campanha para liberá-la ao inventário. Qualquer tentativa do
+    // auditor (hub sem unidade, tela legada de módulos, rota direta) volta ao
+    // contrato de trabalho — a filial dele é escolhida lá, entre as liberadas.
+    if (screen === AppScreen.UNIT_SELECTION && isAuditorUser(user) && !isAdminUser(user)) {
+      logger.warn('>>> [RouteGuard] UNIDADE OPERACIONAL fora da trilha do auditor: retornando ao contrato de trabalho.');
+      pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
+      return;
+    }
     
     if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
       const campaignId = inventory.currentCampaignId;
@@ -2381,7 +2406,7 @@ useEffect(() => {
         setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
       }
     }
-  }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode, setHistory]);
+  }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode, setHistory, pushScreen]);
 
   // Efeito de reparo automático de GPS para ativos conferidos sem coordenadas
   useEffect(() => {
@@ -3486,6 +3511,14 @@ useEffect(() => {
     if (user && !selectedUnit && companyRequiredScreens.includes(currentScreen)) {
       pushScreen(AppScreen.UNIT_SELECTION);
     }
+
+    // 3.1 ENDEREÇO FÍSICO sem unidade ativa: a tela some do DOM (render
+    // condicionado a selectedUnit) e deixava uma área branca. Volta para o
+    // contrato de trabalho, onde a filial é escolhida.
+    if (user && !selectedUnit && currentScreen === AppScreen.ADDRESS_SELECTION) {
+      logger.warn('>>> [SRE_NAV] Endereço físico sem unidade ativa: retornando ao contrato de trabalho.');
+      pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
+    }
   }, [isDataLoaded, user, history, selectedAssets.length, selectedUnit, pushScreen, isUserAuthenticated, publicAsset, setHistory]);
 
   // 🏷️ Filiais reais por contrato encontradas na base local — fonte do seletor
@@ -3518,6 +3551,26 @@ useEffect(() => {
     
     const executePostLoginRouting = async () => {
       logger.info(">>> [SRE_NAV] Usuário autenticado consolidado. Iniciando roteamento pós-login sequencial...");
+
+      // ETAPA 2 DA TRILHA ÚNICA (vale para TODOS os perfis): a segurança
+      // biométrica é um passo da esteira, antes do contrato de trabalho —
+      // não um aviso disparado por timer depois do login (o timer corria com
+      // o roteamento e a tela podia ser encoberta).
+      if (!biometricGateDone) {
+        let biometricPending = false;
+        try {
+          const bioSupported = await isBiometricSupported();
+          const bioUser = String(user.username || user.email || '').toLowerCase().trim();
+          biometricPending = !!bioSupported && !!bioUser && !(await hasBiometricRegistered(bioUser));
+        } catch (bioErr) {
+          logger.warn('[Biometric] Falha ao checar biometria:', bioErr);
+        }
+        if (biometricPending) {
+          logger.info('>>> [SRE_NAV] Biometria pendente: abrindo a segurança biométrica antes do contrato.');
+          await pushScreen(AppScreen.BIOMETRIC_REGISTRATION);
+          return;
+        }
+      }
       
       // SELEÇÃO DE CONTRATO DE TRABALHO (multi-contrato): se o usuário está
       // autorizado em mais de um contexto (tenantid + filial), exige a escolha
@@ -3545,8 +3598,11 @@ useEffect(() => {
         return;
       }
 
-      if (workContexts.length > 1) {
-        logger.info(`>>> [SRE_NAV] Usuário autorizado em ${workContexts.length} contratos. Exigindo seleção de contrato/filial/módulo (Etapa 3).`);
+      // FLUXO ÚNICO DE ACESSO: a autenticação não escolhe mais filial — a tela
+      // de contrato de trabalho (/contexto) faz contrato + filial + módulo para
+      // todo perfil com contrato autorizado.
+      if (workContexts.length > 0) {
+        logger.info(`>>> [SRE_NAV] Usuário autorizado em ${workContexts.length} contexto(s). Exigindo seleção de contrato/filial/módulo.`);
         await pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
         return;
       }
@@ -3602,7 +3658,13 @@ useEffect(() => {
     };
     
     executePostLoginRouting();
-  }, [isUserAuthenticated, user, setHistory, pushScreen, history, users, workContextFiliais]);
+  }, [isUserAuthenticated, user, setHistory, pushScreen, history, users, workContextFiliais, biometricGateDone]);
+
+  // O gate biométrico é por USUÁRIO: ao entrar com outra conta (ou sair), a
+  // etapa de segurança volta a ser exigida.
+  useEffect(() => {
+    setBiometricGateDone(false);
+  }, [user?.email]);
 
   // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
@@ -4034,11 +4096,17 @@ useEffect(() => {
     persistWorkContext(ctx);
     setSelectedUnit(newFilial || null);
 
+    // A escolha define a unidade ATIVA (`filial`), não o escopo da autorização:
+    // as filiais liberadas no perfil são preservadas para que um auditor
+    // autorizado em várias filiais possa alternar entre elas sem perder acesso.
+    const declaredUnits = Array.isArray(user?.units) && user.units.length > 0
+      ? user.units
+      : (newFilial ? [newFilial] : []);
     const updatedUser: User = {
       ...(user as User),
       tenantid: newTenant,
       filial: newFilial,
-      units: newFilial ? [newFilial] : []
+      units: declaredUnits
     };
     setUser(updatedUser);
     sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
@@ -4050,14 +4118,9 @@ useEffect(() => {
       });
     }
 
-    // Roteia com o novo contexto: base vazia → primeira carga (GESTOR);
-    // auditor com base pronta → hub da filial direto (sem repetir seleção).
-    const target = await resolvePostSelectionScreen({
-      email: updatedUser.email,
-      role: updatedUser.role,
-      tenantid: updatedUser.tenantid
-    });
-    await pushScreen(target);
+    // Trilha única (todos os perfis): contrato escolhido → hub do módulo, sem
+    // ramificação por papel (admin não passa por Módulos/Unidade de novo).
+    await pushScreen(resolveModuleEntryScreen(AppModule.INVENTORY, newFilial));
   }, [user, databaseMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
 
   // 🎯 TELA ÚNICA PÓS-LOGIN (Etapa 3 do FLUXO_ACESSO_INICIAL):
@@ -4071,6 +4134,29 @@ useEffect(() => {
     const changedTenant = !!prevTenant && prevTenant !== newTenant;
 
     logger.info(`>>> [SRE_NAV] Contexto escolhido: ${newTenant}${newFilial ? ' / ' + newFilial : ''} módulo=${module}`);
+
+    // LIBERAÇÃO DA UNIDADE (governança): o auditor só entra em unidade
+    // LIBERADA — âncora GPS e campanha configuradas pelo admin/master na tela
+    // UNIDADE OPERACIONAL (/unit), que não é da trilha dele. O reconhecimento
+    // da Etapa 4 ("lembrar escolha") passa por aqui também, então a trava vale
+    // para a reentrada directa no hub.
+    if (module === AppModule.INVENTORY && newFilial && isAuditorUser(user) && !isAdminUser(user)) {
+      const release = readUnitRelease(unitReleaseRef.current, newTenant, newFilial);
+      if (release && !release.released) {
+        const pending = describeUnitReleaseMissing(release);
+        logger.warn(`>>> [SRE_NAV] Unidade ${newFilial} aguardando liberação: falta ${pending}.`);
+        setModalConfig({
+          isOpen: true,
+          title: 'Unidade aguardando liberação',
+          message: `A unidade ${newFilial} ainda não foi liberada para inventário. O administrador precisa configurar ${pending} na Unidade Operacional.`,
+          type: 'error',
+          onConfirm: () => {}
+        });
+        setSelectedUnit(null);
+        await pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
+        return;
+      }
+    }
 
     // SRE ISOLAMENTO: troca de contrato → zera o inventário em memória para
     // jamais exibir dados de outro contrato (o sync seguinte repopula apenas
@@ -4086,11 +4172,17 @@ useEffect(() => {
     persistLastWorkContext(ctx, module);
     setSelectedUnit(newFilial || null);
 
+    // A escolha define a unidade ATIVA (`filial`), não o escopo da autorização:
+    // as filiais liberadas no perfil são preservadas para que um auditor
+    // autorizado em várias filiais possa alternar entre elas sem perder acesso.
+    const declaredUnits = Array.isArray(user?.units) && user.units.length > 0
+      ? user.units
+      : (newFilial ? [newFilial] : []);
     const updatedUser: User = {
       ...(user as User),
       tenantid: newTenant,
       filial: newFilial,
-      units: newFilial ? [newFilial] : []
+      units: declaredUnits
     };
     setUser(updatedUser);
     sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
@@ -4114,20 +4206,39 @@ useEffect(() => {
     setCurrentModule(module);
     localStorage.setItem('app_current_module', module);
 
-    // Roteia direto para o módulo escolhido.
-    if (module === AppModule.ASSET_CONTROL) {
-      await pushScreen(AppScreen.ASSET_CONTROL_HOME);
-    } else if (newFilial) {
-      await pushScreen(AppScreen.MAIN_MENU); // hub operacional da filial
-    } else {
-      await pushScreen(AppScreen.UNIT_SELECTION); // sem filial definida → escolher depois
-    }
+    // Roteia direto para o módulo escolhido. A entrada é a MESMA para todos os
+    // perfis: depende do módulo + filial escolhidos, nunca do papel.
+    await pushScreen(resolveModuleEntryScreen(module, newFilial));
   }, [user, databaseMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
 
   // Sincroniza a ref usada pelo dispatcher pós-login (Etapa 4).
   useEffect(() => {
     applyWorkContextRef.current = handleWorkContextModuleSelect;
   }, [handleWorkContextModuleSelect]);
+
+  // HUB → INVENTÁRIO: última porta antes do endereço físico. O auditor só passa
+  // se a unidade ATIVA estiver liberada (âncora GPS + campanha configuradas
+  // pelo admin/master). Reavalia aqui porque o mapa de liberação pode ficar
+  // completo só depois da carga da filial.
+  const handleHubNavigate = useCallback((target: AppScreen, params?: NavigationParams) => {
+    if (target === AppScreen.ADDRESS_SELECTION && selectedUnit && isAuditorUser(user) && !isAdminUser(user)) {
+      const release = readUnitRelease(unitReleaseRef.current, user?.tenantid || '', selectedUnit);
+      if (release && !release.released) {
+        const pending = describeUnitReleaseMissing(release);
+        logger.warn(`>>> [SRE_NAV] Unidade ${selectedUnit} aguardando liberação: falta ${pending}.`);
+        setModalConfig({
+          isOpen: true,
+          title: 'Unidade aguardando liberação',
+          message: `A unidade ${selectedUnit} ainda não foi liberada para inventário. O administrador precisa configurar ${pending} na Unidade Operacional.`,
+          type: 'error',
+          onConfirm: () => {}
+        });
+        pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
+        return;
+      }
+    }
+    pushScreen(target, params);
+  }, [pushScreen, selectedUnit, user]);
 
   // Contextos de trabalho do usuário logado (fonte do seletor)
   const workContexts = useMemo(() => buildWorkContexts(user, users, workContextFiliais), [user, users, workContextFiliais]);
@@ -6341,6 +6452,27 @@ useEffect(() => {
     return finalResult;
   }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits]);
 
+  // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
+  // admin/master liberam a unidade para o inventário do auditor. Vive em ref
+  // porque o handler do contrato de trabalho (declarado antes deste memo) é
+  // quem aplica a trava de entrada.
+  const unitReleaseRef = useRef<UnitReleaseMap>({});
+  const unitReleaseMap = useMemo(
+    () =>
+      buildUnitReleaseMap(
+        fullCompaniesWithStatus.map(c => ({
+          name: c.name,
+          tenantid: c.tenantid,
+          hasAnchor: c.hasGps,
+          hasCampaign: c.hasCampaign
+        }))
+      ),
+    [fullCompaniesWithStatus]
+  );
+  useEffect(() => {
+    unitReleaseRef.current = unitReleaseMap;
+  }, [unitReleaseMap]);
+
   const unitNames = useMemo(() => fullCompaniesWithStatus.map(c => c.name), [fullCompaniesWithStatus]);
 
   const unitsByTenant = useMemo(() => {
@@ -6412,24 +6544,11 @@ useEffect(() => {
     logger.info('>>> [Offline-First] Auto-sync e redirecionamentos automáticos desativados. Aguardando ação física do operador.');
   }, [screen]);
 
-  // Auto-select unit if only one is available for the auditor
-  useEffect(() => {
-    if (screen === AppScreen.UNIT_SELECTION && !selectedUnit && !isSyncing && inventory.assets.length > 0) {
-      // Se o usuário acabou de vir do menu principal, não auto-selecionamos para permitir que ele saia ou troque
-      const prevScreen = history[history.length - 2];
-      if (prevScreen === AppScreen.MAIN_MENU) return;
-
-      const available = fullCompaniesWithStatus.filter(c => c.hasData);
-      if (available.length === 1 && (user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR)) {
-        const unit = available[0].name;
-        setSelectedUnit(unit);
-        localStorage.setItem('app_selected_unit', unit);
-        setIsInventorying(false);
-        setInventoryLocation(null);
-        pushScreen(AppScreen.MAIN_MENU);
-      }
-    }
-  }, [screen, selectedUnit, isSyncing, inventory.assets.length, fullCompaniesWithStatus, user, history, pushScreen]);
+  // REMOVIDO (trilha única): o antigo "auto-select unit for the auditor" pulava
+  // a Unidade Operacional e empurrava o auditor para o hub. Combinado com o
+  // botão "Sair" do hub (que voltava para /unit), gerava o vaivém
+  // UNIDADE OPERACIONAL ↔ AUDITORIA INTELIGENTE. Agora todos os perfis seguem
+  // a mesma esteira: contrato (/contexto) → hub → endereço físico.
 
   const showCompanyHeader = !!selectedUnit && screen === AppScreen.DASHBOARD;
 
@@ -6802,26 +6921,15 @@ useEffect(() => {
               } else if (multiContextLogin) {
                 logger.info(">>> [SRE_NAV] Login multi-contrato: sync adiado até a escolha do contrato/filial no seletor.");
               }
-              try {
-                const bioSupported = await isBiometricSupported();
-                if (bioSupported) {
-                  const username = (u.username || u.email || '').toLowerCase();
-                  if (username) {
-                    const alreadyRegistered = await hasBiometricRegistered(username);
-                    if (!alreadyRegistered) {
-                      setTimeout(() => pushScreen(AppScreen.BIOMETRIC_REGISTRATION), 500);
-                    }
-                  }
-                }
-              } catch (bioErr) {
-                logger.warn('[Biometric] Falha ao checar biometria:', bioErr);
-              }
+              // A biometria NÃO é mais disparada por timer depois do login: ela
+              // é a Etapa 2 da trilha única, roteada pelo dispatcher pós-login
+              // (LOGIN → BIOMÉTRICA → CONTRATO), igual para todos os perfis.
             }}
           />} />
           <Route path="/menu" element={<MainMenu
             onOpenHelp={() => setIsHelpMenuOpen(true)}
-            onNavigate={pushScreen}
-            onLogout={() => { setSelectedUnit(null); setStartWithDataMenu(false); pushScreen(AppScreen.UNIT_SELECTION); }}
+            onNavigate={handleHubNavigate}
+            onLogout={() => { setSelectedUnit(null); setStartWithDataMenu(false); pushScreen(AppScreen.WORK_CONTEXT_SELECTION); }}
             onChangeUnit={() => { setSelectedUnit(null); pushScreen(AppScreen.UNIT_SELECTION); }}
             onExport={handleExport}
             onBackup={handleBackup}
@@ -6902,11 +7010,14 @@ useEffect(() => {
             <BiometricRegistration 
               username={user?.username || user?.email || ''} 
               onComplete={() => {
-                // Após completar, removemos a tela de biometria do histórico
-                // e deixamos o usuário na tela que estava por baixo (definida no onLogin)
+                // Etapa 2 concluída: libera o gate e devolve ao LOGIN, de onde o
+                // dispatcher pós-login retoma a trilha (CONTRATO DE TRABALHO →
+                // hub do módulo → ENDEREÇO), para qualquer perfil.
+                setBiometricGateDone(true);
                 popScreen();
               }}
               onSkip={() => {
+                setBiometricGateDone(true);
                 popScreen();
               }}
             />
@@ -7199,7 +7310,9 @@ useEffect(() => {
               onBack={async () => { 
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');
-                pushScreen(AppScreen.MODULE_SELECTION);
+                // Passo anterior da trilha é o CONTRATO DE TRABALHO — não o
+                // passeio legado Módulos → Unidade.
+                pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
               }} 
               onSync={syncFromCloud}
               isSyncing={isSyncing}
@@ -7242,7 +7355,13 @@ useEffect(() => {
             <WorkContextSelector
               user={user}
               contexts={workContexts}
+              unitRelease={unitReleaseMap}
               onSelect={handleWorkContextModuleSelect}
+              onOpenAdmin={(target, params) => pushScreen(target, params)}
+              onOpenNewUser={() => {
+                setOpenAddUserOnEntry(true);
+                pushScreen(AppScreen.USER_MANAGEMENT);
+              }}
               onOpenDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
               onLogout={async () => {
                 if (supabase) {
@@ -7363,7 +7482,7 @@ useEffect(() => {
               }}
             />
           )}
-          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={popScreen} currentUser={user} setUser={setUser} availableUnits={availableUnits} unitsByTenant={unitsByTenant} databaseMode={databaseMode} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.USER_MANAGEMENT && (isAdmin ? <UserManagement users={users} setUsers={setUsers} onBack={() => { setOpenAddUserOnEntry(false); popScreen(); }} currentUser={user} setUser={setUser} availableUnits={availableUnits} unitsByTenant={unitsByTenant} databaseMode={databaseMode} initialAddOpen={openAddUserOnEntry} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.FIELD_CONFIGURATOR && (isAdmin ? <FieldConfigurator assets={inventory.assets} currentEditable={inventory.editableFields || []} onSave={(f) => setInventory(prev => ({ ...prev, editableFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.AUDIT_LOGS && (userHasPermission(user, 'view_audit_logs') ? <AuditLogs user={user} onBack={() => setHistory([AppScreen.MAIN_MENU])} databaseMode={databaseMode} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}

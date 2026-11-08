@@ -43,16 +43,21 @@ interface UserManagementProps {
   availableUnits: string[];
   unitsByTenant: Map<string, Set<string>>;
   databaseMode: DatabaseMode;
+  /**
+   * Abre direto o formulário de NOVO USUÁRIO. Usado pelo CONTRATO DE TRABALHO
+   * ("Novo usuário"), onde o admin/master cadastra o auditor sem passar pelo hub.
+   */
+  initialAddOpen?: boolean;
 }
 
-const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, setUser, availableUnits, unitsByTenant, databaseMode }) => {
+const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack, currentUser, setUser, availableUnits, unitsByTenant, databaseMode, initialAddOpen }) => {
   logger.info('>>> [UserManagement] Rendered with:', { 
     currentUserEmail: currentUser?.email, 
     currentUserTenant: currentUser?.tenantid,
     availableUnitsCount: availableUnits?.length,
     availableUnits: availableUnits
   });
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(!!initialAddOpen);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
