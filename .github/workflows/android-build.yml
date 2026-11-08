@@ -54,11 +54,27 @@ jobs:
             exit 1
           fi
           echo "Credenciais do Supabase presentes (URL e chave publica)."
-          # Presente mas malformado é pior que ausente: gera APK que abre com
-          # "Invalid supabaseUrl". A app já cai para INTERNAL, mas avisamos aqui.
-          if ! printf '%s' "$VITE_SUPABASE_URL" | grep -Eq '^https?://[A-Za-z0-9._-]+/?$'; then
-            echo "::warning::VITE_SUPABASE_URL não é um URL http(s) válido (falta o esquema ou tem caracteres estranhos). O APK vai arrancar em modo INTERNAL (offline)."
-          fi
+          # URL presente mas inutilizável produzia build verde com um APK a
+          # arrancar em INTERNAL (offline) — o sintoma que chegou ao campo.
+          # Falhar aqui em vez de distribuir um APK sem nuvem. A validação
+          # repete a normalização de src/services/supabaseService.ts (trim,
+          # aspas acidentais, esquema em falta) para não barrar valores que a
+          # app consegue recuperar; só falha o que a app também descartaria.
+          node -e 'const bruto = (process.env.VITE_SUPABASE_URL || "").trim().replace(/^["\x27]|["\x27]$/g, "").trim();
+            const candidato = /^https?:\/\//i.test(bruto) ? bruto : `https://${bruto}`;
+            let url = null;
+            try { const u = new URL(candidato); if ((u.protocol === "http:" || u.protocol === "https:") && u.hostname.includes(".")) url = u; } catch { url = null; }
+            // A app usa a origem como base e concatena /rest/v1 e /auth/v1;
+            // um caminho herdado (".../rest/v1") faz as chamadas falharem.
+            if (url && url.pathname.replace(/\/+$/, "") !== "") {
+              console.error("::error::VITE_SUPABASE_URL deve ser só a origem, sem caminho (ex.: https://<projeto>.supabase.co). Valor actual tem o caminho: " + url.pathname);
+              process.exit(1);
+            }
+            if (!url) {
+              console.error("::error::VITE_SUPABASE_URL inutilizável como URL http(s) — use algo como https://<projeto>.supabase.co. Sem isto o APK arrancaria em modo INTERNAL (offline).");
+              process.exit(1);
+            }
+            console.log(`URL do Supabase válida (host: ${url.hostname}).`);'
 
       - name: Build Web Application
         run: npm run build
