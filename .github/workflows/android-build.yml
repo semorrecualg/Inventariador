@@ -186,10 +186,11 @@ jobs:
           printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
           echo "Keystore restaurado do secret ANDROID_DEBUG_KEYSTORE_BASE64."
 
-      # O AGP só gera o keystore quando assina e, neste runner, não o deixa em
-      # ~/.android — por isso o cache anterior salvava nada. Criar aqui garante
-      # que o ficheiro existe ANTES do build e é guardado para as próximas
-      # execuções, mantendo a mesma assinatura em todos os APKs.
+      # O AGP procura o keystore em ANDROID_USER_HOME / ANDROID_SDK_HOME; neste
+      # runner isso aponta para fora de ~/.android, então ele gerava uma chave
+      # nova a cada build (o cache ficava vazio e a assinatura mudava).
+      # Criar o ficheiro aqui e fixar as variáveis garante o mesmo keystore
+      # sempre.
       - name: Keystore de assinatura estável — criar se ausente
         run: |
           set -euo pipefail
@@ -206,12 +207,24 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
             echo "Keystore de debug criado; será guardado no cache para os próximos builds."
           fi
+          keytool -list -v -keystore "$KS" -storepass android -alias androiddebugkey \
+            | grep -m1 'SHA256:' || true
 
       - name: Build Debug APK
         run: |
+          set -euo pipefail
+          # Fixa o local do keystore que o AGP usa ao assinar.
+          export ANDROID_USER_HOME="$HOME/.android"
+          export ANDROID_SDK_HOME="$HOME"
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleDebug --stacktrace \
+            -Pandroid.injected.signing.store.file="$HOME/.android/debug.keystore" \
+            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.key.alias=androiddebugkey \
+            -Pandroid.injected.signing.key.password=android
+          echo "--- keystores encontrados no runner ---"
+          find "$HOME" /usr/local/lib/android -name 'debug.keystore' 2>/dev/null | head -5 || true
 
       - name: Renomear APK com versão
         run: |
@@ -248,6 +261,11 @@ jobs:
           echo "Certificado esperado (keystore): ${EXPECTED}"
           echo "Certificado do APK:              ${ACTUAL}"
           if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "--- keystores presentes no runner (diagnóstico) ---"
+            while IFS= read -r ks; do
+              echo "keystore: $ks"
+              keytool -list -v -keystore "$ks" -storepass android -alias androiddebugkey 2>/dev/null | grep -m1 'SHA256:' || true
+            done < <(find "$HOME" /usr/local/lib/android -name 'debug.keystore' 2>/dev/null | head -5)
             echo "::error::O APK não foi assinado com o keystore estável — a instalação por cima da versão anterior vai falhar."
             exit 1
           fi
