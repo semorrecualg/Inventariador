@@ -61,7 +61,7 @@ import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, SupabaseUser
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, isValidLastContext } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
-import { buildUnitReleaseMap, describeUnitReleaseMissing, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
+import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
 import {
   readSyncCheckpoint,
@@ -733,6 +733,10 @@ useEffect(() => {
   }, []);
 
   const [campaigns, setCampaigns] = useState<InventoryCampaign[]>([]);
+  // Unidades com campanha ACTIVE lidas do banco persistido (independente do
+  // filtro de ecrã/unidade aplicado à lista `campaigns`). É a fonte do chip
+  // CAMPANHA no cartão do contrato de trabalho e da trava de liberação.
+  const [activeCampaignUnits, setActiveCampaignUnits] = useState<Set<string>>(() => new Set());
 
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -2199,8 +2203,34 @@ useEffect(() => {
 
 
 
+  /**
+   * Campanhas ACTIVE do banco local, sem filtro de tenant/ecrã.
+   *
+   * O mapa de liberação não pode depender de `campaigns` (lista filtrada pela
+   * unidade/ecrã e só recarregada em algumas telas): a campanha gravada em
+   * GESTÃO DE CAMPANHAS tem de liberar o chip no contrato de trabalho mesmo
+   * que a lista visível não a inclua. Lê já o registro persistido — mesma
+   * regra para administrador e auditor.
+   */
+  const loadActiveCampaignUnits = useCallback(async () => {
+    try {
+      const rows = await sqliteService.getCampaigns();
+      setActiveCampaignUnits(collectActiveCampaignUnits(rows));
+    } catch (err) {
+      logger.warn('>>> [Governance] Falha ao ler campanhas persistidas para a liberação:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!dbInitialized) return;
+    loadActiveCampaignUnits();
+  }, [dbInitialized, loadActiveCampaignUnits]);
+
   // Carregamento de Campanhas e Configurações de GPS
   const refreshCampaigns = useCallback(async () => {
+    // Antes de qualquer guarda: a liberação da unidade tem de reflectir o que
+    // está gravado no banco, não o que o ecrã actual decidiu carregar.
+    await loadActiveCampaignUnits();
     if (!dbInitialized || sqliteStatus.loading || !sqliteService.getIsInitialized()) {
       logger.info("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
       return;
@@ -2275,7 +2305,7 @@ useEffect(() => {
     } catch (err) {
       logger.error('>>> [Governance] ERRO CRÍTICO no Refresh:', err);
     }
-  }, [currentTenantid, currentUnitId, databaseMode, user, screen, dbInitialized, inventory.currentCampaignId, selectedUnit, sqliteStatus.loading]);
+  }, [currentTenantid, currentUnitId, databaseMode, user, screen, dbInitialized, inventory.currentCampaignId, selectedUnit, sqliteStatus.loading, loadActiveCampaignUnits]);
 
   // Hook simplificado para garantir que configs de GPS estejam no inventory (usado por guards)
   useEffect(() => {
@@ -2304,6 +2334,10 @@ useEffect(() => {
       AppScreen.MAIN_MENU, 
       AppScreen.UNIT_SELECTION, 
       AppScreen.CAMPAIGN_MANAGEMENT,
+      // O contrato de trabalho mostra o chip CAMPANHA: ao voltar de GESTÃO DE
+      // CAMPANHAS a releitura é obrigatória, senão o cartão fica preso no estado
+      // anterior (campanha já ATIVA mas chip apagado).
+      AppScreen.WORK_CONTEXT_SELECTION,
       AppScreen.DASHBOARD
     ];
     
@@ -6245,6 +6279,11 @@ useEffect(() => {
       }
     });
 
+    // Cache local de activação (gravado por qualquer ecrã que active campanha).
+    const cachedActiveCampaignUnits = readActiveCampaignCache(
+      typeof localStorage !== 'undefined' ? localStorage : null
+    );
+
     // Pre-calculate units with GPS config (ancora real: coordenadas finitas e nao-zero)
     const unitsWithGps = new Set<string>();
     unitConfigs.forEach(c => {
@@ -6373,9 +6412,13 @@ useEffect(() => {
       const norm = normalizeKey(unit.name);
       const unitTenant = (unit.tenantid || '').toUpperCase().trim();
       
-      // Cache reativo duplo para evitar "pisca-pisca" visual do botão CAMPANHA
-      const cachedActive = localStorage.getItem(`kardek_campanha_ativa_${norm}`) === 'true';
-      const hasDirectCampaign = unitsWithDirectCampaign.has(norm) || cachedActive;
+      // Três espelhos da mesma verdade (lista do ecrã, banco persistido e cache
+      // de activação) — qualquer um liberta, para que a ordem das telas não
+      // decida se o auditor entra. A comparação é tolerante a `_`/prefixo.
+      const hasDirectCampaign =
+        isUnitInReleaseSet(unitsWithDirectCampaign, unit.name) ||
+        isUnitInReleaseSet(activeCampaignUnits, unit.name) ||
+        isUnitInReleaseSet(cachedActiveCampaignUnits, unit.name);
       const hasGps = unitsWithGps.has(norm);
 
       let assetCount = 0;
@@ -6450,7 +6493,7 @@ useEffect(() => {
 
     logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref
