@@ -26,6 +26,17 @@ export interface LicenseProvisionInput {
   masterName?: string;
   masterPassword: string;
   units?: string[];
+  /**
+   * Contrato JÁ existente na base (tenantid canônico). Quando informado, o
+   * tenantid não é derivado do nome do cliente — é o contrato escolhido.
+   */
+  tenantid?: string;
+  /**
+   * Fluxo comercial de reposição: o tenant já existe (base carregada ou
+   * cliente que comprou a licença depois da primeira carga) e recebe um
+   * MASTER novo. Sem esta flag, um tenantid repetido é recusado.
+   */
+  allowExistingTenant?: boolean;
 }
 
 export interface LicenseProvisionPlan {
@@ -70,15 +81,22 @@ export const buildLicenseProvisionPlan = (
   existing: { tenants: string[]; emails: string[]; usernames: string[] },
 ): LicenseProvisionPlan => {
   const errors: string[] = [];
-  const tenantid = normalizeTenantId(input.clientName || '');
+  // Contrato escolhido na base tem precedência: o tenantid é a primeira coluna
+  // dos ativos, não um nome livre digitado pelo operador.
+  const explicitTenant = String(input.tenantid || '').trim().toUpperCase();
+  const tenantid = explicitTenant || normalizeTenantId(input.clientName || '');
 
-  if (!input.clientName?.trim()) {
+  if (!explicitTenant && !input.clientName?.trim()) {
     errors.push('Informe o nome do cliente.');
   }
   if (!tenantid) {
     errors.push('Não foi possível derivar o tenantid do nome do cliente.');
   }
-  if (tenantid && existing.tenants.some((t) => t.toUpperCase() === tenantid)) {
+  if (
+    tenantid &&
+    !input.allowExistingTenant &&
+    existing.tenants.some((t) => t.toUpperCase() === tenantid)
+  ) {
     errors.push(`Já existe uma licença para o tenant ${tenantid}.`);
   }
 
@@ -213,7 +231,7 @@ export const provisionLicense = async (
   }
   recordProvisionedTenant({
     tenantid: master.tenantid,
-    clientName: (input.clientName || '').trim(),
+    clientName: (input.clientName || '').trim() || master.tenantid,
     masterEmail: master.email,
     createdAt: new Date().toISOString(),
   });

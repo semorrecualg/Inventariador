@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { User, UserRole, DatabaseMode } from '../types';
 import { safeStringify } from '../services/utils';
 import Modal from './Modal';
@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { isAdminEmail } from '../utils/authUtils';
+import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
 import { validateStrongPassword, validateQuickLoginPassword, STRONG_PASSWORD_RULE_LABELS } from '../utils/passwordPolicy';
 import { provisionUserInAuth, resetPassword, deleteUserFromCloud, ProvisionResult } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
@@ -83,6 +84,25 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>(UserRole.AUDITOR);
   const [newTenantid, setNewTenantid] = useState(currentUser?.tenantid || '');
+  // Contratos que EXISTEM na base (tenantid é a primeira coluna dos ativos).
+  // Servem de lista de escolha para o dono global, que não tem contrato no
+  // perfil: o cadastro determina qual contrato o novo usuário inventaria.
+  const [knownContracts, setKnownContracts] = useState<ContractSummary[]>([]);
+
+  useEffect(() => {
+    if (!isAddModalOpen) return;
+    let alive = true;
+    listContracts()
+      .then((list) => {
+        if (alive) setKnownContracts(list);
+      })
+      .catch(() => {
+        /* sem catálogo: o campo continua aceitando o tenantid digitado */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isAddModalOpen]);
   const [newUnits, setNewUnits] = useState<string[]>(
     (currentUser?._unitid || currentUser?.unitid) && (currentUser?._unitid || currentUser?.unitid)?.toUpperCase() !== 'DEFAULT' 
       ? [currentUser?._unitid || currentUser?.unitid || ''] 
@@ -809,6 +829,28 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                     <Building2 className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-muted/30" size={18} />
                   )}
                 </div>
+                {(!currentUser?.tenantid || currentUser.tenantid === '') && knownContracts.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    <span className="w-full text-[8px] font-black uppercase tracking-widest text-ink-muted ml-2">
+                      Contratos na base
+                    </span>
+                    {knownContracts.map((contract) => (
+                      <button
+                        key={contract.tenantid}
+                        type="button"
+                        onClick={() => setNewTenantid(contract.tenantid)}
+                        title={contract.filiais.length > 0 ? contract.filiais.join(' · ') : 'Sem filial na base'}
+                        className={`px-2.5 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all active:scale-95 cursor-pointer ${
+                          newTenantid.trim().toUpperCase() === contract.tenantid
+                            ? 'bg-accent text-white border-accent'
+                            : 'bg-white text-ink-muted border-border'
+                        }`}
+                      >
+                        {contract.tenantid}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Unidades Operacionais - Filtradas pelo Grupo */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Building2,
   Factory,
@@ -9,6 +9,7 @@ import {
   Briefcase,
   ClipboardCheck,
   Calculator,
+  ChevronRight,
   Check
 } from 'lucide-react';
 import BackButton from './BackButton';
@@ -20,6 +21,8 @@ import {
   normalizeWorkTenant,
   normalizeWorkFilial
 } from '../utils/workContextUtils';
+import { canAccessDatabaseManager } from '../utils/authUtils';
+import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
 
 interface WorkContextSelectorProps {
   user: User;
@@ -57,9 +60,34 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     normalizeWorkFilial(user.filial || (Array.isArray(user.units) && user.units[0]) || '') ||
     (activeGroup?.filiais?.[0] || '');
 
-  const selectedTenant = activeGroup?.tenantid || '';
+  const selectedTenantBaseline = activeGroup?.tenantid || '';
 
   const [selectedModule, setSelectedModule] = useState<AppModule | null>(null);
+
+  // DONO GLOBAL (admin sem contrato no perfil): o contrato vem da BASE — o
+  // tenantid é a primeira coluna dos ativos. Liberado somente pelo gate
+  // administrativo; um usuário comum nunca vê os contratos de outros clientes.
+  const isGlobalAdmin = !activeGroup && canAccessDatabaseManager(user);
+  const [baseContracts, setBaseContracts] = useState<ContractSummary[]>([]);
+  const [manualTenant, setManualTenant] = useState('');
+
+  useEffect(() => {
+    if (!isGlobalAdmin) return;
+    let alive = true;
+    listContracts()
+      .then((list) => {
+        if (alive) setBaseContracts(list);
+      })
+      .catch(() => {
+        /* sem catálogo: a tela mantém o aviso de contrato ausente */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isGlobalAdmin]);
+
+  const selectedTenant = selectedTenantBaseline || manualTenant;
+  const selectedFilial = activeGroup ? activeFilial : '';
 
   const isAuditor = user.role === UserRole.AUDITOR || user.role === UserRole.AUXILIARY_AUDITOR;
   const canProceed = !!selectedTenant && !!selectedModule;
@@ -121,7 +149,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
             </div>
           </div>
           <span className="text-[8px] font-black uppercase tracking-widest text-ink-muted/60 flex-shrink-0">
-            {contexts.length} contextos
+            {isGlobalAdmin ? `${baseContracts.length} contratos na base` : `${contexts.length} contextos`}
           </span>
         </div>
       </div>
@@ -129,19 +157,98 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
       {/* Corpo com scroll */}
       <div className="flex-1 overflow-y-auto px-5 pt-4 pb-32 space-y-5">
         {!selectedTenant ? (
-          <div className="flex flex-col items-center justify-center py-14 text-center">
-            <div className="w-14 h-14 bg-amber-50 border border-amber-100 rounded-2xl flex items-center justify-center text-amber-500 mb-4">
-              <Briefcase size={26} />
+          isGlobalAdmin ? (
+            <div className="space-y-3">
+              <div className="flex flex-col items-center justify-center pt-6 pb-2 text-center">
+                <div className="w-14 h-14 bg-accent-soft border border-border rounded-2xl flex items-center justify-center text-accent mb-4">
+                  <Building2 size={26} />
+                </div>
+                <p className="font-extrabold uppercase tracking-[0.1em] text-[10px] text-ink mb-2">
+                  Escolha o contrato da base
+                </p>
+                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-wider max-w-[260px] leading-relaxed">
+                  Login de administrador global: o perfil não declara contrato. Selecione o tenantid
+                  que será inventariado.
+                </p>
+              </div>
+
+              {baseContracts.length === 0 ? (
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+                  <p className="text-[9px] font-extrabold text-amber-700 uppercase tracking-widest leading-relaxed text-center">
+                    Nenhum contrato encontrado na base local. Carregue a base no Gestor de Base.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {baseContracts.map((contract) => {
+                    const identity = getTenantIdentity(contract.tenantid);
+                    return (
+                      <button
+                        key={contract.tenantid}
+                        type="button"
+                        onClick={() => setManualTenant(contract.tenantid)}
+                        className="w-full bg-white rounded-2xl px-4 py-3.5 flex items-center justify-between shadow-sm border border-gray-100 active:scale-[0.98] transition-all cursor-pointer"
+                      >
+                        <div className="flex items-center space-x-3 min-w-0">
+                          <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${identity.style}`}>
+                            <identity.Icon size={18} strokeWidth={2.5} />
+                          </div>
+                          <div className="min-w-0 text-left">
+                            <p className="text-[12px] font-black uppercase tracking-[0.12em] text-ink truncate">
+                              {contract.tenantid}
+                            </p>
+                            <p className="text-[7.5px] font-extrabold uppercase tracking-widest text-ink-muted truncate">
+                              {contract.filiais.length > 0
+                                ? `${contract.filiais.length} filial(is) na base`
+                                : 'sem filial na base'}
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight size={16} className="text-ink-muted/40 flex-shrink-0" />
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            <p className="font-extrabold uppercase tracking-[0.1em] text-[10px] text-amber-600 mb-2">
-              Nenhum contrato disponível
-            </p>
-            <p className="text-[9px] font-bold text-ink-muted uppercase tracking-wider max-w-[240px] leading-relaxed">
-              Contate o administrador do sistema para vincular seu contrato.
-            </p>
-          </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-14 text-center">
+              <div className="w-14 h-14 bg-amber-50 border border-amber-100 rounded-2xl flex items-center justify-center text-amber-500 mb-4">
+                <Briefcase size={26} />
+              </div>
+              <p className="font-extrabold uppercase tracking-[0.1em] text-[10px] text-amber-600 mb-2">
+                Nenhum contrato disponível
+              </p>
+              <p className="text-[9px] font-bold text-ink-muted uppercase tracking-wider max-w-[240px] leading-relaxed">
+                Contate o administrador do sistema para vincular seu contrato.
+              </p>
+            </div>
+          )
         ) : (
           <>
+            {isGlobalAdmin && baseContracts.length > 0 && (
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
+                  Contratos na base
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {baseContracts.map((contract) => (
+                    <button
+                      key={contract.tenantid}
+                      type="button"
+                      onClick={() => setManualTenant(contract.tenantid)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all active:scale-95 cursor-pointer ${
+                        selectedTenant === contract.tenantid
+                          ? 'bg-accent text-white border-accent'
+                          : 'bg-white text-ink-muted border-border'
+                      }`}
+                    >
+                      {contract.tenantid}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* Contexto de trabalho — resolvido no login (ETAPA 2/2), somente leitura */}
             <div>
               <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
@@ -232,7 +339,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
           type="button"
           disabled={!canProceed}
           onClick={() => canProceed && onSelect(
-            { tenantid: selectedTenant, filial: activeFilial },
+            { tenantid: selectedTenant, filial: selectedFilial },
             selectedModule as AppModule
           )}
           className="w-full py-3.5 rounded-xl bg-accent text-white font-extrabold uppercase text-[10px] tracking-[0.15em] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
