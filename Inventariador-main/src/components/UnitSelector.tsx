@@ -24,6 +24,7 @@ import * as turf from '@turf/turf';
 import { localDb, readVirtualSnapshot } from '../services/localDbService';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { findHomonymUnits } from '../utils/unitContextUtils';
+import { normalizeKey } from '../utils/schema';
 import { isAdminEmail } from '../utils/authUtils';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
@@ -160,27 +161,35 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           }
             
           const nonDeleted = allAssets.filter(a => a._is_deleted === 0);
-          const filiaisAssets = Array.from(new Set(nonDeleted.map(a => String(a.filial)).filter(f => f && f.trim() !== '')));
-          
+
+          // Identidade da unidade = chave normalizada (agrupa grafias equivalentes);
+          // rótulo exibido = valor bruto da coluna 'filial', como está na base.
+          const unitLabels = new Map<string, string>();
+          const registerUnit = (raw: unknown) => {
+            const label = raw === null || raw === undefined ? '' : String(raw);
+            const key = normalizeKey(label);
+            if (!key) return;
+            if (!unitLabels.has(key)) unitLabels.set(key, label);
+          };
+
+          // Rótulo = texto exato da planilha (filial_raw); identidade = filial (normalizada).
+          nonDeleted.forEach(a => registerUnit((a as { filial_raw?: string }).filial_raw || a.filial));
+
           const configList = await db.unit_configs.toArray();
-          const filiaisConfigs = configList.map(c => String(c.filial || c.nome)).filter(f => f && f.trim() !== '');
           
           // A regra de ouro (Soberania da Filial): Inclui todas as filiais vindas via props (que vieram do cloud/sessão),
           // mais as que possuem ativos locais, mais as que possuem GPS configurado.
-          const propsFiliais = units.map(u => String(u.filial).toUpperCase().trim()).filter(f => f !== '');
-          
-          const allFiliais = Array.from(new Set([
-            ...propsFiliais,
-            ...filiaisAssets.map(f => f.toUpperCase().trim()), 
-            ...filiaisConfigs.map(f => f.toUpperCase().trim())
-          ]));
-          
-          const mapped: SqliteUnitStats[] = allFiliais.map(f => {
-            const filialAssets = nonDeleted.filter(a => String(a.filial || '').toUpperCase().trim() === f);
+          // Propriedades (nuvem/sessão) e GPS entram apenas como fallback de rótulo
+          // quando a filial não aparece em nenhum ativo da base local.
+          units.forEach(u => registerUnit(u.filial));
+          configList.forEach(c => registerUnit(c.filial || c.nome));
+
+          const mapped: SqliteUnitStats[] = Array.from(unitLabels.entries()).map(([key, label]) => {
+            const filialAssets = nonDeleted.filter(a => normalizeKey(a.filial) === key);
             const checkedAssets = filialAssets.filter(a => a._conferido === 1);
             return {
-              filial: f,
-              displayName: f,
+              filial: label,
+              displayName: label,
               tenantid: currentTenantid,
               total: Math.max(0, filialAssets.length),
               checked: Math.max(0, checkedAssets.length)
@@ -590,10 +599,11 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                 return null;
               }
 
-              const displayName = rawName.trim().toUpperCase();
+              // Espelha a coluna 'filial' da base: sem uppercase nem reformatação.
+              const displayName = rawName.trim();
               const unitTenant = (unit.tenantid || '').trim().toUpperCase();
               const { style, Icon } = getUnitIdentity(displayName, unit.hasData);
-              const showTenantBadge = homonymSet.has(displayName);
+              const showTenantBadge = homonymSet.has(displayName.toUpperCase().trim());
 
               return (
                 <div

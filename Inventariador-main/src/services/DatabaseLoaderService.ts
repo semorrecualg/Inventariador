@@ -60,6 +60,18 @@ function getRowValue(row: Record<string, unknown>, ...keys: string[]): string | 
  * CONTRATO SRE (planilha): nomes e ordem das colunas obrigatórias definidos pelo operador.
  * O tenantid (Índice 0) nunca recebe valor fixo/fallback — vem exclusivamente da planilha.
  */
+/**
+ * Espelha a coluna 'filial' exatamente como veio da planilha: sem trim, sem
+ * uppercase, sem prefixo. Esse valor é a Unidade Operacional exibida na tela e
+ * precisa ser idêntico ao que está na base do cliente.
+ */
+const mirrorFilial = (value: unknown): string => {
+  const raw = value === null || value === undefined ? '' : String(value);
+  const probe = raw.trim().toLowerCase();
+  if (probe === '' || probe === 'null' || probe === 'undefined') return 'FILIAL_DEFAULT';
+  return raw;
+};
+
 const CONTRACT_HEADERS = [
   'tenantid', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo', 'serial',
   'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 'endereco', 'registro',
@@ -181,12 +193,16 @@ export class DatabaseLoaderService {
         // deixando o AddressSelector vazio. Fallbacks aceitos para tolerância de nomes de coluna.
         const codEnd = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição', 'codigo_endereco'));
         const tagVal = row.tag || row.etiqueta || pk;
+        const rawFilial = mirrorFilial(row.filial);
         
         return {
           id: pk,
           primarykey: pk,
           tenantid: tenantid,
-          filial: row.filial ? String(row.filial).trim().toUpperCase() : 'FILIAL_DEFAULT',
+          // `filial` é a chave indexada (maiúscula, como as consultas esperam);
+          // `filial_raw` guarda o texto exato da planilha para exibição.
+          filial: rawFilial.toUpperCase(),
+          filial_raw: rawFilial,
           status: normalizeFieldValue('status', getRowValue(row, 'status')) ?? 'Pendente',
           etiqueta: String(tagVal),
           tag: String(tagVal),
@@ -332,7 +348,9 @@ export class DatabaseLoaderService {
           const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
           const finalId = tagSanitizada;
-          const finalFilial = String(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId)?.trim().toUpperCase();          const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
+          const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
+          const finalFilial = finalFilialRaw.toUpperCase();
+          const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
           const itemDesc = normalizeFieldValue(
             'descricaodoativo',
             getRowValue(row, 'descricaodoativo', 'descricao', 'item')
@@ -395,6 +413,7 @@ export class DatabaseLoaderService {
             id: finalId,
             tenantid: finalTenantid,
             filial: finalFilial,
+            filial_raw: finalFilialRaw,
             status: statusVal,
             etiqueta: tagSanitizada,
             tag: tagSanitizada,
@@ -600,7 +619,8 @@ export class DatabaseLoaderService {
           const tagVal = String(getRowValue(row, 'etiqueta', 'tag') || '')?.trim();
           const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
           const finalId = tagSanitizada;
-          const finalFilial = String(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId)?.trim().toUpperCase();
+          const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
+          const finalFilial = finalFilialRaw.toUpperCase();
           const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
           const itemDesc = normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${finalId}`;
           const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${tagSanitizada}`);
@@ -657,6 +677,7 @@ export class DatabaseLoaderService {
             id: finalId,
             tenantid: finalTenantid,
             filial: finalFilial,
+            filial_raw: finalFilialRaw,
             status: statusVal,
             etiqueta: tagSanitizada,
             tag: tagSanitizada,
