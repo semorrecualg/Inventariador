@@ -20,9 +20,16 @@ export async function processAndInjectSpreadsheetData(file: File, onProgress: (p
 
 interface DatabaseManagerScreenProps {
   onBack?: () => void;
+  /**
+   * Avisa o App que a BASE LOCAL acabou de receber dados (carga de planilha ou
+   * restauração de backup). O App usa isso para operar na base local — sem
+   * isso a Unidade Operacional lê a nuvem e mostra "nenhum dado importado"
+   * mesmo com milhares de ativos carregados neste dispositivo.
+   */
+  onLocalBaseLoaded?: (info: { count: number; tenantids: string[] }) => void;
 }
 
-export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ onBack }) => {
+export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ onBack, onLocalBaseLoaded }) => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isPurging, setIsPurging] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
@@ -64,6 +71,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const handleBackupFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const restoreTenants = (rows: unknown[]) => [...new Set(rows
+      .map((r) => String((r as { tenantid?: unknown })?.tenantid ?? '').trim().toUpperCase())
+      .filter(Boolean))];
 
     addLog(`[SRE_BACKUP] Arquivo de backup selecionado: ${file.name}`);
     setIsUploading(true);
@@ -108,6 +118,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         addLog("[SRE_BACKUP] Restauração e sincronização do backup concluídas com sucesso.");
         showRecoveryToast("✓ BACKUP FISICO RECONECTADO COM SUCESSO.", "blue");
         loadStats();
+        // O backup restaurou a BASE LOCAL: o App precisa operar nela.
+        onLocalBaseLoaded?.({ count: parsed.length, tenantids: restoreTenants(parsed) });
       } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
         setIsUploading(false);
         addLog(`[SRE_BACKUP ERROR] Falha ao reconectar backup: ${err.message || String(err)}`);
@@ -265,6 +277,19 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       });
 
       addLog(`[SRE_LOADER] ${assetsInjected.length} ativos injetados com sucesso.`);
+      const contratosDaCarga = [...new Set(
+        assetsInjected.map((a) => String((a as { tenantid?: unknown }).tenantid ?? '').trim())
+          .filter(Boolean)
+      )];
+      // A carga gravou na BASE LOCAL deste dispositivo (Dexie/SQLite). Avisa o
+      // App para ele operar nela — em "Base Oficial" a Unidade Operacional
+      // leria a nuvem, vazia para o contrato, e a tela diria "sem dados".
+      if (assetsInjected.length > 0) {
+        onLocalBaseLoaded?.({
+          count: assetsInjected.length,
+          tenantids: contratosDaCarga.map((c) => c.toUpperCase())
+        });
+      }
       // RASTREIO DE CARGAS: registra no audit_logs da nuvem quantos ativos esta
       // carga trouxe e para qual contrato — alimenta o histórico de cargas.
       // O tenantid do evento vem do usuário logado; se ele não tiver contrato
@@ -273,10 +298,6 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       try {
         const storedUser = sessionStorage.getItem('app_current_user');
         const userEmail = storedUser ? (JSON.parse(storedUser) as { email?: string })?.email || 'unknown' : 'unknown';
-        const contratosDaCarga = [...new Set(
-          assetsInjected.map((a) => String((a as { tenantid?: unknown }).tenantid ?? '').trim())
-            .filter(Boolean)
-        )];
         const tenantDoEvento = (activeTenantid || contratosDaCarga[0] || '').toUpperCase();
         const sufixo = tenantDoEvento
           ? ` (contrato ${tenantDoEvento}${contratosDaCarga.length > 1 ? `; também presentes: ${contratosDaCarga.slice(1).join(', ')}` : ''})`
