@@ -48,14 +48,21 @@ const normalize = (value: unknown): string => String(value ?? '').trim().toUpper
  * que for possível reunir dos perfis/licenças.
  */
 export async function listContracts(): Promise<ContractSummary[]> {
-  const contractFiliais = new Map<string, Set<string>>();
+  // tenantid → (FILIAL em maiúsculas → rótulo original da planilha)
+  // A chave em maiúsculas deduplica; o valor preserva a grafia exata da base,
+  // necessária para atribuir a filial a um perfil sem perder o vínculo com os
+  // ativos (que são gravados com o rótulo original).
+  const contractFiliais = new Map<string, Map<string, string>>();
 
   const add = (tenantRaw: unknown, filialRaw: unknown) => {
     const tenantid = normalize(tenantRaw);
     if (TENANT_SENTINELS.has(tenantid)) return;
-    if (!contractFiliais.has(tenantid)) contractFiliais.set(tenantid, new Set<string>());
-    const filial = normalize(filialRaw);
-    if (!FILIAL_SENTINELS.has(filial)) contractFiliais.get(tenantid)!.add(filial);
+    if (!contractFiliais.has(tenantid)) contractFiliais.set(tenantid, new Map<string, string>());
+    const filialKey = normalize(filialRaw);
+    if (FILIAL_SENTINELS.has(filialKey)) return;
+    const filialLabel = String(filialRaw ?? '').trim();
+    const filiais = contractFiliais.get(tenantid)!;
+    if (!filiais.has(filialKey)) filiais.set(filialKey, filialLabel);
   };
 
   try {
@@ -79,6 +86,11 @@ export async function listContracts(): Promise<ContractSummary[]> {
   }
 
   return Array.from(contractFiliais.entries())
-    .map(([tenantid, filiais]) => ({ tenantid, filiais: Array.from(filiais).sort() }))
+    .map(([tenantid, filiais]) => ({
+      tenantid,
+      filiais: Array.from(filiais.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([, label]) => label),
+    }))
     .sort((a, b) => a.tenantid.localeCompare(b.tenantid));
 }

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles, Building2, CheckCircle2, DownloadCloud, CloudOff } from 'lucide-react';
-import { isAdminEmail, ADMIN_EMAIL } from '../utils/authUtils';
+import { isAdminEmail, markAppManagedSession, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode, downloadBaseToLocal, fetchTenantFiliais } from '../services/supabaseService';
 import type { TenantFilial } from '../services/supabaseService';
@@ -121,6 +121,8 @@ const Login: React.FC<LoginProps> = ({
         );
 
         if (localUser) {
+          // Credencial local do app: não existe token do Supabase para validar.
+          markAppManagedSession();
           sessionStorage.setItem('app_current_user', safeStringify(localUser));
           
           // Log de Auditoria
@@ -223,6 +225,7 @@ const Login: React.FC<LoginProps> = ({
   const enterBranchStage = (user: User, profileUnits: string[], isMaster: boolean, isLocal: boolean) => {
     const tenant = String(user.tenantid || '').trim().toUpperCase();
     if (!tenant) {
+      if (isLocal) markAppManagedSession();
       onLogin(user);
       return;
     }
@@ -319,6 +322,10 @@ const Login: React.FC<LoginProps> = ({
     // Caminho LOCAL (Barreira Local / fallback offline): a base já está no
     // dispositivo — nenhum download; entra direto com a filial escolhida.
     if (pendingIsLocal) {
+      // Login por credencial local (Base Local / Barreira Local / Dexie):
+      // marca a origem para que a checagem de sessão da nuvem não destrua
+      // um acesso que não tem (nem precisa de) token do Supabase.
+      markAppManagedSession();
       logAuditEvent({
         user_email: userWithBranch.email,
         action: 'LOGIN',
@@ -488,7 +495,8 @@ const Login: React.FC<LoginProps> = ({
         };
 
         const userRole = (localUser.role || '').toString().toUpperCase();
-        if (userRole === 'MASTER' || userRole === 'ADMIN' || localUser.is_admin || localUser.isAdmin) {
+        const isMasterLike = userRole === 'MASTER' || userRole === 'ADMIN' || !!localUser.is_admin || !!localUser.isAdmin;
+        if (isMasterLike) {
           if (!localUser.tenantid) throw new Error('Perfil MASTER sem tenantid vinculado no Supabase.');
           sessionStorage.setItem('gbr_admin_scope', 'TENANT_MASTER');
           sessionStorage.setItem('tenantid', localUser.tenantid);
@@ -497,10 +505,15 @@ const Login: React.FC<LoginProps> = ({
           if (localUser.tenantid) sessionStorage.setItem('tenantid', localUser.tenantid);
         }
 
-        sessionStorage.setItem('app_current_user', JSON.stringify(dexieAuthResult.user));
-        localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]));
+        const dexieUser = dexieAuthResult.user as unknown as User;
+        sessionStorage.setItem('app_current_user', safeStringify(dexieUser));
 
-        onLogin(dexieAuthResult.user as unknown as User);
+        // Mesmo fluxo da Barreira Local: com contrato definido, o perfil escolhe
+        // a filial (etapa 2/2) antes de entrar. Antes daqui chamávamos onLogin
+        // direto e, para um auditor criado no app, a tela ficava parada no
+        // formulário de login — o acesso existia mas não entrava.
+        const dexieUnits = dexieUser.units || (dexieUser.unitid ? [dexieUser.unitid] : []);
+        enterBranchStage(dexieUser, dexieUnits, isMasterLike, true);
         setIsLoading(false);
         clearTimeout(loginTimeout);
         return;
