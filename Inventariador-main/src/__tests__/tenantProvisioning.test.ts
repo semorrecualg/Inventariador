@@ -76,6 +76,26 @@ describe('tenantProvisioning — buildLicenseProvisionPlan (lógica pura)', () =
     expect(plan.valid).toBe(false);
   });
 
+  it('usa o contrato da base (tenantid explícito) em vez de derivar do nome', () => {
+    const plan = buildLicenseProvisionPlan(
+      { ...validInput, clientName: '', tenantid: 'grupo_cicopal', allowExistingTenant: true },
+      { tenants: [], emails: [], usernames: [] },
+    );
+    expect(plan.valid).toBe(true);
+    expect(plan.tenantid).toBe('GRUPO_CICOPAL');
+    expect(plan.master!.tenantid).toBe('GRUPO_CICOPAL');
+  });
+
+  it('permite repor o MASTER de um tenant existente (fluxo comercial)', () => {
+    const plan = buildLicenseProvisionPlan(
+      { ...validInput, tenantid: 'CICOPAL', allowExistingTenant: true },
+      { tenants: ['CICOPAL'], emails: [], usernames: [] },
+    );
+    expect(plan.valid).toBe(true);
+    expect(plan.errors).toEqual([]);
+    expect(plan.master!.tenantid).toBe('CICOPAL');
+  });
+
   it('normaliza email e username para minúsculas no master', () => {
     const plan = buildLicenseProvisionPlan(
       { ...validInput, masterEmail: 'CLIENTE@CICOPAL.COM.BR', masterUsername: 'Mestre.Cicopal' },

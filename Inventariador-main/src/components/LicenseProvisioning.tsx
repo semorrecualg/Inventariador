@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Building2, ShieldCheck, Check, X, Eye, EyeOff, KeyRound } from 'lucide-react';
 import BackButton from './BackButton';
 import {
@@ -6,6 +6,7 @@ import {
   normalizeTenantId,
   type LicenseProvisionResult,
 } from '../services/tenantProvisioningService';
+import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
 import {
   validateStrongPassword,
   passwordScore,
@@ -35,6 +36,25 @@ export const LicenseProvisioning: React.FC<LicenseProvisioningProps> = ({ onBack
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<LicenseProvisionResult | null>(null);
+  // Contrato existente na base (o tenantid é a primeira coluna dos ativos) vs.
+  // tenantid novo, ainda sem base carregada.
+  const [mode, setMode] = useState<'new' | 'existing'>('new');
+  const [existingTenant, setExistingTenant] = useState('');
+  const [contracts, setContracts] = useState<ContractSummary[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    listContracts()
+      .then((list) => {
+        if (alive) setContracts(list);
+      })
+      .catch(() => {
+        /* catálogo indisponível: o modo "novo tenantid" continua funcionando */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const strong = validateStrongPassword(password);
   const passwordsMatch = confirmPassword !== '' && password === confirmPassword;
@@ -44,6 +64,10 @@ export const LicenseProvisioning: React.FC<LicenseProvisioningProps> = ({ onBack
     e.preventDefault();
     setError(null);
 
+    if (mode === 'existing' && !existingTenant) {
+      setError('Escolha o contrato (tenantid) que vai receber o MASTER.');
+      return;
+    }
     if (!strong.valid) {
       setError(`A senha do MASTER precisa ser forte: ${strong.errors.join('; ')}.`);
       return;
@@ -61,6 +85,9 @@ export const LicenseProvisioning: React.FC<LicenseProvisioningProps> = ({ onBack
         masterUsername,
         masterName,
         masterPassword: password,
+        ...(mode === 'existing'
+          ? { tenantid: existingTenant, allowExistingTenant: true }
+          : {}),
       });
       setResult(res);
     } catch (err) {
@@ -72,6 +99,8 @@ export const LicenseProvisioning: React.FC<LicenseProvisioningProps> = ({ onBack
 
   const resetForm = () => {
     setClientName('');
+    setExistingTenant('');
+    setMode('new');
     setMasterEmail('');
     setMasterUsername('');
     setMasterName('');
@@ -160,25 +189,76 @@ export const LicenseProvisioning: React.FC<LicenseProvisioningProps> = ({ onBack
                     <Building2 size={16} />
                   </div>
                   <div>
-                    <h3 className="text-[13px] font-bold text-ink uppercase tracking-tight">Novo Cliente</h3>
+                    <h3 className="text-[13px] font-bold text-ink uppercase tracking-tight">Contrato</h3>
                     <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">
-                      O tenantid será derivado automaticamente
+                      Tenantid: primeira coluna da base de ativos
                     </p>
                   </div>
                 </div>
-                <input
-                  type="text"
-                  required
-                  autoComplete="off"
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  placeholder="Ex.: Cicopal Goiás"
-                  className="w-full px-4 py-3.5 bg-bg-main rounded-2xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all"
-                />
-                {clientName.trim() && (
-                  <p className="text-[9px] font-black text-accent uppercase tracking-widest mt-2 ml-1">
-                    Tenant: {normalizeTenantId(clientName) || '—'}
+
+                <div className="flex p-1 bg-bg-main rounded-2xl border border-border mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setMode('new')}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${
+                      mode === 'new' ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'
+                    }`}
+                  >
+                    Novo tenantid
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode('existing')}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${
+                      mode === 'existing' ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'
+                    }`}
+                  >
+                    Contrato existente
+                  </button>
+                </div>
+
+                {mode === 'new' ? (
+                  <>
+                    <input
+                      type="text"
+                      required
+                      autoComplete="off"
+                      value={clientName}
+                      onChange={(e) => setClientName(e.target.value)}
+                      placeholder="Ex.: Cicopal Goiás"
+                      className="w-full px-4 py-3.5 bg-bg-main rounded-2xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all"
+                    />
+                    {clientName.trim() && (
+                      <p className="text-[9px] font-black text-accent uppercase tracking-widest mt-2 ml-1">
+                        Tenant: {normalizeTenantId(clientName) || '—'}
+                      </p>
+                    )}
+                  </>
+                ) : contracts.length === 0 ? (
+                  <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest leading-relaxed">
+                    Nenhum contrato encontrado na base local. Carregue a base do cliente no Gestor de
+                    Base ou use &quot;Novo tenantid&quot;.
                   </p>
+                ) : (
+                  <>
+                    <select
+                      value={existingTenant}
+                      onChange={(e) => setExistingTenant(e.target.value)}
+                      className="w-full px-4 py-3.5 bg-bg-main rounded-2xl border border-border focus:border-accent focus:bg-white outline-none font-bold text-sm transition-all"
+                    >
+                      <option value="">Escolha o contrato…</option>
+                      {contracts.map((c) => (
+                        <option key={c.tenantid} value={c.tenantid}>
+                          {c.tenantid}
+                          {c.filiais.length > 0 ? ` · ${c.filiais.length} filial(is)` : ' · sem filial'}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest mt-2 ml-1 leading-relaxed">
+                      O MASTER passa a administrar esse contrato — a base já existente não é
+                      alterada.
+                    </p>
+                  </>
                 )}
               </div>
 
