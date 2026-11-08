@@ -12,7 +12,8 @@ import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
-import { canAccessDatabaseManager } from './utils/authUtils';
+import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
+import { isUnitInScope } from './utils/unitScope';
 import { userHasPermission } from './services/rbacService';
 
 // Extend Window interface for pushScreen
@@ -499,7 +500,10 @@ const App: React.FC = () => {
   }, [user]);
 
   // REQUISITO 2 - AJUSTE DO INTERCEPTOR VISUAL (TRAVA ABSOLUTA)
-  const isSessionCurrentlyValid = isInternalMode || databaseMode === DatabaseMode.INTERNAL || databaseMode === DatabaseMode.INTERNAL_PLUS || isSessionValid || isProfileLocal || (user && user.role === ('DEMO' as unknown as UserRole));
+  // Sessão criada por credencial local do app (auditor criado em Acessos) é
+  // válida mesmo sem token do Supabase em deploy com nuvem configurada.
+  const appManagedSession = isAppManagedSession();
+  const isSessionCurrentlyValid = isInternalMode || databaseMode === DatabaseMode.INTERNAL || databaseMode === DatabaseMode.INTERNAL_PLUS || isSessionValid || isProfileLocal || appManagedSession || (user && user.role === ('DEMO' as unknown as UserRole));
   const isUserAuthenticated = !!user && isSessionCurrentlyValid;
 
   const [bootstrapError, setBootstrapError] = useState<Error | null>(null);
@@ -1499,7 +1503,9 @@ useEffect(() => {
                     
                     if (!isValid) {
                       // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
-                      let isLocal = false;
+                      // Sessão gerida pelo app (login com credencial local) não tem
+                      // token do Supabase por definição — não é fantasma.
+                      let isLocal = isAppManagedSession();
                       if (currentUserStr) {
                         try {
                           const parsed = JSON.parse(currentUserStr);
@@ -1537,7 +1543,7 @@ useEffect(() => {
                     const errMsg = String(jwtErr instanceof Error ? jwtErr.message : jwtErr);
                     const isNetworkError = errMsg.includes('Failed to fetch') || errMsg.includes('fetch') || errMsg.includes('network') || !navigator.onLine;
 
-                    let isLocal = false;
+                    let isLocal = isAppManagedSession();
                     if (currentUserStr) {
                       try {
                         const parsed = JSON.parse(currentUserStr);
@@ -2357,7 +2363,11 @@ useEffect(() => {
       AppScreen.BIOMETRIC_REGISTRATION,
       AppScreen.STRESS_TEST,
       AppScreen.CHANGE_PASSWORD,
-      AppScreen.TENANT_WORK_SELECTION
+      AppScreen.TENANT_WORK_SELECTION,
+      // Gestão de acessos é administrativa e transversal: criar o auditor da
+      // filial acontece ANTES de existir unidade selecionada. Sem esta exceção
+      // o guard devolvia o dono para a Unidade Operacional e a tela nunca abria.
+      AppScreen.USER_MANAGEMENT
     ];
     
     if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
@@ -3979,6 +3989,10 @@ useEffect(() => {
             AppScreen.MODULE_SELECTION,
             AppScreen.ASSET_CONTROL_HOME,
             AppScreen.TENANT_WORK_SELECTION,
+            // Gestão de acessos NÃO depende de base carregada — é justamente o
+            // passo anterior à primeira carga (criar o auditor do contrato).
+            // Sem esta exceção, o dono era expulso da tela com a base vazia.
+            AppScreen.USER_MANAGEMENT,
             // Telas do fluxo pós-login (Etapa 3/4): base vazia aqui é resolvida
             // pelo próprio fluxo (seletor/sync/carga), nunca por redirect forçado.
             AppScreen.MAIN_MENU,
@@ -4150,7 +4164,15 @@ useEffect(() => {
         });
         
         let resolvedTenantid = (resolveTenantId(permissions) || resolveTenantId(permissionsObj) || resolveTenantId(unifiedMetadataObj) || readLocalTenantId() || readSessionTenantId() || '').trim().toUpperCase();
-        let resolvedUnitId = (permissions._unitid || (permissionsObj.unitid as string) || unifiedMetadata._unitid || (unifiedMetadataObj.unitid as string) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '').trim().toUpperCase();
+        // A filial pode estar gravada como `filial` (provisionamento em
+        // Acessos) ou `unitid/_unitid` (perfis antigos) — ler as duas grafias
+        // evita declarar o auditor "sem filial" e derrubar a sessão dele.
+        let resolvedUnitId = resolveProfileUnitId(
+          permissionsObj,
+          unifiedMetadataObj,
+          { filial: localStorage.getItem('filial') || '' },
+          { filial: sessionStorage.getItem('filial') || '' },
+        );
 
         if (session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
           // DONO GLOBAL: o tenant vem EXCLUSIVAMENTE da base (user_permissions).
@@ -4163,6 +4185,13 @@ useEffect(() => {
 
         const isOwnerAccount = session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
         if ((!resolvedTenantid || resolvedTenantid === 'NULL' || resolvedTenantid === 'UNDEFINED' || !resolvedUnitId || resolvedUnitId === 'NULL' || resolvedUnitId === 'UNDEFINED') && !isOwnerAccount) {
+          if (isAppManagedSession()) {
+            // Quem entrou por credencial local continua dentro: o fail-safe da
+            // nuvem não pode encerrar uma sessão que ele próprio abriu.
+            logger.info('[Auth Fail-Safe] Perfil sem escopo na nuvem, mas sessão local do app ativa — mantendo acesso.');
+            setIsLoading(false);
+            return;
+          }
           logger.warn(`[Auth Fail-Safe] Usuário logado sem tenantid ou filial associado: ${session.user.email}`);
           setIsSessionValid(false);
           setUser(null);
@@ -4372,7 +4401,9 @@ useEffect(() => {
           // (o login local via Barreira Local não cria token Supabase; destruí-lo aqui deslogaria
           // o proprietário sempre que o databaseMode mudar e re-disparar este useEffect).
           const currentUserStr = sessionStorage.getItem('app_current_user');
-          let isLocalUser = false;
+          // Sessão gerida pelo app (login por credencial local) não tem token
+          // do Supabase e continua válida — só fantasmas de F5 são destruídos.
+          let isLocalUser = isAppManagedSession();
           try {
             if (currentUserStr) {
               const parsed = JSON.parse(currentUserStr);
@@ -4403,6 +4434,13 @@ useEffect(() => {
         }
       }).catch((err: unknown) => {
         logger.error('[Boot] Erro ao obter sessão atual na montagem (Purga de Cache):', err);
+        // Falha de rede na checagem da nuvem não pode derrubar uma sessão de
+        // credencial local: só purga quando não há login gerido pelo app.
+        if (isAppManagedSession()) {
+          logger.info('[Boot SRE] Checagem da nuvem falhou, mas a sessão local do app segue válida.');
+          setIsSessionValid(true);
+          return;
+        }
         // GBR KARDEK SRE: Em qualquer falha de boot ou sessão, destruir fantasma e exigir login
         setIsSessionValid(false);
         setUser(null);
@@ -4416,6 +4454,26 @@ useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       logger.info('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
       const isValid = !!session && !!session.user && typeof session.user.id === "string";
+
+      // Sessão gerida pelo app: sem token do Supabase, ou com token de OUTRO
+      // perfil (ex.: sessão do dono que ficou aberta neste navegador), ela não
+      // pode ser trocada nem destruída — o login local manda.
+      if (isAppManagedSession()) {
+        const cachedEmail = (() => {
+          try {
+            return String(JSON.parse(sessionStorage.getItem('app_current_user') || '{}').email || '').toLowerCase();
+          } catch {
+            return '';
+          }
+        })();
+        const sessionEmail = (session?.user?.email || '').toLowerCase();
+        if (!isValid || (cachedEmail && sessionEmail && cachedEmail !== sessionEmail)) {
+          logger.info('[Supabase Auth Listener] Sessão da nuvem ignorada: login ativo veio de credencial local do app.', event);
+          setIsSessionValid(true);
+          return;
+        }
+      }
+
       setIsSessionValid(isValid);
       
       if (isValid && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
@@ -4423,7 +4481,7 @@ useEffect(() => {
       } else if (event === 'SIGNED_OUT' || (event as string) === 'TOKEN_REFRESH_FAILED' || !isValid) {
         // Limpa estado se deslogar no Supabase ou se o refresh do token falhar
         const currentUserStr = sessionStorage.getItem('app_current_user');
-        let isLocalUser = false;
+        let isLocalUser = isAppManagedSession();
         try {
           if (currentUserStr) {
             const parsed = JSON.parse(currentUserStr);
@@ -6108,9 +6166,9 @@ useEffect(() => {
     
     const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
     
-    // Se for auditor ou admin e estiver no modo nuvem, garantimos que as unidades autorizadas apareçam
-    // mesmo que ainda não existam ativos locais para elas
-    if ((isAuditor || isAdmin) && inventory.databaseMode !== DatabaseMode.INTERNAL) {
+    // Unidades autorizadas do perfil aparecem mesmo sem ativos na base — regra
+    // idêntica na nuvem e na BASE LOCAL (antes só valia no modo nuvem).
+    if (isAuditor || isAdmin) {
       for (const u of userUnits) {
         if (u) {
           const cleanU = u.toUpperCase().replace(/_/g, ' ').trim();
@@ -6121,21 +6179,15 @@ useEffect(() => {
     
     const baseCompanies = Array.from(baseCompaniesSet);
 
-    // 3. Normalizar unidades do usuário para busca rápida
-    const normalizedUserUnits = userUnits.map(u => normalizeKey(u));
-
     // 4. Agrupar e Mesclar empresas por CHAVE COMPOSTA [tenantid+filial] — o muro
     // multi-tenant: a mesma filial em contratos diferentes é uma unidade DISTINTA.
     // A normalização por nome (ex: "UNIDADE A" vs "UNIDADE_A") continua valendo DENTRO
     // do mesmo contrato.
     const mergedCompanies = new Map<string, { name: string; tenantid: string; hasData: boolean; hasActiveAssets: boolean; hasAssetCampaign: boolean }>();
 
-    // Filtragem por permissão (Auditor) - No modo INTERNO (Offline Puro), permitimos ver tudo se não houver trava explícita
-    const isUnitAllowed = (norm: string) => !isAuditor || 
-                      inventory.databaseMode === DatabaseMode.INTERNAL || 
-                      userUnits.length === 0 || 
-                      normalizedUserUnits.includes(norm) ||
-                      (normalizedUserUnits.length === 1 && normalizedUserUnits[0] === '');
+    // Filtragem por permissão (Auditor) — regra única (utils/unitScope), sem
+    // exceção por modo: nuvem e base local entregam exatamente as mesmas filiais.
+    const isUnitAllowed = (norm: string) => isUnitInScope(user, norm, userTenant);
 
     // 4a. Unidades detectadas nos ativos/SQL (chave composta com tenantid real)
     companyStatsMap.forEach((stats, statsKey) => {
@@ -6706,6 +6758,11 @@ useEffect(() => {
             dbInitialized={dbInitialized}
             onLogin={async (u) => {
               setUser(u);
+              // Login concluído = sessão válida, independentemente da origem
+              // (Dexie/local, barreira local ou Supabase). Sem isto, um perfil
+              // criado no app (auditor local) autenticava e ficava preso no
+              // formulário porque a sessão só era validada pela nuvem.
+              setIsSessionValid(true);
               sessionStorage.setItem('app_current_user', safeStringify(u));
               if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
                 setDatabaseMode(DatabaseMode.SUPABASE);
@@ -6718,7 +6775,12 @@ useEffect(() => {
               setSelectedUnit(defaultUnit);
               sessionStorage.setItem('tenantid', defaultTenant);
               sessionStorage.setItem('filial', defaultUnit);
-              if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode && !multiContextLogin) {
+              // Sessão de credencial local (auditor criado em ACESSOS) não tem
+              // token do Supabase: o pull da nuvem rodaria sem autorização e só
+              // geraria erro de RLS. A base dele já está no dispositivo.
+              if (isAppManagedSession()) {
+                logger.info('[App] Login por credencial local do app: sincronização da nuvem adiada (sem token Supabase).');
+              } else if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode && !multiContextLogin) {
                 // ETAPA 1/2 (FLUXO_ACESSO_INICIAL): o onLogin não repete o pull do
                 // Boot Loader para o mesmo contrato+filial, e o pull respeita o
                 // filtro de filial do perfil (dados sob demanda da filial).
@@ -6860,9 +6922,21 @@ useEffect(() => {
           )}
           {screen === AppScreen.CHANGE_PASSWORD && (
             <ChangePassword 
-              onPasswordChanged={(p) => { 
+              onPasswordChanged={async (p) => { 
                 const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); 
                 setUsers(upd); 
+                // Persiste a nova senha na tabela local (localforage/Dexie). Sem
+                // isto o perfil trocava a senha na tela, mas o login local
+                // continuava exigindo a senha antiga (e o acesso ficava travado).
+                if (user) {
+                  const updatedUser: User = { ...user, password: p, mustChangePassword: false };
+                  sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
+                  try {
+                    await localDb.users.add(updatedUser);
+                  } catch (persistErr) {
+                    logger.warn('[ChangePassword] Falha ao persistir a nova senha localmente:', persistErr);
+                  }
+                }
                 const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL;
                 const isEmpty = inventory.assets.length === 0;
 
@@ -7068,6 +7142,17 @@ useEffect(() => {
                 }))
               } 
               onSelect={(u, t) => { 
+                // Escopo do perfil: a mesma trava da lista vale para a escolha, nos
+                // dois modos de base (impede abrir filial que não é do auditor).
+                if (!isUnitInScope(user, u, user?.tenantid || '')) {
+                  setModalConfig({
+                    isOpen: true,
+                    title: "Unidade fora do escopo",
+                    message: `A filial ${u} não está entre as unidades autorizadas para este perfil.`,
+                    type: "error"
+                  });
+                  return;
+                }
                 // Muro multi-tenant: o contrato de trabalho é o da UNIDADE selecionada
                 // (chave composta [tenantid+filial]); se a unidade não carregar contrato,
                 // cai para o tenantid do perfil do usuário.
@@ -7238,6 +7323,7 @@ useEffect(() => {
               tenantid={user?.tenantid || ''}
               isOwner={user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()}
               onOpenDatabaseManager={() => pushScreen(AppScreen.DATABASE_MANAGER)}
+              onOpenUserManagement={() => pushScreen(AppScreen.USER_MANAGEMENT)}
               onLogout={async () => {
                 if (supabase) {
                   await logAuditEvent({

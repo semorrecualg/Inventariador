@@ -8,7 +8,8 @@ import {
   ShieldCheck,
   TrendingUp,
   BarChart3,
-  Database
+  Database,
+  Users
 } from 'lucide-react';
 import { sqliteService } from '../services/sqliteService';
 import { readVirtualSnapshot } from '../services/localDbService';
@@ -19,6 +20,8 @@ interface ModuleSelectorProps {
   onSelect: (module: AppModule) => void;
   onLogout: () => void;
   onOpenDatabaseManager?: () => void;
+  /** Gestão de acessos (perfis, contrato e filiais) — administradores. */
+  onOpenUserManagement?: () => void;
   username: string;
   userRole?: UserRole;
   isDatabaseEmpty?: boolean;
@@ -28,7 +31,7 @@ interface ModuleSelectorProps {
   isOwner?: boolean;
 }
 
-const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onOpenDatabaseManager, username, userRole, isDatabaseEmpty = false, tenantid = '', isOwner = false }) => {
+const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onOpenDatabaseManager, onOpenUserManagement, username, userRole, isDatabaseEmpty = false, tenantid = '', isOwner = false }) => {
   const [canAccessModules, setCanAccessModules] = useState<boolean>(!isDatabaseEmpty);
 
   useEffect(() => {
@@ -186,6 +189,16 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
             <p className="text-ink-muted uppercase font-bold text-xs tracking-[0.2em]">Selecione o módulo de trabalho</p>
           </div>
           <div className="flex items-center gap-2">
+            {(isAdmin || isOwner) && onOpenUserManagement && (
+              <button 
+                onClick={onOpenUserManagement}
+                className="flex items-center space-x-2 px-4 py-2 bg-accent-soft hover:bg-accent/15 rounded-xl text-accent transition-all border border-accent/10 active:scale-95 group"
+                title="Criar e administrar acessos (perfil, contrato e filial)"
+              >
+                <Users size={16} />
+                <span className="text-[10px] font-black uppercase tracking-widest">Acessos</span>
+              </button>
+            )}
             {isAdmin && onOpenDatabaseManager && (
               <button 
                 onClick={handleDatabaseManagerClick}

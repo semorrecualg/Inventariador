@@ -107,6 +107,73 @@ export const isAdminUser = (user: User | null | undefined): boolean => {
   return false;
 };
 
+const SESSION_ORIGIN_KEY = 'gbr_session_origin';
+
+/**
+ * Marca a sessão atual como criada por um login do próprio app (credencial
+ * local: Base Local, Barreira Local, Dexie ou biometria). Nesses casos não
+ * existe token do Supabase — e a ausência de token não pode destruir a sessão
+ * de um auditor criado em Acessos.
+ */
+export const markAppManagedSession = (): void => {
+  try {
+    sessionStorage.setItem(SESSION_ORIGIN_KEY, 'APP');
+  } catch {
+    /* storage indisponível — segue sem marcação */
+  }
+};
+
+/**
+ * `true` quando o login que abriu a sessão foi feito pelo app (credencial
+ * local) e o usuário ainda está no cache de sessão do navegador.
+ */
+export const isAppManagedSession = (): boolean => {
+  try {
+    return (
+      sessionStorage.getItem(SESSION_ORIGIN_KEY) === 'APP' &&
+      !!sessionStorage.getItem('app_current_user')
+    );
+  } catch {
+    return false;
+  }
+};
+
+const INVALID_SCOPE_VALUES = new Set(['', 'DEFAULT', 'NULL', 'UNDEFINED', 'NULO', '0']);
+
+const normalizeScopeValue = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return INVALID_SCOPE_VALUES.has(trimmed.toUpperCase()) ? '' : trimmed.toUpperCase();
+};
+
+/**
+ * Resolve a filial (unidade operacional) declarada num perfil.
+ *
+ * O provisionamento em `user_permissions` grava `filial` + `units`, enquanto o
+ * auto-login da nuvem consultava apenas `unitid/_unitid`. Resultado: o perfil
+ * do auditor parecia "sem filial" e o fail-safe de isolamento derrubava a
+ * sessão logo após a escolha da filial. Aqui as duas grafias valem.
+ */
+export const resolveProfileUnitId = (
+  ...sources: Array<Record<string, unknown> | null | undefined>
+): string => {
+  for (const source of sources) {
+    if (!source) continue;
+    for (const key of ['_unitid', 'unitid', 'unitId', 'filial'] as const) {
+      const direct = normalizeScopeValue(source[key]);
+      if (direct) return direct;
+    }
+    const units = source.units;
+    const list = Array.isArray(units) ? units : typeof units === 'string' ? [units] : [];
+    for (const candidate of list) {
+      const value = normalizeScopeValue(candidate);
+      if (value) return value;
+    }
+  }
+  return '';
+};
+
 /** Result of a local user authentication against Dexie.js. */
 export interface AuthResult {
   user?: Record<string, unknown>;

@@ -26,6 +26,7 @@ import { resolveTenantId } from '../utils/tenantUtils';
 import { findHomonymUnits } from '../utils/unitContextUtils';
 import { normalizeKey } from '../utils/schema';
 import { isAdminEmail } from '../utils/authUtils';
+import { isUnitInScope, UnitScopeUser } from '../utils/unitScope';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 import type { DexieAsset } from '../services/sqliteService';
@@ -119,10 +120,13 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
       try {
         if (databaseMode === DatabaseMode.INTERNAL) {
           let tenantid: string | undefined;
+          // Perfil logado: o escopo de unidades vale igual na base local e na nuvem.
+          let sessionUser: UnitScopeUser | null = null;
           try {
             const storedUser = sessionStorage.getItem('app_current_user');
             if (storedUser) {
-              const parsedUser = JSON.parse(storedUser) as { tenantid?: string };
+              const parsedUser = JSON.parse(storedUser) as UnitScopeUser & { tenantid?: string };
+              sessionUser = parsedUser;
               tenantid = resolveTenantId(parsedUser) || undefined;
             }
           } catch (err: unknown) {
@@ -184,7 +188,11 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           units.forEach(u => registerUnit(u.filial));
           configList.forEach(c => registerUnit(c.filial || c.nome));
 
-          const mapped: SqliteUnitStats[] = Array.from(unitLabels.entries()).map(([key, label]) => {
+          const mapped: SqliteUnitStats[] = Array.from(unitLabels.entries())
+            // Restrição do perfil (auditor contratado por filial) — a MESMA regra
+            // do modo nuvem; sem isso a base local entregava todas as filiais.
+            .filter(([, label]) => isUnitInScope(sessionUser, label, currentTenantid))
+            .map(([key, label]) => {
             const filialAssets = nonDeleted.filter(a => normalizeKey(a.filial) === key);
             const checkedAssets = filialAssets.filter(a => a._conferido === 1);
             return {

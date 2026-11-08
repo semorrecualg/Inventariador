@@ -86,10 +86,10 @@ const auditorProfile = (units: string[] = ['FILIAL A']) => ({
   units,
 });
 
-const renderLogin = () => {
+const renderLogin = (localUsers: User[] = []) => {
   render(
     React.createElement(LoginComponent as React.ComponentType<LoginPropsShape>, {
-      users: [],
+      users: localUsers,
       databaseMode: DatabaseMode.SUPABASE,
       onLogin,
       onOpenPrivacyCenter: vi.fn(),
@@ -277,6 +277,37 @@ describe('Login — etapa 2/2 (seleção de filial) do fluxo unificado', () => {
     expect(loggedUser.filial).toBe('FILIAL A');
     expect(loggedUser.units).toEqual(['FILIAL A']);
     expect(downloadBaseToLocalMock).not.toHaveBeenCalled();
+  });
+
+  it('auditor com credencial local do app entra e marca a sessão como gerida pelo app', async () => {
+    // Reproduz o acesso criado em ACESSOS: perfil sem conta no Supabase Auth,
+    // autenticado pela credencial do próprio app (barreira local).
+    const localAuditor = {
+      username: 'auditorlocal',
+      name: 'Auditor Local',
+      email: 'auditor.local@cicopal.com',
+      password: 'teste123',
+      role: 'AUDITOR',
+      tenantid: 'CICOPAL',
+      filial: '010102 CICOPAL SP',
+      units: ['010102 CICOPAL SP'],
+    } as unknown as User;
+
+    renderLogin([localAuditor]);
+    await submitCredentials('auditor.local@cicopal.com', 'teste123');
+
+    expect(await screen.findByText('Etapa 2 de 2')).toBeTruthy();
+    // Caminho local: rótulo específico do botão (sem sincronismo de nuvem)
+    fireEvent.click(screen.getByText('Acessar com a filial selecionada'));
+
+    await waitFor(() => expect(onLogin).toHaveBeenCalledTimes(1));
+    const loggedUser = onLogin.mock.calls[0][0] as User;
+    expect(loggedUser.filial).toBe('010102 CICOPAL SP');
+    // Import dinâmico: authUtils é avaliado DEPOIS do stubEnv do topo do arquivo
+    // (import estático congelaria ADMIN_EMAIL vazio e quebraria os outros testes).
+    const { isAppManagedSession } = await import('../utils/authUtils');
+    // Marca que impede a checagem da nuvem de destruir esta sessão
+    expect(isAppManagedSession()).toBe(true);
   });
 
   it('paginação (lazy loading): rolar até o fim carrega a próxima página de filiais', async () => {

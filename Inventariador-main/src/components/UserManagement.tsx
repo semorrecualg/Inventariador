@@ -90,7 +90,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [knownContracts, setKnownContracts] = useState<ContractSummary[]>([]);
 
   useEffect(() => {
-    if (!isAddModalOpen) return;
+    if (!isAddModalOpen && !isEditModalOpen) return;
     let alive = true;
     listContracts()
       .then((list) => {
@@ -102,7 +102,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     return () => {
       alive = false;
     };
-  }, [isAddModalOpen]);
+  }, [isAddModalOpen, isEditModalOpen]);
   const [newUnits, setNewUnits] = useState<string[]>(
     (currentUser?._unitid || currentUser?.unitid) && (currentUser?._unitid || currentUser?.unitid)?.toUpperCase() !== 'DEFAULT' 
       ? [currentUser?._unitid || currentUser?.unitid || ''] 
@@ -115,6 +115,60 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   // Sub-usuário de "login rápido" (credencial local, encapsulado no tenant do MASTER)
   const [quickLoginMode, setQuickLoginMode] = useState(() => currentUser?.role === UserRole.MASTER);
   const isMasterCurrent = currentUser?.role === UserRole.MASTER;
+
+  // Base local (INTERNAL/INTERNAL_PLUS) não tem Supabase Auth: provisionar
+  // acesso na nuvem aqui só produzia erro de rede no meio do cadastro.
+  const isLocalMode =
+    databaseMode === DatabaseMode.INTERNAL || databaseMode === DatabaseMode.INTERNAL_PLUS;
+
+  /** Filiais da base (planilha) por contrato — independem do inventário em memória. */
+  const baseFiliaisByTenant = React.useMemo(() => {
+    const map = new Map<string, string[]>();
+    knownContracts.forEach(({ tenantid, filiais }) => {
+      map.set(tenantid.trim().toUpperCase(), filiais);
+    });
+    return map;
+  }, [knownContracts]);
+
+  /**
+   * Unidades oferecidas para um contrato: filiais da base local (fonte primária)
+   * + unidades já atribuídas a perfis do mesmo contrato. A base é lida direto do
+   * disco (não do inventário carregado em memória), então o cadastro funciona
+   * mesmo sem nenhuma unidade aberta no momento.
+   */
+  const unitsForTenant = (tenantidRaw: string): string[] => {
+    const key = String(tenantidRaw || '').trim().toUpperCase();
+    if (!key) return [];
+    const merged = new Map<string, string>();
+    const push = (unit: unknown) => {
+      const label = String(unit || '').trim();
+      if (!label || !label.toUpperCase().replace(/[^A-Z0-9]/g, '')) return;
+      const dedupe = label.toUpperCase();
+      if (dedupe === key) return;
+      if (!merged.has(dedupe)) merged.set(dedupe, label);
+    };
+    (baseFiliaisByTenant.get(key) || []).forEach(push);
+    Array.from(unitsByTenant.get(key) || new Set<string>()).forEach(push);
+    return Array.from(merged.values()).sort((a, b) => a.localeCompare(b));
+  };
+
+  /** Adiciona ao escopo uma filial digitada à mão (base ainda não carregada). */
+  const addUnitTo = (
+    current: string[],
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    draft: string,
+    clearDraft: () => void
+  ) => {
+    const label = draft.trim();
+    if (!label) return;
+    if (!current.some((u) => u.trim().toUpperCase() === label.toUpperCase())) {
+      setter([...current, label]);
+    }
+    clearDraft();
+  };
+
+  const [newUnitDraft, setNewUnitDraft] = useState('');
+  const [editUnitDraft, setEditUnitDraft] = useState('');
   const strongRequiredForNew = newRole === UserRole.MASTER || newRole === UserRole.ADMIN;
   const newPwCheck = newPassword
     ? (strongRequiredForNew ? validateStrongPassword(newPassword) : validateQuickLoginPassword(newPassword))
@@ -174,6 +228,18 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       return;
     }
 
+    // ESCOPO DO NOVO ACESSO: sem contrato o perfil não enxerga dado nenhum e,
+    // sem filial, um auditor não consegue abrir unidade alguma. O cadastro barra
+    // o beco sem saída em vez de criar um acesso inutilizável.
+    if (!newTenantid.trim()) {
+      showModal("Contrato Obrigatório", "Informe o contrato (tenantid) que este acesso vai inventariar.", "error");
+      return;
+    }
+    if ((newRole === UserRole.AUDITOR || newRole === UserRole.AUXILIARY_AUDITOR) && newUnits.length === 0) {
+      showModal("Filial Obrigatória", "Marque — ou digite — pelo menos uma unidade operacional (filial) para o auditor.", "error");
+      return;
+    }
+
     // POLÍTICA DE SENHA:
     //  - MASTER/ADMIN exigem senha FORTE (5 regras);
     //  - sub-usuário de "login rápido" exige senha LEVE (mín. 6 + letra + número).
@@ -193,7 +259,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     }
 
     // Sub-usuário de login rápido: credencial local, sem conta no Supabase Auth
-    const shouldProvision = provisionOnCreate && !quickLoginMode;
+    const shouldProvision = provisionOnCreate && !quickLoginMode && !isLocalMode;
 
     // Provisionamento no Supabase Auth se solicitado
     if (shouldProvision) {
@@ -238,8 +304,11 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     };
 
     const normTenantid = normalizeValue(newTenantid);
-    const normUnitId = normalizeValue(newUnits[0] || (currentUser?.unitid ? currentUser.unitid : ''));
-    const normUnits = normalizeArray(newUnits.length > 0 ? newUnits : (currentUser?.unitid ? [currentUser.unitid] : []));
+    // A filial é SÓ a que o administrador marcou/digitou. Antes, sem escolha, o
+    // cadastro herdava a unidade do criador — entregando ao auditor uma filial
+    // que ninguém atribuiu.
+    const normUnits = normalizeArray(newUnits);
+    const normUnitId = normalizeValue(normUnits[0] || '');
 
     const newUser: User = {
       username,
@@ -384,8 +453,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
     const is_admin = editRole === UserRole.ADMIN || editRole === UserRole.MASTER || isAdminEmail(email);
     const normTenantid = normalizeValue(editTenantid);
-    const normUnitId = normalizeValue(editUnits[0] || (selectedUser.unitid ? selectedUser.unitid : ''));
     const normUnits = normalizeArray(editUnits);
+    const normUnitId = normalizeValue(normUnits[0] || '');
 
     const updatedUser: User = { 
       ...selectedUser, 
@@ -397,6 +466,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       is_admin, 
       isAdmin: is_admin, 
       tenantid: normTenantid,
+      filial: normUnitId,
       unitid: normUnitId,
       units: normUnits
     };
@@ -608,7 +678,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
               <div className="space-y-2">
                 <label className="block text-[10px] font-bold text-ink-muted uppercase tracking-[0.2em] ml-2">Unidades Operacionais (Permissões)</label>
                 <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-48 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
-                  {Array.from(unitsByTenant.get(editTenantid.toUpperCase()) || new Set<string>())
+                  {unitsForTenant(editTenantid)
                     .map((unit: string) => {
                       const isSelected = editUnits.includes(unit);
                       return (
@@ -631,13 +701,56 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                       );
                     })
                   }
-                  {(!unitsByTenant.get(editTenantid.toUpperCase()) || unitsByTenant.get(editTenantid.toUpperCase())?.size === 0) && (
-                    <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Nenhuma unidade encontrada</p>
+                  {unitsForTenant(editTenantid).length === 0 && (
+                    <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">
+                      {editTenantid ? 'Nenhuma filial na base — digite abaixo' : 'Aguardando Grupo Empresarial...'}
+                    </p>
                   )}
                 </div>
+
+                <div className="flex gap-2 pt-1">
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={editUnitDraft}
+                    onChange={(e) => setEditUnitDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addUnitTo(editUnits, setEditUnits, editUnitDraft, () => setEditUnitDraft(''));
+                      }
+                    }}
+                    placeholder="Filial fora da lista (ex.: 010103 CICOPAL SP)"
+                    className="flex-1 px-4 py-3 bg-white rounded-2xl border border-border focus:border-accent outline-none font-bold text-[11px] transition-all shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addUnitTo(editUnits, setEditUnits, editUnitDraft, () => setEditUnitDraft(''))}
+                    className="px-4 py-3 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest text-[9px] active:scale-95 transition-all shadow-sm"
+                  >
+                    Adicionar
+                  </button>
+                </div>
+                {editUnits.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {editUnits.map((unit) => (
+                      <span key={unit} className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-accent/10 text-accent border border-accent/20 text-[8px] font-black uppercase tracking-widest">
+                        {unit}
+                        <button
+                          type="button"
+                          onClick={() => setEditUnits((prev) => prev.filter((u) => u !== unit))}
+                          className="text-accent/60 hover:text-accent"
+                          aria-label={`Remover ${unit}`}
+                        >
+                          <X size={10} strokeWidth={3} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {databaseMode !== DatabaseMode.INTERNAL && (
+              {!isLocalMode && (
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl mb-6">
                   <div className="flex items-start">
                     <AlertCircle className="text-amber-600 mr-3 shrink-0 mt-0.5" size={18} />
@@ -859,7 +972,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 <div className="bg-bg-main rounded-[2rem] border border-border p-2 max-h-48 overflow-y-auto space-y-1 no-scrollbar shadow-inner">
                   {newTenantid ? (
                     <>
-                      {Array.from(unitsByTenant.get(newTenantid.toUpperCase()) || new Set<string>())
+                      {unitsForTenant(newTenantid)
                         .map((unit: string) => {
                           const isSelected = newUnits.includes(unit);
                           return (
@@ -882,14 +995,60 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                           );
                         })
                       }
-                      {(!unitsByTenant.get(newTenantid.toUpperCase()) || unitsByTenant.get(newTenantid.toUpperCase())?.size === 0) && (
-                        <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Nenhuma unidade encontrada para {newTenantid}</p>
+                      {unitsForTenant(newTenantid).length === 0 && (
+                        <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">
+                          Nenhuma filial na base para {newTenantid} — digite abaixo
+                        </p>
                       )}
                     </>
                   ) : (
                     <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">Aguardando Grupo Empresarial...</p>
                   )}
                 </div>
+
+                <div className="flex gap-2 pt-1">
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={newUnitDraft}
+                    onChange={(e) => setNewUnitDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addUnitTo(newUnits, setNewUnits, newUnitDraft, () => setNewUnitDraft(''));
+                      }
+                    }}
+                    placeholder="Filial fora da lista (ex.: 010103 CICOPAL SP)"
+                    className="flex-1 px-4 py-3 bg-white rounded-2xl border border-border focus:border-accent outline-none font-bold text-[11px] transition-all shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addUnitTo(newUnits, setNewUnits, newUnitDraft, () => setNewUnitDraft(''))}
+                    className="px-4 py-3 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest text-[9px] active:scale-95 transition-all shadow-sm"
+                  >
+                    Adicionar
+                  </button>
+                </div>
+                {newUnits.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {newUnits.map((unit) => (
+                      <span key={unit} className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-accent/10 text-accent border border-accent/20 text-[8px] font-black uppercase tracking-widest">
+                        {unit}
+                        <button
+                          type="button"
+                          onClick={() => setNewUnits((prev) => prev.filter((u) => u !== unit))}
+                          className="text-accent/60 hover:text-accent"
+                          aria-label={`Remover ${unit}`}
+                        >
+                          <X size={10} strokeWidth={3} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest ml-2">
+                  O auditor só verá as filiais atribuídas acima.
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -1035,7 +1194,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   </div>
                 </div>
               ) : (
-                databaseMode !== DatabaseMode.INTERNAL && (
+                !isLocalMode && (
                   <div 
                     className="flex items-center space-x-3 p-3 bg-emerald-50/50 rounded-2xl border border-emerald-100/50 cursor-pointer hover:bg-emerald-50 transition-all" 
                     onClick={() => setProvisionOnCreate(!provisionOnCreate)}
