@@ -113,6 +113,7 @@ import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInve
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
+import { determineAssetTag } from './services/tagService';
 
 import { requestPersistentStorage, localDb } from './services/localDbService';
 import { demoService } from './services/demoService';
@@ -1998,7 +1999,13 @@ useEffect(() => {
         const results = allAssets.filter(item => {
           if (normalizeFlag(item._is_deleted)) return false;
           
-          if (inventory.currentCampaignId && item.currentCampaignId !== inventory.currentCampaignId) {
+          // Só isola campanhas quando o ativo TEM campanha gravada. Base recém-carregada
+          // (sem vínculo de campanha) continuaria vendo a tela vazia em todos os endereços.
+          if (
+            inventory.currentCampaignId &&
+            item.currentCampaignId &&
+            item.currentCampaignId !== inventory.currentCampaignId
+          ) {
             return false;
           }
           
@@ -3922,67 +3929,13 @@ useEffect(() => {
   }, [inventory.assets, selectedUnit, manualLocations]);
 
   // REATIVAÇÃO E REFINAMENTO DAS REGRAS DE OURO (FLAGS)
+  // Fonte única das regras: `determineAssetTag` (tagService) — a mesma usada pela
+  // lista, pela ficha e pela conferência individual. Aqui só mantemos o efeito
+  // colateral de marcar a divergência crítica no próprio registro.
   const determineTag = useCallback((asset: Asset, targetLocation: string): TagInventario => {
     const statusUpper = String(asset.status || '').toUpperCase();
-    const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;
-    const isConferido = normalizeFlag(asset._conferido) || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-    
-    // REGRA DE OURO: Item ATIVO mas com DATA DE BAIXA ou Status de Baixa
-    const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!asset.databaixa;
-    asset._is_divergent_baixa = isGoldenRuleDivergent;
-    
-    // 1. PRIORIDADE MÁXIMA: ETIQUETAGEM (REGRA DE OURO v24)
-    const originalEtq = normalizeKey(asset._plaquetaMaster || '');
-    const needsLabel = originalEtq === 'ETIQUETAR';
-    if (needsLabel) {
-      if (isConferido) return TagInventario.ETIQUETADO;
-      return TagInventario.FALTA_ETIQUETAR;
-    }
-
-    // 1.1 DIVERGÊNCIA CRÍTICA (REGRA DE OURO)
-    if (isGoldenRuleDivergent) return TagInventario.DIVERGENCIA;
-
-    // 2. BAIXADO (Se não conferido)
-    if (isBaixado && !isConferido) return TagInventario.BAIXADO;
-    
-    // 3. ADOTADO EXTERNO (Empresa diferente)
-    const assetCompKey = normalizeKey(asset.filial || asset._unitid || asset.tenantid || asset.GRUPO_EMPRESARIAL || '');
-    const currentCompKey = normalizeKey(selectedUnit || '');
-    if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-      return TagInventario.ADOTADO_EXTERNO;
-    }
-
-    // 4. NOVO ITEM
-    if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;
-
-    // 5. DIVERGÊNCIA: Etiqueta física difere do registro lógico
-    const currentEtq = normalizeKey(asset.etiqueta || "");
-    const masterEtq = normalizeKey(asset._plaquetaMaster || "");
-    if (masterEtq !== "" && masterEtq !== "ETIQUETAR" && currentEtq !== masterEtq) {
-      return TagInventario.DIVERGENCIA;
-    }
-
-    // REGRA DE OURO: Se não foi conferido, é PENDENTE
-    if (!isConferido) {
-      return TagInventario.PENDENTE;
-    }
-
-    const targetLocKey = normalizeKey(targetLocation);
-    const originalLocKey = normalizeKey(asset.endereco || ""); 
-    const currentAuditLocKey = asset._localMaster ? normalizeKey(asset._localMaster) : "";
-
-    // 1) CONFERIDO: Localizado exatamente no ENDERECO original
-    if (originalLocKey === targetLocKey) {
-      return TagInventario.CONFERIDO;
-    }
-
-    // 3) RE-ADOTADO: Já conferido anteriormente em um local e agora encontrado em outro local
-    if (isConferido && currentAuditLocKey !== "" && currentAuditLocKey !== targetLocKey) {
-      return TagInventario.RE_ADOTADO;
-    }
-
-    // 2) ADOTADO: Localizado em endereço diferente do original
-    return TagInventario.ADOTADO;
+    asset._is_divergent_baixa = !statusUpper.includes('BAIXA') && !!asset.databaixa;
+    return determineAssetTag(asset, targetLocation, selectedUnit);
   }, [selectedUnit]);
 
   useEffect(() => {
@@ -4255,6 +4208,9 @@ useEffect(() => {
   // pelo admin/master). Reavalia aqui porque o mapa de liberação pode ficar
   // completo só depois da carga da filial.
   const handleHubNavigate = useCallback((target: AppScreen, params?: NavigationParams) => {
+    // Atalho "Novo usuário" do PAINEL COMPLETO: abre o cadastro já no formulário.
+    // Qualquer outra entrada em Acessos chega com o formulário fechado.
+    if (target === AppScreen.USER_MANAGEMENT) setOpenAddUserOnEntry(!!params?.openAddUser);
     if (target === AppScreen.ADDRESS_SELECTION && selectedUnit && isAuditorUser(user) && !isAdminUser(user)) {
       const release = readUnitRelease(unitReleaseRef.current, user?.tenantid || '', selectedUnit);
       if (release && !release.released) {
@@ -7401,10 +7357,6 @@ useEffect(() => {
               unitRelease={unitReleaseMap}
               onSelect={handleWorkContextModuleSelect}
               onOpenAdmin={(target, params) => pushScreen(target, params)}
-              onOpenNewUser={() => {
-                setOpenAddUserOnEntry(true);
-                pushScreen(AppScreen.USER_MANAGEMENT);
-              }}
               onOpenDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
               onLogout={async () => {
                 if (supabase) {
@@ -7429,6 +7381,9 @@ useEffect(() => {
               selectedUnit={selectedUnit}
               onSelect={(addr) => {
                 setSelectedAddress(addr);
+                // O motor do inventário lê `selectedLocation` (prop) — sem isto a
+                // tela abria com o endereço anterior/nulo e a lista vinha vazia.
+                setInventoryLocation(addr);
                 pushScreen(AppScreen.INVENTORY);
               }}
               onBack={popScreen}
