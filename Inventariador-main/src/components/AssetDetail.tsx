@@ -28,8 +28,6 @@ import {
   QrCode,
   Loader2,
   Camera,
-  X,
-  ChevronRight,
   ArrowDown,
   Image as ImageIcon,
   Trash2,
@@ -40,10 +38,10 @@ import { deleteAssetPhoto } from '../services/supabaseService';
 import { compressImage } from '../utils/imageUtils';
 import { addToSyncQueue } from '../services/syncService';
 import { saveLocalPhoto, deleteLocalPhoto, getLocalPhoto } from '../services/photoService';
-import { createWorker } from 'tesseract.js';
 
 import { reverseGeocode } from '../services/geocodingService';
-import { determineAssetTag, getTagMetadata } from '../services/tagService';
+import { determineAssetTag, getTagMetadata, normalizeString } from '../services/tagService';
+import { resolveTenantId } from '../utils/tenantUtils';
 import { logger } from '../utils/logger';
 
 const formatReadingTime = (isoStr?: string) => {
@@ -127,11 +125,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const [isSyncingProtheus, setIsSyncingProtheus] = useState(false);
   const [protheusSyncResult, setProtheusSyncResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const [isOCRProcessing, setIsOCRProcessing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const [ocrResults, setOcrResults] = useState<string[]>([]);
-  const ocrInputRef = React.useRef<HTMLInputElement>(null);
-  const [ocrTargetField, setOcrTargetField] = useState<string | null>(null);
   const [isImpairmentModalOpen, setIsImpairmentModalOpen] = useState(false);
   const [isUnitizeModalOpen, setIsUnitizeModalOpen] = useState(false);
   const [unitizeCount, setUnitizeCount] = useState(2);
@@ -191,98 +185,6 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       }
     }
   }, [unitizeCount, unitizeMethod, unitizePercentages]);
-
-  const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !ocrTargetField) return;
-
-    setIsOCRProcessing(true);
-    setOcrResults([]);
-    try {
-      // Usar português e inglês com carregamento local referenciado no diretório de assets estático (/assets/ocr/) para suporte offline-first total
-      const worker = await createWorker('por+eng', 1, {
-        langPath: `${window.location.origin}/assets/ocr`,
-        workerPath: `${window.location.origin}/assets/ocr/tesseract-worker.min.js`,
-        corePath: `${window.location.origin}/assets/ocr/tesseract-core-wasm.js`
-      });
-      const { data: { text } } = await worker.recognize(file);
-      await worker.terminate();
-
-      // 1. Limpeza e Normalização
-      const cleanedText = text.replace(/[\n\r]/g, ' ').trim().toUpperCase();
-      
-      // 2. Extração Inteligente com Regex (Filtro de Ruído)
-      const patterns = {
-        plaqueta: /\b\d{6}\b/g, // Padrão GBR: 6 dígitos numéricos
-        serial: /\b[A-Z0-9-]{6,20}\b/g, // Alfanumérico longo para Seriais
-        geral: /\b[A-Z0-9]{4,}\b/g // Qualquer termo com 4+ caracteres (ignora ruídos pequenos)
-      };
-
-      const foundMatches: string[] = [];
-      
-      // Prioridade por contexto do campo alvo
-      if (ocrTargetField === 'ETIQUETA') {
-        const plaquetaMatches = cleanedText.match(patterns.plaqueta);
-        if (plaquetaMatches) foundMatches.push(...plaquetaMatches);
-      } else if (ocrTargetField === 'SERIAL') {
-        const serialMatches = cleanedText.match(patterns.serial);
-        if (serialMatches) foundMatches.push(...serialMatches);
-      }
-
-      // Adicionar matches genéricos se não houver específicos ou para dar opções
-      const genericMatches = cleanedText.match(patterns.geral);
-      if (genericMatches) {
-        // Filtrar matches genéricos que já estão na lista ou que parecem ruído excessivo
-        genericMatches.forEach(m => {
-          if (!foundMatches.includes(m) && m.length < 25) {
-            foundMatches.push(m);
-          }
-        });
-      }
-
-      const uniqueMatches = Array.from(new Set(foundMatches));
-
-      if (uniqueMatches.length === 1) {
-        // Único resultado: Aplicar direto (Preenchimento Automático)
-        const result = uniqueMatches[0];
-        const updates = { ...workingAsset };
-        updates[canonicalKey(ocrTargetField)] = result;
-        setWorkingAsset(updates);
-        if (editingField === ocrTargetField) setEditValue(result);
-        setOcrTargetField(null);
-      } else if (uniqueMatches.length > 1) {
-        // Múltiplos resultados: Abrir interface de escolha
-        setOcrResults(uniqueMatches);
-      } else {
-        // Nenhum padrão: Usar o texto bruto limpo
-        const updates = { ...workingAsset };
-        updates[canonicalKey(ocrTargetField)] = cleanedText.substring(0, 50);
-        setWorkingAsset(updates);
-        if (editingField === ocrTargetField) setEditValue(cleanedText.substring(0, 50));
-        setOcrTargetField(null);
-      }
-    } catch (err) {
-      logger.error('Erro no OCR:', err);
-    } finally {
-      setIsOCRProcessing(false);
-      if (ocrInputRef.current) ocrInputRef.current.value = '';
-    }
-  };
-
-  const selectOCRResult = (val: string) => {
-    if (!ocrTargetField) return;
-    const updates = { ...workingAsset };
-    updates[canonicalKey(ocrTargetField)] = val;
-    setWorkingAsset(updates);
-    if (editingField === ocrTargetField) setEditValue(val);
-    setOcrResults([]);
-    setOcrTargetField(null);
-  };
-
-  const triggerOCR = (field: string) => {
-    setOcrTargetField(field);
-    ocrInputRef.current?.click();
-  };
 
   const handleReverseGeocoding = async (field: string) => {
     if (!navigator.geolocation) {
@@ -468,7 +370,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     {
       title: 'LOCALIZAÇÃO E CUSTO',
       fields: [
-        { key: 'GRUPO_EMPRESARIAL', label: TYPE_LABELS.GROUP, icon: Building2 },
+        // O grupo empresarial do contrato é o `tenantid`; `GRUPO_EMPRESARIAL`
+        // é a grafia legada da planilha e fica só como fallback de leitura.
+        { key: 'tenantid', label: TYPE_LABELS.GROUP, icon: Building2 },
         { key: unitMapping || 'filial', label: TYPE_LABELS.UNIT, icon: Building2 },
         { key: 'ENDERECO', label: TYPE_LABELS.ADDRESS, icon: MapPin },
         { key: ccMapping || 'CENTRODECUSTO', label: TYPE_LABELS.COST_CENTER, icon: Briefcase }
@@ -682,6 +586,15 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     return statusUpper.includes('BAIXA') || !!workingAsset.databaixa;
   }, [workingAsset.status, workingAsset.databaixa]);
 
+  // PLAQUETA PATRIMONIAL: no fluxo de etiquetagem o número precisa ser digitado
+  // na ficha, mesmo que `ETIQUETA` não esteja na lista de campos editáveis do
+  // tenant. Continua liberado depois de gravado (DE: ETIQUETAR) para correção.
+  const isLabelingPlaque = useMemo(() => {
+    const current = normalizeString(String(workingAsset.etiqueta ?? ''));
+    const original = normalizeString(String(workingAsset._valoresOriginais?.etiqueta ?? ''));
+    return current === 'ETIQUETAR' || original === 'ETIQUETAR';
+  }, [workingAsset.etiqueta, workingAsset._valoresOriginais]);
+
   const isConferido = !!workingAsset._conferido || String(workingAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
 
@@ -763,7 +676,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       {/* KARDEX HEADER */}
       <div className={`px-5 pt-8 pb-6 ${headerBg} text-white relative shadow-md z-20`}>
         <div className="flex items-center justify-between mb-6">
-          <BackButton onClick={onBack} label="Voltar" subLabel="Detalhes do Ativo" />
+          <BackButton onClick={onBack} label="Voltar" subLabel="Ficha do Ativo" />
           <div className="flex items-center space-x-3">
             <button onClick={() => setIsQrModalOpen(true)} className="p-3.5 bg-white/10 border border-white/20 rounded-xl active:scale-90 transition-all backdrop-blur-md hover:bg-white/20">
               <QrCode size={22} />
@@ -964,54 +877,6 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             </div>
           )}
 
-          <input 
-            type="file" 
-            accept="image/*" 
-            capture="environment" 
-            className="hidden" 
-            ref={ocrInputRef} 
-            onChange={handleOCR} 
-          />
-          
-          {isOCRProcessing && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex flex-col items-center justify-center p-8 text-center">
-              <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl animate-pulse">
-                <Loader2 size={40} className="text-accent animate-spin" />
-              </div>
-              <h3 className="text-xl font-bold text-white uppercase tracking-tight mb-2">Processando OCR</h3>
-              <p className="text-sm text-white/70 max-w-xs uppercase font-bold tracking-widest">
-                Aguarde enquanto nossa IA extrai o texto da imagem...
-              </p>
-            </div>
-          )}
-
-          {ocrResults.length > 0 && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-              <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden animate-slideUp">
-                <div className="bg-bg-main p-4 border-b border-border flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-ink uppercase tracking-widest">Resultados Detectados</h3>
-                  <button onClick={() => setOcrResults([])} className="p-1 text-ink-muted"><X size={18} /></button>
-                </div>
-                <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto no-scrollbar">
-                  <p className="text-[10px] text-ink-muted uppercase font-bold mb-3 tracking-tight">Toque no valor correto para o campo {ocrTargetField === 'ETIQUETA' ? 'PLAQUETA' : 'SERIAL'}:</p>
-                  {ocrResults.map((res, i) => (
-                    <button 
-                      key={i}
-                      onClick={() => selectOCRResult(res)}
-                      className="w-full p-4 bg-bg-main border border-border rounded-xl text-left flex items-center justify-between active:scale-95 transition-all hover:border-accent group"
-                    >
-                      <span className="text-sm font-bold font-mono text-ink group-hover:text-accent">{res}</span>
-                      <ChevronRight size={16} className="text-ink-muted group-hover:text-accent" />
-                    </button>
-                  ))}
-                </div>
-                <div className="p-4 bg-bg-main border-t border-border">
-                  <button onClick={() => setOcrResults([])} className="w-full py-3 text-[10px] font-bold text-ink-muted uppercase tracking-widest">Cancelar</button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {isBatch && (
             <div className="bg-white border border-border rounded-xl p-4 shadow-sm modern-card">
               <div className="flex items-center justify-between mb-3">
@@ -1045,14 +910,16 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                   const isDateField = key === 'DATAAQUISIC' || key === 'DATABAIXA';
                   const isDateTime = key === '_dataLeitura';
                   const isCurrency = key === 'VLRAQUISIC' || key.startsWith('_valor') || key.includes('perda');
-                  const rawVal = workingAsset[canonicalKey(key)];
+                  const rawVal = key === 'tenantid'
+                    ? (resolveTenantId(workingAsset) || workingAsset.GRUPO_EMPRESARIAL || tenantid || '')
+                    : workingAsset[canonicalKey(key)];
                   const origVal = workingAsset._valoresOriginais?.[canonicalKey(key)] ?? workingAsset._valoresOriginais?.[key];
                   let displayVal = String(rawVal || '---');
                   if (isDateField) displayVal = formatDateBR(rawVal as string | number | undefined);
                   if (isDateTime) displayVal = formatReadingTime(rawVal as string);
                   if (isCurrency) displayVal = formatCurrency(rawVal as string | number | undefined);
 
-                  const canEdit = !readOnly && editableFields.includes(key);
+                  const canEdit = !readOnly && (editableFields.includes(key) || (key === 'ETIQUETA' && isLabelingPlaque));
                   if (!rawVal && (key === 'DATABAIXA' || key === '_dataLeitura' || key === '_auditor')) return null;
 
                   return (
@@ -1085,15 +952,6 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                               className="flex-1 bg-white px-3 py-2 border border-accent/30 rounded-lg text-xs font-bold uppercase text-ink outline-none shadow-sm focus:ring-2 focus:ring-accent/20" 
                               placeholder={`NOVO VALOR (PARA) ${label}`}
                             />
-                            {(key === 'SERIAL' || key === 'ETIQUETA') && (
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); triggerOCR(key); }}
-                                className="w-10 h-10 bg-bg-main border border-line text-ink-muted rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition-all hover:text-accent hover:border-accent/30"
-                                title="Ler texto da câmera (OCR)"
-                              >
-                                <Camera size={18} />
-                              </button>
-                            )}
                             {(key === 'ENDERECO' || key === '_localMaster') && (
                               <button 
                                 onClick={(e) => { e.stopPropagation(); handleReverseGeocoding(key); }}

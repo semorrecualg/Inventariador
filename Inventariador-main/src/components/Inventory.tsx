@@ -14,7 +14,7 @@ import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, TransactionOrigin, AppScreen } from '../types';
 import Scanner from './Scanner';
-import { extractEtiquetaFromQrData } from '../utils/qrUtils';
+import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
 import { generateUUID } from '../services/supabaseService';
 import { telemetryService, DeviceMetrics } from '../services/telemetryService';
 import { isAdminEmail } from '../utils/authUtils';
@@ -22,6 +22,9 @@ import { localDb } from '../services/localDbService';
 import { sqliteService } from '../services/sqliteService';
 import { MemoryGuardService } from '../services/MemoryGuardService';
 import { normalizeKey } from '../utils/schema';
+import { canonicalKey } from '../utils/normalize';
+import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
+import { findSerialDuplicates } from '../utils/assetDuplicates';
 import { AssetListItem } from './AssetListItem';
 import { resolvePersistedTag } from '../services/tagService';
 import { BufferIndicator } from './BufferIndicator';
@@ -155,6 +158,8 @@ interface InventoryProps {
   user: User | null;
   currentCampaignId?: string;
   unitConfig?: UnitConfig | null;
+  /** Campos escolhidos em PAINEL COMPLETO → Configurar QR Code. */
+  qrCodeFields?: string[];
 }
 
 const Inventory: React.FC<InventoryProps> = ({ 
@@ -186,7 +191,8 @@ const Inventory: React.FC<InventoryProps> = ({
   databaseMode,
   user,
   currentCampaignId,
-  unitConfig
+  unitConfig,
+  qrCodeFields = ['ETIQUETA']
 }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
@@ -327,6 +333,47 @@ const Inventory: React.FC<InventoryProps> = ({
   const [localPhotoIds, setLocalPhotoIds] = useState<Set<string>>(new Set());
   const [qrModalAsset, setQrModalAsset] = useState<Asset | null>(null);
 
+  // QR DO ATIVO = ETIQUETA + os campos definidos em "Configurar QR Code".
+  // A etiqueta vem SEMPRE primeiro (é o que o leitor usa para localizar o
+  // ativo); os demais seguem a ordem oficial de `QR_FIELD_ORDER`.
+  const qrFieldKeys = useMemo(() => {
+    const keys: string[] = ['ETIQUETA'];
+    for (const raw of qrCodeFields || []) {
+      const field = String(raw || '').trim();
+      if (!field) continue;
+      if (!keys.some(k => k.toUpperCase() === field.toUpperCase())) keys.push(field);
+    }
+    const rank = (field: string) => {
+      const index = QR_FIELD_ORDER.findIndex(o => o.toUpperCase() === field.toUpperCase());
+      return index === -1 ? QR_FIELD_ORDER.length : index;
+    };
+    return keys.sort((a, b) => rank(a) - rank(b));
+  }, [qrCodeFields]);
+
+  // Valores já formatados (data/moeda) na mesma ordem do QR — o modal mostra
+  // exatamente o que foi codificado, campo a campo.
+  const qrModalFieldValues = useMemo(() => {
+    if (!qrModalAsset) return [] as Array<{ field: string; value: string }>;
+    const record = qrModalAsset as unknown as Record<string, unknown>;
+    const out: Array<{ field: string; value: string }> = [];
+    for (const field of qrFieldKeys) {
+      const key = canonicalKey(field);
+      const raw = record[key] ?? record[field] ?? record[field.toUpperCase()];
+      let value = String(raw ?? '').trim();
+      if (!value) continue;
+      const upper = field.toUpperCase();
+      if (upper === 'DATAAQUISIC' || upper === 'DATABAIXA') value = formatDateBR(value);
+      if (upper === 'VLRAQUISIC') value = formatCurrency(value);
+      out.push({ field, value });
+    }
+    return out;
+  }, [qrModalAsset, qrFieldKeys]);
+
+  const qrModalData = useMemo(
+    () => qrModalFieldValues.map(item => item.value).join('\n'),
+    [qrModalFieldValues]
+  );
+
   // BARREIRA DE PROTEÇÃO CONTRA REFRESH (F5 SEGURO)
   // AUTO-REPARO SRE: além de observar o flag, tenta inicializar o motor Dexie
   // quando ele não estiver pronto (init() é idempotente e db.open() em banco já
@@ -441,6 +488,13 @@ const Inventory: React.FC<InventoryProps> = ({
   const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
   const [scannedResult, setScannedResult] = useState<string | null>(null);
   const [isOCRProcessing, setIsOCRProcessing] = useState(false);
+
+  // ALERTA DE DUPLICIDADE DE SERIAL: o cadastro manual de NOVO ITEM não pode
+  // criar um segundo registro com o mesmo número de série de outro ativo.
+  const manualSerialConflicts = useMemo(
+    () => (isManualEntryOpen ? findSerialDuplicates(manualAsset.serial, allAssets, manualAsset.id) : []),
+    [isManualEntryOpen, manualAsset.serial, manualAsset.id, allAssets]
+  );
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [showGlobalSearchResolution, setShowGlobalSearchResolution] = useState<string | null>(null);
   const [isHierarchyLoading, setIsHierarchyLoading] = useState(false);
@@ -539,6 +593,15 @@ const Inventory: React.FC<InventoryProps> = ({
   const handleScannerOpen = useCallback(() => {
     onUpdateSearchMode(InventorySearchMode.SCANNER);
     setIsScannerOpen(true);
+  }, [onUpdateSearchMode]);
+
+  // Saída da leitura para digitação: fecha a câmera e devolve o foco ao campo
+  // de busca. "Digitar Código Manualmente" NÃO cria ativo — quem cria é
+  // "Incluir novo registro" no estado vazio/resultado não localizado.
+  const closeScannerForTyping = useCallback(() => {
+    setIsScannerOpen(false);
+    onUpdateSearchMode(InventorySearchMode.MANUAL);
+    setTimeout(() => searchInputRef.current?.focus(), 100);
   }, [onUpdateSearchMode]);
 
   const handleScan = useCallback(async (result: string) => {
@@ -1274,6 +1337,7 @@ const Inventory: React.FC<InventoryProps> = ({
   };
 
   const saveManualEntry = () => {
+    if (manualSerialConflicts.length > 0) return;
     const rawAsset: Asset = {
         ...manualAsset,
         id: generateUUID(),
@@ -1296,22 +1360,12 @@ const Inventory: React.FC<InventoryProps> = ({
  
 
   useEffect(() => {
-    const checkCameraPermission = async () => {
-      if (isInventorying && searchMode === InventorySearchMode.SCANNER) {
-        try {
-          // Just-in-Time: Solicita permissão apenas no momento do uso
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          // Se chegou aqui, a permissão foi concedida. Paramos o stream imediatamente.
-          stream.getTracks().forEach(track => track.stop());
-          setIsScannerOpen(true);
-        } catch (err) {
-          logger.error('Erro ao acessar a câmera:', err);
-          // Opcional: Mostrar um alerta amigável se a permissão for negada
-        }
-      }
-    };
-
-    checkCameraPermission();
+    // Modo scanner persistido (reentrada no inventário): reabre a leitura.
+    // A permissão da câmera é pedida pelo próprio Scanner — a pré-checagem com
+    // getUserMedia abria um segundo stream e podia derrubar o start real.
+    if (isInventorying && searchMode === InventorySearchMode.SCANNER) {
+      setIsScannerOpen(true);
+    }
   }, [isInventorying, searchMode]); // Só dispara quando entra no inventário de um local ou muda para scanner
 
   useEffect(() => {
@@ -1846,57 +1900,109 @@ const Inventory: React.FC<InventoryProps> = ({
         <React.Fragment>
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
       {/* Header Fixo Blindado */}
-      <div className="bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between sticky top-0 z-50 shrink-0">
-        <div className="flex items-center space-x-4">
-          <button 
+      <div className="bg-white border-b border-slate-100 px-3 py-3 sticky top-0 z-50 shrink-0">
+        <div className="flex items-center gap-2">
+          <button
             onClick={onBack}
-            className="flex items-center space-x-3 group"
+            className="flex items-center shrink-0 group"
+            title="Voltar ao inventário"
           >
-            <div className="p-3 bg-slate-50 text-slate-800 rounded-2xl group-active:scale-90 transition-all border border-slate-100 shadow-sm">
-              <ArrowLeft size={20} strokeWidth={3} />
+            <div className="p-2.5 bg-slate-50 text-slate-800 rounded-xl group-active:scale-90 transition-all border border-slate-100 shadow-sm">
+              <ArrowLeft size={18} strokeWidth={3} />
             </div>
-            <div className="text-left">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Voltar</p>
+            {/* Texto só em telas largas: no telemóvel o espaço é da consulta. */}
+            <div className="hidden sm:block text-left ml-2">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Voltar</p>
               <p className="text-sm font-bold text-slate-900 uppercase tracking-tight leading-none">Inventário</p>
             </div>
           </button>
-        </div>
 
-        <div className="flex items-center space-x-2">
-          {isBatchMode && (
-            <button 
-              onClick={toggleSelectAll} 
-              className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-accent text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}
+          {/* CONSULTA POR ETIQUETA — na mesma linha dos ícones */}
+          <div className="relative flex-1 min-w-0">
+            <div className="absolute inset-y-0 left-2.5 flex items-center pointer-events-none">
+              <Search size={14} className="text-[#94A3B8]" />
+            </div>
+            <input
+              ref={searchInputRef}
+              type="text"
+              autoComplete="off"
+              autoCapitalize="characters"
+              disabled={isPersistingScan}
+              onChange={(e) => setDisplayValue(e.target.value.toUpperCase())}
+              value={displayValue}
+              className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-8 pr-16 py-2.5 font-mono text-[13px] font-bold rounded-xl text-[#1E293B] outline-none focus:border-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              placeholder={isPersistingScan ? "GRAVANDO..." : "ETIQUETA"}
+              aria-label="Consultar por etiqueta"
+            />
+            <div className="absolute inset-y-0 right-1 flex items-center">
+              <button
+                disabled={isPersistingScan}
+                onClick={triggerSmartOCR}
+                className="p-1.5 text-[#64748B] hover:bg-white rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Busca por Foto (OCR)"
+              >
+                <Camera size={16} />
+              </button>
+              {displayValue && (
+                <button
+                  onClick={() => { setDisplayValue(''); setCommittedSearch(''); }}
+                  className="p-1.5 text-[#64748B] hover:bg-white rounded-lg transition-all"
+                  title="Limpar consulta"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            {/* Input oculto que alimenta a Busca por Foto (OCR) */}
+            <input
+              ref={ocrInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleSmartOCR}
+            />
+          </div>
+
+          <div className="flex items-center gap-0.5 shrink-0">
+            {isBatchMode && (
+              <button
+                onClick={toggleSelectAll}
+                className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? 'bg-accent text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}
+                title="Selecionar todos"
+              >
+                {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                const next = !isBatchMode;
+                setIsBatchMode(next);
+                if (!next) setSelectedIds(new Set());
+              }}
+              className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${isBatchMode ? 'bg-accent text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}
+              title={isBatchMode ? 'Sair do modo lote' : 'Modo lote'}
             >
-              {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
+              <CheckSquare size={18} />
             </button>
-          )}
 
-          <button 
-            onClick={() => {
-              const next = !isBatchMode;
-              setIsBatchMode(next);
-              if (!next) setSelectedIds(new Set());
-            }}
-            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${isBatchMode ? 'bg-accent text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}
-            title={isBatchMode ? 'Sair do modo lote' : 'Modo lote'}
-          >
-            <CheckSquare size={20} />
-          </button>
+            <button
+              onClick={onOpenConsultation}
+              className="w-9 h-9 flex items-center justify-center text-slate-400 hover:bg-slate-50 rounded-xl transition-colors"
+              title="Consulta de ativos"
+            >
+              <Database size={18} />
+            </button>
 
-          <button 
-            onClick={onOpenConsultation}
-            className="w-10 h-10 flex items-center justify-center text-slate-400 hover:bg-slate-50 rounded-xl transition-colors"
-          >
-            <Database size={20} />
-          </button>
-
-          <button 
-            onClick={handleScannerOpen} 
-            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-accent text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}
-          >
-            <Camera size={20} />
-          </button>
+            <button
+              onClick={handleScannerOpen}
+              className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${searchMode === InventorySearchMode.SCANNER ? 'bg-accent text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}
+              title="Leitor de código de barras / QR"
+            >
+              <Camera size={18} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1962,51 +2068,6 @@ const Inventory: React.FC<InventoryProps> = ({
               >
                 Conferidos
               </button>
-            </div>
-
-            {/* Search Bar */}
-            <div className="relative">
-              <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                <Search size={16} className="text-[#94A3B8]" />
-              </div>
-              <input 
-                ref={searchInputRef} 
-                type="text" 
-                autoComplete="off"
-                autoCapitalize="characters"
-                disabled={isPersistingScan}
-                onChange={(e) => setDisplayValue(e.target.value.toUpperCase())}
-                value={displayValue} 
-                className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-11 pr-24 py-3.5 font-mono text-lg font-bold rounded-2xl text-[#1E293B] outline-none focus:border-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed" 
-                placeholder={isPersistingScan ? "GRAVANDO LEITURA..." : "ESCANEIE OU DIGITE..."} 
-              />
-              <div className="absolute inset-y-0 right-2 flex items-center space-x-1">
-                <button 
-                  disabled={isPersistingScan}
-                  onClick={triggerSmartOCR}
-                  className="p-2 text-[#64748B] hover:bg-white rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Busca por Foto (OCR)"
-                >
-                  <Camera size={20} />
-                </button>
-                {displayValue && (
-                  <button 
-                    onClick={() => { setDisplayValue(''); setCommittedSearch(''); }} 
-                    className="p-2 text-[#64748B] hover:bg-white rounded-xl transition-all"
-                  >
-                    <X size={20} />
-                  </button>
-                )}
-              </div>
-              {/* Input oculto que alimenta a Busca por Foto (OCR) */}
-              <input
-                ref={ocrInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={handleSmartOCR}
-              />
             </div>
 
             {isSearchResultBatch && (
@@ -2152,37 +2213,18 @@ const Inventory: React.FC<InventoryProps> = ({
       {/* Modal de Inclusão Manual removido daqui pois estava duplicado */}
 
       {/* Scanner Full-Screen */}
-      {isScannerOpen && searchMode !== 'SCANNER' && (
+      {isScannerOpen && (
         <Scanner 
           mode={scannerMode}
           onModeChange={onUpdateScannerMode}
           onScan={handleScan}
-          onClose={() => {
-            setIsScannerOpen(false);
-            onUpdateSearchMode(InventorySearchMode.MANUAL);
-            setTimeout(() => searchInputRef.current?.focus(), 100);
-          }}
+          onClose={closeScannerForTyping}
           isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset || showGlobalSearchResolution)}
           scanFeedbackMode={scanFeedbackMode}
           batterySaver={batterySaver}
           torch={torch}
           onTorchToggle={() => setTorch(torch === 'on' ? 'off' : 'on')}
-          onManualInput={() => {
-            setIsScannerOpen(false);
-            setManualAsset({
-              etiqueta: "",
-              filial: selectedUnit || "",
-              status: "ATIVO",
-              dataaqusic: new Date().toLocaleDateString('pt-BR'),
-              AUDITOR_LOCAL_AUDITADO: selectedLocation || "",
-              TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-              qt: 1,
-              descricaodoativo: '',
-              serial: '',
-              endereco: selectedLocation || ""
-            });
-            setIsManualEntryOpen(true);
-          }}
+          onManualInput={closeScannerForTyping}
         >
           {isThermalBlocked && (
             <div className="bg-red-600 p-6 rounded-[2rem] text-white text-center animate-pulse border-4 border-white/20 shadow-2xl">
@@ -2195,7 +2237,14 @@ const Inventory: React.FC<InventoryProps> = ({
             </div>
           )}
           {isScannerPaused && !isThermalBlocked && (
-            <div className="bg-slate-900/90 backdrop-blur-xl p-8 rounded-[2.5rem] text-white text-center border border-white/10 shadow-2xl">
+            // O contêiner de children do Scanner é pointer-events-none para não
+            // bloquear os controles da câmera; sem pointer-events-auto aqui o
+            // botão RETOMAR não recebia o clique e a tela ficava travada em
+            // standby (o scanner pausado nunca reseta sozinho).
+            <div
+              onClick={resetActivity}
+              className="pointer-events-auto bg-slate-900/90 backdrop-blur-xl p-8 rounded-[2.5rem] text-white text-center border border-white/10 shadow-2xl"
+            >
               <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
                 <Zap size={32} className="text-amber-500" />
               </div>
@@ -2212,11 +2261,12 @@ const Inventory: React.FC<InventoryProps> = ({
               </button>
             </div>
           )}
-          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center space-x-2 z-50">
-            <div className="px-4 py-2 bg-success/80 backdrop-blur-md rounded-full flex items-center space-x-3 shadow-2xl border border-white/20">
-              <div className="w-2.5 h-2.5 bg-white rounded-full animate-pulse"></div>
-              <span className="text-xs font-black text-white uppercase tracking-[0.2em]">Scanner Ativo</span>
-            </div>
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center space-x-2 z-50">              <div className={`px-4 py-2 backdrop-blur-md rounded-full flex items-center space-x-3 shadow-2xl border border-white/20 ${isScannerPaused ? 'bg-amber-500/80' : 'bg-success/80'}`}>
+                <div className="w-2.5 h-2.5 bg-white rounded-full animate-pulse"></div>
+                <span className="text-xs font-black text-white uppercase tracking-[0.2em]">
+                  {isScannerPaused ? 'Scanner Pausado' : 'Scanner Ativo'}
+                </span>
+              </div>
           </div>
         </Scanner>
       )}
@@ -2257,10 +2307,23 @@ const Inventory: React.FC<InventoryProps> = ({
                   type="text" 
                   value={newLocationName} 
                   onChange={(e) => setNewLocationName(e.target.value.toUpperCase())}
+                  list="locais-cadastrados"
                   className="w-full bg-bg-main border border-border p-4 rounded-2xl text-sm font-bold text-ink outline-none focus:border-accent transition-all"
                   placeholder="EX: SALA 101, ALMOXARIFADO..."
                   autoFocus
                 />
+                {/* Inteligência de sugestão: reaproveitar endereços já existentes
+                    evita variações de escrita ("ADM" × "ADMINISTRACAO"). */}
+                <datalist id="locais-cadastrados">
+                  {dbLocations.map(loc => (
+                    <option key={loc.locKey} value={loc.displayName} />
+                  ))}
+                </datalist>
+                {dbLocations.length > 0 && (
+                  <p className="text-[9px] font-bold text-ink-muted uppercase tracking-wide ml-1">
+                    {dbLocations.length} endereço(s) já cadastrado(s) — toque para reaproveitar.
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-col space-y-3">
@@ -2298,10 +2361,23 @@ const Inventory: React.FC<InventoryProps> = ({
             </button>
             <div className="bg-slate-100 p-8 text-center border-b border-slate-200">
                <div className="bg-white p-6 rounded-3xl shadow-xl inline-block mb-4 border border-slate-200">
-                 <QRCodeSVG value={String(qrModalAsset.etiqueta || qrModalAsset.id || '')} size={180} />
+                 <QRCodeSVG value={qrModalData || String(qrModalAsset.etiqueta || qrModalAsset.id || '')} size={180} />
                </div>
                <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter leading-none mb-1">{qrModalAsset.etiqueta}</h3>
                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{qrModalAsset.descricaodoativo}</p>
+               {/* Campos definidos em "Configurar QR Code" — o que está no QR. */}
+               {qrModalFieldValues.some(item => item.field.toUpperCase() !== 'ETIQUETA') && (
+                 <div className="mt-4 w-full space-y-1.5 text-left">
+                   {qrModalFieldValues
+                     .filter(item => item.field.toUpperCase() !== 'ETIQUETA')
+                     .map(item => (
+                       <div key={item.field} className="flex items-start justify-between gap-3 border-b border-slate-200/70 pb-1">
+                         <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 shrink-0">{item.field}</span>
+                         <span className="text-[10px] font-bold text-slate-700 text-right break-words min-w-0">{item.value}</span>
+                       </div>
+                     ))}
+                 </div>
+               )}
             </div>
             <div className="p-6 bg-white">
                <button 
@@ -2553,6 +2629,23 @@ const Inventory: React.FC<InventoryProps> = ({
                       />
                     </div>
                   </div>
+                  {manualSerialConflicts.length > 0 && (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-2xl animate-fadeIn">
+                      <div className="flex items-center gap-2 mb-1">
+                        <AlertTriangle size={12} className="text-red-600 shrink-0" />
+                        <span className="text-[9px] font-black text-red-700 uppercase tracking-widest">Serial duplicado na base</span>
+                      </div>
+                      <p className="text-[10px] font-bold text-red-600 leading-snug break-words">
+                        {manualSerialConflicts.slice(0, 3).map(a =>
+                          `${formatEtiqueta(a.etiqueta)}${a.filial ? ` · ${a.filial}` : ''}`
+                        ).join(' | ')}
+                        {manualSerialConflicts.length > 3 && ` +${manualSerialConflicts.length - 3}`}
+                      </p>
+                      <p className="text-[9px] text-red-500 font-bold uppercase mt-1">
+                        Corrija o serial ou confira o registro existente antes de salvar.
+                      </p>
+                    </div>
+                  )}
                   <div className="p-4 bg-accent-soft border border-accent/10 rounded-2xl space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[8px] font-black text-ink-muted uppercase tracking-widest">Unidade Operacional:</span>
@@ -2583,9 +2676,10 @@ const Inventory: React.FC<InventoryProps> = ({
             <div className="p-8 bg-white border-t border-accent/10 shrink-0 sticky bottom-0">
                <button 
                  onClick={saveManualEntry}
-                 className="w-full bg-accent text-white py-5 rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all shadow-accent/20"
+                 disabled={manualSerialConflicts.length > 0}
+                 className="w-full bg-accent text-white py-5 rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all shadow-accent/20 disabled:opacity-40 disabled:cursor-not-allowed"
                >
-                 Salvar e Conferir
+                 {manualSerialConflicts.length > 0 ? 'Serial duplicado — corrija para salvar' : 'Salvar e Conferir'}
                </button>
             </div>
           </div>

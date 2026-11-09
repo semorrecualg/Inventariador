@@ -54,6 +54,7 @@ tela ficava vazia em todos os endereços).
 | Bateria (%) | idem | OK |
 | Conferidos / total da localidade | derivado de `assets` (regra do hub) | **Restaurado** |
 | Barra e percentual de progresso | derivado | **Restaurado** |
+| Consulta manual por ETIQUETA | campo fixo no cabeçalho (mesma busca por etiqueta/descrição) | **Movido para o topo** |
 
 ### 2.2 Linha do ativo (`AssetListItem`)
 
@@ -96,18 +97,22 @@ tela ficava vazia em todos os endereços).
 | **PENDENTE** | `STATUS = ATIVO` no `endereco` original, ainda não conferido | **Cinza aço** (`slate-600`) |
 | **BAIXADO** | `STATUS` contém BAIXA **ou** `databaixa` preenchido — **permanente e imutável**: continua BAIXADO mesmo localizado fisicamente | **Vermelho crítico** (`red-600`) |
 | **CONFERIDO** | localizado exatamente no `endereco` original da base mestre | **Verde esmeralda** (`emerald-600`) |
-| **ADOTADO** | localizado em endereço diferente do original, mas da mesma empresa | **Azul royal** (`blue-600`) |
+| **ADOTADO** | localizado em endereço diferente do original, mas da mesma empresa | **Indigo/azul** (`indigo-600`) |
 | **RE-ADOTADO** | já conferido em um endereço e reencontrado em outro durante o inventário | **Violeta/fúcsia** (`fuchsia-600`) |
-| **NOVO ITEM** | inclusão manual, fora da malha original | **Âmbar** (`amber-500`) |
+| **NOVO ITEM** | inclusão manual, fora da malha original | **Laranja** (`orange-600`) |
 | **ADOTADO EXTERNO** | etiqueta de outra empresa, trazida pela busca global | **Preto + âmbar** (`slate-950` / `amber-300`, com anel) |
-| **DIVERGÊNCIA** | etiqueta física ≠ `_plaquetaMaster`, ou `STATUS` ATIVO com `databaixa` (regra de ouro) | **Laranja** (`orange-600`) |
-| FALTA ETIQUETAR / ETIQUETADO | workflow de plaquetas (`EMPLAQUETAR`) | `rose-600` / `cyan-600` |
+| **DIVERGÊNCIA** | etiqueta física ≠ `_plaquetaMaster`, ou `STATUS` ATIVO com `databaixa` (regra de ouro) | **Rose/vermelho** (`rose-600`) |
+| **FALTA ETIQUETAR** | plaqueta mestre (ou etiqueta física) com a instrução `ETIQUETAR` e emplaquetamento **não confirmado** | **Âmbar/amarelo** (`amber-400`) |
+| **ETIQUETADO** | era FALTA ETIQUETAR e o auditor confirmou a etiquetagem (`_plaquetado` / `TAG_INVENTARIO = ETIQUETADO`) | **Violeta** (`violet-600`) |
 
 Regras de cálculo (`determineAssetTag`, na ordem):
 
 1. `STATUS` ATIVO + `databaixa` → **DIVERGÊNCIA** (regra de ouro) antes de tudo.
 2. Baixado (BAIXA ou `databaixa`) → **BAIXADO**, sempre — inclusive conferido.
-3. `_plaquetaMaster = ETIQUETAR` → FALTA ETIQUETAR / ETIQUETADO.
+3. `_plaquetaMaster = ETIQUETAR` (ou etiqueta física `ETIQUETAR`) → **FALTA
+   ETIQUETAR**; só vira **ETIQUETADO** com confirmação explícita do
+   emplaquetamento (`_plaquetado`). Conferir a presença do bem **não** conclui
+   a etiquetagem.
 4. `filial` diferente da unidade em auditoria → **ADOTADO EXTERNO**.
 5. `_isNew` / `TAG_INVENTARIO = NOVO ITEM` → **NOVO ITEM**.
 6. Etiqueta atual ≠ plaqueta mestre → **DIVERGÊNCIA**.
@@ -214,7 +219,7 @@ apenas para calar o ESLint:
 
 | Item | Antes | Depois |
 |---|---|---|
-| Campo de busca | `readOnly` e o teclado numérico nunca era renderizado → **impossível digitar** | input editável (etiqueta e descrição) |
+| Campo de busca | `readOnly` e o teclado numérico nunca era renderizado → **impossível digitar** | input editável no **cabeçalho** (etiqueta e descrição), no lugar da barra grande acima da lista |
 | Teclado numérico | componente morto | removido (não servia para busca por descrição) |
 | Busca por foto (OCR) | botão chamava `ocrInputRef.click()` sem `<input type="file">` na árvore → inerte | input oculto renderizado (`capture="environment"`) |
 | Progresso da localidade | só na fase A | barra + `conferidos/total/%` no cabeçalho e na barra de ação |
@@ -222,6 +227,7 @@ apenas para calar o ESLint:
 | Finalizar lote | `onOpenSignature` sem botão | "Finalizar lote" na barra de ação |
 | Conferir resultado da busca | `handleConfirmSearchBatch` sem botão | botão quando há vários registros da mesma etiqueta |
 | Incluir novo registro | `handleCreateNew` sem botão | botão no estado vazio com termo buscado |
+| Digitar código manualmente (leitor) | abria direto o formulário **NOVO REGISTRO** | fecha a câmera e devolve o foco à busca para digitar o código; a criação continua em "Incluir novo registro" |
 | Formulário de novo registro | `onChange` gravava `ETIQUETA`/`DESCRICAODOATIVO`/`SERIAL`/`QT` (maiúsculas) enquanto os `value` liam minúsculas → **campos não aceitavam texto** | bindings corrigidos (`etiqueta`, `descricaodoativo`, `serial`, `qt`) + `endereco` do local atual |
 | Restauração de scroll | `handleRangeChanged` nunca ligado ao Virtuoso | `rangeChanged` conectado |
 | `isSearchVisible` / `showScrollTop` | estado morto | removido |

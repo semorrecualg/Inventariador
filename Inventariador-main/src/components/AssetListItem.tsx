@@ -215,34 +215,55 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
           </div>
         </div>
 
-        {/* Ação Integrada */}
-        <div className="shrink-0 ml-2 flex items-center space-x-2">
+        {/* Ações do ativo — QR no topo e CONFIRMAÇÃO em destaque à direita */}
+        <div className="shrink-0 ml-3 flex flex-col items-center justify-between gap-2 self-stretch py-0.5">
           {onShowQr && (
-            <button 
-              onClick={(e) => { e.stopPropagation(); onShowQr(asset); }} 
-              className="p-3 bg-slate-50 border border-slate-200 text-slate-400 rounded-xl active:scale-90 shadow-sm hover:text-blue-600 transition-colors mr-1"
+            <button
+              onClick={(e) => { e.stopPropagation(); onShowQr(asset); }}
+              aria-label={`Ver QR Code do ativo ${formatEtiqueta(asset.etiqueta)}`}
+              className="w-9 h-9 flex items-center justify-center bg-slate-50 border border-slate-200 text-slate-400 rounded-xl shadow-sm active:scale-90 hover:text-blue-600 hover:border-blue-200 transition-colors"
               id={`qr-btn-${asset.id}`}
             >
-              <QrCode size={16} />
+              <QrCode size={15} />
             </button>
           )}
           {extraAction}
           {isBatchMode ? (
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all shadow-sm ${isSelected ? 'bg-accent text-white ring-4 ring-accent/20' : 'border-2 border-[#CBD5E1] bg-white'}`}>
-              {isSelected && <Check size={22} strokeWidth={4} />}
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-sm ${isSelected ? 'bg-accent text-white ring-4 ring-accent/20' : 'border-2 border-[#CBD5E1] bg-white'}`}>
+              {isSelected && <Check size={24} strokeWidth={4} />}
             </div>
-          ) : (
-            <button 
-              onClick={!isConferido ? handleConfirm : undefined}
-              className={`w-11 h-11 rounded-full flex items-center justify-center transition-all shadow-md ${isConferido ? meta.color.bg.replace('/30', '') : 'border-2 border-[#CBD5E1] bg-white active:scale-95'} ${isConferido ? 'text-white' : ''}`}
-            >
-              {isConferido ? (
+          ) : onMakeDecision ? (
+            isConferido ? (
+              <div
+                aria-label={`${meta.label} — ativo já processado`}
+                title={meta.label}
+                className={`w-12 h-12 rounded-full flex items-center justify-center shadow-sm ring-1 ring-inset ring-slate-900/5 ${meta.color.softBg} ${meta.color.icon}`}
+              >
                 <Check size={26} strokeWidth={4} />
-              ) : (
-                <div className="w-6 h-6 rounded-full border-2 border-[#CBD5E1]/50" />
-              )}
-            </button>
-          )}
+              </div>
+            ) : (
+              <button
+                onClick={handleConfirm}
+                aria-label={`Confirmar ativo ${formatEtiqueta(asset.etiqueta)} no inventário`}
+                title="Confirmar este ativo no inventário"
+                className="group flex flex-col items-center gap-1 active:scale-95 transition-transform"
+              >
+                <span className="w-14 h-14 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shadow-md shadow-blue-200/60 ring-4 ring-blue-100/70 group-hover:bg-blue-200/80 group-hover:ring-blue-200/70 transition-all">
+                  <Check size={30} strokeWidth={3.5} />
+                </span>
+                <span className="text-[8px] font-black uppercase tracking-widest text-blue-500 leading-none">
+                  Confirmar
+                </span>
+              </button>
+            )
+          ) : isConferido ? (
+            <div
+              aria-label={`${meta.label} — ativo já processado`}
+              className={`w-10 h-10 rounded-full flex items-center justify-center shadow-sm ring-1 ring-inset ring-slate-900/5 ${meta.color.softBg} ${meta.color.icon}`}
+            >
+              <Check size={20} strokeWidth={4} />
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

@@ -346,7 +346,7 @@ const Consultation: React.FC<ConsultationProps> = ({
             </div>
             <div className="text-left">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Voltar</p>
-              <p className="text-sm font-bold text-slate-900 uppercase tracking-tight leading-none">Consulta</p>
+              <p className="text-sm font-bold text-slate-900 uppercase tracking-tight leading-none">Ficha do Ativo</p>
             </div>
           </button>
 

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Asset, TagInventario } from '../types';
 import { logger } from '../utils/logger';
+import { normalizeFlag } from '../utils/normalize';
 import { 
   Search, 
   Filter, 
@@ -94,14 +95,22 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
     if (isBaixado && !asset._conferido) return TagInventario.BAIXADO;
 
     if (!asset._conferido) {
-      const needsLabel = normalize(asset.etiqueta || '') === 'ETIQUETAR';
+      const needsLabel =
+        normalize(asset.etiqueta || '') === 'ETIQUETAR' ||
+        normalize(asset._plaquetaMaster || '') === 'ETIQUETAR';
       if (needsLabel) return TagInventario.FALTA_ETIQUETAR;
       return TagInventario.PENDENTE;
     }
 
-    const wasFaltaEtiquetar = normalize(asset._plaquetaMaster || '') === 'ETIQUETAR';
-    if (wasFaltaEtiquetar && normalize(asset.etiqueta || '') !== 'ETIQUETAR') {
-      return TagInventario.ETIQUETADO;
+    // Emplaquetamento só conclui com confirmação explícita — conferir o bem
+    // sem colar a plaqueta mantém FALTA ETIQUETAR (mesma regra do tagService).
+    const wasFaltaEtiquetar =
+      normalize(asset._plaquetaMaster || '') === 'ETIQUETAR' ||
+      normalize(asset.etiqueta || '') === 'ETIQUETAR';
+    if (wasFaltaEtiquetar) {
+      return normalizeFlag(asset._plaquetado) || asset.TAG_INVENTARIO === TagInventario.ETIQUETADO
+        ? TagInventario.ETIQUETADO
+        : TagInventario.FALTA_ETIQUETAR;
     }
 
     if (asset._isNew || asset.TAG_INVENTARIO === TagInventario.NOVO_ITEM) return TagInventario.NOVO_ITEM;

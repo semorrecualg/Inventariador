@@ -30,6 +30,16 @@ interface LabelingProps {
   scanFeedbackMode: ScanFeedbackMode;
 }
 
+const normalizeText = (value: unknown): string =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+/** Item sem plaqueta: `etiqueta` = "ETIQUETAR" em qualquer caixa/espaço. */
+const needsLabel = (asset: Asset): boolean => normalizeText(asset.etiqueta) === 'ETIQUETAR';
+
 const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit, onBack, onUpdateAsset, onSelectAsset, scannerMode, onUpdateScannerMode, scanFeedbackMode }) => {
   const [dbAssets, setDbAssets] = useState<Asset[]>([]);
   const [activeTab, setActiveTab] = useState<'pending' | 'checked'>('pending');
@@ -66,15 +76,22 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
     };
   }, [selectedUnit, initialAssets]); // Recarregar se a base master mudar ou unidade mudar
 
-  const normalize = (s: string) => s?.toString().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, '').trim() || '';
-
   const assetsToLabel = useMemo(() => {
-    // Se temos dbAssets (carregados via query), usamos eles. Caso contrário fallback no props.
-    const source = dbAssets.length > 0 ? dbAssets : initialAssets;
-    
-    return source.filter(a => 
-      String(a.etiqueta || '').toUpperCase() === 'ETIQUETAR'
-    );
+    // A query lê o banco; o estado vivo da aplicação tem prioridade por id para
+    // que uma plaqueta recém-gravada (ex.: "009120") não continue aparecendo
+    // como "ETIQUETAR" caso a leitura do banco aconteça antes do flush.
+    const liveById = new Map(initialAssets.map(a => [String(a.id), a]));
+    const source = dbAssets.length > 0
+      ? dbAssets.map(a => liveById.get(String(a.id)) ?? a)
+      : initialAssets;
+    const seen = new Set<string>();
+    return source.filter(a => {
+      if (!needsLabel(a)) return false;
+      const key = String(a.id ?? a.etiqueta);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [dbAssets, initialAssets]);
 
   const filteredAssets = useMemo(() => {
@@ -83,13 +100,13 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
     else base = base.filter(a => !a._conferido);
 
     if (advDesc) {
-       const term = normalize(advDesc);
+       const term = normalizeText(advDesc);
        base = base.filter(a => 
-         normalize(a.descricaodoativo || '').includes(term) || 
-         normalize(a.serial || '').includes(term) ||
-         normalize(a.etiqueta || '').includes(term) ||
-         normalize(a.notafiscal || '').includes(term) ||
-         normalize(a.registro || '').includes(term)
+         normalizeText(a.descricaodoativo).includes(term) || 
+         normalizeText(a.serial).includes(term) ||
+         normalizeText(a.etiqueta).includes(term) ||
+         normalizeText(a.notafiscal).includes(term) ||
+         normalizeText(a.registro).includes(term)
        );
     }
 
@@ -137,7 +154,10 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
             </div>
           </button>
 
-          <div className="flex space-x-2">
+          <div className="flex items-center space-x-2">
+            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-full">
+              {assetsToLabel.length} itens
+            </span>
             <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`p-3 rounded-xl border transition-all shadow-sm active:scale-95 ${isFilterOpen ? 'bg-accent text-white' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
               <Filter size={20} />
             </button>
@@ -191,7 +211,9 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
               const fullDescription = [asset.qt || '1', asset.descricaodoativo || 'SEM DESCRIÇÃO', asset.serial || 'S/N', formatMonthYearBR(asset.dataaqusic), asset.nomefornecedor || 'FORNECEDOR N/I'].join('; ');
 
               const isConferido = !!asset._conferido;
-              const tagDisplay = asset.TAG_INVENTARIO || (isConferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR);
+              // Esta lista é, por definição, de itens sem plaqueta: a tag exibida
+              // reflete o estado real do emplaquetamento, não o valor persistido.
+              const tagDisplay = isConferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
               const colors = getColors(tagDisplay);
 
               const statusUpper = String(asset.status || '').toUpperCase();
@@ -214,7 +236,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
                     <div className="pt-8 flex flex-col space-y-3">
                       <div className="flex items-center space-x-2">
                         <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Patrimônio:</span>
-                        <span className="text-xl font-bold font-mono tracking-tighter text-slate-900">{formatEtiqueta(asset.etiqueta)}</span>
+                        <span className="text-xl font-bold font-mono tracking-tighter text-slate-900">{formatEtiqueta(asset.etiqueta) || 'SEM ETIQUETA'}</span>
                         {asset._photoUrl && (
                           <div className="bg-amber-100 p-1 rounded-lg animate-pulse">
                             <Camera size={12} className="text-amber-600" />

@@ -258,6 +258,7 @@ const Login: React.FC<LoginProps> = ({
         logger.info('[DEXIE_AUTH] Usuário local localizado no Dexie. Montando escopo de acesso.');
 
         const localUser = dexieAuthResult.user as {
+          email?: string;
           role?: string;
           tenantid?: string;
           is_admin?: boolean;
@@ -266,10 +267,16 @@ const Login: React.FC<LoginProps> = ({
 
         const userRole = (localUser.role || '').toString().toUpperCase();
         const isMasterLike = userRole === 'MASTER' || userRole === 'ADMIN' || !!localUser.is_admin || !!localUser.isAdmin;
+        // DONO GLOBAL: o perfil não declara contrato por desenho — o contrato é
+        // escolhido em /contexto. Bloqueá-lo aqui contradizia o caminho da nuvem
+        // (`!tenantid && !is_master`) e impedia o próprio dono de entrar.
+        const isGlobalOwner = isAdminEmail(localUser.email);
         if (isMasterLike) {
-          if (!localUser.tenantid) throw new Error('Perfil MASTER sem tenantid vinculado no Supabase.');
+          if (!localUser.tenantid && !isGlobalOwner) {
+            throw new Error('Perfil MASTER sem tenantid vinculado no Supabase.');
+          }
           sessionStorage.setItem('gbr_admin_scope', 'TENANT_MASTER');
-          sessionStorage.setItem('tenantid', localUser.tenantid);
+          if (localUser.tenantid) sessionStorage.setItem('tenantid', localUser.tenantid);
         } else {
           sessionStorage.setItem('gbr_admin_scope', 'OPERATIONAL_AUDITOR');
           if (localUser.tenantid) sessionStorage.setItem('tenantid', localUser.tenantid);
@@ -325,7 +332,8 @@ const Login: React.FC<LoginProps> = ({
           if (matchedLocalUser) {
             loggedUser = { ...matchedLocalUser };
             const roleUpper = String(loggedUser.role || '').toUpperCase();
-            const isMasterLike = isAdminEmail(loggedUser.email) || !!loggedUser.is_admin || !!loggedUser.isAdmin ||
+            const isGlobalOwner = isAdminEmail(loggedUser.email);
+            const isMasterLike = isGlobalOwner || !!loggedUser.is_admin || !!loggedUser.isAdmin ||
                                  roleUpper === 'ADMIN' || roleUpper === 'MASTER';
             if (!loggedUser.tenantid) {
               // REGRA SRE usuário×tenant: o app NUNCA aceita um perfil sem contrato
@@ -343,6 +351,13 @@ const Login: React.FC<LoginProps> = ({
               }
               if (cloudTenant) {
                 loggedUser.tenantid = cloudTenant;
+              } else if (isGlobalOwner) {
+                // DONO GLOBAL (VITE_ADMIN_EMAIL): sem contrato no perfil é o
+                // estado normal — /contexto lista os contratos da base local.
+                // Nunca herda tenant de storage/sessão anterior (seria um
+                // contrato aleatório para um perfil global).
+                logger.info(`[Login] Dono global sem tenantid no perfil — contrato será escolhido em /contexto: ${loggedUser.email}`);
+                loggedUser.tenantid = '';
               } else if (isMasterLike) {
                 logger.warn(`[Login] [CHECK 3] Bloqueando login de admin/master sem tenantid vinculado: ${loggedUser.email}`);
                 setIsLoading(false);

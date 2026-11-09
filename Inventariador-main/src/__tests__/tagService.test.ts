@@ -50,6 +50,34 @@ describe('determineAssetTag — Regras de Ouro', () => {
   });
 });
 
+describe('determineAssetTag — emplaquetamento (FALTA ETIQUETAR × ETIQUETADO)', () => {
+  const needsLabel = asset({ _plaquetaMaster: 'ETIQUETAR' });
+
+  it('instrução "ETIQUETAR" na plaqueta mestre é FALTA ETIQUETAR', () => {
+    expect(determineAssetTag(needsLabel, 'CORREDOR A', 'MATRIZ')).toBe(TagInventario.FALTA_ETIQUETAR);
+  });
+
+  it('conferir o bem NÃO conclui o emplaquetamento', () => {
+    expect(determineAssetTag({ ...needsLabel, _conferido: true }, 'CORREDOR A', 'MATRIZ')).toBe(TagInventario.FALTA_ETIQUETAR);
+  });
+
+  it('plaqueta física "ETIQUETAR" (base sem _plaquetaMaster) também é FALTA ETIQUETAR', () => {
+    expect(determineAssetTag(asset({ etiqueta: 'ETIQUETAR', _conferido: true }), 'CORREDOR A', 'MATRIZ')).toBe(TagInventario.FALTA_ETIQUETAR);
+  });
+
+  it('_plaquetado confirma a etiquetagem → ETIQUETADO', () => {
+    expect(determineAssetTag({ ...needsLabel, _conferido: true, _plaquetado: true }, 'CORREDOR B', 'MATRIZ')).toBe(TagInventario.ETIQUETADO);
+  });
+
+  it('tag ETIQUETADO gravada é preservada mesmo sem o flag', () => {
+    expect(determineAssetTag({ ...needsLabel, TAG_INVENTARIO: TagInventario.ETIQUETADO }, 'CORREDOR A', 'MATRIZ')).toBe(TagInventario.ETIQUETADO);
+  });
+
+  it('BAIXADO continua a vencer o emplaquetamento', () => {
+    expect(determineAssetTag({ ...needsLabel, status: 'BAIXA', _plaquetado: true }, 'CORREDOR A', 'MATRIZ')).toBe(TagInventario.BAIXADO);
+  });
+});
+
 describe('resolvePersistedTag — tags de decisão são preservadas', () => {
   it('preserva RE-ADOTADO gravado mesmo com _localMaster já atualizado', () => {
     const moved = asset({ _conferido: true, _localMaster: 'CORREDOR B', TAG_INVENTARIO: TagInventario.RE_ADOTADO });
@@ -69,8 +97,13 @@ describe('TAG_POLICY — cores de alta visibilidade', () => {
     expect(meta.color.text).toBe('text-white');
   });
 
-  it('NOVO ITEM usa âmbar e CONFERIDO verde esmeralda', () => {
-    expect(getTagMetadata(TagInventario.NOVO_ITEM).color.bg).toContain('amber');
+  it('NOVO ITEM usa laranja e CONFERIDO verde esmeralda', () => {
+    expect(getTagMetadata(TagInventario.NOVO_ITEM).color.bg).toContain('orange');
     expect(getTagMetadata(TagInventario.CONFERIDO).color.bg).toContain('emerald');
+  });
+
+  it('FALTA ETIQUETAR é âmbar e ETIQUETADO é violeta (Matriz de Tags)', () => {
+    expect(getTagMetadata(TagInventario.FALTA_ETIQUETAR).color.bg).toContain('amber');
+    expect(getTagMetadata(TagInventario.ETIQUETADO).color.bg).toContain('violet');
   });
 });

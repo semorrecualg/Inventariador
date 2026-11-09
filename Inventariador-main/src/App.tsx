@@ -2422,7 +2422,15 @@ useEffect(() => {
       // Gestão de acessos é administrativa e transversal: criar o auditor da
       // filial acontece ANTES de existir unidade selecionada. Sem esta exceção
       // o guard devolvia o dono para a Unidade Operacional e a tela nunca abria.
-      AppScreen.USER_MANAGEMENT
+      AppScreen.USER_MANAGEMENT,
+      // Telas de GOVERNAÇA abertas pelo PAINEL COMPLETO do hub: não leem
+      // `selectedUnit` e já são protegidas por RBAC na renderização. Sem a
+      // exceção o guard rebatia o clique em "Configurar QR Code" (e nos
+      // demais) para a Unidade Operacional — a tela nunca abria.
+      AppScreen.FIELD_CONFIGURATOR,
+      AppScreen.QR_CODE_CONFIGURATOR,
+      AppScreen.LICENSE_PROVISIONING,
+      AppScreen.AUDIT_LOGS
     ];
 
     // UNIDADE OPERACIONAL (/unit) NÃO faz parte da trilha do auditor: é a tela
@@ -5767,19 +5775,13 @@ useEffect(() => {
     const currentScreen = history[history.length - 1];
     setIsReadOnlyDetail(currentScreen === AppScreen.CONSULTATION);
 
-    const etq = normalizeKey(asset.etiqueta || "");
-    if (etq && etq !== "ETIQUETAR") {
-      const related = inventory.assets.filter(a => normalizeKey(a.etiqueta || "") === etq);
-      if (related.length > 1) {
-        setSelectedAssets(related);
-      } else {
-        setSelectedAssets([asset]);
-      }
-    } else {
-      setSelectedAssets([asset]);
-    }
+    // A ficha abre SOMENTE o registro tocado. Antes juntávamos todo registro
+    // com a mesma `etiqueta` num "lote", e a ficha de 000753 exibia um segundo
+    // item que apenas contém esse número noutro campo do cadastro. A
+    // identidade do detalhe é a ETIQUETA do registro escolhido.
+    setSelectedAssets([asset]);
     pushScreen(AppScreen.ASSET_DETAIL);
-  }, [inventory.assets, history, pushScreen]);
+  }, [history, pushScreen]);
 
   const handleExport = () => {
     if (inventory.assets.length === 0) return;
@@ -7117,6 +7119,7 @@ useEffect(() => {
                   user={user}
                   currentCampaignId={inventory.currentCampaignId}
                   unitConfig={currentUnitConfig}
+                  qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']}
                 />
               )}
             </GPSComplianceGuard>
@@ -7172,7 +7175,7 @@ useEffect(() => {
               readOnly={isReadOnlyDetail}
               protheusIntegrationEnabled={inventory.protheusIntegrationEnabled || false}
               protheusApiUrl={inventory.protheusApiUrl || ''}
-              tenantid={user?.tenantid || ''}
+              tenantid={resolveTenantId(user) || currentUnitConfig?.tenantid || readSessionTenantId() || ''}
               mandatoryPhotoOnDivergence={inventory.mandatoryPhotoOnDivergence}
               mandatoryPhotoOnNewItem={inventory.mandatoryPhotoOnNewItem}
               databaseMode={databaseMode}
