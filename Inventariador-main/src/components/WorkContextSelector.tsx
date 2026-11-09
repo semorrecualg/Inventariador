@@ -10,16 +10,7 @@ import {
   Calculator,
   ChevronRight,
   Check,
-  Lock,
-  UserPlus,
-  Users,
-  Calendar,
-  SlidersHorizontal,
-  QrCode,
-  Database,
-  History,
-  KeyRound,
-  Settings
+  Lock
 } from 'lucide-react';
 import BackButton from './BackButton';
 import type { NavigationParams, User } from '../types';
@@ -62,8 +53,6 @@ interface WorkContextSelectorProps {
    * base de dados, cargas, licenças, unidade operacional).
    */
   onOpenAdmin?: (screen: AppScreen, params?: NavigationParams) => void;
-  /** Abre o formulário de cadastro de NOVOS USUÁRIOS (somente admin/master). */
-  onOpenNewUser?: () => void;
 }
 
 /**
@@ -85,8 +74,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   onLogout,
   onOpenDatabase,
   unitRelease,
-  onOpenAdmin,
-  onOpenNewUser
+  onOpenAdmin
 }) => {
   const groups = groupContextsByTenant(contexts);
 
@@ -141,7 +129,6 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   // ADMIN/MASTER: dono das liberações. Nesta tela ele vê o estado da unidade
   // (âncora + campanha) e o cadastro de acessos, sem sair do contrato.
   const isAdmin = isAdminUser(user);
-  const canManageBase = canAccessDatabaseManager(user);
 
   const baseFiliais = useMemo(() => {
     const tenant = normalizeWorkTenant(selectedTenant);
@@ -175,29 +162,6 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   // Trava de entrada: só o auditor de campo é impedido; o admin precisa passar
   // para configurar a unidade.
   const canProceed = !!selectedTenant && !!selectedModule && !(isAuditorOnly && chosenPending);
-
-  // Chip de estado da configuração da unidade (âncora / campanha).
-  const releaseChip = (ok: boolean) =>
-    `flex items-center gap-1 px-2 py-1 rounded-lg border text-[7.5px] font-black uppercase tracking-widest ${
-      ok ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-amber-50 border-amber-100 text-amber-600'
-    }`;
-
-  // Liberações exclusivas de ADMIN/MASTER (matriz RBAC — TRILHA A). O cadastro
-  // de usuários e a carga/base só aparecem para quem realmente tem o gate.
-  const adminLinks: Array<{ label: string; hint: string; screen: AppScreen; icon: React.ReactNode }> = [
-    { label: 'Usuários', hint: 'Acessos', screen: AppScreen.USER_MANAGEMENT, icon: <Users size={13} /> },
-    { label: 'Filiais', hint: 'Unidades', screen: AppScreen.UNIT_CONFIGURATOR, icon: <Building2 size={13} /> },
-    { label: 'Eventos', hint: 'Campanhas', screen: AppScreen.CAMPAIGN_MANAGEMENT, icon: <Calendar size={13} /> },
-    { label: 'Campos', hint: 'Edição', screen: AppScreen.FIELD_CONFIGURATOR, icon: <SlidersHorizontal size={13} /> },
-    { label: 'QR Code', hint: 'Mapeamento', screen: AppScreen.QR_CODE_CONFIGURATOR, icon: <QrCode size={13} /> }
-  ];
-  if (canManageBase) {
-    adminLinks.push(
-      { label: 'Base', hint: 'Carga/Limpeza', screen: AppScreen.DATABASE_MANAGER, icon: <Database size={13} /> },
-      { label: 'Cargas', hint: 'Histórico', screen: AppScreen.LOAD_HISTORY, icon: <History size={13} /> },
-      { label: 'Licenças', hint: 'Novo cliente', screen: AppScreen.LICENSE_PROVISIONING, icon: <KeyRound size={13} /> }
-    );
-  }
 
   const getTenantIdentity = (tenantid: string) => {
     const hash = tenantid.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
@@ -544,116 +508,36 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
               </div>
             </div>
 
-            {/* LIBERAÇÕES · ADMIN/MASTER (TRILHA A) — o que somente estes
-                perfis podem fazer fica visível no próprio CONTRATO DE TRABALHO:
-                estado da unidade (âncora + campanha), cadastro de NOVOS
-                USUÁRIOS e os configuradores da base. Nada é duplicado: cada
-                botão abre a tela administrativa já existente. */}
+            {/* LIBERAÇÕES · ADMIN/MASTER — uma única entrada. Todas as
+                ferramentas (unidade/âncora/campanha, acessos, filiais, eventos,
+                campos, QR, base, cargas, licenças, integridade, fotos e
+                Protheus) vivem no PAINEL COMPLETO do hub; manter a lista aqui
+                duplicava cada botão sem acrescentar nenhuma regra. */}
             {isAdmin && (
-              <div
-                className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm space-y-3"
-                data-testid="admin-liberacoes"
-              >
-                <div className="flex items-center space-x-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-accent-soft text-accent flex items-center justify-center border border-accent/10 flex-shrink-0">
-                    <ShieldCheck size={15} />
-                  </div>
-                  <div className="min-w-0 text-left">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-ink truncate">
-                      Liberações · admin / master
-                    </p>
-                    <p className="text-[7.5px] font-bold uppercase tracking-widest text-ink-muted truncate">
-                      Exclusivo destes perfis
-                    </p>
-                  </div>
-                </div>
-
-                {/* Estado da unidade escolhida: as DUAS configurações que
-                    liberam o inventário do auditor. */}
-                <div className="rounded-xl bg-bg-main border border-border px-3 py-2.5 space-y-1.5">
-                  <p className="text-[8px] font-black uppercase tracking-widest text-ink-muted truncate">
-                    {chosenFilial ? `Unidade · ${chosenFilial}` : 'Unidade · sem filial na base'}
-                  </p>
-                  {chosenFilial && (
-                    <>
-                      <div className="flex items-center flex-wrap gap-1.5">
-                        <span className={releaseChip(!!chosenRelease?.hasAnchor)} data-testid="release-anchor">
-                          {chosenRelease?.hasAnchor ? <Check size={11} /> : <Lock size={11} />}
-                          Âncora GPS
-                        </span>
-                        <span className={releaseChip(!!chosenRelease?.hasCampaign)} data-testid="release-campaign">
-                          {chosenRelease?.hasCampaign ? <Check size={11} /> : <Lock size={11} />}
-                          Campanha
-                        </span>
-                      </div>
-                      <p className={`text-[8px] font-extrabold uppercase tracking-widest leading-relaxed ${
-                        chosenRelease?.released ? 'text-emerald-600' : 'text-amber-600'
-                      }`}>
-                        {chosenRelease
-                          ? chosenRelease.released
-                            ? 'Unidade liberada para o inventário do auditor'
-                            : `Falta ${chosenPending} para liberar o inventário`
-                          : 'Sem leitura de configuração na base local'}
-                      </p>
-                    </>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => onOpenAdmin?.(AppScreen.UNIT_SELECTION)}
-                  className="w-full py-3 rounded-xl bg-accent text-white font-extrabold uppercase text-[9px] tracking-[0.12em] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  data-testid="admin-open-unit-operational"
-                >
-                  <Landmark size={14} />
-                  Configurar âncora e campanha
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onOpenNewUser?.()}
-                  className="w-full py-3 rounded-xl border border-accent/30 bg-accent-soft text-accent font-extrabold uppercase text-[9px] tracking-[0.12em] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  data-testid="admin-new-user"
-                >
-                  <UserPlus size={14} />
-                  Novo usuário · cadastrar acesso
-                </button>
-
-                <div className="grid grid-cols-2 gap-2">
-                  {adminLinks.map((link) => (
-                    <button
-                      key={link.screen}
-                      type="button"
-                      onClick={() => onOpenAdmin?.(link.screen)}
-                      className="flex items-center gap-2 px-2.5 py-2.5 bg-white border border-border rounded-xl active:scale-[0.98] transition-all text-left shadow-sm min-w-0"
-                    >
-                      <span className="w-7 h-7 rounded-lg bg-accent-soft text-accent flex items-center justify-center border border-accent/10 flex-shrink-0">
-                        {link.icon}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-[9px] font-black uppercase tracking-wide text-ink truncate">
-                          {link.label}
-                        </span>
-                        <span className="block text-[7px] font-bold uppercase tracking-widest text-ink-muted truncate">
-                          {link.hint}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Resto das liberações administrativas (integridade SHA,
-                    fotos obrigatórias, toggles Protheus, auditoria) vive no
-                    painel ADMIN do hub — aqui só o atalho, para não duplicar
-                    estado nem regra. */}
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
+                  Liberações · admin / master
+                </p>
                 <button
                   type="button"
                   onClick={() => onOpenAdmin?.(AppScreen.MAIN_MENU, { openPanel: 'ADMIN' })}
-                  className="w-full py-2.5 rounded-xl border border-border bg-white text-ink-muted font-extrabold uppercase text-[8px] tracking-[0.12em] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full bg-white rounded-2xl px-4 py-4 flex items-center justify-between shadow-sm border border-slate-200 transition-all cursor-pointer active:scale-[0.98]"
                   data-testid="admin-full-panel"
                 >
-                  <Settings size={12} />
-                  Painel completo · integridade, fotos, Protheus
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-accent/10 text-accent flex items-center justify-center flex-shrink-0">
+                      <ShieldCheck size={20} strokeWidth={2.5} />
+                    </div>
+                    <div className="min-w-0 text-left">
+                      <p className="text-[13px] font-black uppercase tracking-wide text-ink">
+                        Painel completo
+                      </p>
+                      <p className="text-[8px] font-bold uppercase tracking-widest text-ink-muted">
+                        Integridade, fotos, Protheus e demais liberações
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-ink-muted/40 flex-shrink-0" />
                 </button>
               </div>
             )}

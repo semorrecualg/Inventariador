@@ -23,6 +23,7 @@ import { sqliteService } from '../services/sqliteService';
 import { MemoryGuardService } from '../services/MemoryGuardService';
 import { normalizeKey } from '../utils/schema';
 import { AssetListItem } from './AssetListItem';
+import { resolvePersistedTag } from '../services/tagService';
 import { BufferIndicator } from './BufferIndicator';
 import { assetRepository } from '../services/assetRepository';
 
@@ -68,40 +69,6 @@ interface AssetCardProps {
   onShowQr: (asset: Asset) => void;
 }
 
-const NumericKeypad = ({ onInput, onDelete, onClose }: { onInput: (val: string) => void, onDelete: () => void, onClose: () => void }) => {
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
-  
-  return (
-    <div className="bg-white/95 backdrop-blur-2xl border-t border-border p-1.5 pb-3 grid grid-cols-3 gap-1 animate-slideUp z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] rounded-t-[1.25rem]">
-      {keys.map((key) => (
-        <button
-          key={key}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (key === 'OK') onClose();
-            else if (key === '⌫') onDelete();
-            else onInput(key);
-          }}
-          className={`h-10 rounded-lg flex items-center justify-center text-base font-bold transition-all active:scale-90 ${
-            key === 'OK' ? 'bg-accent text-white shadow-md' : 
-            key === '⌫' ? 'bg-bg-main text-ink-muted' : 
-            'bg-white border border-border text-ink shadow-sm'
-          }`}
-        >
-          {key === 'OK' ? 'OK' : key}
-        </button>
-      ))}
-    </div>
-  );
-};
-
-// Satisfy ESLint unused check for NumericKeypad
-const isOfflineValidationEnabled = false;
-if (isOfflineValidationEnabled) {
-  const _keypadRef = <NumericKeypad onInput={() => {}} onDelete={() => {}} onClose={() => {}} />;
-  logger.info(_keypadRef);
-}
-
 const normalizeKeyFast = (s: string | null | undefined) => {
   if (!s) return '';
   return s.toString().toUpperCase()
@@ -109,6 +76,27 @@ const normalizeKeyFast = (s: string | null | undefined) => {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^A-Z0-9]/g, '')
     .trim();
+};
+
+/**
+ * Endereço efetivo do ativo — MESMA regra de `getLocationsWithStats` (App.tsx) e
+ * do `AddressSelector`: o local auditado (`_localMaster`) vence o endereço da base.
+ */
+const assetAddressKey = (a: Asset): string =>
+  normalizeKeyFast(a._localMaster || a.endereco || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL');
+
+/**
+ * Pertence à unidade em auditoria? Tolera divergência de grafia entre `filial`
+ * (texto) e `_unitid`/código numérico — mesma tolerância da carga indexada de
+ * `fetchUnitAssets` no App.tsx, para a lista não desaparecer por um detalhe de nome.
+ */
+const belongsToUnit = (a: Asset, activeFilial: string): boolean => {
+  const target = normalizeKeyFast(activeFilial);
+  if (!target) return true;
+  const keys = [normalizeKeyFast(String(a.filial || '')), normalizeKeyFast(String(a._unitid || ''))].filter(Boolean);
+  if (keys.some(k => k === target)) return true;
+  const targetCode = target.match(/^\d+/)?.[0];
+  return !!targetCode && keys.some(k => k.match(/^\d+/)?.[0] === targetCode);
 };
 
 const AssetCard = React.memo(({ 
@@ -444,8 +432,6 @@ const Inventory: React.FC<InventoryProps> = ({
   const [manualAsset, setManualAsset] = useState<Partial<Asset>>({});
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
-  const [showNumericKeypad, setShowNumericKeypad] = useState(false);
-  const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [isLocationSearchVisible, setIsLocationSearchVisible] = useState(false);
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
   const [debouncedLocTerm, setDebouncedLocTerm] = useState('');
@@ -461,7 +447,6 @@ const Inventory: React.FC<InventoryProps> = ({
   const ocrInputRef = useRef<HTMLInputElement>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [showScrollTop, setShowScrollTop] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   // v24.50: Restauração de Scroll (UX de Campo)
@@ -545,31 +530,14 @@ const Inventory: React.FC<InventoryProps> = ({
     if (inventorySearchValue) {
       setDisplayValue(inventorySearchValue);
       setCommittedSearch(inventorySearchValue);
-      setIsSearchVisible(true);
       setIsScannerOpen(false);
       onUpdateSearchMode(InventorySearchMode.MANUAL);
       clearInventorySearchValue();
     }
   }, [inventorySearchValue, clearInventorySearchValue, onUpdateSearchMode]);
 
-  const handleScannerClose = useCallback(() => {
-    setIsScannerOpen(false);
-    onUpdateSearchMode(InventorySearchMode.MANUAL);
-    setIsSearchVisible(true);
-    setTimeout(() => searchInputRef.current?.focus(), 100);
-  }, [onUpdateSearchMode]);
-
-  const handleTorchToggle = useCallback(() => {
-    setTorch(prev => prev === 'on' ? 'off' : 'on');
-  }, []);
-
-  const handleUpdateScannerModeLocal = useCallback((m: ScannerMode) => {
-    onUpdateScannerMode(m);
-  }, [onUpdateScannerMode]);
-
   const handleScannerOpen = useCallback(() => {
     onUpdateSearchMode(InventorySearchMode.SCANNER);
-    setIsSearchVisible(false);
     setIsScannerOpen(true);
   }, [onUpdateSearchMode]);
 
@@ -625,10 +593,25 @@ const Inventory: React.FC<InventoryProps> = ({
         // 2. REGRAS DE VALIDAÇÃO E ATUALIZAÇÃO SRE & 3. ISOLAMENTO DE CONCORRÊNCIA (DEXIE)
         // Ativo localizado: update atômico usando o serviço de banco local
         const id = String(foundAsset.id || foundAsset.primarykey);
-        
+
+        // REGRA DE OURO: BAIXADO é permanente e imutável — localizar o bem não
+        // apaga a baixa; apenas registra a conferência física.
+        const isBaixado = String(foundAsset.status || '').toUpperCase().includes('BAIXA') || !!foundAsset.databaixa;
+        const auditLocation = selectedLocationRef.current || foundAsset.endereco || '';
+        // TAG de auditoria calculada no ato e PERSISTIDA (coluna do arquivo de retorno).
+        // Avaliada sobre o estado ANTERIOR (com o `_localMaster` antigo) para detectar
+        // a movimentação em tempo real e marcar RE-ADOTADO corretamente.
+        const auditTag = resolvePersistedTag(
+          { ...foundAsset, _conferido: true },
+          auditLocation,
+          currentUnit
+        );
+
         await localDb.assets.update(id, {
           _conferido: true,
-          status: 'CONFERIDO',
+          ...(isBaixado ? {} : { status: 'CONFERIDO' }),
+          TAG_INVENTARIO: auditTag,
+          _localMaster: auditLocation,
           _is_synced: 0
         }, user?.email || 'operador');
 
@@ -649,16 +632,17 @@ const Inventory: React.FC<InventoryProps> = ({
         const cleanAsset = cleanAndCapitalizeAsset({
           ...foundAsset,
           _conferido: true,
-          status: 'CONFERIDO',
+          ...(isBaixado ? {} : { status: 'CONFERIDO' }),
+          TAG_INVENTARIO: auditTag,
           _is_synced: 0,
-          _localMaster: selectedLocationRef.current || foundAsset.endereco
+          _localMaster: auditLocation
         });
         await onUpdateAssetRef.current(cleanAsset);
 
         setSreNotification({
-          type: 'success',
-          message: 'Ativo Conferido com Sucesso',
-          subText: `Etiqueta: ${extractedEtiqueta} | Status: CONFERIDO`
+          type: isBaixado ? 'warning' : 'success',
+          message: isBaixado ? 'BAIXADO Registrado' : 'Ativo Conferido com Sucesso',
+          subText: `Etiqueta: ${extractedEtiqueta} | Status: ${isBaixado ? 'BAIXADO (permanente)' : auditTag}`
         });
 
         // SEMPRE auto-confirma ativos conhecidos — sem modal, agilidade total
@@ -917,15 +901,12 @@ const Inventory: React.FC<InventoryProps> = ({
         const foundTag = plaquetaMatch[0];
         setDisplayValue(foundTag);
         setCommittedSearch(foundTag);
-        setIsSearchVisible(true);
-        setShowNumericKeypad(false);
       } else {
         // Se não achar plaqueta, tenta qualquer código alfanumérico relevante
         const genericMatch = cleanedText.match(/\b[A-Z0-9]{4,}\b/);
         if (genericMatch) {
           setDisplayValue(genericMatch[0]);
           setCommittedSearch(genericMatch[0]);
-          setIsSearchVisible(true);
         }
       }
     } catch (err) {
@@ -986,87 +967,65 @@ const Inventory: React.FC<InventoryProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (isSearchVisible) {
-      setShowNumericKeypad(true);
-    } else {
-      setShowNumericKeypad(false);
-    }
-  }, [isSearchVisible]);
+  // SOBERANIA DE FILIAL: filial recuperada da session/local ou do prop.
+  const activeFilialKey = useMemo(() => (
+    localStorage.getItem('filial') || sessionStorage.getItem('filial') || selectedUnit || user?.filial || ''
+  ).trim().toUpperCase(), [selectedUnit, user?.filial]);
 
-  // locationStats removido pois não é mais utilizado na UI de telemetria
+  /**
+   * Universo da tela: os ativos DO ENDEREÇO selecionado.
+   * `assets` é o subconjunto indexado da unidade (pode vir vazio por campanha/sync);
+   * `allAssets` é a base completa carregada — usada para completar, sem duplicar.
+   * A chave de endereço é a mesma do AddressSelector (`_localMaster` vence `endereco`).
+   */
+  const addressAssets = useMemo(() => {
+    if (!selectedLocation) return [] as Asset[];
+    const target = normalizeKeyFast(selectedLocation);
+    const seen = new Set<string>();
+    const out: Asset[] = [];
+    const push = (a: Asset) => {
+      if (assetAddressKey(a) !== target) return;
+      const id = String(a.id || a.primarykey || '');
+      if (id) {
+        if (seen.has(id)) return;
+        seen.add(id);
+      }
+      out.push(a);
+    };
+    for (const a of assets) push(a);
+    for (const a of allAssets) push(a);
+    return out;
+  }, [assets, allAssets, selectedLocation]);
 
   const filteredAssets = useMemo(() => {
     if (!selectedLocation) return [];
-    
-    // SOBERANIA DE FILIAL: Filtra estritamente pela filial recuperada da session/local ou do prop
-    const activeFilial = (localStorage.getItem('filial') || sessionStorage.getItem('filial') || selectedUnit || user?.filial || '').trim().toUpperCase();
 
     const term = normalizeKeyFast(committedSearch);
     const searchUpper = committedSearch.toUpperCase().trim();
+    // Busca manual continua varrendo a unidade inteira (necessário para adoção e
+    // busca global); sem termo, a lista é estritamente o endereço selecionado.
+    const source = term ? (allAssets.length > 0 ? allAssets : assets) : addressAssets;
+    const result: Asset[] = [];
 
-    if (!term) {
-      const result = [];
-      for (let i = 0; i < assets.length; i++) {
-        const a = assets[i];
+    for (const a of source) {
+      if (!belongsToUnit(a, activeFilialKey)) continue;
 
-        // Filtro estrito de filial (evita itens órfãos/unidades fantasmas)
-        const assetFilial = (a.filial || '').trim().toUpperCase();
-        if (assetFilial !== activeFilial) continue;
+      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
 
-        const statusUpper = String(a.status || '').toUpperCase();
-        const isBaixado = statusUpper.includes('BAIXA') || !!a.databaixa;
-        const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-        
-        if (isBaixado && !isConferido) continue;
-
-        if (activeFilter === 'checked') {
-          if (isConferido) result.push(a);
-        } else {
-          if (!isConferido) result.push(a);
-        }
-      }
-
-      return result.sort((a, b) => {
-        if (activeFilter === 'checked') {
-          const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
-          const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
-          if (dateA !== dateB) return dateB - dateA;
-        }
-        
-        const etqA = String(a.etiqueta || '').padStart(10, '0');
-        const etqB = String(b.etiqueta || '').padStart(10, '0');
-        return activeFilter === 'checked' 
-          ? etqB.localeCompare(etqA, undefined, { numeric: true })
-          : etqA.localeCompare(etqB, undefined, { numeric: true });
-      });
-    }
-
-    const localMatches = [];
-    const targetAssets = allAssets && allAssets.length > 0 ? allAssets : assets;
-    
-    for (let i = 0; i < targetAssets.length; i++) {
-        const a = targetAssets[i];
-
-        // Filtro estrito de filial (evita itens órfãos/unidades fantasmas)
-        const assetFilial = (a.filial || '').trim().toUpperCase();
-        if (assetFilial !== activeFilial) continue;
-
+      if (term) {
         const etq = normalizeKeyFast(a.etiqueta || '');
         const descText = String(a.descricaodoativo || '').toUpperCase();
+        if (!(etq === term || etq.includes(term) || descText.includes(searchUpper))) continue;
+      } else {
+        // Baixado não conferido não entra no giro (o hub só o conta quando localizado).
+        const isBaixado = String(a.status || '').toUpperCase().includes('BAIXA') || !!a.databaixa;
+        if (isBaixado && !isConferido) continue;
+      }
 
-        if (etq === term || etq.includes(term) || descText.includes(searchUpper)) {
-            // Filtro por aba ATIVOS/CONFERIDOS — mesmo durante busca
-            const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-            if (activeFilter === 'checked') {
-              if (isConferido) localMatches.push(a);
-            } else {
-              if (!isConferido) localMatches.push(a);
-            }
-        }
+      if (activeFilter === 'checked' ? isConferido : !isConferido) result.push(a);
     }
 
-    return localMatches.sort((a, b) => {
+    return result.sort((a, b) => {
       if (activeFilter === 'checked') {
         const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
         const dateB = b._dataLeitura ? new Date(b._dataLeitura).getTime() : 0;
@@ -1079,7 +1038,7 @@ const Inventory: React.FC<InventoryProps> = ({
         ? etqB.localeCompare(etqA, undefined, { numeric: true })
         : etqA.localeCompare(etqB, undefined, { numeric: true });
     });
-  }, [assets, allAssets, selectedLocation, committedSearch, activeFilter, selectedUnit, user]);
+  }, [addressAssets, assets, allAssets, selectedLocation, committedSearch, activeFilter, activeFilialKey]);
 
   const isSearchResultBatch = useMemo(() => {
     if (!committedSearch || filteredAssets.length <= 1) return false;
@@ -1091,6 +1050,30 @@ const Inventory: React.FC<InventoryProps> = ({
     
     return pendingInSearch.every(a => normalizeKey(a.etiqueta || "") === firstEtq);
   }, [committedSearch, filteredAssets]);
+
+  // Progresso da localidade aberta (mesma regra do hub: baixados só contam se conferidos).
+  const locationStats = useMemo(() => {
+    if (!selectedLocation) return { total: 0, checked: 0 };
+    let total = 0;
+    let checked = 0;
+    for (const a of addressAssets) {
+      if (!belongsToUnit(a, activeFilialKey)) continue;
+      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      const isBaixado = String(a.status || '').toUpperCase().includes('BAIXA') || !!a.databaixa;
+      if (isBaixado && !isConferido) continue;
+      if (!isBaixado) total++;
+      if (isConferido) {
+        checked++;
+        if (isBaixado) total++;
+      }
+    }
+    return { total, checked };
+  }, [addressAssets, activeFilialKey, selectedLocation]);
+
+  const locationProgress = locationStats.total > 0
+    ? Math.round((locationStats.checked / locationStats.total) * 100)
+    : 0;
+  const pendingSearchCount = filteredAssets.filter(a => !a._conferido).length;
 
   const handleConfirmSearchBatch = async () => {
     const pendingInSearch = filteredAssets.filter(a => !a._conferido);
@@ -1135,16 +1118,24 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
     
+    // TAG de auditoria calculada e PERSISTIDA na conferência (Regras de Ouro).
+    const auditLocation = selectedLocation || asset.endereco || '';
+    const preservedTag = resolvePersistedTag(
+      { ...asset, _conferido: true },
+      auditLocation,
+      selectedUnit
+    );
+
     await handleUpdateAssetWithBackup({
       ...asset,
       _conferido: true,
-      _localMaster: selectedLocation || asset.endereco
+      TAG_INVENTARIO: preservedTag,
+      _localMaster: auditLocation
     });
     setDisplayValue('');
   }, [allAssets, handleUpdateAssetWithBackup, onBulkUpdateAssets, selectedUnit, selectedLocation]);
 
   const handleAssetClick = useCallback(async (asset: Asset) => {
-    setShowNumericKeypad(false);
     const etq = normalizeKey(asset.etiqueta || "");
     const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedUnit || '');
@@ -1236,29 +1227,11 @@ const Inventory: React.FC<InventoryProps> = ({
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
         qt: 1,
         descricaodoativo: '',
-        serial: ''
+        serial: '',
+        endereco: selectedLocation || ''
     });
     setIsManualEntryOpen(true);
   };
-
-  // Satisfy ESLint unused checks
-  if (isOfflineValidationEnabled) {
-    logger.info({
-      showNumericKeypad,
-      setShowNumericKeypad,
-      showScrollTop,
-      onOpenSignature,
-      handleRangeChanged,
-      handleScannerClose,
-      handleTorchToggle,
-      handleUpdateScannerModeLocal,
-      handleSmartOCR,
-      isSearchResultBatch,
-      handleConfirmSearchBatch,
-      handleBatchConfirm,
-      handleCreateNew
-    });
-  }
 
   const handleVoiceTyping = (field: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1506,34 +1479,22 @@ const Inventory: React.FC<InventoryProps> = ({
                       try {
                         const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
                         const currentCompKey = normalizeKey(selectedUnit || '');
-                        const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.endereco || '');
-                        const currentLocKey = normalizeKey(selectedLocation || '');
-                        
-                        let updatedAsset: Asset;
 
-                        if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-                          updatedAsset = { 
-                            ...scannedAsset, 
-                            filial: selectedUnit || scannedAsset.filial,
-                            _conferido: true,
-                            TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                            _localMaster: selectedLocation || scannedAsset.endereco
-                          };
-                        } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
-                          updatedAsset = {
-                            ...scannedAsset,
-                            _conferido: true,
-                            TAG_INVENTARIO: TagInventario.ADOTADO,
-                            _localMaster: selectedLocation || scannedAsset.endereco
-                          };
-                        } else {
-                          updatedAsset = {
-                            ...scannedAsset,
-                            _conferido: true,
-                            TAG_INVENTARIO: TagInventario.CONFERIDO,
-                            _localMaster: selectedLocation || scannedAsset.endereco
-                          };
-                        }
+                        const auditLoc = selectedLocation || scannedAsset.endereco || '';
+                        const auditTag = resolvePersistedTag(
+                          { ...scannedAsset, _conferido: true },
+                          auditLoc,
+                          selectedUnit
+                        );
+                        const updatedAsset: Asset = {
+                          ...scannedAsset,
+                          ...(assetCompKey !== "" && assetCompKey !== currentCompKey
+                            ? { filial: selectedUnit || scannedAsset.filial }
+                            : {}),
+                          _conferido: true,
+                          TAG_INVENTARIO: auditTag,
+                          _localMaster: auditLoc
+                        };
 
                         const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
                         await handleUpdateAssetWithBackup(cleanAsset);
@@ -1559,35 +1520,22 @@ const Inventory: React.FC<InventoryProps> = ({
                       try {
                         const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
                         const currentCompKey = normalizeKey(selectedUnit || '');
-                        const assetLocKey = normalizeKey(scannedAsset._localMaster || scannedAsset.endereco || '');
-                        const currentLocKey = normalizeKey(selectedLocation || '');
-                        
-                        let updatedAsset: Asset;
-                        if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-                          // Caso seja de outra empresa, adota como externo
-                          updatedAsset = { 
-                            ...scannedAsset, 
-                            filial: selectedUnit || scannedAsset.filial,
-                            _conferido: true,
-                            TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                            _localMaster: selectedLocation || scannedAsset.endereco
-                          };
-                        } else if (assetLocKey !== "" && assetLocKey !== currentLocKey) {
-                          // Caso seja da mesma empresa mas outro endereço, adota como sobra física
-                          updatedAsset = {
-                            ...scannedAsset,
-                            _conferido: true,
-                            TAG_INVENTARIO: TagInventario.ADOTADO,
-                            _localMaster: selectedLocation || scannedAsset.endereco
-                          };
-                        } else {
-                          // Caso seja do mesmo endereço
-                          updatedAsset = {
-                            ...scannedAsset,
-                            _conferido: true,
-                            _localMaster: selectedLocation || scannedAsset.endereco
-                          };
-                        }
+
+                        const auditLoc = selectedLocation || scannedAsset.endereco || '';
+                        const auditTag = resolvePersistedTag(
+                          { ...scannedAsset, _conferido: true },
+                          auditLoc,
+                          selectedUnit
+                        );
+                        const updatedAsset: Asset = {
+                          ...scannedAsset,
+                          ...(assetCompKey !== "" && assetCompKey !== currentCompKey
+                            ? { filial: selectedUnit || scannedAsset.filial }
+                            : {}),
+                          _conferido: true,
+                          TAG_INVENTARIO: auditTag,
+                          _localMaster: auditLoc
+                        };
                         
                         const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
                         await handleUpdateAssetWithBackup(cleanAsset);
@@ -1641,7 +1589,8 @@ const Inventory: React.FC<InventoryProps> = ({
                         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
                         qt: 1,
                         descricaodoativo: '',
-                        serial: ''
+                        serial: '',
+                        endereco: selectedLocation || ''
                       });
                       setIsManualEntryOpen(true);
                       setScannedResult(null);
@@ -1914,7 +1863,6 @@ const Inventory: React.FC<InventoryProps> = ({
         </div>
 
         <div className="flex items-center space-x-2">
-          {/* ... botões secundários omitidos para brevidade se necessário, mas vou manter para consistência ... */}
           {isBatchMode && (
             <button 
               onClick={toggleSelectAll} 
@@ -1923,6 +1871,18 @@ const Inventory: React.FC<InventoryProps> = ({
               {selectedIds.size === filteredAssets.length && filteredAssets.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
             </button>
           )}
+
+          <button 
+            onClick={() => {
+              const next = !isBatchMode;
+              setIsBatchMode(next);
+              if (!next) setSelectedIds(new Set());
+            }}
+            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${isBatchMode ? 'bg-accent text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}
+            title={isBatchMode ? 'Sair do modo lote' : 'Modo lote'}
+          >
+            <CheckSquare size={20} />
+          </button>
 
           <button 
             onClick={onOpenConsultation}
@@ -1972,6 +1932,22 @@ const Inventory: React.FC<InventoryProps> = ({
               </div>
             </div>
 
+            {/* Progresso da localidade */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-black uppercase tracking-widest text-[#64748B]">Conferidos</span>
+                <span className="text-[9px] font-black uppercase tracking-widest text-[#1E293B]">
+                  {locationStats.checked} / {locationStats.total} · {locationProgress}%
+                </span>
+              </div>
+              <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${locationProgress === 100 ? 'bg-emerald-500' : 'bg-accent'}`}
+                  style={{ width: `${locationProgress}%` }}
+                />
+              </div>
+            </div>
+
             {/* Segmented Control */}
             <div className="flex bg-slate-100/50 p-1 rounded-xl border border-slate-100">
               <button 
@@ -1996,12 +1972,12 @@ const Inventory: React.FC<InventoryProps> = ({
               <input 
                 ref={searchInputRef} 
                 type="text" 
-                readOnly
-                inputMode="none"
+                autoComplete="off"
+                autoCapitalize="characters"
                 disabled={isPersistingScan}
-                onClick={() => !isPersistingScan && setShowNumericKeypad(true)}
+                onChange={(e) => setDisplayValue(e.target.value.toUpperCase())}
                 value={displayValue} 
-                className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-11 pr-24 py-3.5 font-mono text-lg font-bold rounded-2xl text-[#1E293B] outline-none focus:border-accent transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" 
+                className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-11 pr-24 py-3.5 font-mono text-lg font-bold rounded-2xl text-[#1E293B] outline-none focus:border-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed" 
                 placeholder={isPersistingScan ? "GRAVANDO LEITURA..." : "ESCANEIE OU DIGITE..."} 
               />
               <div className="absolute inset-y-0 right-2 flex items-center space-x-1">
@@ -2022,7 +1998,27 @@ const Inventory: React.FC<InventoryProps> = ({
                   </button>
                 )}
               </div>
+              {/* Input oculto que alimenta a Busca por Foto (OCR) */}
+              <input
+                ref={ocrInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleSmartOCR}
+              />
             </div>
+
+            {isSearchResultBatch && (
+              <button
+                type="button"
+                onClick={handleConfirmSearchBatch}
+                className="w-full py-3 rounded-xl bg-emerald-500 text-white font-black uppercase text-[10px] tracking-widest shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              >
+                <CheckSquare size={14} />
+                Conferir os {pendingSearchCount} registros do resultado
+              </button>
+            )}
           </div>
         </div>
 
@@ -2033,7 +2029,7 @@ const Inventory: React.FC<InventoryProps> = ({
               style={{ height: '100%' }}
               data={filteredAssets}
               increaseViewportBy={300}
-              atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
+              rangeChanged={handleRangeChanged}
               components={{
                 Footer: () => <div className="h-40" />
               }}
@@ -2055,17 +2051,100 @@ const Inventory: React.FC<InventoryProps> = ({
               )}
             />
           ) : (
-            <div className="py-24 flex flex-col items-center justify-center opacity-30 text-center">
-              <Search size={64} className="mb-6 text-ink-muted" />
-              <p className="text-[12px] font-bold uppercase tracking-[0.3em] text-ink-muted">Aguardando Auditoria</p>
+            <div className="py-24 flex flex-col items-center justify-center text-center px-8">
+              <Search size={64} className="mb-6 text-ink-muted opacity-30" />
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ink-muted opacity-60 text-center">
+                {activeFilter === 'checked'
+                  ? 'Nenhum ativo conferido neste endereço'
+                  : 'Nenhum ativo pendente neste endereço'}
+              </p>
+              {selectedLocation && (
+                <p className="mt-2 mb-1 max-w-[16rem] truncate text-[9px] font-black uppercase tracking-widest text-slate-400">
+                  {selectedLocation}
+                </p>
+              )}
+              {committedSearch && (
+                <div className="mt-6 w-full max-w-xs space-y-2">
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted">
+                    Nenhum ativo para “{committedSearch}”
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleCreateNew}
+                    className="w-full py-3.5 rounded-xl bg-accent text-white font-black uppercase text-[10px] tracking-widest shadow-lg shadow-accent/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                  >
+                    <FilePlus2 size={14} />
+                    Incluir novo registro
+                  </button>
+                  {/* ADOTADO EXTERNO (5.1/5.2): a busca global só é oferecida a partir
+                      da etiqueta digitada manualmente, trazendo o registro de outra
+                      empresa para análise e confirmação do auditor. */}
+                  <button
+                    type="button"
+                    onClick={() => setShowGlobalSearchResolution(committedSearch)}
+                    className="w-full py-3.5 rounded-xl bg-slate-950 text-amber-300 border border-amber-400 font-black uppercase text-[10px] tracking-widest active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                  >
+                    <Database size={14} />
+                    Buscar em outras empresas
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
 
-      <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
-        <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v2.6 • MOBILE SOBERANO</p>
+      {/* Barra de ação: progresso + encerramento (ou confirmação em lote) */}
+      {!isBatchMode ? (
+        <div className="bg-white border-t border-slate-100 px-4 py-3 flex items-center gap-3 shrink-0">
+          <div className="flex-1 min-w-0">
+            <p className="text-[8px] font-black uppercase tracking-widest text-[#64748B]">Conferidos no local</p>
+            <p className="text-sm font-black text-[#1E293B] leading-tight">
+              {locationStats.checked}
+              <span className="text-slate-400"> / {locationStats.total}</span>
+              <span className="ml-2 text-[10px] font-black text-accent">{locationProgress}%</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenSignature}
+            className="px-5 py-3 rounded-xl bg-slate-900 text-white font-black uppercase text-[10px] tracking-widest active:scale-[0.98] transition-all flex items-center gap-2"
+          >
+            <CheckCircle2 size={14} />
+            Finalizar lote
+          </button>
+        </div>
+      ) : (
+        <div className="bg-slate-900 px-4 py-3 flex items-center gap-3 shrink-0">
+          <div className="flex-1 min-w-0">
+            <p className="text-[8px] font-black uppercase tracking-widest text-white/40">Modo lote</p>
+            <p className="text-sm font-black text-white leading-tight">
+              {selectedIds.size} <span className="text-white/40">selecionado(s)</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { setIsBatchMode(false); setSelectedIds(new Set()); }}
+            className="px-4 py-3 rounded-xl bg-white/10 text-white font-black uppercase text-[10px] tracking-widest active:scale-[0.98] transition-all"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleBatchConfirm}
+            disabled={selectedIds.size === 0}
+            className="px-5 py-3 rounded-xl bg-emerald-500 text-white font-black uppercase text-[10px] tracking-widest active:scale-[0.98] transition-all flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Check size={14} />
+            Conferir
+          </button>
+        </div>
+      )}
+
+      <footer className="bg-slate-900 px-6 py-2 text-center border-t border-white/5 shrink-0">
+        <p className="text-[9px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v2.6 • MOBILE SOBERANO</p>
       </footer>
+
       </div>
         </React.Fragment>
       )}
@@ -2081,7 +2160,6 @@ const Inventory: React.FC<InventoryProps> = ({
           onClose={() => {
             setIsScannerOpen(false);
             onUpdateSearchMode(InventorySearchMode.MANUAL);
-            setIsSearchVisible(true);
             setTimeout(() => searchInputRef.current?.focus(), 100);
           }}
           isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset || showGlobalSearchResolution)}
@@ -2303,22 +2381,21 @@ const Inventory: React.FC<InventoryProps> = ({
                     const assetCompKey = normalizeKey(scannedAsset.filial || scannedAsset._unitid || '');
                     const currentCompKey = normalizeKey(selectedUnit || '');
                     
-                    let updatedAsset: Asset;
-                    if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-                      updatedAsset = { 
-                        ...scannedAsset, 
-                        filial: selectedUnit || scannedAsset.filial,
-                        _conferido: true,
-                        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-                        _localMaster: selectedLocation || scannedAsset.endereco
-                      };
-                    } else {
-                      updatedAsset = {
-                        ...scannedAsset,
-                        _conferido: true,
-                        _localMaster: selectedLocation || scannedAsset.endereco
-                      };
-                    }
+                    const auditLoc = selectedLocation || scannedAsset.endereco || '';
+                    const auditTag = resolvePersistedTag(
+                      { ...scannedAsset, _conferido: true },
+                      auditLoc,
+                      selectedUnit
+                    );
+                    const updatedAsset: Asset = {
+                      ...scannedAsset,
+                      ...(assetCompKey !== "" && assetCompKey !== currentCompKey
+                        ? { filial: selectedUnit || scannedAsset.filial }
+                        : {}),
+                      _conferido: true,
+                      TAG_INVENTARIO: auditTag,
+                      _localMaster: auditLoc
+                    };
                     
                     const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
                     handleUpdateAssetWithBackup(cleanAsset);
@@ -2419,7 +2496,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       <input 
                         type="text" 
                         value={manualAsset.etiqueta || ''} 
-                        onChange={(e) => setManualAsset({...manualAsset, ETIQUETA: e.target.value.toUpperCase()})}
+                        onChange={(e) => setManualAsset(prev => ({...prev, etiqueta: e.target.value.toUpperCase()}))}
                         className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-12 text-ink font-black font-mono text-lg outline-none focus:border-accent"
                       />
                       <button 
@@ -2436,7 +2513,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       <textarea 
                         rows={3}
                         value={manualAsset.descricaodoativo || ''} 
-                        onChange={(e) => setManualAsset({...manualAsset, DESCRICAODOATIVO: e.target.value.toUpperCase()})}
+                        onChange={(e) => setManualAsset(prev => ({...prev, descricaodoativo: e.target.value.toUpperCase()}))}
                         className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-12 text-ink font-bold text-xs outline-none focus:border-accent uppercase"
                         placeholder="DESCREVA O BEM..."
                       />
@@ -2455,7 +2532,7 @@ const Inventory: React.FC<InventoryProps> = ({
                         <input 
                           type="text" 
                           value={manualAsset.serial || ''} 
-                          onChange={(e) => setManualAsset({...manualAsset, SERIAL: e.target.value.toUpperCase()})}
+                          onChange={(e) => setManualAsset(prev => ({...prev, serial: e.target.value.toUpperCase()}))}
                           className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 pr-12 text-ink font-bold text-xs outline-none focus:border-accent"
                         />
                         <button 
@@ -2471,7 +2548,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       <input 
                         type="number" 
                         value={manualAsset.qt || 1} 
-                        onChange={(e) => setManualAsset({...manualAsset, QT: e.target.value})}
+                        onChange={(e) => setManualAsset(prev => ({...prev, qt: Number(e.target.value) || 1}))}
                         className="w-full bg-accent-soft border border-accent/10 rounded-xl px-4 py-3 text-ink font-bold text-xs outline-none focus:border-accent"
                       />
                     </div>

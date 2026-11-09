@@ -47,8 +47,8 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
           <div className="absolute bottom-0 left-0 w-24 h-24 bg-black/10 rounded-full -ml-12 -mb-12 blur-xl" />
           
           <div className="relative z-10 flex flex-col items-center">
-            <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-4 border border-white/30 shadow-2xl overflow-hidden p-1 transform hover:rotate-3 transition-transform">
-              <TagIcon className={meta.color.text} size={40} />
+            <div className={`w-20 h-20 ${meta.color.bg} rounded-3xl flex items-center justify-center mb-4 border border-white/40 shadow-2xl overflow-hidden p-1 transform hover:rotate-3 transition-transform`}>
+              <TagIcon className={`${meta.color.text} drop-shadow`} size={40} />
             </div>
             <h1 className="text-sm font-black uppercase tracking-[0.3em] text-white/90 mb-1">AUDIT AUTHORITY</h1>
             <p className="text-[10px] font-black uppercase tracking-widest text-white/60">KARDEX DIGITAL v24.50.3</p>

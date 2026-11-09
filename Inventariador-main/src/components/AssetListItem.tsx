@@ -1,13 +1,15 @@
 
 import React, { useMemo } from 'react';
 import { Asset, TagInventario } from '../types';
-import { determineAssetTag, getTagMetadata } from '../services/tagService';
+import { resolvePersistedTag, getTagMetadata } from '../services/tagService';
 import { formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
 import { 
   Camera, 
   Check, 
   QrCode,
   AlertTriangle,
+  AlertCircle,
+  ExternalLink,
   ArrowDown,
   MapPin
 } from 'lucide-react';
@@ -58,7 +60,7 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
   }, [statusUpper, asset.databaixa]);
 
   const visualStatus = useMemo(() => {
-    return determineAssetTag(
+    return resolvePersistedTag(
       asset, 
       selectedLocation || asset._localMaster || asset.endereco || "", 
       selectedUnit || asset._unitid || null
@@ -85,10 +87,11 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
   };
 
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
+  const isAdotadoExterno = visualStatus === TagInventario.ADOTADO_EXTERNO;
 
   return (
     <div 
-      className={`mb-3 p-4 bg-white rounded-2xl border border-[#F1F5F9] relative transition-all active:scale-[0.99] shadow-[0_2px_8px_rgba(0,0,0,0.04)] ${isSelected ? 'ring-2 ring-accent' : ''}`} 
+      className={`mb-3 p-4 pl-5 bg-white rounded-2xl border border-[#F1F5F9] relative overflow-hidden transition-all active:scale-[0.99] shadow-[0_2px_8px_rgba(0,0,0,0.04)] ${isAdotadoExterno ? 'ring-2 ring-amber-400 shadow-lg' : ''} ${isSelected ? 'ring-2 ring-accent' : ''}`} 
       onClick={() => {
         if (isBatchMode && onToggleSelect) {
           if (!isConferido) onToggleSelect(String(asset.id));
@@ -97,21 +100,44 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
         }
       }}
     >
+      {/* Faixa lateral permanente com a cor da TAG de auditoria */}
+      <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${meta.color.bg}`} />
+
       <div className="flex items-center justify-between">
         <div className="flex-1 pr-4 min-w-0">
-          <div className="flex items-center space-x-2 mb-1">
+          <div className="flex items-center flex-wrap gap-2 mb-2">
             <div className="bg-[#F1F5F9] px-1.5 py-0.5 rounded-[4px]">
               <span className="text-[9px] font-extrabold text-[#64748B] uppercase tracking-wider">PATRIMÔNIO</span>
             </div>
             {(asset._photoUrl || hasLocalPhoto) && (
               <Camera size={12} className="text-accent" />
             )}
-            {isBaixado && (
-              <div className="bg-red-50 px-1.5 py-0.5 rounded-[4px]">
-                <span className="text-[9px] font-extrabold text-red-600 uppercase tracking-wider">BAIXA</span>
-              </div>
-            )}
+            {/* TAG DE AUDITORIA — Regra de Ouro da conferência física */}
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border shadow-sm ${meta.color.badge}`}>
+              <StatusIcon size={12} />
+              <span className={`text-[10px] font-black uppercase tracking-wide ${meta.color.text}`}>
+                {meta.label}
+              </span>
+            </div>
           </div>
+
+          {isBaixado && (
+            <div className="mb-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-red-50 border border-red-200">
+              <AlertCircle size={12} className="text-red-600 shrink-0" />
+              <span className="text-[9px] font-black uppercase tracking-wide text-red-700 leading-tight">
+                Baixado na base mestre — status permanente
+              </span>
+            </div>
+          )}
+
+          {isAdotadoExterno && (
+            <div className="mb-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-amber-400">
+              <ExternalLink size={12} className="text-amber-300 shrink-0" />
+              <span className="text-[9px] font-black uppercase tracking-wide text-amber-300 leading-tight">
+                Adotado externo — registro de outra empresa
+              </span>
+            </div>
+          )}
           
           <h3 className="text-xl font-extrabold text-[#1E293B] font-mono tracking-tight mb-1 truncate">
             {formatEtiqueta(asset.etiqueta)}
@@ -158,13 +184,7 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
             </div>
           )}
 
-          <div className="flex items-center space-x-3">
-            <div className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md ${meta.color.bg} ${meta.color.border} border`}>
-              <StatusIcon size={10} className={meta.color.text} />
-              <span className={`text-[10px] font-black uppercase tracking-tight ${meta.color.text}`}>
-                {visualStatus}
-              </span>
-            </div>
+          <div className="flex items-center flex-wrap gap-x-3 gap-y-1">
             {Number(asset._is_synced) === 1 ? (
               <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-tight bg-emerald-50/60 border border-emerald-100 px-1.5 py-0.5 rounded-md flex items-center gap-1">
                 <span className="w-1 h-1 bg-emerald-500 rounded-full"></span>

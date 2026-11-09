@@ -13,6 +13,7 @@ import {
   Download, 
   FileText,
   Users,
+  UserPlus,
   Settings,
   X,
   ShieldCheck,
@@ -536,8 +537,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="w-16 h-16 bg-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 border border-accent/10 shadow-lg overflow-hidden p-1">
                   <ShieldCheck className="text-accent" size={32} />
                 </div>
-                <h2 className="text-xl font-bold text-ink uppercase tracking-tight">Painel Administrativo</h2>
-                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.3em] mt-1.5">Protocolo de Segurança</p>
+                <h2 className="text-xl font-bold text-ink uppercase tracking-tight">Painel Completo</h2>
+                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.3em] mt-1.5">Integridade · Fotos · Protheus</p>
               </div>
             
             <div className="space-y-2.5 max-h-[65vh] overflow-y-auto no-scrollbar pr-1">
@@ -562,6 +563,16 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Acessos</h4>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Gerir Usuários</p>
+                </div>
+              </button>
+
+              {/* Cadastro direto de auditor/usuário — antes vivia na paleta do
+                  CONTRATO DE TRABALHO; aqui é a única porta para o formulário. */}
+              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.USER_MANAGEMENT, { openAddUser: true }); }} className="w-full flex items-center p-4 bg-white border border-accent/20 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><UserPlus size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Novo Usuário</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Cadastrar acesso</p>
                 </div>
               </button>
 
