@@ -14,6 +14,7 @@ import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors'
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
+import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, isAuditorUser, userHasPermission } from './services/rbacService';
 
 // Extend Window interface for pushScreen
@@ -787,44 +788,16 @@ useEffect(() => {
   const [consultationFilters, setConsultationFilters] = useState<SearchFilters>(() => {
     try {
       const saved = localStorage.getItem('app_consultation_filters');
-      return saved ? JSON.parse(saved) : {
-        etiqueta: '',
-        descricaodoativo: '',
-        serial: '',
-        cnpj: '',
-        nomefornecedor: '',
-        notafiscal: '',
-        endereco: '',
-        conta_contabil: '',
-        centrodecusto: '',
-        DATAAQUISIC_START: '',
-        DATAAQUISIC_END: '',
-        Sn1_recno: '',
-        Sn3_recno: ''
-      };
+      return normalizeSearchFilters(saved ? JSON.parse(saved) : null);
     } catch {
-      return {
-        etiqueta: '',
-        descricaodoativo: '',
-        serial: '',
-        cnpj: '',
-        nomefornecedor: '',
-        notafiscal: '',
-        endereco: '',
-        conta_contabil: '',
-        centrodecusto: '',
-        DATAAQUISIC_START: '',
-        DATAAQUISIC_END: '',
-        Sn1_recno: '',
-        Sn3_recno: ''
-      };
+      return normalizeSearchFilters(null);
     }
   });
 
   const [committedConsultationFilters, setCommittedConsultationFilters] = useState<SearchFilters | null>(() => {
     try {
       const saved = localStorage.getItem('app_committed_consultation_filters');
-      return saved ? JSON.parse(saved) : null;
+      return saved ? normalizeSearchFilters(JSON.parse(saved)) : null;
     } catch { return null; }
   });
 

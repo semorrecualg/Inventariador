@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Asset, ScannerMode, ScanFeedbackMode, SearchFilters } from '../types';
+import { matchesConsultationFilters } from '../utils/consultationFilters';
 import Scanner from './Scanner';
 import { AssetListItem } from './AssetListItem';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
@@ -204,14 +205,8 @@ const Consultation: React.FC<ConsultationProps> = ({
     if (!committedFilters) return [];
     
     return sourceAssets.filter(asset => {
-      // Standard text filters
-      const textMatch = Object.entries(committedFilters).every(([key, value]) => {
-        if (!value || key.startsWith('DATAAQUISIC_')) return true;
-        const assetValue = String(asset[key as keyof Asset] || '').toUpperCase();
-        return assetValue.includes(value.toUpperCase().trim());
-      });
-
-      if (!textMatch) return false;
+      // Filtros textuais: chaves UPPER do contrato × chaves canônicas do ativo
+      if (!matchesConsultationFilters(asset, committedFilters)) return false;
 
       // Date range filter
       const assetDate = parseAssetDate(asset.dataaqusic);
