@@ -54,6 +54,7 @@ O modo de banco é definido pelas credenciais de ambiente:
 | `docs/RBAC_GOVERNANCA.md` | Matriz de papéis e rotinas RBAC |
 | `docs/SCHEMA_BASELINE.md` | Snapshot congelado do schema local (v7 — chave composta `[tenantid+primarykey]`) |
 | `docs/MIGRACAO_HIBRIDA.md` | Plano de dados (fases 0–5) |
+| `docs/FLUXO_LOGIN_DOWNLOAD_BASE.md` | Fluxograma do login na nuvem → download da base do tenant |
 | `SYSTEM_INSTRUCTIONS.md` | Governança SRE do repositório |
 | `SKILL.md` | Skill de release (changelog/versão/GitHub release) |
 | `CHANGELOG.md` | Histórico de versões |
