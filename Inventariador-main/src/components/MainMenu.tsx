@@ -9,7 +9,6 @@ import Modal from './Modal';
 import BackButton from './BackButton';
 import { 
   Info,
-  Search, 
   Download, 
   FileText,
   Users,
@@ -446,7 +445,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <div className="flex-1 text-left">
             <h3 className="text-base font-bold text-ink tracking-tight">FICHA DO ATIVO</h3>
-            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Visualizar Kardex do Item</p>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Consultar, localizar e abrir a ficha</p>
           </div>
           <ChevronRight size={20} className="text-slate-300 group-hover:text-purple-600 transition-colors" />
         </button>
@@ -464,21 +463,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Itens sem plaqueta / Novas Tags</p>
           </div>
           <ChevronRight size={20} className="text-slate-300 group-hover:text-accent transition-colors" />
-        </button>
-
-        {/* Module 4: CONSULTA */}
-        <button
-          onClick={() => onNavigate(AppScreen.CONSULTATION)}
-          className="w-full flex items-center p-5 bg-surface border border-border rounded-2xl active:scale-[0.98] transition-all shadow-[0_2px_15px_rgba(0,0,0,0.05)] group animate-fadeIn [animation-delay:150ms]"
-        >
-          <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center mr-5 group-hover:bg-amber-600 group-hover:text-white transition-colors">
-            <Search size={24} />
-          </div>
-          <div className="flex-1 text-left">
-            <h3 className="text-base font-bold text-ink tracking-tight">CONSULTA DE ATIVOS</h3>
-            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest mt-0.5">Busca rápida e localização</p>
-          </div>
-          <ChevronRight size={20} className="text-slate-300 group-hover:text-amber-600 transition-colors" />
         </button>
 
         {/* Module 5: CONCILIACAO — TRILHA B (AUDITOR / ADMIN) */}
@@ -1633,7 +1617,7 @@ O **Inventariador GBR v2.6** é uma solução avançada para gestão de inventá
 - Busca por intervalo de data de aquisição.
 - Modo de retorno ao inventário para itens localizados fora da rota original.
 
-### 4.4. Detalhes do Ativo (Kardex)
+### 4.4. Ficha do Ativo (Kardex)
 - Visualização completa de 5 grupos de dados: Identificação, Localização, Aquisição, Controle Contábil e Dados do Inventário.
 - **Edição Controlada**: Apenas campos configurados pelo ADMIN podem ser alterados pelo AUDITOR.
 - **Geração de QR Code**: Baseado em campos configuráveis para etiquetas de campo.

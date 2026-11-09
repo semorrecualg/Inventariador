@@ -4,6 +4,7 @@ import { safeStringify } from '../services/utils';
 import * as XLSX from 'xlsx';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
+import { normalizeFlag } from '../utils/normalize';
 import { readSessionTenantId } from '../utils/tenantUtils';
 import BackButton from './BackButton';
 import { 
@@ -278,10 +279,14 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
       if (etq && etq !== 'ETIQUETAR') s.comPlaqueta++;
 
-      if (tag === TagInventario.FALTA_ETIQUETAR || (plaquetaMaster === 'ETIQUETAR' && !isConferido)) {
+      // Mesma regra da Matriz de Tags (tagService): a conclusão do
+      // emplaquetamento exige confirmação explícita (`_plaquetado`), não a
+      // simples conferência física do bem.
+      const isEtiquetado = normalizeFlag(a._plaquetado) || tag === TagInventario.ETIQUETADO;
+      if (tag === TagInventario.FALTA_ETIQUETAR || (plaquetaMaster === 'ETIQUETAR' && !isEtiquetado)) {
         s.faltaEtiquetar++;
       }
-      if (tag === TagInventario.ETIQUETADO || (plaquetaMaster === 'ETIQUETAR' && isConferido)) {
+      if (tag === TagInventario.ETIQUETADO || (plaquetaMaster === 'ETIQUETAR' && isEtiquetado)) {
         s.jaEtiquetado++;
       }
 

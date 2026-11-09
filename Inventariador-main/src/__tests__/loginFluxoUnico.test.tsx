@@ -207,4 +207,55 @@ describe('Login — fluxo único (autentica e entra; filial é escolhida em /con
     const { isAppManagedSession } = await import('../utils/authUtils');
     expect(isAppManagedSession()).toBe(true);
   });
+
+  it('dono global sem tenantid na credencial local entra pela barreira local (contrato vem do pós-login)', async () => {
+    // Bug real: semorr@gmail.com (VITE_ADMIN_EMAIL) logava no mobile (perfil
+    // local com contrato) e era BLOQUEADO no web pela Barreira Local, porque o
+    // guard exigia tenantid até do dono global — que por desenho não tem
+    // contrato no perfil. O caminho da nuvem sempre isentou o dono.
+    ensureUserProfileMock.mockResolvedValue({ email: ADMIN_EMAIL, tenantid: '' });
+    const owner = {
+      username: 'admin',
+      name: 'Dono Global',
+      email: ADMIN_EMAIL,
+      password: 'admin123',
+      role: 'ADMIN',
+      is_admin: true,
+      isAdmin: true,
+      tenantid: '',
+    } as unknown as User;
+
+    renderLogin([owner]);
+    await submitCredentials(ADMIN_EMAIL, 'admin123');
+
+    await waitFor(() => expect(onLogin).toHaveBeenCalledTimes(1));
+    const loggedUser = onLogin.mock.calls[0][0] as User;
+    expect(loggedUser.email).toBe(ADMIN_EMAIL);
+    expect(loggedUser.tenantid).toBe('');
+    expect(screen.queryByText(/sem tenantid vinculado/i)).toBeNull();
+  });
+
+  it('dono global na base Dexie sem tenantid entra (nenhum contrato herdado de sessão antiga)', async () => {
+    const { localDb } = await import('../services/localDbService');
+    await localDb.users.clear();
+    await localDb.users.add({
+      username: 'admin',
+      name: 'Dono Global',
+      email: ADMIN_EMAIL,
+      password: 'admin123',
+      role: 'ADMIN',
+      is_admin: true,
+      isAdmin: true,
+      tenantid: '',
+      filial: '',
+    } as unknown as User);
+
+    renderLogin();
+    await submitCredentials(ADMIN_EMAIL, 'admin123');
+
+    await waitFor(() => expect(onLogin).toHaveBeenCalledTimes(1));
+    const loggedUser = onLogin.mock.calls[0][0] as User;
+    expect(loggedUser.email).toBe(ADMIN_EMAIL);
+    expect(loggedUser.tenantid).toBe('');
+  });
 });

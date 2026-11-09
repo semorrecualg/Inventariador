@@ -317,6 +317,12 @@ export class SqliteService {
     timestamp: number;
   }[] = [];
 
+  /** Janela do auto-flush por tempo: sem isto, uma edição isolada (ex.: a
+   *  plaqueta digitada na ficha) ficava só na memória até juntar 5/50
+   *  alterações — telas que leem o banco (ETIQUETAGEM) viam o valor antigo. */
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly FLUSH_DELAY_MS = 600;
+
   private constructor() {}
 
   public static getInstance(): SqliteService {
@@ -1186,11 +1192,20 @@ export class SqliteService {
       timestamp: Date.now()
     });
     
+    if (this.flushTimer) clearTimeout(this.flushTimer);
     if (this.bufferedFieldChanges.length >= 5) {
       this.flushFieldChanges().catch(err => {
         logger.error(">>> [sqliteService] Erro ao disparar flush automático:", err);
       });
+      return;
     }
+
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this.flushFieldChanges().catch(err => {
+        logger.error(">>> [sqliteService] Erro no auto-flush por tempo:", err);
+      });
+    }, SqliteService.FLUSH_DELAY_MS);
   }
 
   public getBufferedChangesCount(): number {
@@ -1198,6 +1213,10 @@ export class SqliteService {
   }
 
   public async flushFieldChanges(): Promise<void> {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
     if (this.bufferedFieldChanges.length === 0) return;
     
     logger.info(`>>> [sqliteService] flushFieldChanges acionado para ${this.bufferedFieldChanges.length} alterações...`);

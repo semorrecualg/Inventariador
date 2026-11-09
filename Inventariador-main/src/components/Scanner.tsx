@@ -353,10 +353,16 @@ const Scanner: React.FC<ScannerProps> = ({
       isStartingRef.current = false;
       if (isMounted.current) {
         logger.error("Scanner start error", err);
-        const errMsg = err instanceof Error ? err.message : "";
-        const isPermissionDenied = errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("not allowed") || errMsg.toLowerCase().includes("denied");
+        // A lib rejeita ora com Error, ora com string ("NotAllowedError: ...");
+        // sem ler a string o utilizador só via a mensagem genérica.
+        const errMsg = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+        const errLower = errMsg.toLowerCase();
+        const isPermissionDenied = errLower.includes("permission") || errLower.includes("not allowed") || errLower.includes("denied");
+        const isMissingCamera = errLower.includes("not found") || errLower.includes("no camera") || errLower.includes("devices not found") || errLower.includes("overconstrained");
         if (isPermissionDenied) {
-          setError("Para usar esta função, ative a câmera nas configurações do Android/iOS.");
+          setError("Câmera bloqueada. Autorize o acesso nas permissões do navegador/aparelho e tente novamente.");
+        } else if (isMissingCamera) {
+          setError("Nenhuma câmera encontrada neste dispositivo. Use 'Digitar Código Manualmente'.");
         } else {
           setError(errMsg || "Erro ao acessar câmera. Verifique as permissões de hardware.");
         }
@@ -438,8 +444,25 @@ const Scanner: React.FC<ScannerProps> = ({
     }
   };
 
+  // Alternância de modo: o botão no centro continua existindo, mas o duplo
+  // clique/toque em qualquer área livre da leitura também alterna
+  // BARRAS ⇄ QR (comportamento original da tela de leitura).
+  const toggleMode = useCallback(() => {
+    if (!onModeChange) return;
+    onModeChange(mode === ScannerMode.BARCODE ? ScannerMode.QRCODE : ScannerMode.BARCODE);
+  }, [onModeChange, mode]);
+
+  const handleDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    // Controles (fechar, reiniciar, zoom, lanterna) não trocam o modo.
+    if ((event.target as HTMLElement).closest('button')) return;
+    toggleMode();
+  };
+
   const scannerContent = (
-    <div className={`${isInline ? 'relative w-full h-64 rounded-3xl' : 'fixed inset-0 z-[9999]'} bg-black flex flex-col items-center justify-center overflow-hidden shadow-2xl transition-all duration-300`}>
+    <div
+      onDoubleClick={handleDoubleClick}
+      className={`${isInline ? 'relative w-full h-64 rounded-3xl' : 'fixed inset-0 z-[9999]'} bg-black flex flex-col items-center justify-center overflow-hidden shadow-2xl transition-all duration-300`}
+    >
       {/* Inactivity Overlay */}
       {isInactive && !isPaused && (
         <div className="absolute inset-0 z-[110] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center">
@@ -554,7 +577,7 @@ const Scanner: React.FC<ScannerProps> = ({
 
           {onModeChange && (
             <button 
-              onClick={() => onModeChange(mode === ScannerMode.BARCODE ? ScannerMode.QRCODE : ScannerMode.BARCODE)}
+              onClick={toggleMode}
               className={`p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center ${isInline ? 'min-w-[48px]' : 'min-w-[64px]'} pointer-events-auto shadow-xl`}
             >
               <RefreshCw size={isInline ? 16 : 20} className="mb-1" />
@@ -617,7 +640,10 @@ const Scanner: React.FC<ScannerProps> = ({
       )}
 
       {error && !isPaused && (
-        <div className={`absolute ${isInline ? 'bottom-4' : 'bottom-24'} left-6 right-6 p-4 bg-red-500/20 backdrop-blur-md border border-red-500/50 rounded-2xl text-center pointer-events-auto`}>
+        // Em ecrã cheio o aviso fica SOB a barra de controlos: no rodapé ele
+        // ficava por baixo do botão "Digitar Código Manualmente" (ambos em
+        // bottom-24) e a mensagem + "Tentar Novamente" era ilegível.
+        <div className={`absolute ${isInline ? 'bottom-4' : 'top-24'} left-6 right-6 z-[120] p-4 bg-red-500/20 backdrop-blur-md border border-red-500/50 rounded-2xl text-center pointer-events-auto`}>
           <p className="text-white text-xs font-bold uppercase tracking-tight">{error}</p>
           <button onClick={() => { setError(null); startScanner(); }} className="mt-2 text-white text-[10px] font-bold underline uppercase tracking-widest">Tentar Novamente</button>
         </div>

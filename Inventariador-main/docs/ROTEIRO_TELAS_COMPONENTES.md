@@ -94,7 +94,6 @@ graph TD
     MAIN_MENU -->|INVENTÁRIO| ADDR_SEL
     MAIN_MENU -->|FICHA DO ATIVO| CONSULTATION
     MAIN_MENU -->|ETIQUETAR ATIVOS| LABELING
-    MAIN_MENU -->|CONSULTA DE ATIVOS| CONSULTATION
     MAIN_MENU -->|CONCILIAÇÃO POR CONTAS| RECONCILIATION
     MAIN_MENU -->|ASSINATURA DIGITAL| SIGNATURE
 
@@ -167,7 +166,6 @@ MAIN_MENU · MainMenu.tsx            ← Hub operacional do auditor (DASHBOARD f
   ├─ INVENTÁRIO · AddressSelector.tsx → Inventory.tsx
   ├─ FICHA DO ATIVO · Consultation.tsx
   ├─ ETIQUETAR ATIVOS · Labeling.tsx
-  ├─ CONSULTA DE ATIVOS · Consultation.tsx
   ├─ CONCILIAÇÃO POR CONTAS · AccountReconciliation.tsx
   └─ ASSINATURA DIGITAL · Signature.tsx
   → (escolher INVENTÁRIO)
@@ -200,7 +198,7 @@ MODULE_SELECTION · ModuleSelector.tsx
 ```
 MAIN_MENU · MainMenu.tsx            ← entrada após a seleção de unidade (tool grid)
   → ADDRESS_SELECTION · AddressSelector.tsx → INVENTORY · Inventory.tsx  (INVENTÁRIO)
-  → CONSULTATION · Consultation.tsx                   (FICHA DO ATIVO · CONSULTA DE ATIVOS)
+  → CONSULTATION · Consultation.tsx                   (FICHA DO ATIVO)
   → LABELING · Labeling.tsx                           (ETIQUETAR ATIVOS)
   → ACCOUNT_RECONCILIATION · AccountReconciliation.tsx (CONCILIAÇÃO POR CONTAS)
   → SIGNATURE · Signature.tsx                         (ASSINATURA DIGITAL)
@@ -275,9 +273,9 @@ PAINEL → `ADMIN`, AUDITORIA → `AUDIT`. O MainMenu **não** exibe mais a tool
 > (`ASSET_CONTROL_HOME`), conforme `docs/CORRECAO_INVENTORYCARD_MODULO_ATIVO.md`.
 
 > **Nota de fluxo (2026-08-06):** o fluxo principal do auditor passa por **`MAIN_MENU`**
-> (`MainMenu.tsx`) após `UNIT_SELECTION` — o componente já ativa as 6 funcionalidades:
-> **INVENTÁRIO · FICHA DO ATIVO · ETIQUETAR ATIVOS · CONSULTA DE ATIVOS ·
-> CONCILIAÇÃO POR CONTAS · ASSINATURA DIGITAL**. O `DASHBOARD` (`Dashboard.tsx`) fica
+> (`MainMenu.tsx`) após `UNIT_SELECTION` — o componente já ativa as 5 funcionalidades:
+> **INVENTÁRIO · FICHA DO ATIVO · ETIQUETAR ATIVOS · CONCILIAÇÃO POR CONTAS ·
+> ASSINATURA DIGITAL**. O `DASHBOARD` (`Dashboard.tsx`) fica
 > **fora do fluxo principal** (mantido como acesso legado no grafo).
 >
 > **Sincronização com o código (2026-08-06):** o `onSelect` do `UnitSelector` em `App.tsx`

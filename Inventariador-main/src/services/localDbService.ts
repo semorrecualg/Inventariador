@@ -20,6 +20,40 @@ const snapshotStore = localforage.createInstance({
   storeName: 'virtual_backups'
 });
 
+/**
+ * Normaliza texto para a busca de endereço: sem acentos, caixa alta e
+ * espaços colapsados. Usado tanto no termo digitado quanto no endereço.
+ */
+export const normalizeAddressSearch = (value: unknown): string =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+
+/**
+ * Regra única da busca de endereço/localidade: o termo pode estar em QUALQUER
+ * posição do endereço (ex.: "contab" acha "151200 CONTABILIDADE - CDC"), sem
+ * diferenciar acentos ou caixa. Termo vazio não filtra.
+ */
+/**
+ * Chave comparável de etiqueta: caixa alta, sem acentos e só `[A-Z0-9]`.
+ * Faz `" etiquetar "`, `Etiquetar` e `ETIQUETAR` caírem no mesmo balde.
+ */
+export const normalizeTagKey = (value: unknown): string =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+export const matchesAddressSearch = (address: unknown, term: unknown): boolean => {
+  const needle = normalizeAddressSearch(term);
+  if (!needle) return true;
+  return normalizeAddressSearch(address).includes(needle);
+};
+
 export const getCurrentTenantid = (): string => {
   try {
     const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
@@ -357,17 +391,13 @@ export const localDb = {
     getLocationsWithStats: async (unitId: string, searchTerm = '') => {
       const tenant = getCurrentTenantid().trim().toUpperCase();
       const uIdUpper = unitId.toUpperCase().trim();
-      const cleanSearch = searchTerm.toLowerCase().trim();
-      
-      const query = db.addresses.where('[tenantid+filial]').equals([tenant, uIdUpper]);
-      let addrList = await query.toArray();
 
-      if (cleanSearch !== '') {
-        addrList = addrList.filter(a => String(a.codigo_endereco || '').toLowerCase().startsWith(cleanSearch));
-      }
-      
-      // 2. Se a tabela addresses estiver vazia, extrai as localidades dinamicamente da tabela de trabalho
-      //    (assets canônica — decisão DBA 2026-08-06; fallback local_assets baseline para restore .dat)
+      const indexedAddrs = await db.addresses.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+      let addrList = indexedAddrs;
+
+      // 2. Só se o ÍNDICE estiver vazio (nunca por causa do filtro): extrai as
+      //    localidades da tabela de trabalho (assets canônica — decisão DBA
+      //    2026-08-06; fallback local_assets baseline para restore .dat)
       if (addrList.length === 0) {
         let workAssets = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
         if (workAssets.length === 0) {
@@ -376,22 +406,26 @@ export const localDb = {
         const extractedAddrs = new Map<string, typeof addrList[0]>();
         workAssets.forEach(a => {
           const addrStr = String(a.endereco || '').trim();
-          if (addrStr && (cleanSearch === '' || addrStr.toUpperCase().startsWith(cleanSearch))) {
-            const key = addrStr.toUpperCase();
-            if (!extractedAddrs.has(key)) {
-              extractedAddrs.set(key, {
-                tenantid: tenant,
-                filial: uIdUpper,
-                codigo_endereco: addrStr,
-                setor: '',
-                bloco: '',
-                _is_synced: 1
-              });
-            }
+          if (!addrStr) return;
+          const key = addrStr.toUpperCase();
+          if (!extractedAddrs.has(key)) {
+            extractedAddrs.set(key, {
+              tenantid: tenant,
+              filial: uIdUpper,
+              codigo_endereco: addrStr,
+              setor: '',
+              bloco: '',
+              _is_synced: 1
+            });
           }
         });
         addrList = Array.from(extractedAddrs.values());
       }
+
+      // 3. Busca por TRECHO, sem acentos e sem caixa, no índice já montado.
+      //    Antes: `startsWith` case-sensitive e, no fallback, comparação de
+      //    maiúsculas contra termo minúsculo — “CONTAB” nunca encontrava nada.
+      addrList = addrList.filter(a => matchesAddressSearch(a.codigo_endereco, searchTerm));
 
       // 4. Busca reativa das estatísticas de conferência na tabela de trabalho (assets canônica)
       let listAssets = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
@@ -439,31 +473,38 @@ export const localDb = {
       return Array.from(uniqueResults.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
     },
 
+    /**
+     * Itens que precisam de plaqueta na unidade em que o auditor está atuando:
+     * TODOS os registros daquela filial com o campo `etiqueta` = "ETIQUETAR".
+     */
     getLabelingAssets: async (unitId?: string): Promise<Asset[]> => {
-      let activeUnit = unitId || '';
+      let activeUnit = String(unitId || '').trim();
       let activeCampaign = '';
 
       try {
         const ctx = await db.SYSTEM_CONTEXT.get('selected_unit');
         const activeCampaignRow = await db.SYSTEM_CONTEXT.get('active_campaign');
-        if (!activeUnit && ctx) activeUnit = ctx.value;
+        if (!activeUnit && ctx) activeUnit = String(ctx.value || '').trim();
         if (activeCampaignRow) activeCampaign = activeCampaignRow.value;
       } catch { /* ignore */ }
 
       if (!activeUnit) {
         const storedUnit = localStorage.getItem('app_selected_unit');
-        if (storedUnit) activeUnit = storedUnit;
+        if (storedUnit) activeUnit = storedUnit.trim();
       }
 
       if (!activeUnit) return [];
+      const unitKey = normalizeTagKey(activeUnit);
 
       const list = await db.ativos.toArray();
       const results = list.filter(a => {
-        const filialMatch = String(a.filial || a._unitid || '').toUpperCase().trim() === activeUnit.toUpperCase().trim();
-        const isNotDeleted = a._is_deleted !== 1;
-        const noLabel = !a.etiqueta || String(a.etiqueta).trim() === '' || String(a.etiqueta).toUpperCase().trim() === 'ETIQUETAR' || a._plaquetado === 0;
-        const campaignMatch = !activeCampaign || String(a.currentCampaignId) === String(activeCampaign);
-        return filialMatch && isNotDeleted && noLabel && campaignMatch;
+        if (a._is_deleted === 1) return false;
+        const assetUnit = normalizeTagKey(a.filial || a._unitid);
+        if (assetUnit !== unitKey) return false;
+        // Mesma tolerância do loader do inventário: registros da base sem
+        // campanha continuam válidos na campanha ativa.
+        if (activeCampaign && a.currentCampaignId && String(a.currentCampaignId) !== String(activeCampaign)) return false;
+        return normalizeTagKey(a.etiqueta) === 'ETIQUETAR';
       });
 
       return results.map(row => toReactAsset(row)).sort((a, b) => {
