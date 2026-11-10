@@ -1897,6 +1897,40 @@ const Inventory: React.FC<InventoryProps> = ({
       ) : (
         <React.Fragment>
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
+      {/* Endereço e progresso sobem para cima da barra de comandos: bypass →
+          endereço → progresso → busca, que fecha a seção do topo. */}
+      <div className="bg-white px-6 pt-3 pb-2 shrink-0 space-y-2.5">
+        {/* Endereço — uma única linha: o texto completo rola em marquee
+            em vez de ser truncado (antes repetia-se em duas linhas). */}
+        <div className="flex items-center bg-slate-50/50 p-2 rounded-2xl border border-slate-100">
+          <div className="flex-1 min-w-0 px-2 flex items-center space-x-2">
+            <MapPin size={12} className={currentSelectedAddress ? "text-accent shrink-0" : "text-slate-400 shrink-0"} />
+            <span className="text-[7.5px] font-black text-accent uppercase tracking-widest leading-none shrink-0 select-none">Endereço:</span>
+            <Marquee className="flex-1 min-w-0" speed={38}>
+              <span className="text-[9px] font-extrabold text-slate-700 uppercase tracking-tight whitespace-nowrap">
+                {currentSelectedAddress || selectedLocation || 'TODAS AS LOCALIDADES'}
+              </span>
+            </Marquee>
+          </div>
+        </div>
+
+        {/* Progresso da localidade */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-black uppercase tracking-widest text-[#64748B]">Conferidos</span>
+            <span className="text-[9px] font-black uppercase tracking-widest text-[#1E293B]">
+              {locationStats.checked} / {locationStats.total} · {locationProgress}%
+            </span>
+          </div>
+          <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${locationProgress === 100 ? 'bg-emerald-500' : 'bg-accent'}`}
+              style={{ width: `${locationProgress}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* Header Fixo Blindado */}
       <div className="bg-white border-b border-slate-100 px-3 py-3 sticky top-0 z-50 shrink-0">
         <div className="flex items-center gap-2">
@@ -2001,38 +2035,8 @@ const Inventory: React.FC<InventoryProps> = ({
       </div>
 
       <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
-        <div className="bg-white px-6 py-4 shadow-sm border-b border-slate-50 shrink-0">
-          <div className="space-y-4">
-            {/* Endereço — uma única linha: o texto completo rola em marquee
-                em vez de ser truncado (antes repetia-se em duas linhas). */}
-            <div className="flex items-center bg-slate-50/50 p-2 rounded-2xl border border-slate-100">
-              <div className="flex-1 min-w-0 px-2 flex items-center space-x-2">
-                <MapPin size={12} className={currentSelectedAddress ? "text-accent shrink-0" : "text-slate-400 shrink-0"} />
-                <span className="text-[7.5px] font-black text-accent uppercase tracking-widest leading-none shrink-0 select-none">Endereço:</span>
-                <Marquee className="flex-1 min-w-0" speed={38}>
-                  <span className="text-[9px] font-extrabold text-slate-700 uppercase tracking-tight whitespace-nowrap">
-                    {currentSelectedAddress || selectedLocation || 'TODAS AS LOCALIDADES'}
-                  </span>
-                </Marquee>
-              </div>
-            </div>
-
-            {/* Progresso da localidade */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] font-black uppercase tracking-widest text-[#64748B]">Conferidos</span>
-                <span className="text-[9px] font-black uppercase tracking-widest text-[#1E293B]">
-                  {locationStats.checked} / {locationStats.total} · {locationProgress}%
-                </span>
-              </div>
-              <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${locationProgress === 100 ? 'bg-emerald-500' : 'bg-accent'}`}
-                  style={{ width: `${locationProgress}%` }}
-                />
-              </div>
-            </div>
-
+        <div className="bg-white px-6 py-3 border-b border-slate-50 shrink-0">
+          <div className="space-y-3">
             {/* Segmented Control */}
             <div className="flex bg-slate-100/50 p-1 rounded-xl border border-slate-100">
               <button 
