@@ -18,6 +18,7 @@ import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
 import { generateUUID } from '../services/supabaseService';
 import { telemetryService } from '../services/telemetryService';
 import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
+import Marquee from './Marquee';
 import { isAdminEmail } from '../utils/authUtils';
 import { localDb } from '../services/localDbService';
 import { sqliteService } from '../services/sqliteService';
@@ -2002,21 +2003,17 @@ const Inventory: React.FC<InventoryProps> = ({
       <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
         <div className="bg-white px-6 py-4 shadow-sm border-b border-slate-50 shrink-0">
           <div className="space-y-4">
-            {/* Sensors Row */}
-            <div className="flex items-center justify-between bg-slate-50/50 p-2 rounded-2xl border border-slate-100">
-              <div className="flex-1 min-w-0 px-2">
-                {currentSelectedAddress && (
-                  <div className="flex items-center space-x-1.5 mb-1 select-none">
-                    <span className="text-[7.5px] font-black text-accent uppercase tracking-widest leading-none">Endereço:</span>
-                    <span className="text-[9px] font-extrabold text-slate-700 uppercase tracking-tight leading-none truncate">{currentSelectedAddress}</span>
-                  </div>
-                )}
-                <div className="flex items-center space-x-2">
-                  <MapPin size={12} className={currentSelectedAddress ? "text-accent shrink-0" : "text-slate-400 shrink-0"} />
-                  <span className="text-[9px] font-bold text-[#1E293B] truncate uppercase tracking-tight">
-                    {selectedLocation || 'TODAS AS LOCALIDADES'}
+            {/* Endereço — uma única linha: o texto completo rola em marquee
+                em vez de ser truncado (antes repetia-se em duas linhas). */}
+            <div className="flex items-center bg-slate-50/50 p-2 rounded-2xl border border-slate-100">
+              <div className="flex-1 min-w-0 px-2 flex items-center space-x-2">
+                <MapPin size={12} className={currentSelectedAddress ? "text-accent shrink-0" : "text-slate-400 shrink-0"} />
+                <span className="text-[7.5px] font-black text-accent uppercase tracking-widest leading-none shrink-0 select-none">Endereço:</span>
+                <Marquee className="flex-1 min-w-0" speed={38}>
+                  <span className="text-[9px] font-extrabold text-slate-700 uppercase tracking-tight whitespace-nowrap">
+                    {currentSelectedAddress || selectedLocation || 'TODAS AS LOCALIDADES'}
                   </span>
-                </div>
+                </Marquee>
               </div>
             </div>
 
