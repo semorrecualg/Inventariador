@@ -909,16 +909,24 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   const forcedTenantid = Array.isArray(tenantid) ? tenantid[0] : tenantid;
   logger.info(`>>> [Supabase] Iniciando sincronização de ${assets.length} ativos em lotes para o tenant: ${forcedTenantid || 'Global'}`);
   
-  const CHUNK_SIZE = 50; // Bloqueio em max 50 para evitar erro 400 (URL Too Long) na Nuvem
+  // VOLUME: 50/requisição + 40ms de espera obrigatória davam 140 idas à rede por
+  // carga de 7.000. Cada requisição custa RTT + commit no Postgres, então o tempo
+  // crescia linearmente com o número de lotes. 500 por requisição usa o limite de
+  // corpo do PostgREST com folga (≈0,5 MB) e reduz a 14 idas à rede.
+  const CHUNK_SIZE = 500;
+  // Coroutines controladas: 4 lotes em voo movem 2.000 registros por rodada sem
+  // saturar o pool de conexões do Supabase (o gargalo passa a ser o Postgres, não
+  // a latência de cada ida e volta).
+  const MAX_PARALLEL_BATCHES = 4;
   const total = assets.length;
   const successfullySyncedIds: string[] = [];
   const failedRows: string[] = []; // Isolamento de registros rejeitados (diagnóstico por id)
+  let processedRows = 0;
+  const startedAt = Date.now();
 
-  for (let i = 0; i < total; i += CHUNK_SIZE) {
-    const chunk = assets.slice(i, i + CHUNK_SIZE);
-    
+  const buildPayload = (chunk: Asset[]) => {
     // Preparação de dados (Sanitização rígida anti-PGRST204)
-    const sanitizedAssetsPayload = chunk.map(a => {
+    return chunk.map(a => {
       const cleanAsset = { ...a };
       if (cleanAsset._photoUrl && cleanAsset._photoUrl.startsWith('blob:')) {
         delete cleanAsset._photoUrl;
@@ -995,51 +1003,87 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         })()
       };
     });
+  };
 
-    const lote = Math.floor(i / CHUNK_SIZE) + 1;
+  // Envio de um lote. O alvo do ON CONFLICT é (tenantid, id) — escopo por
+  // contrato, para a carga de um contrato nunca sobrescrever outra base com a
+  // mesma chave de origem. Em schema legado o índice único real pode ser
+  // (tenantid, primarykey): nesse caso (42P10/22P02) repete uma vez pelo índice
+  // do bootstrap em vez de degradar para 500 requisições individuais.
+  const sendBatch = async (rows: Record<string, unknown>[]) => {
+    if (!supabase) throw new Error('Instância do Supabase indisponível.');
+    const attempt = await supabase.from('assets').upsert(rows, { onConflict: 'tenantid, id' });
+    if (!attempt.error) return;
+
+    const code = (attempt.error as { code?: string }).code || '';
+    if (code === '42P10' || code === '22P02' || /conflict|uuid/i.test(attempt.error.message || '')) {
+      const retry = await supabase.from('assets').upsert(rows, { onConflict: 'tenantid, primarykey' });
+      if (!retry.error) return;
+      throw retry.error;
+    }
+    throw attempt.error;
+  };
+
+  const processBatch = async (batchIndex: number) => {
+    const start = batchIndex * CHUNK_SIZE;
+    const chunk = assets.slice(start, start + CHUNK_SIZE);
+    const sanitizedAssetsPayload = buildPayload(chunk);
+    const lote = batchIndex + 1;
+
     try {
-      // SRE ISOLAMENTO DE CONTRATO: upsert escopado por (tenantid, id).
-      // Antes, onConflict 'id' permitia que a carga de um contrato SOBRESCREVESSE
-      // ativos de outro contrato que compartilhassem a mesma chave primária de
-      // origem (ex.: base de teste do CLIENTETESTE copiada do CICOPAL).
-      const { error } = await supabase
-        .from('assets')
-        .upsert(sanitizedAssetsPayload, { onConflict: 'tenantid, id' });
-
-      if (error) {
-        throw error;
-      }
+      await sendBatch(sanitizedAssetsPayload);
       successfullySyncedIds.push(...chunk.map(a => String(a.id)));
     } catch (err: unknown) {
       // ISOLAMENTO POR ATIVO: se o lote falhar (ex.: schema incompatível em uma coluna),
       // tenta cada linha individualmente para sincronizar o que é válido e identificar
       // exatamente os registros rejeitados (id + motivo) — sem derrubar a esteira inteira.
-      let loteOk = 0;
-      for (const row of sanitizedAssetsPayload) {
-        try {
-          // Mesmo escopo por (tenantid, id) no fallback ativo-a-ativo
-          const { error: rowError } = await supabase.from('assets').upsert([row], { onConflict: 'tenantid, id' });
-          if (rowError) {
-            failedRows.push(`${row.id}: ${rowError.message || 'Erro de esquema.'}`);
-          } else {
-            loteOk++;
+      // O fallback só corre para um lote que falhou: 8 linhas em voo em vez de
+      // 500 idas sequenciais (o caminho normal nunca paga este custo).
+      const ROW_PARALLEL = 8;
+      for (let r = 0; r < sanitizedAssetsPayload.length; r += ROW_PARALLEL) {
+        const rowSlice = sanitizedAssetsPayload.slice(r, r + ROW_PARALLEL);
+        await Promise.all(rowSlice.map(async (row) => {
+          try {
+            await sendBatch([row]);
             successfullySyncedIds.push(String(row.id));
+          } catch (rowErr: unknown) {
+            const rowMsg = rowErr instanceof Error ? rowErr.message : String(rowErr);
+            failedRows.push(`${row.id}: ${rowMsg}`);
           }
-        } catch (rowErr: unknown) {
-          const rowMsg = rowErr instanceof Error ? rowErr.message : String(rowErr);
-          failedRows.push(`${row.id}: ${rowMsg}`);
-        }
+        }));
       }
-      logger.error(`>>> [Supabase] Lote ${lote}: ${loteOk}/${sanitizedAssetsPayload.length} ativos OK, ${sanitizedAssetsPayload.length - loteOk} rejeitados (isolamento ativo-a-ativo).`, err);
+      logger.error(
+        `>>> [Supabase] Lote ${lote} falhou; ${sanitizedAssetsPayload.length} linha(s) reenviadas em isolamento. Causa: ${err instanceof Error ? err.message : String(err)}`,
+        err
+      );
     }
 
+    // Progresso monotónico: conta linhas de lotes concluídos, nunca de lotes
+    // apenas iniciados (o utilizador vê o que já está no Postgres).
+    processedRows += chunk.length;
     if (onProgress) {
-      onProgress(Math.min(i + CHUNK_SIZE, total), total);
+      onProgress(Math.min(processedRows, total), total);
     }
+  };
 
-    // Delay visual para a esteira reativa
-    await new Promise(res => setTimeout(res, 40));
-  }
+  // Pool de coroutines controladas: mantém no máximo MAX_PARALLEL_BATCHES em voo.
+  const totalBatches = Math.ceil(total / CHUNK_SIZE);
+  let nextBatch = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(MAX_PARALLEL_BATCHES, totalBatches) }, async () => {
+      while (nextBatch < totalBatches) {
+        const current = nextBatch++;
+        await processBatch(current);
+      }
+    })
+  );
+
+  const elapsedMs = Date.now() - startedAt;
+  logger.info(
+    `>>> [Supabase] Espelhamento: ${successfullySyncedIds.length}/${total} ativos em ` +
+    `${totalBatches} lote(s) de ${CHUNK_SIZE} · ${Math.round(elapsedMs / 100) / 10}s ` +
+    `(${total > 0 ? Math.round(total / Math.max(elapsedMs, 1) * 1000) : 0} ativos/s)`
+  );
 
   if (failedRows.length > 0) {
     logger.error(`>>> [Supabase] Espelhamento concluído com ${failedRows.length} registro(s) rejeitado(s) por esquema/dados.`);
@@ -1049,6 +1093,27 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   }
 
   return successfullySyncedIds;
+};
+
+/**
+ * Espelha para a nuvem e devolve o estado local ao o que já está no Postgres:
+ * os ids aceites são marcados `_is_synced = 1` numa única transação. É o único
+ * ponto que apaga a etiqueta “PENDENTE NUVEM” sem esperar um novo download.
+ */
+export const syncAssetsToCloudAndMark = async (
+  assets: Asset[],
+  tenantid?: string | string[],
+  onProgress?: (processed: number, total: number) => void
+): Promise<string[]> => {
+  const synced = await syncAssetsToCloud(assets, tenantid, onProgress);
+  if (synced.length > 0) {
+    try {
+      await sqliteService.markAssetsSynced(synced);
+    } catch (markErr) {
+      logger.warn('>>> [Supabase] Ativos enviados mas falhou a marcação local de sincronizado:', markErr);
+    }
+  }
+  return synced;
 };
 
 /**
@@ -1765,7 +1830,9 @@ const fetchFullInventoryImpl = async (
   try {
     // 1. Busca todos os ativos filtrados por tenantid e opcionalmente unitid (PAGINADO)
     let assets: Asset[] = [];
-    const PAGE_SIZE = 200;
+    // 1.000/página (limite do PostgREST por requisição): 7 idas à rede para
+    // 7.000 registos, em vez das 35 que a paginação de 200 exigia.
+    const PAGE_SIZE = 1000;
     let from = 0;
     let hasMore = true;
 

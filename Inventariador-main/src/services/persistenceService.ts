@@ -1,6 +1,7 @@
+import { Capacitor } from '@capacitor/core';
 import localforage from 'localforage';
 import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
-import { syncAssetsToCloud, syncConfigToCloud } from './supabaseService';
+import { syncAssetsToCloudAndMark, syncConfigToCloud } from './supabaseService';
 import { encryption } from './securityService';
 import { localDb, backupDatabaseToPhysicalStorage } from './localDbService';
 import { sqliteService, db, DexieAsset } from './sqliteService';
@@ -147,6 +148,66 @@ export const saveConfigOnly = async (data: Partial<InventoryState>): Promise<voi
   }
 };
 
+// --- Resguardo em localStorage coalescido (contingência por ativo) ---
+// A versão anterior lia, fazia JSON.parse, filtrava, fazia push e JSON.stringify
+// de TODO o array de contingência a cada conferência — com 7.000 ativos isso é
+// um bloqueio da main thread de dezenas de ms por toque, a crescer linearmente.
+// Aqui as alterações acumulam-se em memória e são fundidas numa única escrita.
+const backupMirrorQueue = new Map<string, Map<string, Asset>>();
+let backupMirrorTimer: ReturnType<typeof setTimeout> | null = null;
+const BACKUP_MIRROR_DELAY_MS = 800;
+
+const writeBackupBucket = (key: string, pending: Map<string, Asset>) => {
+  try {
+    const raw = localStorage.getItem(key);
+    let arr: Asset[] = [];
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) arr = parsed as Asset[];
+      } catch {
+        arr = [];
+      }
+    }
+    const pendingIds = new Set(pending.keys());
+    const merged = arr.filter(a => !pendingIds.has(String(a.id)));
+    pending.forEach(a => merged.push(a));
+    localStorage.setItem(key, JSON.stringify(merged));
+  } catch (e) {
+    logger.warn('>>> [Persistência Espelhada] Erro ao gravar backup de contingência no localStorage:', e);
+  }
+};
+
+export const flushAssetBackupMirror = (): void => {
+  if (backupMirrorTimer) {
+    clearTimeout(backupMirrorTimer);
+    backupMirrorTimer = null;
+  }
+  for (const [key, pending] of backupMirrorQueue) {
+    if (pending.size === 0) continue;
+    writeBackupBucket(key, pending);
+  }
+  backupMirrorQueue.clear();
+};
+
+export const queueAssetBackupMirror = (asset: Asset, tenantid: string, filial: string): void => {
+  const key = `gbr_backup_${String(tenantid || '').trim().toUpperCase()}_${String(filial || 'MATRIZ').trim().toUpperCase()}`;
+  const bucket = backupMirrorQueue.get(key) || new Map<string, Asset>();
+  bucket.set(String(asset.id), asset);
+  backupMirrorQueue.set(key, bucket);
+  if (backupMirrorTimer) return;
+  backupMirrorTimer = setTimeout(() => {
+    backupMirrorTimer = null;
+    flushAssetBackupMirror();
+  }, BACKUP_MIRROR_DELAY_MS);
+};
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushAssetBackupMirror();
+  });
+}
+
 export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
   try {
     await localDb.assets.put(asset);
@@ -195,7 +256,25 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
     }
   });
 
-  // Espelhamento físico em background no disco rígido do dispositivo (Anti-Limpeza)
+  // Espelhamento físico em background no disco rígido do dispositivo (Anti-Limpeza).
+  // Antes esta rotina lia a base INTEIRA (toArray) e regravava o JSON completo a
+  // cada ativo conferido: 7.000 confirmações = 7.000 dumps de ~7.000 linhas.
+  // Agora as gravações são coalescidas (uma por janela) e serializadas: o dump
+  // reflete sempre o estado mais recente, sem multiplicar I/O por toque.
+  schedulePhysicalMirror();
+}
+
+// --- Espelho físico coalescido (ver comentário em saveCollectedAssetAtomic) ---
+let physicalMirrorTimer: ReturnType<typeof setTimeout> | null = null;
+let physicalMirrorInFlight: Promise<void> | null = null;
+let physicalMirrorDirty = false;
+const PHYSICAL_MIRROR_DELAY_MS = 1200;
+
+const runPhysicalMirror = async (): Promise<void> => {
+  physicalMirrorDirty = false;
+  // Na Web o Filesystem nativo não existe (os dois serviços retornam cedo):
+  // ler a base inteira seria trabalho puro sem destino. Só corre no dispositivo.
+  if (typeof Capacitor === 'undefined' || !Capacitor.isNativePlatform()) return;
   try {
     const todosAtivos = await db.local_assets.toArray();
     // Executa conversões explícitas e higienização regex de ruídos antes de gravar no hardware físico
@@ -208,7 +287,39 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
   } catch (err) {
     logger.error('[SRE] Erro ao espelhar em diretorio local:', err);
   }
-}
+};
+
+export const flushPhysicalMirror = async (): Promise<void> => {
+  if (physicalMirrorTimer) {
+    clearTimeout(physicalMirrorTimer);
+    physicalMirrorTimer = null;
+  }
+  if (physicalMirrorInFlight) {
+    await physicalMirrorInFlight.catch(() => undefined);
+  }
+  if (!physicalMirrorDirty) return;
+  physicalMirrorInFlight = runPhysicalMirror();
+  await physicalMirrorInFlight.catch(() => undefined);
+  physicalMirrorInFlight = null;
+};
+
+const schedulePhysicalMirror = (): void => {
+  physicalMirrorDirty = true;
+  if (physicalMirrorTimer) return;
+  physicalMirrorTimer = setTimeout(() => {
+    physicalMirrorTimer = null;
+    if (physicalMirrorInFlight) {
+      // Já existe um dump a correr: reprograma para depois dele.
+      schedulePhysicalMirror();
+      return;
+    }
+    physicalMirrorInFlight = runPhysicalMirror();
+    physicalMirrorInFlight.finally(() => {
+      physicalMirrorInFlight = null;
+      if (physicalMirrorDirty) schedulePhysicalMirror();
+    });
+  }, PHYSICAL_MIRROR_DELAY_MS);
+};
 
 export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false, skipSqlAssetsInsert = false): Promise<void> => {
   try {
@@ -283,7 +394,9 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
       
       if (assetsToSync.length > 0) {
         logger.info(`>>> [Persistence] Sincronizando ${assetsToSync.length} ativos sujos com a nuvem...`);
-        syncAssetsToCloud(assetsToSync).catch(err => logger.warn('Cloud sync failed (offline?):', err));
+        // syncAssetsToCloudAndMark: marca _is_synced = 1 nos ids aceites, para a
+        // etiqueta "PENDENTE NUVEM" desaparecer sem depender de novo download.
+        syncAssetsToCloudAndMark(assetsToSync).catch(err => logger.warn('Cloud sync failed (offline?):', err));
         // Se sincronizou ativos, sincroniza a config também para atualizar o lastUpdated na nuvem
         syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => logger.warn('Config sync failed (offline?):', err));
       } else if (forceCloudSync) {

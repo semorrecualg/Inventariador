@@ -110,7 +110,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode } from './services/supabaseService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
@@ -2486,8 +2486,9 @@ useEffect(() => {
     if (dirtyAssets.length > 0) {
       if (!skipLoadingState) setIsSyncing(true);
       try {
-        // Sincroniza os ativos e recebe os IDs processados com sucesso (Push)
-        const syncedIds = await syncAssetsToCloud(dirtyAssets, effectiveTenantid);
+        // Sincroniza os ativos e recebe os IDs processados com sucesso (Push).
+        // A variante AndMark devolve o estado local ao da nuvem (_is_synced = 1).
+        const syncedIds = await syncAssetsToCloudAndMark(dirtyAssets, effectiveTenantid);
         
         // Sincroniza a config também para garantir que o timestamp suba
         const configToSync = { ...inventoryRef.current };
@@ -4961,7 +4962,88 @@ useEffect(() => {
     }
   }, [history, setHistory]);
 
-  const commitAssetUpdate = useCallback(async (updatedAsset: Asset) => {
+  // ---------------------------------------------------------------------------
+  // FILA DE ENVIO À NUVEM (coalescida, fora do caminho visual)
+  // ---------------------------------------------------------------------------
+  // Tela C: cada conferência disparava o seu próprio upsert e, no fim, pedia um
+  // recarregamento completo da base (dois effects a reler os ativos da unidade).
+  // Agora o Dexie e o estado visual são escritos no toque; este buffer junta as
+  // confirmações de uma janela curta num único lote e, quando o Postgres aceita,
+  // marca `_is_synced = 1` localmente — é isso que apaga "PENDENTE NUVEM".
+  const cloudQueueRef = useRef<Map<string, Asset>>(new Map());
+  const cloudQueueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushCloudQueueRef = useRef<() => Promise<void>>(async () => {});
+  const CLOUD_FLUSH_DELAY_MS = 1200;
+
+  const scheduleCloudFlush = useCallback((delayMs: number = CLOUD_FLUSH_DELAY_MS) => {
+    if (cloudQueueTimerRef.current) return;
+    cloudQueueTimerRef.current = setTimeout(() => {
+      cloudQueueTimerRef.current = null;
+      void flushCloudQueueRef.current();
+    }, delayMs);
+  }, []);
+
+  const flushCloudQueue = useCallback(async () => {
+    if (cloudQueueTimerRef.current) {
+      clearTimeout(cloudQueueTimerRef.current);
+      cloudQueueTimerRef.current = null;
+    }
+    if (databaseMode !== DatabaseMode.SUPABASE) {
+      cloudQueueRef.current.clear();
+      return;
+    }
+    const pending = Array.from(cloudQueueRef.current.values());
+    cloudQueueRef.current.clear();
+    if (pending.length === 0) return;
+
+    try {
+      const synced = await syncAssetsToCloudAndMark(pending, user?.tenantid);
+      const syncedSet = new Set(synced.map(String));
+      if (syncedSet.size > 0) {
+        const mark = (a: Asset) => (syncedSet.has(String(a.id)) ? { ...a, _is_synced: 1 } : a);
+        // Patch local do estado: sem setRefreshVersion, sem reler a base inteira.
+        setInventory(prev => ({ ...prev, assets: prev.assets.map(mark) }));
+        setSqliteUnitAssets(prev => prev.map(mark));
+        logger.info(`>>> [Sync Queue] ${synced.length}/${pending.length} ativos confirmados na nuvem e marcados como sincronizados.`);
+      }
+      const unsent = pending.filter(a => !syncedSet.has(String(a.id)));
+      if (unsent.length > 0) {
+        // Offline (syncAssetsToCloud devolve []): fica em fila e só volta com o
+        // evento `online` — sem temporizador a bater na rede a cada 1,2 s.
+        unsent.forEach(a => cloudQueueRef.current.set(String(a.id), a));
+        if (navigator.onLine) scheduleCloudFlush();
+      }
+    } catch (err) {
+      logger.warn('>>> [Sync Queue] Lote não enviado; mantido em fila para nova tentativa:', err);
+      pending.forEach(a => cloudQueueRef.current.set(String(a.id), a));
+      // Recuo: 5 s para não martelar a nuvem em erro persistente.
+      if (navigator.onLine) scheduleCloudFlush(5000);
+    }
+  }, [databaseMode, user?.tenantid, scheduleCloudFlush]);
+
+  useEffect(() => {
+    flushCloudQueueRef.current = flushCloudQueue;
+  }, [flushCloudQueue]);
+
+  const queueCloudSync = useCallback((assets: Asset[]) => {
+    if (databaseMode !== DatabaseMode.SUPABASE || assets.length === 0) return;
+    assets.forEach(a => cloudQueueRef.current.set(String(a.id), a));
+    scheduleCloudFlush();
+  }, [databaseMode, scheduleCloudFlush]);
+
+  // Reenvia a fila quando a rede volta e fecha o timer no desmonte.
+  useEffect(() => {
+    const onOnline = () => {
+      if (cloudQueueRef.current.size > 0) void flushCloudQueueRef.current();
+    };
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      if (cloudQueueTimerRef.current) clearTimeout(cloudQueueTimerRef.current);
+    };
+  }, []);
+
+  const commitAssetUpdate = useCallback(async (updatedAsset: Asset, options?: { deferCloud?: boolean }): Promise<Asset> => {
     dirtyAssetsRef.current.add(String(updatedAsset.id));
     
     // Identificar a origem da transação (Código Fixo de 4 dígitos)
@@ -5165,19 +5247,88 @@ useEffect(() => {
           logger.error(">>> [KARDEK] Falha ao persistir localmente:", localErr);
         }
 
-        // 2) Sincronizar com a nuvem em background — se falhar, dados já estão seguros localmente
-        try {
-          await syncAssetsToCloud([updates], user?.tenantid);
-          setRefreshVersion(prev => prev + 1);
-          logger.info(`>>> [KARDEK] Sincronizado na Nuvem para id: ${updates.id}`);
-        } catch (err) {
-          logger.warn(">>> [KARDEK] Falha ao sincronizar com nuvem (dados preservados localmente):", err);
-          // Atualiza a versão mesmo assim para refletir a mudança local
-          setRefreshVersion(prev => prev + 1);
-        }
+        // 2) Envio à nuvem coalescido. Não bloqueia, não recarrega a base e não
+        // duplica o pedido que a auto-sincronização já faria 3 s depois.
+        if (!options?.deferCloud) queueCloudSync([updates]);
       });
     }
-  }, [history, inventoryLocation, databaseMode, user, inventory.assets, currentUnit]);
+
+    return updates;
+  }, [history, inventoryLocation, databaseMode, user, inventory.assets, currentUnit, queueCloudSync]);
+
+  /**
+   * Tela C: captura de GPS fora do caminho crítico. Depois do commit local o
+   * registro é completado com a posição (e a entrada de auditoria) e só então
+   * entra na fila da nuvem, para o Postgres receber as coordenadas corretas.
+   */
+  const enrichAssetWithGps = useCallback(async (baseAsset: Asset, alreadySynced = false) => {
+    try {
+      const metrics = await telemetryService.getDeviceMetrics();
+      const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+      const isGpsBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
+
+      let loc: import('./utils/gpsUtils').GpsLocation = { lat: 0, lng: 0, altitude: 0 };
+      if (isAdmin || isGpsBypassed) {
+        if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
+          loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
+        }
+      } else if (metrics.battery > 5) {
+        loc = await Promise.race([
+          getCurrentLocation(),
+          new Promise<import('./utils/gpsUtils').GpsLocation>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
+        ]).catch(e => {
+          logger.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
+          if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
+            return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
+          }
+          return { lat: 0, lng: 0, altitude: 0 };
+        });
+      } else {
+        logger.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de', metrics.battery, '% ou inferior!');
+        if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
+          loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
+        }
+      }
+
+      const { convertAltitudeToFloor } = await import('./utils/gpsUtils');
+      const andar = convertAltitudeToFloor(loc.altitude);
+      const history: AuditLogEntry[] = [...(baseAsset._history || [])];
+      const lastIndex = history.length - 1;
+      if (lastIndex >= 0) {
+        history[lastIndex] = {
+          ...history[lastIndex],
+          details: `${history[lastIndex].details} [GPS: ${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}, Andar: ${andar}]`
+        };
+      }
+
+      const patch = {
+        latitude: loc.lat,
+        longitude: loc.lng,
+        _altitude_metros: loc.altitude || 0,
+        _id_andar: andar,
+        _history: history
+      };
+
+      await sqliteService.patchAsset(
+        String(baseAsset.tenantid || user?.tenantid || ''),
+        String(baseAsset.primarykey || baseAsset.id || ''),
+        patch
+      );
+
+      const patched = { ...baseAsset, ...patch, _is_synced: alreadySynced ? 1 : baseAsset._is_synced } as Asset;
+      setInventory(prev => ({
+        ...prev,
+        assets: prev.assets.map(a => (String(a.id) === String(baseAsset.id) ? { ...a, ...patch } as Asset : a))
+      }));
+      setSqliteUnitAssets(prev => prev.map(a => (String(a.id) === String(baseAsset.id) ? { ...a, ...patch } as Asset : a)));
+
+      queueCloudSync([patched]);
+      logger.info(`>>> [GPS] Registro ${baseAsset.id} completado em background: ${loc.lat}, ${loc.lng}, andar ${andar}.`);
+    } catch (e) {
+      logger.warn('>>> [GPS] Captura em background falhou; envio do registro segue sem coordenadas:', e);
+      queueCloudSync([baseAsset]);
+    }
+  }, [currentUnitConfig, queueCloudSync, user]);
 
   const updateAsset = useCallback(async (updatedAsset: Asset) => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
@@ -5227,70 +5378,15 @@ useEffect(() => {
       _dataLeitura: new Date().toISOString()
     };
 
-    // Captura GPS de forma ASSÍNCRONA mas PRIORITÁRIA para o primeiro commit
-    if (updatedAsset._conferido) {
-      logger.info(`>>> [GPS] Iniciando captura prioritária para item ${updatedAsset.id}...`);
-      
-      try {
-        const metrics = await telemetryService.getDeviceMetrics();
-        logger.info(`>>> [GPS/Bateria] Nível da bateria para GPS: ${metrics.battery}%`);
-        
-        const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-        const isGpsBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
-        
-        let loc: import('./utils/gpsUtils').GpsLocation = { lat: 0, lng: 0, altitude: 0 };
-        if (isAdmin || isGpsBypassed) {
-          logger.info('>>> [GPS] Perfis administrativos/bypass detectado de forma síncrona: bypass imediato da malha de captura física.');
-          if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-            loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-          }
-        } else if (metrics.battery > 5) {
-          // REGRA DE RIGOR: Aguarda até 3 segundos pela posição GPS antes de salvar
-          // Se falhar ou timeout, usa fallback da unidade
-          loc = await Promise.race([
-            getCurrentLocation(),
-            new Promise<import('./utils/gpsUtils').GpsLocation>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
-          ]).catch(e => {
-            logger.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
-            if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-              return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-            }
-            return { lat: 0, lng: 0, altitude: 0 };
-          });
-        } else {
-          logger.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de', metrics.battery, '% ou inferior!');
-          if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-            loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-          }
-        }
-
-        logger.info(`>>> [GPS] Capturado para Kardex: ${loc.lat}, ${loc.lng}, Alt: ${loc.altitude}m`);
-        
-        // Injeta GPS no objeto e no registro da auditoria
-        assetWithHistory.latitude = loc.lat;
-        assetWithHistory.longitude = loc.lng;
-        
-        // GBR v25: Processamento Vertical (Z-Axis)
-        assetWithHistory._altitude_metros = loc.altitude || 0;
-        const { convertAltitudeToFloor } = await import('./utils/gpsUtils');
-        assetWithHistory._id_andar = convertAltitudeToFloor(loc.altitude);
-        
-        // Atualiza a última entrada da trilha com a posição exata
-        const lastIndex = (assetWithHistory._history || []).length - 1;
-        if (lastIndex >= 0) {
-          (assetWithHistory._history || [])[lastIndex].details += ` [GPS: ${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}, Andar: ${assetWithHistory._id_andar}]`;
-        }
-      } catch (e) {
-        logger.error(">>> [GPS] Erro fatal na lógica de captura:", e);
-      }
-    }
-
-    // Commit definitivo com ou sem GPS (fallback garantido acima)
-    await commitAssetUpdate(assetWithHistory);
-    
-    // Adiciona à lista de sujos para garantir sync
+    // Commit local + estado visual imediatamente; GPS e nuvem não bloqueiam o
+    // toque. A captura de posição (até 3 s) corre depois e completa o registro.
+    const committed = await commitAssetUpdate(assetWithHistory, { deferCloud: Boolean(updatedAsset._conferido) });
     dirtyAssetsRef.current.add(String(assetWithHistory.id));
-  }, [inventory.assets, commitAssetUpdate, user, currentUnitConfig, inventory.currentCampaignId]);
+
+    if (updatedAsset._conferido) {
+      void enrichAssetWithGps(committed, Boolean(updatedAsset._is_synced));
+    }
+  }, [inventory.assets, commitAssetUpdate, user, enrichAssetWithGps, inventory.currentCampaignId]);
 
   const unitizeAsset = useCallback(async (parentAsset: Asset, numberOfUnits: number, percentages?: number[]) => {
     if (numberOfUnits < 2) return;
@@ -5701,20 +5797,17 @@ useEffect(() => {
           logger.error(">>> [DATABASE] Falha ao persistir localmente em lote:", localErr);
         }
 
-        // Sincronizar com a nuvem em background — se falhar, dados já estão seguros localmente
-        try {
-          await syncAssetsToCloud(updatedAssetsList, user?.tenantid);
-          logAuditEvent({
-            user_email: user?.email || 'unknown',
-            action: 'BULK_UPDATE',
-            table_name: 'assets',
-            details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
-            tenantid: user?.tenantid || readSessionTenantId() || '',
-            origin: origin
-          });
-        } catch (syncErr) {
-          logger.warn(">>> [DATABASE] Falha ao sincronizar lote com nuvem (dados preservados localmente):", syncErr);
-        }
+        // Nuvem em background pelo buffer coalescido: o lote grande não segura
+        // mais a UI à espera da rede (7.000 ativos = 14 pedidos de 500).
+        queueCloudSync(updatedAssetsList);
+        logAuditEvent({
+          user_email: user?.email || 'unknown',
+          action: 'BULK_UPDATE',
+          table_name: 'assets',
+          details: `Atualização em lote de ${ids.length} itens via ${currentScreen}: ${Object.keys(manualUpdates || {}).join(', ')}`,
+          tenantid: user?.tenantid || readSessionTenantId() || '',
+          origin: origin
+        }).catch(syncErr => logger.warn('>>> [DATABASE] Falha ao registar auditoria do lote:', syncErr));
       }
 
       // 3. SÓ APÓS CONFIRMAÇÃO DO BANCO ATUALIZAMOS A UI
@@ -5737,7 +5830,7 @@ useEffect(() => {
     } finally {
       setIsProcessing(false);
     }
-  }, [inventoryLocation, determineTag, user, databaseMode, history, currentUnitConfig, inventory.assets]);
+  }, [inventoryLocation, determineTag, user, databaseMode, history, currentUnitConfig, inventory.assets, queueCloudSync]);
 
   const handleUpdateScannerMode = useCallback((mode: ScannerMode) => {
     setInventory(prev => ({ ...prev, scannerMode: mode }));
