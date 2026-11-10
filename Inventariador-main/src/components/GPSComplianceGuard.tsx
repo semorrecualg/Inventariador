@@ -6,6 +6,8 @@ import { UnitConfig } from '../types';
 import { isAdminEmail } from '../utils/authUtils';
 import { getCurrentDeviceLocation } from '../utils/gpsUtils';
 import { logger } from '../utils/logger';
+import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
+import Marquee from './Marquee';
 
 interface GPSComplianceGuardProps {
   children: React.ReactNode;
@@ -23,6 +25,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
   isFieldMode = true
 }) => {
   const [status, setStatus] = useState<'checking' | 'granted' | 'denied' | 'out-of-range' | 'bypassed'>('checking');
+  const deviceMetrics = useDeviceMetrics();
   const [currentDistance, setCurrentDistance] = useState<number | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
@@ -398,10 +401,17 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
       {status === 'bypassed' && (
         <div className="bg-emerald-50/80 border-b border-emerald-200/70 px-4 py-2 flex items-center gap-2">
           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shrink-0" />
-          <p className="text-[9px] font-black text-emerald-700 uppercase tracking-widest flex-1 leading-tight">
-            🔓 Bypass Síncrono Imediato Ativo — Status de Homologação: Liberado
-            <span className="text-emerald-600/80 ml-1.5 font-bold">({unitConfig?.unit_id || 'Âncora'})</span>
-          </p>
+          {/* Uma linha só, em marquee: o estado de homologação já é longo e
+              agora inclui a telemetria do dispositivo no fim. */}
+          <Marquee className="flex-1 min-w-0" speed={42}>
+            <span className="text-[9px] font-black text-emerald-700 uppercase tracking-widest leading-tight whitespace-nowrap">
+              🔓 Bypass Síncrono Imediato Ativo — Status de Homologação: Liberado{' '}
+              <span className="text-emerald-600/80 font-bold">({unitConfig?.unit_id || 'Âncora'})</span>{' '}
+              <span className="text-emerald-800/80 font-bold">
+                [ Telemetria: {Math.round(deviceMetrics.temp)}°C | Bat: {deviceMetrics.battery}% ]
+              </span>
+            </span>
+          </Marquee>
         </div>
       )}
 

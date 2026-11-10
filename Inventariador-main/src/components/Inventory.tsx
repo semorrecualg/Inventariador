@@ -16,7 +16,8 @@ import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMod
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
 import { generateUUID } from '../services/supabaseService';
-import { telemetryService, DeviceMetrics } from '../services/telemetryService';
+import { telemetryService } from '../services/telemetryService';
+import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
 import { isAdminEmail } from '../utils/authUtils';
 import { localDb } from '../services/localDbService';
 import { sqliteService } from '../services/sqliteService';
@@ -50,7 +51,6 @@ import {
   Database,
   Mic,
   ShieldAlert,
-  Activity,
   WifiOff,
   ArrowLeft,
   Target,
@@ -420,8 +420,9 @@ const Inventory: React.FC<InventoryProps> = ({
     };
   }, []);
 
-  // Telemetria e Hardware
-  const [deviceMetrics, setDeviceMetrics] = useState<DeviceMetrics>({ temp: 35, battery: 100 });
+  // Telemetria e Hardware — métricas vêm do poller partilhado (5 s), que também
+  // alimenta o cabeçalho. Aqui só interessa a regra térmica.
+  const deviceMetrics = useDeviceMetrics();
   const [torch, setTorch] = useState<'on' | 'off'>('off');
   const [isThermalBlocked, setIsThermalBlocked] = useState(false);
   const [lastActivityTime, setLastActivityTime] = useState(Date.now());
@@ -429,22 +430,14 @@ const Inventory: React.FC<InventoryProps> = ({
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [isPersistingScan, setIsPersistingScan] = useState(false);
 
-  // Monitoramento de Telemetria (Native Module Simulation)
+  // Regra Contábil (CPC 27): Bloquear leituras se a temperatura exceder 48°C
   useEffect(() => {
-    const interval = setInterval(async () => {
-      const metrics = await telemetryService.getDeviceMetrics();
-      setDeviceMetrics(metrics);
-      
-      // Regra Contábil (CPC 27): Bloquear leituras se a temperatura exceder 48°C
-      if (metrics.temp > 48) {
-        setIsThermalBlocked(true);
-      } else if (metrics.temp < 45) {
-        setIsThermalBlocked(false);
-      }
-    }, 5000); // Check every 5s
-
-    return () => clearInterval(interval);
-  }, []);
+    if (deviceMetrics.temp > 48) {
+      setIsThermalBlocked(true);
+    } else if (deviceMetrics.temp < 45) {
+      setIsThermalBlocked(false);
+    }
+  }, [deviceMetrics.temp]);
 
   // Standby Automático (30s de inatividade)
   useEffect(() => {
@@ -2023,17 +2016,6 @@ const Inventory: React.FC<InventoryProps> = ({
                   <span className="text-[9px] font-bold text-[#1E293B] truncate uppercase tracking-tight">
                     {selectedLocation || 'TODAS AS LOCALIDADES'}
                   </span>
-                </div>
-              </div>
-              
-              <div className="flex items-center space-x-3 pr-2">
-                <div className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl transition-all ${deviceMetrics.temp > 42 ? 'bg-red-500 text-white shadow-lg' : 'bg-blue-500/10 border border-blue-100 text-blue-600'}`}>
-                  <Activity size={12} />
-                  <span className="text-[9px] font-black tracking-widest">{deviceMetrics.temp.toFixed(0)}°C</span>
-                </div>
-                <div className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl transition-all ${deviceMetrics.battery < 20 ? 'bg-red-500 text-white shadow-lg' : 'bg-emerald-500/10 border border-emerald-100 text-emerald-600'}`}>
-                  <Zap size={12} />
-                  <span className="text-[9px] font-black tracking-widest">{deviceMetrics.battery}%</span>
                 </div>
               </div>
             </div>

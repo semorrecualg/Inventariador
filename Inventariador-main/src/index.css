@@ -202,3 +202,27 @@
   75% { transform: translateX(4px); }
 }
 .animate-shake { animation: shake 0.2s ease-in-out 0s 2; }
+
+/* Marquee contínuo (direita → esquerda) do cabeçalho de inventário.
+   O deslocamento é exatamente uma cópia do conteúdo, por isso o ciclo fecha
+   sem salto; a duração é definida em linha pelo componente Marquee. */
+@keyframes marquee-scroll {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(var(--marquee-shift, -50%), 0, 0); }
+}
+
+.marquee-track {
+  display: inline-flex;
+  width: max-content;
+  animation-name: marquee-scroll;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track {
+    animation: none;
+    transform: none;
+  }
+}
