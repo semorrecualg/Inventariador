@@ -26,6 +26,7 @@ import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
 import { AssetListItem } from './AssetListItem';
+import PreferencesPanel from './PreferencesPanel';
 import { resolvePersistedTag } from '../services/tagService';
 import { BufferIndicator } from './BufferIndicator';
 import { assetRepository } from '../services/assetRepository';
@@ -53,7 +54,8 @@ import {
   Activity,
   WifiOff,
   ArrowLeft,
-  Target
+  Target,
+  Settings2
 } from 'lucide-react';
 
 import { QRCodeSVG } from 'qrcode.react';
@@ -145,7 +147,12 @@ interface InventoryProps {
   onUpdateSearchMode: (mode: InventorySearchMode) => void;
   onUpdateScannerMode: (mode: ScannerMode) => void;
   autoConfirmOnScan: boolean;
+  onUpdateAutoConfirm: (val: boolean) => void;
   scanFeedbackMode: ScanFeedbackMode;
+  onUpdateScanFeedbackMode: (mode: ScanFeedbackMode) => void;
+  darkMode: boolean;
+  onUpdateDarkMode: (val: boolean) => void;
+  onUpdateBatterySaver: (val: boolean) => void;
   onOpenConsultation: () => void;
   onOpenSignature: () => void;
   inventorySearchValue: string | null;
@@ -180,7 +187,12 @@ const Inventory: React.FC<InventoryProps> = ({
   onUpdateSearchMode, 
   onUpdateScannerMode, 
   autoConfirmOnScan, 
+  onUpdateAutoConfirm,
   scanFeedbackMode, 
+  onUpdateScanFeedbackMode,
+  darkMode,
+  onUpdateDarkMode,
+  onUpdateBatterySaver,
   onOpenConsultation, 
   onOpenSignature,
   inventorySearchValue, 
@@ -200,6 +212,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const [dbLocations, setDbLocations] = useState<{ displayName: string; total: number; checked: number; locKey: string }[]>([]);
   const [globalSearchResults, setGlobalSearchResults] = useState<Asset[]>([]);
   const [sreNotification, setSreNotification] = useState<{ type: 'success' | 'warning' | 'error' | 'info'; message: string; subText?: string } | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Auto-dismiss SRE notification after 4 seconds
   useEffect(() => {
@@ -653,6 +666,15 @@ const Inventory: React.FC<InventoryProps> = ({
       }
 
       if (foundAsset) {
+        // AUTO-CONFERÊNCIA DESLIGADA (Ajustes de Campo): a leitura abre a ficha
+        // de confirmação e só grava depois do toque do auditor. A persistência
+        // fica a cargo do modal, que reutiliza o mesmo fluxo de atualização.
+        if (!autoConfirmOnScanRef.current) {
+          setIsHierarchyLoading(false);
+          setScannedAsset(foundAsset);
+          return;
+        }
+
         // 2. REGRAS DE VALIDAÇÃO E ATUALIZAÇÃO SRE & 3. ISOLAMENTO DE CONCORRÊNCIA (DEXIE)
         // Ativo localizado: update atômico usando o serviço de banco local
         const id = String(foundAsset.id || foundAsset.primarykey);
@@ -1453,6 +1475,23 @@ const Inventory: React.FC<InventoryProps> = ({
           document.body
         )}
 
+      {isSettingsOpen && (
+        <PreferencesPanel
+          onClose={() => setIsSettingsOpen(false)}
+          autoConfirmOnScan={autoConfirmOnScan}
+          onUpdateAutoConfirm={onUpdateAutoConfirm}
+          scanFeedbackMode={scanFeedbackMode}
+          onUpdateScanFeedbackMode={onUpdateScanFeedbackMode}
+          scannerMode={scannerMode}
+          onUpdateScannerMode={onUpdateScannerMode}
+          darkMode={darkMode}
+          onUpdateDarkMode={onUpdateDarkMode}
+          batterySaver={batterySaver}
+          onUpdateBatterySaver={onUpdateBatterySaver}
+          contextLabel={selectedLocation || selectedUnit || undefined}
+        />
+      )}
+
         {/* Modal de Confirmação de Item Lido */}
         {scannedAsset && createPortal(
           <div className="fixed inset-0 z-[10001] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
@@ -1546,13 +1585,19 @@ const Inventory: React.FC<InventoryProps> = ({
                             ? { filial: selectedUnit || scannedAsset.filial }
                             : {}),
                           _conferido: true,
+                          ...(String(scannedAsset.status || '').toUpperCase().includes('BAIXA') || scannedAsset.databaixa
+                            ? {}
+                            : { status: 'CONFERIDO' }),
                           TAG_INVENTARIO: auditTag,
-                          _localMaster: auditLoc
+                          _localMaster: auditLoc,
+                          _is_synced: 0
                         };
 
                         const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
                         await handleUpdateAssetWithBackup(cleanAsset);
                         setScannedAsset(null);
+                        setCommittedSearch('');
+                        setDisplayValue('');
                         onSelectAsset(cleanAsset); // Abre detalhes para foto
                       } catch (err) {
                         logger.error('>>> Erro na persistência de ativo com foto:', err);
@@ -1587,13 +1632,19 @@ const Inventory: React.FC<InventoryProps> = ({
                             ? { filial: selectedUnit || scannedAsset.filial }
                             : {}),
                           _conferido: true,
+                          ...(String(scannedAsset.status || '').toUpperCase().includes('BAIXA') || scannedAsset.databaixa
+                            ? {}
+                            : { status: 'CONFERIDO' }),
                           TAG_INVENTARIO: auditTag,
-                          _localMaster: auditLoc
+                          _localMaster: auditLoc,
+                          _is_synced: 0
                         };
                         
                         const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
                         await handleUpdateAssetWithBackup(cleanAsset);
                         setScannedAsset(null);
+                        setCommittedSearch('');
+                        setDisplayValue('');
                       } catch (err) {
                         logger.error('>>> Erro na persistência síncrona de ativo:', err);
                         alert('Falha crítica na persistência: ' + (err instanceof Error ? err.message : String(err)));
@@ -2001,6 +2052,19 @@ const Inventory: React.FC<InventoryProps> = ({
               title="Leitor de código de barras / QR"
             >
               <Camera size={18} />
+            </button>
+
+            {/* Ajustes de campo: preferências de leitura, conferência e energia */}
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="relative w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:bg-slate-50 transition-colors"
+              title="Ajustes de campo"
+              aria-label="Abrir ajustes de campo"
+            >
+              <Settings2 size={18} />
+              {!autoConfirmOnScan && (
+                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-500" />
+              )}
             </button>
           </div>
         </div>

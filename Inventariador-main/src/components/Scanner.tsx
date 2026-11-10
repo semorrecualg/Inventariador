@@ -5,6 +5,7 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { X, Maximize, Minimize, Camera, RefreshCw, ShieldCheck, Flashlight } from 'lucide-react';
 import { ScannerMode, ScanFeedbackMode } from '../types';
 import { logger } from '../utils/logger';
+import { playScanFeedback } from '../utils/scanFeedback';
 
 interface ScannerProps {
   mode: ScannerMode;
@@ -121,37 +122,7 @@ const Scanner: React.FC<ScannerProps> = ({
   }, [resetInactivityTimeout]);
 
   const playBeep = useCallback(() => {
-    try {
-      if (scanFeedbackMode === ScanFeedbackMode.NONE) return;
-
-      const shouldSound = scanFeedbackMode === ScanFeedbackMode.SOUND || scanFeedbackMode === ScanFeedbackMode.BOTH;
-      const shouldVibrate = scanFeedbackMode === ScanFeedbackMode.VIBRATE || scanFeedbackMode === ScanFeedbackMode.BOTH;
-
-      if (shouldSound) {
-        const AudioContextClass = window.AudioContext || (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (AudioContextClass) {
-          const audioCtx = new AudioContextClass();
-          const oscillator = audioCtx.createOscillator();
-          const gainNode = audioCtx.createGain();
-
-          oscillator.connect(gainNode);
-          gainNode.connect(audioCtx.destination);
-
-          oscillator.type = 'sine';
-          oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
-          gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-
-          oscillator.start();
-          oscillator.stop(audioCtx.currentTime + 0.1);
-        }
-      }
-      
-      if (shouldVibrate && navigator.vibrate) {
-        navigator.vibrate(batterySaver ? 50 : 100);
-      }
-    } catch (e) {
-      logger.error('Feedback failed', e);
-    }
+    playScanFeedback(scanFeedbackMode, batterySaver);
   }, [scanFeedbackMode, batterySaver]);
 
   const stopScanner = useCallback(async () => {
