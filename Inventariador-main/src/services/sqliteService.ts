@@ -698,7 +698,10 @@ export class SqliteService {
   ): Promise<void> {
     const total = assets.length;
     let processed = 0;
-    const CHUNK_SIZE = 200;
+    // 1.000 por bulkPut dentro da MESMA transação: 7 ondas de escrita no
+    // IndexedDB em vez de 35 para uma carga de 7.000 ativos. O limite de 200
+    // existia para o motor SQL legado, que já foi purgado.
+    const CHUNK_SIZE = 1000;
 
     this.isImportingBatch = true;
     logger.info(`>>> [Dexie SRE Batch] Iniciando bulk insert de ${total} ativos...`);
@@ -1104,6 +1107,43 @@ export class SqliteService {
 
   public async bulkInsertAssets(assets: Record<string, unknown>[]): Promise<void> {
     await this.bulkInsertAssetsOfflineFirst(assets);
+  }
+
+  /**
+   * Marca em UMA transação os ativos que a nuvem já aceitou (_is_synced = 1).
+   * Sem isto a etiqueta "PENDENTE NUVEM" ficava amber para sempre: o upsert na
+   * nuvem acontecia, mas o flag local nunca era atualizado (só o download da base
+   * o fazia). Uma transação e três `modify` por índice resolvem N ativos, em vez
+   * de N transações abertas pelo cartão.
+   */
+  public async markAssetsSynced(primarykeys: string[]): Promise<void> {
+    const keys = Array.from(new Set(primarykeys.map(k => String(k || '').trim()).filter(Boolean)));
+    if (keys.length === 0) return;
+    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      await db.ativos.where('primarykey').anyOf(keys).modify({ _is_synced: 1 });
+      await db.assets.where('primarykey').anyOf(keys).modify({ _is_synced: 1 });
+      await db.local_assets.where('primarykey').anyOf(keys).modify({ _is_synced: 1 });
+    });
+  }
+
+  /**
+   * Patch pontual de um ativo (ex.: coordenadas GPS que chegaram depois do
+   * commit visual) nas três tabelas espelhadas — uma transação, sem reescrever
+   * o registro inteiro da base.
+   */
+  public async patchAsset(
+    tenantid: string,
+    primarykey: string,
+    changes: Record<string, unknown>
+  ): Promise<void> {
+    const tenantKey = String(tenantid || '').trim().toUpperCase();
+    const key = String(primarykey || '').trim();
+    if (!tenantKey || !key) return;
+    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      await db.ativos.update([tenantKey, key], changes);
+      await db.assets.update([tenantKey, key], changes);
+      await db.local_assets.update([tenantKey, key], changes);
+    });
   }
 
   public async checkIntegrity(): Promise<boolean> {

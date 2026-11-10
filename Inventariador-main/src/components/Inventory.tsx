@@ -21,6 +21,7 @@ import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
 import Marquee from './Marquee';
 import { isAdminEmail } from '../utils/authUtils';
 import { localDb } from '../services/localDbService';
+import { queueAssetBackupMirror } from '../services/persistenceService';
 import { sqliteService } from '../services/sqliteService';
 import { MemoryGuardService } from '../services/MemoryGuardService';
 import { normalizeKey } from '../utils/schema';
@@ -265,31 +266,15 @@ const Inventory: React.FC<InventoryProps> = ({
 
   // MECANISMO DE PERSISTÊNCIA ESPELHADA (DUPLO GRAVADOR)
   const handleUpdateAssetWithBackup = useCallback(async (cleanAsset: Asset) => {
+    // O resguardo em localStorage é coalescido (uma escrita por janela em vez de
+    // um parse/stringify de todo o array a cada conferência). A gravação local
+    // (Dexie) e o estado visual correm imediatamente, sem esperar a rede.
     try {
       const activeTenantid = String(cleanAsset.tenantid || user?.tenantid || '').trim().toUpperCase();
       const activeFilial = String(cleanAsset.filial || selectedUnit || user?.filial || 'MATRIZ').trim().toUpperCase();
-      const backupKey = `gbr_backup_${activeTenantid}_${activeFilial}`;
-      
-      const rawBackup = localStorage.getItem(backupKey);
-      let backupArray: Asset[] = [];
-      if (rawBackup) {
-        try {
-          backupArray = JSON.parse(rawBackup);
-          if (!Array.isArray(backupArray)) {
-            backupArray = [];
-          }
-        } catch {
-          backupArray = [];
-        }
-      }
-      
-      backupArray = backupArray.filter(a => String(a.id) !== String(cleanAsset.id));
-      backupArray.push(cleanAsset);
-      
-      localStorage.setItem(backupKey, JSON.stringify(backupArray));
-      logger.info(`>>> [Persistência Espelhada] Item ${cleanAsset.id} (Etiqueta: ${cleanAsset.etiqueta}) espelhado com sucesso no localStorage.`);
+      queueAssetBackupMirror(cleanAsset, activeTenantid, activeFilial);
     } catch (e) {
-      logger.warn(">>> [Persistência Espelhada] Erro ao gravar backup de contingência no localStorage:", e);
+      logger.warn(">>> [Persistência Espelhada] Erro ao agendar backup de contingência:", e);
     }
     
     await onUpdateAsset(cleanAsset);

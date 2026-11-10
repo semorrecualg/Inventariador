@@ -180,25 +180,30 @@ export const localDb = {
       localDb.assets._mutationBuffer = [];
       
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets, db.audit_logs], async () => {
-        for (const item of bufferCopy) {
-          const dexieAsset = toDexieAsset(item.asset);
-          await db.ativos.put(dexieAsset);
-          await db.assets.put(dexieAsset);
-          await db.local_assets.put(dexieAsset);
-          
-          if (item.userId) {
-            const logId = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-            await db.audit_logs.put({
-              id: logId,
-              usuario: item.userId,
+        // Bulk insert real dentro da transação única: um `bulkPut` por tabela em
+        // vez de 3 `put` por item (antes eram 30 operações para um flush de 10).
+        const dexieAssets = bufferCopy.map(item => toDexieAsset(item.asset));
+        await db.ativos.bulkPut(dexieAssets);
+        await db.assets.bulkPut(dexieAssets);
+        await db.local_assets.bulkPut(dexieAssets);
+
+        const auditLogs = bufferCopy
+          .filter(item => Boolean(item.userId))
+          .map((item) => {
+            const dexieAsset = toDexieAsset(item.asset);
+            return {
+              id: `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              usuario: item.userId as string,
               acao: 'CREATE_OR_UPDATE',
               tabela: 'ativos',
               registro_id: dexieAsset.primarykey,
               details: 'Criação/Update via Buffer',
               delta: JSON.stringify(item.asset),
               updated_at: new Date().toISOString()
-            });
-          }
+            };
+          });
+        if (auditLogs.length > 0) {
+          await db.audit_logs.bulkPut(auditLogs);
         }
       });
     },
