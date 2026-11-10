@@ -40,6 +40,34 @@ um upsert de bloco — hipótese confirmada pelos logs novos (`Lote N falhou…`
 
 7.000 ativos passam de **140 idas à rede** para **14**, em 4 ondas.
 
+### 1.1 `assets.id` é uuid — a causa de "0 sincronizados, 7.061 rejeitados"
+
+O bootstrap declara `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, mas a chave
+de origem do inventário é texto (`0101010000004969001`). O payload enviava essa
+string em `id`, o Postgres recusava **todas** as linhas com
+`22P02 invalid input syntax for type uuid` e o `PostgrestError` (que não é um
+`Error`) aparecia como `[object Object]`, escondendo a causa.
+
+Correções:
+
+- **UUID derivado (v5)** de `(tenantid, primarykey)`: respeita o tipo da coluna e
+  é estável entre execuções, mantendo o upsert idempotente em
+  `onConflict: 'tenantid, id'`. Modo aprendido uma vez por sessão (a fila não
+  repete o lote falhado a cada 1,2 s).
+- **23505** em `assets_tenant_primarykey_key` = a chave de origem já existe na
+  nuvem: contada como **sincronizada**, não como rejeitada.
+- **PGRST204** (coluna inexistente no schema remoto): a coluna é retirada do
+  payload e o lote repetido, em vez de derrubar as 500 linhas.
+- **Mensagens legíveis:** `descreveSupabaseError` extrai `code · message ·
+  details · hint`, e o exemplo do erro final mostra a causa real.
+- **Dedupe por `(tenantid, primarykey)`** dentro do lote: chave repetida fazia o
+  Postgres abortar com "ON CONFLICT DO UPDATE command cannot affect row a second
+  time".
+- **Marcação local pela chave de origem:** `markAssetsSynced` casa pelo
+  `primarykey`, mas o retorno do sync trazia `id`; quando `id !== primarykey` a
+  etiqueta não limpava mesmo com o dado aceite. A conversão passou a ser feita
+  em `syncAssetsToCloudAndMark`.
+
 **RPC nativa (avaliada, não adotada ainda):** o `upsert` do PostgREST já é um
 único `INSERT … ON CONFLICT` no Postgres, portanto o ganho de uma função
 `plpgsql` não está na escrita — está em juntar vários lotes num só corpo. Com
@@ -144,8 +172,10 @@ encadeados.
 - Carga de 7.000: o log final passa a mostrar
   `Espelhamento: N/7000 ativos em 14 lote(s) de 500 · Xs (Y ativos/s)`.
 - Falha de schema: `Lote N falhou; 500 linha(s) reenviadas em isolamento.
-  Causa: …` — se aparecer sempre, o alvo do `ON CONFLICT` precisa do índice
-  certo (ver `docs/supabase_bootstrap.sql`).
+  Causa: [CÓDIGO] mensagem · detalhe · dica` — a causa do Postgres aparece
+  legível; `assets.id` uuid é detetado e resolvido automaticamente.
+- Avisos esperados uma vez por sessão: `assets.id é uuid ...` e
+  `Coluna 'x' não existe em assets ...`.
 - Confirmação: o cartão muda de estado no toque (sem esperar GPS) e
   `PENDENTE NUVEM` passa a `SINCRONIZADO` após a janela de envio, sem recarregar
   a lista.

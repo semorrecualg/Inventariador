@@ -197,7 +197,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         )
       );
       addLog(`[SRE_CLOUD] Contratos detectados na base: ${tenantsDaBase.length ? tenantsDaBase.join(' | ') : '(nenhum — Global)'}`);
-      addLog(`[SRE_CLOUD] Enviando ${baseParaEspelhar.length} ativos do contrato ${activeTenantid || 'global'} em lotes de 50 (Política SRE)...`);
+      addLog(`[SRE_CLOUD] Enviando ${baseParaEspelhar.length} ativos do contrato ${activeTenantid || 'global'} em lotes de 500 (4 lotes em paralelo)...`);
 
       const syncedIds = await syncAssetsToCloud(
         baseParaEspelhar as unknown as Asset[],
@@ -664,7 +664,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <div>
               <h3 className="text-xs font-black uppercase text-sky-200 tracking-wider">Espelhamento em Massa — Supabase</h3>
               <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide mt-1">
-                Sobe a base carregada para a tabela <b>assets</b> da Nuvem em lotes de 50, preservando o <b>tenantid de cada ativo</b> exatamente como veio da planilha (tenant 100% da base — zero valor fixo).
+                Sobe a base carregada para a tabela <b>assets</b> da Nuvem em lotes de 500, preservando o <b>tenantid de cada ativo</b> exatamente como veio da planilha (tenant 100% da base — zero valor fixo).
               </p>
             </div>
           </div>
