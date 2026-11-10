@@ -91,7 +91,7 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
 
   return (
     <div 
-      className={`mb-3 p-4 pl-5 bg-white rounded-2xl border border-[#F1F5F9] relative overflow-hidden transition-all active:scale-[0.99] shadow-[0_2px_8px_rgba(0,0,0,0.04)] ${isAdotadoExterno ? 'ring-2 ring-amber-400 shadow-lg' : ''} ${isSelected ? 'ring-2 ring-accent' : ''}`} 
+      className={`mb-2.5 p-3.5 pl-4 bg-white rounded-2xl border border-[#F1F5F9] relative overflow-hidden transition-all active:scale-[0.99] shadow-[0_2px_8px_rgba(0,0,0,0.04)] ${isAdotadoExterno ? 'ring-2 ring-amber-400 shadow-lg' : ''} ${isSelected ? 'ring-2 ring-accent' : ''}`} 
       onClick={() => {
         if (isBatchMode && onToggleSelect) {
           if (!isConferido) onToggleSelect(String(asset.id));
@@ -103,21 +103,38 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
       {/* Faixa lateral permanente com a cor da TAG de auditoria */}
       <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${meta.color.bg}`} />
 
-      <div className="flex items-center justify-between">
-        <div className="flex-1 pr-4 min-w-0">
-          <div className="flex items-center flex-wrap gap-2 mb-2">
-            <div className="bg-[#F1F5F9] px-1.5 py-0.5 rounded-[4px]">
-              <span className="text-[9px] font-extrabold text-[#64748B] uppercase tracking-wider">PATRIMÔNIO</span>
+      <div>
+        <div className="min-w-0">
+          {/* Topo: badge/TAG à esquerda, ações rápidas (QR) à direita */}
+          <div className="flex items-start justify-between gap-2 mb-1.5">
+            <div className="flex items-center flex-wrap gap-2 min-w-0">
+              <div className="bg-[#F1F5F9] px-1.5 py-0.5 rounded-[4px]">
+                <span className="text-[9px] font-extrabold text-[#64748B] uppercase tracking-wider">PATRIMÔNIO</span>
+              </div>
+              {(asset._photoUrl || hasLocalPhoto) && (
+                <Camera size={12} className="text-accent" />
+              )}
+              {/* TAG DE AUDITORIA — Regra de Ouro da conferência física */}
+              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border shadow-sm ${meta.color.badge}`}>
+                <StatusIcon size={12} />
+                <span className={`text-[10px] font-black uppercase tracking-wide ${meta.color.text}`}>
+                  {meta.label}
+                </span>
+              </div>
             </div>
-            {(asset._photoUrl || hasLocalPhoto) && (
-              <Camera size={12} className="text-accent" />
-            )}
-            {/* TAG DE AUDITORIA — Regra de Ouro da conferência física */}
-            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border shadow-sm ${meta.color.badge}`}>
-              <StatusIcon size={12} />
-              <span className={`text-[10px] font-black uppercase tracking-wide ${meta.color.text}`}>
-                {meta.label}
-              </span>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {onShowQr && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onShowQr(asset); }}
+                  aria-label={`Ver QR Code do ativo ${formatEtiqueta(asset.etiqueta)}`}
+                  className="w-8 h-8 flex items-center justify-center bg-slate-50 border border-slate-200 text-slate-400 rounded-lg shadow-sm active:scale-90 hover:text-blue-600 hover:border-blue-200 transition-colors"
+                  id={`qr-btn-${asset.id}`}
+                >
+                  <QrCode size={14} />
+                </button>
+              )}
+              {extraAction}
             </div>
           </div>
 
@@ -142,13 +159,14 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
           <h3 className="text-xl font-extrabold text-[#1E293B] font-mono tracking-tight mb-1 truncate">
             {formatEtiqueta(asset.etiqueta)}
           </h3>
-          
-          <p className="text-sm font-medium text-[#475569] leading-snug line-clamp-2 mb-2">
+
+          {/* Texto a toda a largura: sem coluna lateral a espremer o conteúdo */}
+          <p className="text-sm font-medium text-[#475569] leading-snug line-clamp-2 mb-1.5">
             {fullDescription}
           </p>
           
           {isAdopted && (
-            <div className="mb-3 bg-blue-50/70 border border-blue-200 rounded-xl p-3 space-y-2 animate-fadeIn shadow-sm">
+            <div className="mb-2 bg-blue-50/70 border border-blue-200 rounded-xl p-2.5 space-y-2 animate-fadeIn shadow-sm">
               <div className="flex items-center justify-between border-b border-blue-100 pb-1.5 mb-1.5">
                 <span className="text-[9px] font-black text-blue-600 uppercase tracking-[0.2em]">Situação: Adoção</span>
                 <MapPin size={10} className="text-blue-500" />
@@ -215,56 +233,51 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
           </div>
         </div>
 
-        {/* Ações do ativo — QR no topo e CONFIRMAÇÃO em destaque à direita */}
-        <div className="shrink-0 ml-3 flex flex-col items-center justify-between gap-2 self-stretch py-0.5">
-          {onShowQr && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onShowQr(asset); }}
-              aria-label={`Ver QR Code do ativo ${formatEtiqueta(asset.etiqueta)}`}
-              className="w-9 h-9 flex items-center justify-center bg-slate-50 border border-slate-200 text-slate-400 rounded-xl shadow-sm active:scale-90 hover:text-blue-600 hover:border-blue-200 transition-colors"
-              id={`qr-btn-${asset.id}`}
-            >
-              <QrCode size={15} />
-            </button>
-          )}
-          {extraAction}
-          {isBatchMode ? (
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-sm ${isSelected ? 'bg-accent text-white ring-4 ring-accent/20' : 'border-2 border-[#CBD5E1] bg-white'}`}>
-              {isSelected && <Check size={24} strokeWidth={4} />}
-            </div>
-          ) : onMakeDecision ? (
-            isConferido ? (
-              <div
-                aria-label={`${meta.label} — ativo já processado`}
-                title={meta.label}
-                className={`w-12 h-12 rounded-full flex items-center justify-center shadow-sm ring-1 ring-inset ring-slate-900/5 ${meta.color.softBg} ${meta.color.icon}`}
-              >
-                <Check size={26} strokeWidth={4} />
-              </div>
-            ) : (
-              <button
-                onClick={handleConfirm}
-                aria-label={`Confirmar ativo ${formatEtiqueta(asset.etiqueta)} no inventário`}
-                title="Confirmar este ativo no inventário"
-                className="group flex flex-col items-center gap-1 active:scale-95 transition-transform"
-              >
-                <span className="w-14 h-14 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shadow-md shadow-blue-200/60 ring-4 ring-blue-100/70 group-hover:bg-blue-200/80 group-hover:ring-blue-200/70 transition-all">
-                  <Check size={30} strokeWidth={3.5} />
-                </span>
-                <span className="text-[8px] font-black uppercase tracking-widest text-blue-500 leading-none">
-                  Confirmar
-                </span>
-              </button>
-            )
-          ) : isConferido ? (
+        {/* Confirmação em barra na base do card: liberta a largura do texto e
+            baixa a altura (antes era um botão redondo na coluna da direita). */}
+        {isBatchMode ? (
+          <div
+            aria-label={isSelected ? 'Ativo selecionado' : isConferido ? 'Ativo já conferido' : 'Ativo não selecionado'}
+            className={`mt-2.5 w-full h-10 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm text-[10px] font-black uppercase tracking-widest ${isSelected
+              ? 'bg-accent text-white shadow-accent/20'
+              : isConferido
+                ? 'bg-slate-100 text-slate-400 border border-slate-200'
+                : 'border border-[#CBD5E1] bg-white text-slate-500'
+            }`}
+          >
+            {isSelected && <Check size={16} strokeWidth={4} />}
+            {isSelected ? 'Selecionado' : isConferido ? 'Já conferido' : 'Selecionar'}
+          </div>
+        ) : onMakeDecision ? (
+          isConferido ? (
             <div
               aria-label={`${meta.label} — ativo já processado`}
-              className={`w-10 h-10 rounded-full flex items-center justify-center shadow-sm ring-1 ring-inset ring-slate-900/5 ${meta.color.softBg} ${meta.color.icon}`}
+              title={meta.label}
+              className={`mt-2.5 w-full h-9 rounded-xl flex items-center justify-center gap-2 shadow-sm ring-1 ring-inset ring-slate-900/5 ${meta.color.softBg} ${meta.color.icon}`}
             >
-              <Check size={20} strokeWidth={4} />
+              <Check size={15} strokeWidth={4} />
+              <span className="text-[10px] font-black uppercase tracking-widest">{meta.label}</span>
             </div>
-          ) : null}
-        </div>
+          ) : (
+            <button
+              onClick={handleConfirm}
+              aria-label={`Confirmar ativo ${formatEtiqueta(asset.etiqueta)} no inventário`}
+              title="Confirmar este ativo no inventário"
+              className="mt-2.5 w-full h-11 rounded-xl bg-accent text-white flex items-center justify-center gap-2 shadow-md shadow-accent/25 active:scale-[0.98] hover:bg-accent/90 transition-all"
+            >
+              <Check size={16} strokeWidth={3.5} />
+              <span className="text-[11px] font-black uppercase tracking-widest leading-none">Confirmar</span>
+            </button>
+          )
+        ) : isConferido ? (
+          <div
+            aria-label={`${meta.label} — ativo já processado`}
+            className={`mt-2.5 w-full h-9 rounded-xl flex items-center justify-center gap-2 shadow-sm ring-1 ring-inset ring-slate-900/5 ${meta.color.softBg} ${meta.color.icon}`}
+          >
+            <Check size={15} strokeWidth={4} />
+            <span className="text-[10px] font-black uppercase tracking-widest">{meta.label}</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
