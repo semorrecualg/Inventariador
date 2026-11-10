@@ -49,6 +49,36 @@ async function putMirror(table: 'ativos' | 'local_assets', tenantid: string, pk:
   } as unknown as DexieAsset);
 }
 
+describe('sqliteService.countAssetMirrors (contra-prova do Gestor de Base)', () => {
+  beforeEach(async () => {
+    await db.ativos.clear();
+    await db.local_assets.clear();
+    await db.assets.clear();
+  });
+
+  it('devolve cada espelho e o total canónico (maior espelho)', async () => {
+    await putMirror('local_assets', 'CICOPAL', 'PK-001');
+    await putMirror('ativos', 'CICOPAL', 'PK-001');
+    await putMirror('ativos', 'CICOPAL', 'PK-002');
+
+    const counts = await sqliteService.countAssetMirrors('CICOPAL');
+    expect(counts).toEqual({ local_assets: 1, ativos: 2, assets: 0, total: 2 });
+  });
+
+  it('não anuncia 0 quando os dados vivem apenas em assets/ativos', async () => {
+    await putMirror('ativos', 'CICOPAL', 'PK-001');
+    expect((await sqliteService.countAssetMirrors()).total).toBe(1);
+  });
+
+  it('escopa por tenant quando informado', async () => {
+    await putMirror('local_assets', 'CICOPAL', 'PK-001');
+    await putMirror('local_assets', 'CLIENTETESTE', 'PK-002');
+
+    expect((await sqliteService.countAssetMirrors('CLIENTETESTE')).total).toBe(1);
+    expect((await sqliteService.countAssetMirrors('  cicopal ')).total).toBe(1);
+  });
+});
+
 describe('sqliteService.countAtivosByTenant (isolamento por tenant)', () => {
   beforeEach(async () => {
     await db.ativos.clear();

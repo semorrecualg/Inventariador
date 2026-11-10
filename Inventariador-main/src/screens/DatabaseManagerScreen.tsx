@@ -3,7 +3,7 @@ import { db, sqliteService } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
-import { saveSnapshotToWorkspace, saveVirtualSnapshot } from '../services/localDbService';
+import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
 import { logger } from '../utils/logger';
@@ -49,16 +49,22 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     originalShowRecoveryToast(message, type);
   };
   const [assetCount, setAssetCount] = useState<number>(0);
+  // Contra-prova física: cada espelho é contado em separado, para o painel poder
+  // explicar uma diferença em vez de a esconder num único número.
+  const [mirrors, setMirrors] = useState<{ local_assets: number; ativos: number; assets: number }>({ local_assets: 0, ativos: 0, assets: 0 });
+  // Espelho virtual (sandbox/iframe): é o que a Unidade Operacional lê quando o
+  // banco local está vazio. Só é lido quando o banco está vazio (diagnóstico).
+  const [virtualCount, setVirtualCount] = useState<number>(0);
   const [logCount, setLogCount] = useState<number>(0);
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
 
-  const addLog = (msg: string) => {
+  const addLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('pt-BR');
     setConsoleLogs(prev => [...prev, `>> [${time}] ${msg}`].slice(-15));
-  };
+  }, []);
 
   const handleBackupButtonClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -232,16 +238,35 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           if (userStr) tid = String(JSON.parse(userStr)?.tenantid || '').trim().toUpperCase();
         } catch { /* ignore */ }
       }
-      const aCount = tid
-        ? await sqliteService.countAtivosByTenant(tid)
-        : await db.local_assets.count();
+      // Contagem contra os TRÊS espelhos (local_assets · ativos · assets), com a
+      // mesma regra do resto do app (maior espelho). Antes contava só
+      // `local_assets` e anunciava 0 ativos com dados vivos noutro espelho.
+      const counts = await sqliteService.countAssetMirrors(tid || null);
+      setMirrors({ local_assets: counts.local_assets, ativos: counts.ativos, assets: counts.assets });
+      const aCount = counts.total;
+
+      // Banco local vazio: verifica o espelho virtual (iframe sandbox) — é dele
+      // que a Unidade Operacional tira o número quando não há linhas em disco.
+      let vCount = 0;
+      if (aCount === 0) {
+        try {
+          const virtualData = await readVirtualSnapshot();
+          vCount = Array.isArray(virtualData) ? virtualData.length : 0;
+        } catch { vCount = 0; }
+      }
+      setVirtualCount(vCount);
       setAssetCount(aCount);
       const lCount = await db.audit_logs.count();
       setLogCount(lCount);
+      if (vCount > 0) {
+        addLog(`[SRE_STATS] Banco local vazio, mas existe espelho virtual com ${vCount} ativos (origem do número mostrado na Unidade Operacional).`);
+      } else {
+        addLog(`[SRE_STATS] Espelhos: local_assets=${counts.local_assets} · ativos=${counts.ativos} · assets=${counts.assets}.`);
+      }
     } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
       console.error("[SRE STATS ERR]", err);
     }
-  }, [activeTenantid]);
+  }, [activeTenantid, addLog]);
 
   // Recalcula as estatísticas no boot E quando o tenant ativo é detectado:
   // loadStats muda de identidade junto com activeTenantid, então um único
@@ -252,7 +277,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
   useEffect(() => {
     addLog("[SRE BOOT] Inicializando painel de gestão de base de dados...");
-  }, []);
+  }, [addLog]);
 
   // Carga central de planilha (usada pelo input de arquivo E pela listagem de
   // planilhas da pasta vinculada). O parser XLSX (SheetJS) suporta .xls/.xlsx/.csv.
@@ -428,11 +453,17 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     addLog("[SRE_PURGE] Iniciando higienização estrutural de tabelas...");
     
     try {
-      await db.transaction('rw', [db.local_assets, db.addresses, db.ativos], async () => {
+      await db.transaction('rw', [db.local_assets, db.addresses, db.ativos, db.assets], async () => {
         await db.local_assets.clear();
         await db.addresses.clear();
         await db.ativos.clear();
+        // `assets` também é espelho do inventário: sem o limpar, a higienização
+        // deixava dados vivos e as contagens por espelho divergiam.
+        await db.assets.clear();
       });
+      // Espelho virtual (sandbox): alimentava a Unidade Operacional com milhares
+      // de ativos depois de o banco local ser higienizado.
+      await clearVirtualSnapshot();
 
       localStorage.setItem('gbr_kardek_history', stableHistory);
       setIsPurging(false);
@@ -506,6 +537,14 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         <div className="p-4 bg-slate-900/30 border border-slate-800/50 rounded-xl flex flex-col justify-between">
           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{activeTenantid ? 'Ativos do Contrato' : 'Ativos Locais'}</span>
           <span className="text-xl font-black text-emerald-400 mt-1 font-mono">{assetCount}</span>
+          <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider mt-1 leading-tight">
+            local_assets {mirrors.local_assets} · ativos {mirrors.ativos} · assets {mirrors.assets}
+          </span>
+          {virtualCount > 0 && (
+            <span className="text-[8px] font-bold text-amber-400 uppercase tracking-wider mt-1 leading-tight">
+              Espelho virtual (sandbox): {virtualCount} — é o número que a Unidade Operacional lê
+            </span>
+          )}
         </div>
         <div className="p-4 bg-slate-900/30 border border-slate-800/50 rounded-xl flex flex-col justify-between">
           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Registros de Auditoria</span>
