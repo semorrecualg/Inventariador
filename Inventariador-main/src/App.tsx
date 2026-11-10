@@ -257,7 +257,7 @@ const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({
   editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'],
   qrCodeFields: ['ETIQUETA'],
   scannerMode: ScannerMode.BARCODE,
-  autoConfirmOnScan: false,
+  autoConfirmOnScan: true,
   scanFeedbackMode: ScanFeedbackMode.BOTH,
   inventorySearchMode: InventorySearchMode.MANUAL,
   immersiveMode: false,
@@ -6917,12 +6917,14 @@ useEffect(() => {
             databaseMode={databaseMode}
             onUpdateDatabaseMode={handleRequestDatabaseModeSwitch}
             inventoryInfo={{ count: activeUnitAssetCount, totalDatabase: selectedUnit ? activeUnitAssetCount : inventory.assets.length, date: inventory.lastUpdated }}
-            autoConfirmOnScan={inventory.autoConfirmOnScan || false}
+            autoConfirmOnScan={inventory.autoConfirmOnScan ?? true}
             onUpdateAutoConfirm={(val) => updateConfig({ autoConfirmOnScan: val })}
             isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
             scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH}
             onUpdateScanFeedbackMode={(mode) => updateConfig({ scanFeedbackMode: mode })}
+            scannerMode={inventory.scannerMode || ScannerMode.BARCODE}
+            onUpdateScannerMode={handleUpdateScannerMode}
             initialDataMenuOpen={startWithDataMenu}
             initialOpenPanel={menuPanelToOpen}
             selectedUnit={selectedUnit}
@@ -7078,8 +7080,13 @@ useEffect(() => {
                   searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL}
                   onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))}
                   onUpdateScannerMode={handleUpdateScannerMode}
-                  autoConfirmOnScan={inventory.autoConfirmOnScan || false}
+                  autoConfirmOnScan={inventory.autoConfirmOnScan ?? true}
                   scanFeedbackMode={inventory.scanFeedbackMode || ScanFeedbackMode.BOTH}
+                  onUpdateAutoConfirm={(val) => updateConfig({ autoConfirmOnScan: val })}
+                  onUpdateScanFeedbackMode={(mode) => updateConfig({ scanFeedbackMode: mode })}
+                  darkMode={inventory.darkMode || false}
+                  onUpdateDarkMode={(val) => updateConfig({ darkMode: val })}
+                  onUpdateBatterySaver={(val) => updateConfig({ batterySaver: val })}
                   onOpenConsultation={() => { setIsConsultationFromInventory(true); pushScreen(AppScreen.CONSULTATION); }}
                   onOpenSignature={() => pushScreen(AppScreen.SIGNATURE)}
                   inventorySearchValue={inventorySearchValue}

@@ -1,29 +1,75 @@
-import React, { useState } from 'react';
-import { ScanFeedbackMode } from '../types';
-import { 
+import React from 'react';
+import { ScanFeedbackMode, ScannerMode } from '../types';
+import {
+  ArrowLeft,
+  Battery,
+  BookOpen,
+  Barcode,
+  Moon,
+  QrCode,
+  RotateCcw,
   ShieldCheck,
   Vibrate,
   Volume2,
-  X,
-  Battery,
-  BookOpen,
-  ExternalLink,
-  ChevronRight
+  X
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import BackButton from './BackButton';
+import { playScanFeedback } from '../utils/scanFeedback';
 
 export interface PreferencesPanelProps {
   onClose: () => void;
+  /** LIGADO grava o ativo no ato da leitura; DESLIGADO pede confirmação na ficha. */
   autoConfirmOnScan: boolean;
   onUpdateAutoConfirm: (val: boolean) => void;
   scanFeedbackMode: ScanFeedbackMode;
   onUpdateScanFeedbackMode: (mode: ScanFeedbackMode) => void;
+  /** Presente apenas onde existe leitor de câmera (inventário, etiquetagem, menu). */
+  scannerMode?: ScannerMode;
+  onUpdateScannerMode?: (mode: ScannerMode) => void;
   darkMode: boolean;
   onUpdateDarkMode: (val: boolean) => void;
   batterySaver: boolean;
   onUpdateBatterySaver: (val: boolean) => void;
+  /** Abre o manual do sistema quando o contexto oferece essa tela. */
+  onOpenManual?: () => void;
+  /** Unidade/endereço em que as preferências vão ser aplicadas. */
+  contextLabel?: string;
 }
+
+const FEEDBACK_OPTIONS: { mode: ScanFeedbackMode; label: string; icon: React.ReactNode }[] = [
+  { mode: ScanFeedbackMode.VIBRATE, label: 'Vibrar', icon: <Vibrate size={15} /> },
+  { mode: ScanFeedbackMode.SOUND, label: 'Som (bip)', icon: <Volume2 size={15} /> },
+  {
+    mode: ScanFeedbackMode.BOTH,
+    label: 'Ambos',
+    icon: (
+      <span className="flex items-center gap-0.5">
+        <Vibrate size={12} />
+        <Volume2 size={12} />
+      </span>
+    )
+  },
+  { mode: ScanFeedbackMode.NONE, label: 'Silencioso', icon: <X size={15} /> }
+];
+
+/** Interruptor acessível (role="switch") usado nas três preferências on/off. */
+const Switch: React.FC<{
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+}> = ({ checked, onChange, label }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
+    onClick={() => onChange(!checked)}
+    className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${checked ? 'bg-success' : 'bg-border'}`}
+  >
+    <span
+      className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all ${checked ? 'left-6' : 'left-1'}`}
+    />
+  </button>
+);
 
 const PreferencesPanel: React.FC<PreferencesPanelProps> = ({
   onClose,
@@ -31,189 +77,259 @@ const PreferencesPanel: React.FC<PreferencesPanelProps> = ({
   onUpdateAutoConfirm,
   scanFeedbackMode,
   onUpdateScanFeedbackMode,
+  scannerMode,
+  onUpdateScannerMode,
   darkMode,
   onUpdateDarkMode,
   batterySaver,
   onUpdateBatterySaver,
+  onOpenManual,
+  contextLabel
 }) => {
-  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
+  const canChangeScannerMode = !!scannerMode && !!onUpdateScannerMode;
+  const isDefaultSetup =
+    autoConfirmOnScan &&
+    scanFeedbackMode === ScanFeedbackMode.BOTH &&
+    (!canChangeScannerMode || scannerMode === ScannerMode.BARCODE);
+
+  const restoreDefaults = () => {
+    onUpdateAutoConfirm(true);
+    onUpdateScanFeedbackMode(ScanFeedbackMode.BOTH);
+    if (canChangeScannerMode && onUpdateScannerMode) {
+      onUpdateScannerMode(ScannerMode.BARCODE);
+    }
+  };
 
   return (
-    <>
-      {isDocModalOpen && (
-        <div className="fixed inset-0 z-[20000] bg-white flex flex-col animate-slideUp">
-          <div className="px-6 pt-12 pb-6 bg-emerald-500 text-white flex items-center justify-between shadow-lg">
-            <div className="flex items-center space-x-4">
-              <BackButton onClick={() => setIsDocModalOpen(false)} label="Voltar" />
-              <div>
-                <h2 className="text-lg font-black uppercase tracking-tight">Manual do Sistema</h2>
-                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">Inventariador GBR v2.6</p>
-              </div>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-6 md:p-10 bg-bg-main no-scrollbar">
-            <div className="max-w-3xl mx-auto prose prose-slate prose-sm prose-emerald">
-              <div className="bg-white border border-border rounded-3xl p-6 md:p-10 shadow-sm mb-10 markdown-body">
-                <ReactMarkdown>
-                  {`# Documentação Técnica e Operacional - Inventariador GBR v2.6
-
-Este documento serve como o manual oficial e registro técnico de todas as funcionalidades operacionais do sistema de Inventário de Ativo Imobilizado.`}
-                </ReactMarkdown>
-              </div>
-            </div>
-          </div>
+    <div className="fixed inset-0 z-[10000] bg-bg-main flex flex-col animate-fadeIn">
+      {/* Barra superior */}
+      <div className="bg-surface border-b border-border px-4 py-3 flex items-center gap-3 sticky top-0 z-[10001] safe-area-top">
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-2 -ml-1 rounded-xl text-ink-muted active:bg-accent-soft transition-colors"
+          aria-label="Fechar ajustes de campo"
+        >
+          <ArrowLeft size={20} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-sm font-black text-ink uppercase tracking-tight leading-tight">
+            Ajustes de Campo
+          </h1>
+          <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.18em] mt-0.5 truncate">
+            {contextLabel ? contextLabel : 'Preferências do auditor'}
+          </p>
         </div>
-      )}
+        <span className="px-2 py-1 rounded-lg bg-accent-soft text-accent text-[8px] font-black uppercase tracking-widest">
+          Neste dispositivo
+        </span>
+      </div>
 
-      <div className="fixed inset-0 z-[10000] bg-slate-50 flex flex-col animate-fadeIn">
-        {/* Top App Bar - Material 3 Style */}
-        <div className="bg-white/80 backdrop-blur-md border-b border-slate-100 px-4 py-3 flex items-center sticky top-0 z-[10001]">
-          <button 
-            onClick={onClose}
-            className="p-2 -ml-2 text-slate-600 active:bg-slate-100 rounded-full transition-colors mr-3"
-          >
-            <ChevronRight size={24} className="rotate-180" />
-          </button>
-          <div>
-            <h1 className="text-base font-semibold text-slate-900 leading-tight">Ajustes de Campo</h1>
-            <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Preferências do Auditor</p>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 no-scrollbar">
-          <div className="w-full max-w-sm mx-auto space-y-4">
-            {/* AUTO CONFERENCIA */}
-            <div className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
-              <div className="flex items-center mb-3">
-                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><ShieldCheck size={16} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Auto-Conferência</h4>
-                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Registro Automático no Scan</p>
-                </div>
+      <div className="flex-1 overflow-y-auto no-scrollbar px-4 py-4">
+        <div className="w-full max-w-md mx-auto space-y-4 pb-8">
+          {/* LEITURA */}
+          <section className="bg-surface border border-border rounded-2xl p-4 shadow-sm">
+            <div className="flex items-center mb-3">
+              <div className="w-9 h-9 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-3 border border-border">
+                <Barcode size={17} />
               </div>
-              <div className="flex p-1 bg-slate-50 border border-slate-100 rounded-xl">
-                <button 
-                  onClick={() => onUpdateAutoConfirm(true)}
-                  className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${autoConfirmOnScan ? 'bg-white text-emerald-600 shadow-sm border border-emerald-100' : 'text-slate-400'}`}
-                >
-                  LIGADO
-                </button>
-                <button 
-                  onClick={() => onUpdateAutoConfirm(false)}
-                  className={`flex-1 py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all ${!autoConfirmOnScan ? 'bg-white text-slate-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
-                >
-                  DESLIGADO
-                </button>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-[12px] font-black text-ink uppercase tracking-tight">Leitura</h2>
+                <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">
+                  Scanner, conferência e captura
+                </p>
               </div>
             </div>
 
-            {/* FEEDBACK SCANNER */}
-            <div className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
-              <div className="flex items-center mb-3">
-                <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center mr-4 border border-blue-100"><Vibrate size={16} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Feedback do Scanner</h4>
-                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Confirmação de Leitura</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-50 border border-slate-100 rounded-xl">
-                <button 
-                  onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.VIBRATE)}
-                  className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.VIBRATE ? 'bg-white text-blue-600 shadow-sm border border-blue-100' : 'text-slate-400'}`}
-                >
-                  <Vibrate size={12} />
-                  <span>Vibrar</span>
-                </button>
-                <button 
-                  onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.SOUND)}
-                  className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.SOUND ? 'bg-white text-blue-600 shadow-sm border border-blue-100' : 'text-slate-400'}`}
-                >
-                  <Volume2 size={12} />
-                  <span>Som (Bip)</span>
-                </button>
-                <button 
-                  onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.BOTH)}
-                  className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.BOTH ? 'bg-white text-blue-600 shadow-sm border border-blue-100' : 'text-slate-400'}`}
-                >
-                  <div className="flex space-x-1">
-                    <Vibrate size={10} />
-                    <Volume2 size={10} />
-                  </div>
-                  <span>Ambos</span>
-                </button>
-                <button 
-                  onClick={() => onUpdateScanFeedbackMode(ScanFeedbackMode.NONE)}
-                  className={`py-2.5 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center space-y-1 ${scanFeedbackMode === ScanFeedbackMode.NONE ? 'bg-white text-slate-600 shadow-sm border border-slate-200' : 'text-slate-400'}`}
-                >
-                  <X size={12} />
-                  <span>Nenhum</span>
-                </button>
-              </div>
-            </div>
-
-            {/* ENERGIA E TEMA */}
-            <div className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
-              <div className="flex items-center mb-3">
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center mr-4 border ${darkMode ? 'bg-slate-800 text-yellow-400 border-slate-700' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
-                  <Battery size={16} />
-                </div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-slate-900 uppercase tracking-tight">Energia e Visibilidade</h4>
-                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Performance e Bateria</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <button 
-                  onClick={() => onUpdateDarkMode(!darkMode)}
-                  className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${darkMode ? 'bg-slate-800 border-slate-700 text-white shadow-md' : 'bg-slate-50 border-slate-100 text-slate-500'}`}
-                >
-                  <div className="flex items-center">
-                    <span className="mr-3">{darkMode ? '🌙' : '☀️'}</span>
-                    <span>Modo Escuro (OLED)</span>
-                  </div>
-                  <div className={`w-10 h-5 rounded-full relative transition-colors ${darkMode ? 'bg-emerald-500' : 'bg-slate-200'}`}>
-                    <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${darkMode ? 'left-6' : 'left-1'}`} />
-                  </div>
-                </button>
-
-                <button 
-                  onClick={() => onUpdateBatterySaver(!batterySaver)}
-                  className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border ${batterySaver ? 'bg-amber-50 border-amber-100 text-amber-700 shadow-md' : 'bg-slate-50 border-slate-100 text-slate-500'}`}
-                >
-                  <div className="flex items-center">
-                    <Battery size={14} className="mr-3" />
-                    <span>Economia de Bateria</span>
-                  </div>
-                  <div className={`w-10 h-5 rounded-full relative transition-colors ${batterySaver ? 'bg-emerald-500' : 'bg-slate-200'}`}>
-                    <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${batterySaver ? 'left-6' : 'left-1'}`} />
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* DOCUMENTAÇÃO */}
-            <div className="grid grid-cols-2 gap-3">
-              <button 
-                onClick={() => setIsDocModalOpen(true)}
-                className="flex flex-col items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.98] transition-all text-center shadow-sm"
+            {/* Feedback */}
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[9px] font-black text-ink-muted uppercase tracking-widest">
+                Feedback da leitura
+              </p>
+              <button
+                type="button"
+                onClick={() => playScanFeedback(scanFeedbackMode, batterySaver)}
+                className="px-2.5 py-1 rounded-lg bg-accent-soft text-accent text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all"
+                aria-label="Testar feedback da leitura"
               >
-                <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mb-2 border border-emerald-100"><BookOpen size={20} /></div>
-                <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-tight">Manual</h4>
-              </button>
-
-              <button 
-                onClick={() => window.open('/ajuda_sistema.html', '_blank')}
-                className="flex flex-col items-center p-4 bg-white border border-slate-200 rounded-2xl active:scale-[0.98] transition-all text-center shadow-sm"
-              >
-                <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-2 border border-indigo-100"><ExternalLink size={20} /></div>
-                <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-tight">Guia POP</h4>
+                Testar
               </button>
             </div>
-          </div>
-          <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">GBR Personalization</div>
+            <div className="grid grid-cols-2 gap-2 p-1 bg-bg-main border border-border rounded-xl">
+              {FEEDBACK_OPTIONS.map(option => {
+                const active = scanFeedbackMode === option.mode;
+                return (
+                  <button
+                    key={option.mode}
+                    type="button"
+                    onClick={() => onUpdateScanFeedbackMode(option.mode)}
+                    aria-pressed={active}
+                    className={`py-2.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all flex flex-col items-center justify-center gap-1 ${
+                      active
+                        ? 'bg-surface text-accent shadow-sm border border-accent/30'
+                        : 'text-ink-muted border border-transparent'
+                    }`}
+                  >
+                    {option.icon}
+                    <span>{option.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="h-px bg-border my-4" />
+
+            {/* Auto-conferência */}
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center shrink-0 border border-border">
+                <ShieldCheck size={15} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-black text-ink uppercase tracking-tight">
+                  Auto-Conferência
+                </p>
+                <p className="text-[9px] font-medium text-ink-muted leading-snug mt-1">
+                  {autoConfirmOnScan
+                    ? 'Grava o ativo no ato da leitura — fluxo rápido, sem ficha intermédia.'
+                    : 'Abre a ficha de confirmação para revisar local e património antes de gravar.'}
+                </p>
+              </div>
+              <Switch
+                checked={autoConfirmOnScan}
+                onChange={onUpdateAutoConfirm}
+                label="Auto-Conferência no scanner"
+              />
+            </div>
+
+            {/* Modo de captura */}
+            {canChangeScannerMode && (
+              <>
+                <div className="h-px bg-border my-4" />
+                <p className="text-[9px] font-black text-ink-muted uppercase tracking-widest mb-2">
+                  Padrão de captura
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onUpdateScannerMode?.(ScannerMode.BARCODE)}
+                    aria-pressed={scannerMode === ScannerMode.BARCODE}
+                    className={`py-2.5 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 border ${
+                      scannerMode === ScannerMode.BARCODE
+                        ? 'bg-accent-soft text-accent border-accent/30'
+                        : 'bg-bg-main text-ink-muted border-border'
+                    }`}
+                  >
+                    <Barcode size={14} />
+                    <span>Código de barras</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateScannerMode?.(ScannerMode.QRCODE)}
+                    aria-pressed={scannerMode === ScannerMode.QRCODE}
+                    className={`py-2.5 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 border ${
+                      scannerMode === ScannerMode.QRCODE
+                        ? 'bg-accent-soft text-accent border-accent/30'
+                        : 'bg-bg-main text-ink-muted border-border'
+                    }`}
+                  >
+                    <QrCode size={14} />
+                    <span>QR Code</span>
+                  </button>
+                </div>
+              </>
+            )}
+
+            {!isDefaultSetup && (
+              <button
+                type="button"
+                onClick={restoreDefaults}
+                className="mt-4 w-full py-2 rounded-xl border border-border text-ink-muted text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 active:scale-[0.99] transition-all"
+              >
+                <RotateCcw size={12} />
+                Restaurar padrões de leitura
+              </button>
+            )}
+          </section>
+
+          {/* ENERGIA */}
+          <section className="bg-surface border border-border rounded-2xl p-4 shadow-sm">
+            <div className="flex items-center mb-3">
+              <div className="w-9 h-9 bg-accent-soft text-accent rounded-xl flex items-center justify-center mr-3 border border-border">
+                <Battery size={17} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-[12px] font-black text-ink uppercase tracking-tight">
+                  Energia e visibilidade
+                </h2>
+                <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">
+                  Autonomia da bateria em campo
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 bg-bg-main text-ink-muted rounded-lg flex items-center justify-center shrink-0 border border-border">
+                <Battery size={15} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-black text-ink uppercase tracking-tight">
+                  Economia de bateria
+                </p>
+                <p className="text-[9px] font-medium text-ink-muted leading-snug mt-1">
+                  Vibração curta, pausa da câmara mais cedo e menos atualizações de telemetria.
+                </p>
+              </div>
+              <Switch
+                checked={batterySaver}
+                onChange={onUpdateBatterySaver}
+                label="Economia de bateria"
+              />
+            </div>
+
+            <div className="h-px bg-border my-3" />
+
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 bg-bg-main text-ink-muted rounded-lg flex items-center justify-center shrink-0 border border-border">
+                <Moon size={15} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-black text-ink uppercase tracking-tight">
+                  Modo escuro
+                </p>
+                <p className="text-[9px] font-medium text-ink-muted leading-snug mt-1">
+                  Reduz o brilho da interface para leitura em ambientes com pouca luz.
+                </p>
+              </div>
+              <Switch checked={darkMode} onChange={onUpdateDarkMode} label="Modo escuro" />
+            </div>
+          </section>
+
+          {onOpenManual && (
+            <button
+              type="button"
+              onClick={onOpenManual}
+              className="w-full p-4 bg-surface border border-border rounded-2xl shadow-sm flex items-center gap-3 active:scale-[0.99] transition-all text-left"
+            >
+              <div className="w-9 h-9 bg-accent-soft text-accent rounded-xl flex items-center justify-center border border-border">
+                <BookOpen size={17} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-black text-ink uppercase tracking-tight">
+                  Manual do sistema
+                </p>
+                <p className="text-[9px] font-medium text-ink-muted leading-snug mt-0.5">
+                  Regras de inventário, perfis e integração Protheus.
+                </p>
+              </div>
+            </button>
+          )}
+
+          <p className="text-center text-[8px] font-bold text-ink-muted/70 uppercase tracking-[0.3em] pt-2">
+            Preferências aplicadas a este dispositivo
+          </p>
         </div>
       </div>
-    </>
+    </div>
   );
 };
 
