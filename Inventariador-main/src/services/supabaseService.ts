@@ -13,6 +13,7 @@ import { isAdminEmail } from '../utils/authUtils';
 import { pullDedupKey } from '../utils/syncDedup';
 import { normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
+import { assetUuid } from './uuidV5';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -34,6 +35,29 @@ export class SupabaseAuthException extends Error {
     this.name = 'SupabaseAuthException';
   }
 }
+
+/**
+ * O `PostgrestError` do supabase-js NÃO é uma instância de `Error`, portanto
+ * `String(err)` devolvia `[object Object]` e escondia a causa real (código,
+ * detalhe e dica do Postgres).
+ */
+const describeSupabaseError = (err: unknown): string => {
+  if (!err) return 'erro desconhecido';
+  if (err instanceof Error) return err.message;
+  const e = err as { code?: string; message?: string; details?: string; hint?: string };
+  const parts = [
+    e.code ? `[${e.code}]` : '',
+    e.message || '',
+    e.details ? `detalhe: ${e.details}` : '',
+    e.hint ? `dica: ${e.hint}` : ''
+  ].filter(Boolean);
+  if (parts.length > 0) return parts.join(' · ');
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return 'erro sem detalhe legível';
+  }
+};
 
 export interface ProvisionResult {
   user?: unknown;
@@ -890,6 +914,13 @@ export const signInWithMagicLink = async (email: string) => {
   return data;
 };
 
+/**
+ * Formato de `id` que o schema remoto aceita. Aprendido uma vez por sessão:
+ * sem isso, cada chamada (fila de nuvem a cada 1,2 s) repetiria o lote falhado
+ * só para descobrir que `assets.id` é uuid.
+ */
+let assetsIdMode: 'key' | 'uuid' = 'key';
+
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<string[]> => {
   if (!assets || assets.length === 0) {
     logger.error('>>> [Supabase] Fluxo Bloqueado: Ação explícita de sincronia abortada. Array de ativos nulo ou vazio detectado.');
@@ -923,10 +954,18 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   const failedRows: string[] = []; // Isolamento de registros rejeitados (diagnóstico por id)
   let processedRows = 0;
   const startedAt = Date.now();
+  // Formato de `id` aceito pelo schema remoto ('key' = chave de origem;
+  // 'uuid' = UUID derivado) e colunas que o schema remoto não tem.
+  let idMode: 'key' | 'uuid' = assetsIdMode;
+  const omittedColumns = new Set<string>();
 
-  const buildPayload = (chunk: Asset[]) => {
+  const buildPayload = (chunk: Asset[]): { rows: Record<string, unknown>[]; keys: string[] } => {
+    // Dedupe por (tenantid, primarykey): a mesma chave repetida no lote faz o
+    // Postgres abortar com "ON CONFLICT DO UPDATE command cannot affect row a
+    // second time" e derrubaria as 500 linhas do lote.
+    const byKey = new Map<string, { row: Record<string, unknown>; key: string }>();
     // Preparação de dados (Sanitização rígida anti-PGRST204)
-    return chunk.map(a => {
+    chunk.forEach(a => {
       const cleanAsset = { ...a };
       if (cleanAsset._photoUrl && cleanAsset._photoUrl.startsWith('blob:')) {
         delete cleanAsset._photoUrl;
@@ -960,7 +999,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       const assetPrimaryKey = String(cleanAsset.primarykey !== undefined && cleanAsset.primarykey !== null ? cleanAsset.primarykey : '').trim() || String(cleanAsset.id || '');
 
       // Projeção estrita de colunas GBR v2.6 sem campos fantasmas, usando tenantid e _unitid direto, preenchendo id com a propriedade primarykey
-      return {
+      const row: Record<string, unknown> = {
         id: assetPrimaryKey,
         tenantid: finalTenantid,
         filial: finalFilial,
@@ -1002,37 +1041,78 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
           return isNaN(num) ? null : num;
         })()
       };
+
+      byKey.set(`${row.tenantid}|${row.primarykey}`, {
+        row,
+        // A marcação local usa o id do asset, não o UUID derivado do schema.
+        key: String(a.id ?? assetPrimaryKey)
+      });
     });
+
+    const entries = Array.from(byKey.values());
+    return { rows: entries.map((entry) => entry.row), keys: entries.map((entry) => entry.key) };
   };
 
   // Envio de um lote. O alvo do ON CONFLICT é (tenantid, id) — escopo por
   // contrato, para a carga de um contrato nunca sobrescrever outra base com a
-  // mesma chave de origem. Em schema legado o índice único real pode ser
-  // (tenantid, primarykey): nesse caso (42P10/22P02) repete uma vez pelo índice
-  // do bootstrap em vez de degradar para 500 requisições individuais.
+  // mesma chave de origem. O payload é adaptado ao schema remoto (tipo de `id`
+  // e colunas existentes) sem degradar para 500 requisições individuais.
   const sendBatch = async (rows: Record<string, unknown>[]) => {
     if (!supabase) throw new Error('Instância do Supabase indisponível.');
-    const attempt = await supabase.from('assets').upsert(rows, { onConflict: 'tenantid, id' });
-    if (!attempt.error) return;
 
-    const code = (attempt.error as { code?: string }).code || '';
-    if (code === '42P10' || code === '22P02' || /conflict|uuid/i.test(attempt.error.message || '')) {
-      const retry = await supabase.from('assets').upsert(rows, { onConflict: 'tenantid, primarykey' });
-      if (!retry.error) return;
-      throw retry.error;
+    // O schema remoto decide o formato de `id` e o conjunto de colunas:
+    // - `id` uuid (bootstrap): a chave de origem não é um UUID -> 22P02 em 100%
+    //   das linhas. Nesse caso passa a enviar um UUID derivado de
+    //   (tenantid, primarykey), estável entre execuções (upsert idempotente).
+    // - coluna ausente (PGRST204): retira a coluna e reaproveita o lote.
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const projected = omittedColumns.size > 0 ? rows.map(r => { const copy = { ...r }; omittedColumns.forEach(c => delete copy[c]); return copy; }) : rows;
+      const payload = idMode === 'uuid'
+        ? projected.map(r => ({ ...r, id: assetUuid(String(r.tenantid), String(r.primarykey ?? r.id ?? '')) }))
+        : projected;
+
+      const result = await supabase.from('assets').upsert(payload, { onConflict: 'tenantid, id' });
+      if (!result.error) return;
+
+      const err = result.error as { code?: string; message?: string; details?: string; hint?: string };
+      const code = err.code || '';
+      const message = `${err.message || ''} ${err.details || ''}`;
+
+      if (code === '22P02' && /uuid/i.test(message) && idMode === 'key') {
+        idMode = 'uuid';
+        assetsIdMode = 'uuid';
+        logger.warn('>>> [Supabase] assets.id é uuid no schema remoto: a enviar UUID derivado de (tenantid, primarykey).');
+        continue;
+      }
+
+      const missingColumn = /'([a-zA-Z0-9_]+)' column/.exec(message)?.[1] || /column "([a-zA-Z0-9_]+)"/.exec(message)?.[1];
+      if ((code === 'PGRST204' || /schema cache/i.test(message)) && missingColumn && !omittedColumns.has(missingColumn)) {
+        omittedColumns.add(missingColumn);
+        logger.warn(`>>> [Supabase] Coluna '${missingColumn}' não existe em assets: ignorada no payload do espelhamento.`);
+        continue;
+      }
+
+      // Schema legado cujo alvo de conflito não é (tenantid, id).
+      if (code === '42P10' && idMode === 'key') {
+        const retry = await supabase.from('assets').upsert(payload, { onConflict: 'tenantid, primarykey' });
+        if (!retry.error) return;
+        throw retry.error;
+      }
+
+      throw result.error;
     }
-    throw attempt.error;
+    throw new Error('Espelhamento não convergiu com o schema remoto de assets.');
   };
 
   const processBatch = async (batchIndex: number) => {
     const start = batchIndex * CHUNK_SIZE;
     const chunk = assets.slice(start, start + CHUNK_SIZE);
-    const sanitizedAssetsPayload = buildPayload(chunk);
+    const { rows, keys } = buildPayload(chunk);
     const lote = batchIndex + 1;
 
     try {
-      await sendBatch(sanitizedAssetsPayload);
-      successfullySyncedIds.push(...chunk.map(a => String(a.id)));
+      await sendBatch(rows);
+      successfullySyncedIds.push(...keys);
     } catch (err: unknown) {
       // ISOLAMENTO POR ATIVO: se o lote falhar (ex.: schema incompatível em uma coluna),
       // tenta cada linha individualmente para sincronizar o que é válido e identificar
@@ -1040,20 +1120,26 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       // O fallback só corre para um lote que falhou: 8 linhas em voo em vez de
       // 500 idas sequenciais (o caminho normal nunca paga este custo).
       const ROW_PARALLEL = 8;
-      for (let r = 0; r < sanitizedAssetsPayload.length; r += ROW_PARALLEL) {
-        const rowSlice = sanitizedAssetsPayload.slice(r, r + ROW_PARALLEL);
-        await Promise.all(rowSlice.map(async (row) => {
+      for (let r = 0; r < rows.length; r += ROW_PARALLEL) {
+        const rowSlice = rows.slice(r, r + ROW_PARALLEL);
+        await Promise.all(rowSlice.map(async (row, i) => {
+          const localKey = keys[r + i];
           try {
             await sendBatch([row]);
-            successfullySyncedIds.push(String(row.id));
+            successfullySyncedIds.push(localKey);
           } catch (rowErr: unknown) {
-            const rowMsg = rowErr instanceof Error ? rowErr.message : String(rowErr);
-            failedRows.push(`${row.id}: ${rowMsg}`);
+            // 23505 em `assets_tenant_primarykey_key`: a chave de origem já está
+            // na nuvem (com id anterior) — o ativo está sincronizado, não rejeitado.
+            if ((rowErr as { code?: string }).code === '23505') {
+              successfullySyncedIds.push(localKey);
+              return;
+            }
+            failedRows.push(`${row.primarykey ?? localKey}: ${describeSupabaseError(rowErr)}`);
           }
         }));
       }
       logger.error(
-        `>>> [Supabase] Lote ${lote} falhou; ${sanitizedAssetsPayload.length} linha(s) reenviadas em isolamento. Causa: ${err instanceof Error ? err.message : String(err)}`,
+        `>>> [Supabase] Lote ${lote} falhou; ${rows.length} linha(s) reenviadas em isolamento. Causa: ${describeSupabaseError(err)}`,
         err
       );
     }
@@ -1107,8 +1193,16 @@ export const syncAssetsToCloudAndMark = async (
 ): Promise<string[]> => {
   const synced = await syncAssetsToCloud(assets, tenantid, onProgress);
   if (synced.length > 0) {
+    // `syncAssetsToCloud` devolve ids locais, mas o índice `primarykey` é a chave
+    // de origem — nos ativos em que `id !== primarykey`, marcar pelo id não
+    // encontrava a linha e a etiqueta continuava amber mesmo com o dado aceite.
+    const byId = new Map(assets.map(a => [String(a.id), a]));
+    const keys = synced.map(id => {
+      const asset = byId.get(String(id));
+      return String(asset?.primarykey || asset?.id || id);
+    });
     try {
-      await sqliteService.markAssetsSynced(synced);
+      await sqliteService.markAssetsSynced(keys);
     } catch (markErr) {
       logger.warn('>>> [Supabase] Ativos enviados mas falhou a marcação local de sincronizado:', markErr);
     }
