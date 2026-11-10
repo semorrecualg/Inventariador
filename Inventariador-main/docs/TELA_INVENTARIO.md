@@ -17,7 +17,7 @@
 | Fase | Quando | Conteúdo |
 |---|---|---|
 | **A · Seleção de localidade** | `isInventorying === false` | lista de endereços com progresso, busca de local, aviso de âncora GPS, banner offline, FAB "Nova Localidade" |
-| **B · Execução** | `isInventorying === true` | cabeçalho de contexto, progresso, filtros, busca/OCR, lista virtualizada, barra de ação (lote/encerramento) |
+| **B · Execução** | `isInventorying === true` | cabeçalho de contexto, progresso, filtros, busca por etiqueta, ajustes de campo, lista virtualizada, barra de ação (lote/encerramento) |
 
 O isolamento é triplo: a tela só recebe `assets` da unidade selecionada
 (`filteredAssetsByUnit`), aplica filtro de unidade (`belongsToUnit`, tolerante a
@@ -221,7 +221,7 @@ apenas para calar o ESLint:
 |---|---|---|
 | Campo de busca | `readOnly` e o teclado numérico nunca era renderizado → **impossível digitar** | input editável no **cabeçalho** (etiqueta e descrição), no lugar da barra grande acima da lista |
 | Teclado numérico | componente morto | removido (não servia para busca por descrição) |
-| Busca por foto (OCR) | botão chamava `ocrInputRef.click()` sem `<input type="file">` na árvore → inerte | input oculto renderizado (`capture="environment"`) |
+| Busca por foto (OCR) | botão chamava `ocrInputRef.click()` sem `<input type="file">` na árvore → inerte | **removida**: apontava para `/assets/ocr/*` inexistente e falhava em silêncio; a leitura fica com o leitor de câmera (código de barras/QR) |
 | Progresso da localidade | só na fase A | barra + `conferidos/total/%` no cabeçalho e na barra de ação |
 | Modo lote | estado inalcançável | botão no cabeçalho + barra "selecionados / Conferir / Cancelar" |
 | Finalizar lote | `onOpenSignature` sem botão | "Finalizar lote" na barra de ação |

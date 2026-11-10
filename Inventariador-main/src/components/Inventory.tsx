@@ -31,7 +31,6 @@ import { resolvePersistedTag } from '../services/tagService';
 import { BufferIndicator } from './BufferIndicator';
 import { assetRepository } from '../services/assetRepository';
 
-import { createWorker } from 'tesseract.js';
 import { reverseGeocode } from '../services/geocodingService';
 import { 
   MapPin, 
@@ -500,7 +499,6 @@ const Inventory: React.FC<InventoryProps> = ({
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
   const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
   const [scannedResult, setScannedResult] = useState<string | null>(null);
-  const [isOCRProcessing, setIsOCRProcessing] = useState(false);
 
   // ALERTA DE DUPLICIDADE DE SERIAL: o cadastro manual de NOVO ITEM não pode
   // criar um segundo registro com o mesmo número de série de outro ativo.
@@ -511,7 +509,6 @@ const Inventory: React.FC<InventoryProps> = ({
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [showGlobalSearchResolution, setShowGlobalSearchResolution] = useState<string | null>(null);
   const [isHierarchyLoading, setIsHierarchyLoading] = useState(false);
-  const ocrInputRef = useRef<HTMLInputElement>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -962,46 +959,6 @@ const Inventory: React.FC<InventoryProps> = ({
     );
   };
 
-  const handleSmartOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsOCRProcessing(true);
-    try {
-      // Usar português e inglês padrão local referenciado no diretório de assets estático (/assets/ocr/) para suporte offline-first total
-      const worker = await createWorker('por+eng', 1, {
-        langPath: `${window.location.origin}/assets/ocr`,
-        workerPath: `${window.location.origin}/assets/ocr/tesseract-worker.min.js`,
-        corePath: `${window.location.origin}/assets/ocr/tesseract-core-wasm.js`
-      });
-      const { data: { text } } = await worker.recognize(file);
-      await worker.terminate();
-
-      const cleanedText = text.replace(/[\n\r]/g, ' ').trim().toUpperCase();
-      
-      // Tentar encontrar padrão de plaqueta (6 dígitos)
-      const plaquetaMatch = cleanedText.match(/\b\d{6}\b/);
-      
-      if (plaquetaMatch) {
-        const foundTag = plaquetaMatch[0];
-        setDisplayValue(foundTag);
-        setCommittedSearch(foundTag);
-      } else {
-        // Se não achar plaqueta, tenta qualquer código alfanumérico relevante
-        const genericMatch = cleanedText.match(/\b[A-Z0-9]{4,}\b/);
-        if (genericMatch) {
-          setDisplayValue(genericMatch[0]);
-          setCommittedSearch(genericMatch[0]);
-        }
-      }
-    } catch (err) {
-      logger.error('Erro no Smart OCR:', err);
-    } finally {
-      setIsOCRProcessing(false);
-      if (ocrInputRef.current) ocrInputRef.current.value = '';
-    }
-  };
-
   const handleReverseGeocoding = async () => {
     if (!navigator.geolocation) {
       alert('Geolocalização não suportada.');
@@ -1034,10 +991,6 @@ const Inventory: React.FC<InventoryProps> = ({
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  };
-
-  const triggerSmartOCR = () => {
-    ocrInputRef.current?.click();
   };
 
   const handleForceLocation = async () => {
@@ -1981,19 +1934,11 @@ const Inventory: React.FC<InventoryProps> = ({
               disabled={isPersistingScan}
               onChange={(e) => setDisplayValue(e.target.value.toUpperCase())}
               value={displayValue}
-              className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-8 pr-16 py-2.5 font-mono text-[13px] font-bold rounded-xl text-[#1E293B] outline-none focus:border-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-[#F8FAFC] border border-[#F1F5F9] pl-8 pr-9 py-2.5 font-mono text-[13px] font-bold rounded-xl text-[#1E293B] outline-none focus:border-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               placeholder={isPersistingScan ? "GRAVANDO..." : "ETIQUETA"}
               aria-label="Consultar por etiqueta"
             />
             <div className="absolute inset-y-0 right-1 flex items-center">
-              <button
-                disabled={isPersistingScan}
-                onClick={triggerSmartOCR}
-                className="p-1.5 text-[#64748B] hover:bg-white rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Busca por Foto (OCR)"
-              >
-                <Camera size={16} />
-              </button>
               {displayValue && (
                 <button
                   onClick={() => { setDisplayValue(''); setCommittedSearch(''); }}
@@ -2004,15 +1949,6 @@ const Inventory: React.FC<InventoryProps> = ({
                 </button>
               )}
             </div>
-            {/* Input oculto que alimenta a Busca por Foto (OCR) */}
-            <input
-              ref={ocrInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={handleSmartOCR}
-            />
           </div>
 
           <div className="flex items-center gap-0.5 shrink-0">
@@ -2339,18 +2275,6 @@ const Inventory: React.FC<InventoryProps> = ({
       {renderConfirmationModals()}
 
       {renderHierarchyResolutionModals()}
-
-      {isOCRProcessing && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex flex-col items-center justify-center p-8 text-center">
-          <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl animate-pulse">
-            <Loader2 size={40} className="text-accent animate-spin" />
-          </div>
-          <h3 className="text-xl font-bold text-white uppercase tracking-tight mb-2">Analisando Imagem</h3>
-          <p className="text-sm text-white/70 max-w-xs uppercase font-bold tracking-widest">
-            Identificando etiquetas e códigos...
-          </p>
-        </div>
-      )}
 
       {/* Outros Modais do Sistema */}
       {isNewLocationModalOpen && (

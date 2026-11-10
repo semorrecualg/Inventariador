@@ -73,7 +73,8 @@ Este mapa documenta a topologia e as conexões físicas dos mais de 35 component
 - **`LoadHistoryScreen.tsx`** (`src/screens/`): Histórico de cargas/sincronizações por contrato (lê `audit_logs` — IMPORT/SYNC_PULL), gate `manage_database`.
 - **`LicenseProvisioning.tsx`**: Provisionamento de novo cliente — cria MASTER amarrado ao `tenantid` com senha forte (`passwordPolicy`), sem backdoor.
 - **`Inventory.tsx`**: O motor nuclear de renderização da listagem de ativos filtrados, com scroll de alta reatividade e cacheamento de posicionamento estático.
-- **`Scanner.tsx`**: Integração de OCR nativo e leitor de código de barras unidimensional/QR bidimensional.
+- **`Scanner.tsx`**: Leitor de código de barras unidimensional e QR bidimensional pela câmera.
+- **`PreferencesPanel.tsx`**: Painel único de Ajustes de Campo (feedback de leitura, auto-conferência, padrão de captura, energia e tema), aberto pelo menu e pelo formulário de inventário.
 - **`Labeling.tsx`**: Tratamento independente de controle de sobras, ativos sem etiquetas físicas ou com necessidade de emplaquetamento re-ativo.
 - **`Signature.tsx`**: Captura e gravação de assinatura manuscrita eletrônica do auditor no encerramento da campanha operacional de auditoria física.
 
