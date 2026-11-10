@@ -996,6 +996,36 @@ export class SqliteService {
     }
   }
 
+  /**
+   * Contra-prova por espelho físico: conta `local_assets`, `ativos` e `assets`
+   * separadamente e devolve o total canónico (maior espelho) — a MESMA regra de
+   * `getAssetCount`/`countAtivosByTenant`. O Gestor de Base contava só
+   * `local_assets`: com dados vivos noutro espelho (versões anteriores do app
+   * escreviam apenas um), anunciava 0 ativos enquanto a Unidade Operacional
+   * mostrava milhares. Devolver cada espelho permite explicar a diferença em
+   * vez de escondê-la.
+   */
+  public async countAssetMirrors(
+    tenantid?: string | null
+  ): Promise<{ local_assets: number; ativos: number; assets: number; total: number }> {
+    const t = String(tenantid || '').trim().toUpperCase();
+    const countTable = async (table: 'local_assets' | 'ativos' | 'assets'): Promise<number> => {
+      try {
+        if (!t) return await db[table].count();
+        const rows = (await db[table].toArray()) as { tenantid?: unknown }[];
+        return rows.filter(a => String(a.tenantid || '').trim().toUpperCase() === t).length;
+      } catch {
+        return 0;
+      }
+    };
+    const [local_assets, ativos, assets] = await Promise.all([
+      countTable('local_assets'),
+      countTable('ativos'),
+      countTable('assets')
+    ]);
+    return { local_assets, ativos, assets, total: Math.max(local_assets, ativos, assets) };
+  }
+
   public async saveInventoryConfig(config: Record<string, unknown>): Promise<void> {
     logger.info(">>> [SqliteService] saveInventoryConfig called with:", config);
     if (config.selectedUnit) {

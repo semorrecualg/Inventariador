@@ -67,7 +67,7 @@ vi.mock('../services/NavigationGuardService', () => ({
   showRecoveryToast: vi.fn()
 }));
 
-import { saveVirtualSnapshot, readVirtualSnapshot } from '../services/localDbService';
+import { saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
 
 describe('saveVirtualSnapshot — persistência resiliente do espelho virtual', () => {
   beforeEach(() => {
@@ -237,5 +237,30 @@ describe('readVirtualSnapshot — leitura com fallback e higienização', () => 
 
     expect(result).toEqual(lsPayload);
     expect(snapshotStoreMock.getItem).not.toHaveBeenCalled();
+  });
+});
+
+describe('clearVirtualSnapshot — higienização do espelho virtual', () => {
+  beforeEach(() => {
+    storageMap.clear();
+    mockStorage.removeItem.mockReset();
+    mockStorage.removeItem.mockImplementation((k: string) => {
+      storageMap.delete(k);
+    });
+    snapshotStoreMock.removeItem.mockReset().mockResolvedValue(undefined);
+    vi.stubGlobal('localStorage', mockStorage);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('apaga os dois backends, para o espelho não repovoar a Unidade Operacional', async () => {
+    storageMap.set(SNAPSHOT_KEY, JSON.stringify([{ id: 'A1' }]));
+
+    await clearVirtualSnapshot();
+
+    expect(storageMap.get(SNAPSHOT_KEY)).toBeUndefined();
+    expect(snapshotStoreMock.removeItem).toHaveBeenCalledWith(SNAPSHOT_KEY);
   });
 });

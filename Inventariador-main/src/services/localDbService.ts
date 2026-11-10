@@ -1079,6 +1079,18 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
 }
 
 /**
+ * Apaga o snapshot virtual dos dois backends (localStorage + IndexedDB).
+ * É um espelho dos ativos que o UnitSelector/ModuleSelector leem como fallback
+ * em iframe: sem o limpar, a "Higienização Física" deixava o espelho intacto e
+ * a Unidade Operacional voltava a anunciar milhares de ativos com o banco local
+ * já vazio.
+ */
+export async function clearVirtualSnapshot(): Promise<void> {
+  try { localStorage.removeItem('gbr_virtual_snapshot_backup'); } catch { /* best-effort */ }
+  try { await snapshotStore.removeItem('gbr_virtual_snapshot_backup'); } catch { /* best-effort */ }
+}
+
+/**
  * Lê o snapshot virtual persistido (localStorage → fallback IndexedDB).
  * Usado pelo UnitSelector para reconstruir unidades quando o filtro de tenant
  * não encontra ativos diretamente no banco local.
