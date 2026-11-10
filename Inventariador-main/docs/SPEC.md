@@ -10,8 +10,8 @@
 ## 1. Resumo executivo
 
 **Inventariador (GBR KARDEK)** é um PWA mobile-first para **auditoria física de ativos
-imobilizados em campo**: o auditor confere patrimônio lendo código de barras/QR (com OCR
-como fallback), etiqueta itens faltantes, captura assinatura eletrônica, georreferencia
+imobilizados em campo**: o auditor confere patrimônio lendo código de barras/QR,
+etiqueta itens faltantes, captura assinatura eletrônica, georreferencia
 ativos em mapa e gera relatórios — **offline-first** (Dexie/IndexedDB) com empacotamento
 Android via Capacitor e **sincronização multi-tenant em nuvem (Supabase) ativa** quando as
 credenciais `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` estão presentes.
@@ -75,7 +75,7 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
   (sem unidade → recuo forçado para `UNIT_SELECTION`).
 - **Inventory** executa filtro estrito por endereço selecionado
   (`current_selected_address` em sessionStorage) e renderiza com Virtuoso (virtualizado).
-- **Scanner / Labeling / Signature:** captura de código de barras + OCR, etiquetagem de
+- **Scanner / Labeling / Signature:** captura de código de barras/QR, etiquetagem de
   sobras/ativos sem etiqueta e assinatura manuscrita eletrônica de encerramento.
 - **Dashboard / AssetMap / AssetDetail / Consultation:** leitura e análise com fallback Dexie.
 

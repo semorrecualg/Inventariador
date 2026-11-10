@@ -8,7 +8,7 @@
 
 ## 1. Visão geral do produto e stack
 
-PWA mobile-first para **auditoria física de ativos imobilizados em campo** (conferência com leitura de código de barras/QR + OCR, etiquetagem, assinatura eletrônica, georreferenciamento e relatórios), com **operação 100% offline** e empacotamento para Android via Capacitor.
+PWA mobile-first para **auditoria física de ativos imobilizados em campo** (conferência com leitura de código de barras/QR, etiquetagem, assinatura eletrônica, georreferenciamento e relatórios), com **operação 100% offline** e empacotamento para Android via Capacitor.
 
 | Camada | Tecnologia |
 |---|---|
