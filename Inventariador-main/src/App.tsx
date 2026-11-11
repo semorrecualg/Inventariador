@@ -7292,7 +7292,7 @@ useEffect(() => {
           ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
-              isAdmin={!!(user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
+              isAdmin={isAdminUser(user) || canAccessDatabaseManager(user)}
               isAuditor={!!(user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
               onNavigate={pushScreen}
    onLoadDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
@@ -7395,11 +7395,13 @@ useEffect(() => {
               lastSyncTime={lastSyncTime}
               onConfigGPS={(u) => {
                 setSelectedUnit(u);
-                pushScreen(AppScreen.UNIT_CONFIGURATOR);
+                // A unidade viaja em `unitName`: a tela de GPS abre escopada nela.
+                pushScreen(AppScreen.UNIT_CONFIGURATOR, { unitName: u });
               }}
               onCampaigns={(u) => {
                 setSelectedUnit(u);
-                pushScreen(AppScreen.CAMPAIGN_MANAGEMENT);
+                // Idem para a campanha: escopo estrito da filial clicada.
+                pushScreen(AppScreen.CAMPAIGN_MANAGEMENT, { unitName: u });
               }}
               isImportingBatch={isImportingBatchState}
             />
@@ -7467,14 +7469,14 @@ useEffect(() => {
               isImportingBatch={isImportingBatchState}
             />
           )}
-          {screen === AppScreen.UNIT_CONFIGURATOR && user && (userHasPermission(user, 'configure_units') ? (
+          {screen === AppScreen.UNIT_CONFIGURATOR && user && (userHasPermission(user, 'configure_units') || isAdminUser(user) ? (
             <UnitConfigurator 
               user={user}
               units={unitNames}
               onBack={popScreen}
               onUpdateConfigs={handleUpdateUnitConfigs}
               onNavigate={pushScreen}
-              initialUnit={selectedUnit}
+              initialUnit={screenParams?.unitName || selectedUnit}
               onBypassApplied={(cfg) => {
                 // Bypass de seguranca (Fase Ancora GPS): grava coordenada padrao e abre a
                 // flag de Campanha para liberar a esteira operacional (ADDRESS_SELECTION > INVENTORY).
@@ -7562,7 +7564,7 @@ useEffect(() => {
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.AUDIT_LOGS && (userHasPermission(user, 'view_audit_logs') ? <AuditLogs user={user} onBack={() => setHistory([AppScreen.MAIN_MENU])} databaseMode={databaseMode} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.LOAD_HISTORY && (userHasPermission(user, 'manage_database') ? <LoadHistoryScreen onBack={popScreen} tenantid={(user?.tenantid || readSessionTenantId() || '').toString().trim().toUpperCase()} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
-          {screen === AppScreen.CAMPAIGN_MANAGEMENT && (userHasPermission(user, 'manage_campaigns') ? (
+          {screen === AppScreen.CAMPAIGN_MANAGEMENT && (userHasPermission(user, 'manage_campaigns') || isAdminUser(user) ? (
             <CampaignManager 
               user={user} 
               onBack={popScreen} 
@@ -7607,7 +7609,7 @@ useEffect(() => {
               availableUnits={fullCompaniesWithStatus.map(c => c.name)}
               campaigns={campaigns}
               onRefresh={refreshCampaigns}
-              initialUnit={selectedUnit}
+              initialUnit={screenParams?.unitName || selectedUnit}
               tenantid={currentTenantid}
               unitId={currentUnitId}
               databaseMode={databaseMode}
