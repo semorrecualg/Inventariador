@@ -69,6 +69,34 @@ ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS filial text;
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS primarykey text;
 
+-- COLUNAS DO PAYLOAD DE ESPELHAMENTO (src/services/supabaseService.ts -> buildPayload):
+-- uma tabela `assets` criada antes do GBR v2.6 nao as tem, e o PostgREST rejeita o
+-- LOTE INTEIRO com PGRST204 ("Could not find the 'cnpj' column of 'assets' in the
+-- schema cache"). O espelhamento em massa terminava com 0 de 12.636 ativos
+-- sincronizados. Idempotente: no-op quando a coluna ja existe.
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS status text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS etiqueta text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS qt numeric;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS descricaodoativo text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS serial text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS dataaqusic text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS cnpj text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS nomefornecedor text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS notafiscal text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS endereco text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS registro text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS subreg text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS databaixa text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS contacontabil text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS centrodecusto text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS vlraquisic numeric;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS sn1_recno numeric;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS sn3_recno numeric;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS gps_lat numeric(18,10);
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS gps_lng numeric(18,10);
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS "DE_PARA" text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS "currentCampaignId" text;
+
 -- SRE ISOLAMENTO DE CONTRATO: a unicidade da chave de origem é POR TENANT —
 -- a mesma chave primária pode existir legitimamente em contratos diferentes
 -- (ex.: base de teste do CLIENTETESTE copiada do CICOPAL). O índice GLOBAL
@@ -285,6 +313,12 @@ ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS asset_id text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS user_email text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS action text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS data jsonb;
+-- O log de auditoria do app grava `details` (logAuditEvent). Sem a coluna, o
+-- PostgREST responde 42703 e a trilha de SYNC_PUSH/SYNC_PULL fica sem registo.
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS details text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS record_id text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS origin text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS table_name text;
 
 CREATE TABLE IF NOT EXISTS public."asset-photos" (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
