@@ -82,7 +82,12 @@ const normalizeSupabaseUrl = (value: string): string => {
     const parsed = new URL(candidate);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
     if (!parsed.hostname.includes('.')) return '';
-    return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
+    // Secrets às vezes chegam com o caminho da API (`.../rest/v1`). O supabase-js
+    // já acrescenta `/rest/v1` a cada chamada, logo esse caminho produzia
+    // `.../rest/v1/rest/v1/assets` (PGRST125) e TODAS as chamadas à nuvem
+    // falhavam — o app caía para base local vazia e mostrava "Primeira Carga".
+    const cleanPath = parsed.pathname.replace(/\/+$/, '').replace(/\/rest\/v1$/i, '').replace(/\/+$/, '');
+    return `${parsed.origin}${cleanPath}`;
   } catch {
     return '';
   }
