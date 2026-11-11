@@ -398,7 +398,16 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                       <button
                         key={opt.filial}
                         type="button"
-                        onClick={() => setSelectedFilial(opt.filial)}
+                        onClick={() => {
+                          // Registra a escolha (o retorno do configurador cai com a
+                          // filial certa) e, para ADMIN/MASTER, abre a configuração
+                          // desta unidade — âncora GPS + campanha — já com a filial
+                          // em parâmetro. O auditor apenas escolhe onde vai inventariar.
+                          setSelectedFilial(opt.filial);
+                          if (isAdmin) {
+                            onOpenAdmin?.(AppScreen.UNIT_SELECTION, { unitName: opt.filial });
+                          }
+                        }}
                         aria-pressed={isChosen}
                         className={`w-full bg-white rounded-2xl px-4 py-3.5 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] ${
                           isChosen ? 'border-accent ring-1 ring-accent/30' : 'border-gray-100'

@@ -30,7 +30,6 @@ import {
   RefreshCw,
   ShieldAlert,
   Activity,
-  Calendar,
   FolderOpen,
   HardDrive,
   HelpCircle,
@@ -577,14 +576,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Integridade</h4>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Validar Checksum SHA-256</p>
-                </div>
-              </button>
-
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.CAMPAIGN_MANAGEMENT); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Calendar size={16} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Campanhas de Inventário</h4>
-                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Criar, ativar e encerrar campanhas por unidade</p>
                 </div>
               </button>
 

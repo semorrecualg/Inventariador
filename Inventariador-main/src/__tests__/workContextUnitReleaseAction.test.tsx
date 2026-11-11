@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
 // ============================================================================
-// workContextUnitReleaseAction.test.tsx — badge "Âncora e Campanha" (Fig. 1).
+// workContextUnitReleaseAction.test.tsx — configuração da UNIDADE OPERACIONAL
+// a partir do CONTRATO DE TRABALHO.
 //
-// O badge da unidade pendente no CONTRATO DE TRABALHO era decorativo: clicar
-// nele não abria nada, e o admin tinha de atravessar o Painel Completo →
-// "Unidade Operacional" para configurar âncora GPS + campanha. Estes testes
-// travam o comportamento novo:
-//   1. admin abre a UNIDADE OPERACIONAL pelo badge;
-//   2. o clique no badge NÃO seleciona a filial (stopPropagation no card);
-//   3. auditor continua vendo apenas a trava (quem configura é o admin).
+// Regra do produto: a configuração da unidade (âncora GPS + campanha por
+// unidade) só tem entrada contextual. No contrato de trabalho, clicar no CARD
+// da unidade — ou no badge "Âncora e Campanha" — abre a Unidade Operacional já
+// com a filial em parâmetro. O auditor não configura: para ele o card continua
+// sendo só a escolha de onde vai inventariar.
 // ============================================================================
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
@@ -39,7 +38,7 @@ const buildUser = (role: UserRole): User =>
   }) as unknown as User;
 
 // Mapa de liberação real (âncora e campanha ausentes) — a unidade aparece
-// "AGUARDANDO LIBERAÇÃO", que é o cenário da figura.
+// "AGUARDANDO LIBERAÇÃO", que é o cenário das figuras.
 const releaseMap = buildUnitReleaseMap([
   { name: FILIAL, tenantid: TENANT, hasAnchor: false, hasCampaign: false }
 ]);
@@ -60,10 +59,22 @@ const renderSelector = (role: UserRole) => {
   return { onOpenAdmin, onSelect };
 };
 
-describe('CONTRATO DE TRABALHO · badge "Âncora e Campanha"', () => {
+/** Card da filial (o botão que envolve o nome da unidade na lista). */
+const unitCard = () => screen.getByText(FILIAL).closest('button') as HTMLButtonElement;
+
+describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
   afterEach(() => cleanup());
 
-  it('admin: clicar no badge abre a UNIDADE OPERACIONAL (configuração de âncora + campanha)', () => {
+  it('admin: clicar no CARD da unidade abre a configuração com a filial em parâmetro', () => {
+    const { onOpenAdmin } = renderSelector(UserRole.ADMIN);
+
+    fireEvent.click(unitCard());
+
+    expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.UNIT_SELECTION, { unitName: FILIAL });
+  });
+
+  it('admin: o badge de âncora e campanha também abre (com o mesmo destino)', () => {
     const { onOpenAdmin } = renderSelector(UserRole.ADMIN);
     const badge = screen.getByTestId(`unit-release-action-${FILIAL}`);
 
@@ -75,22 +86,27 @@ describe('CONTRATO DE TRABALHO · badge "Âncora e Campanha"', () => {
 
   it('admin: o badge se identifica como a entrada de âncora e campanha', () => {
     renderSelector(UserRole.ADMIN);
-    const badge = screen.getByTestId(`unit-release-action-${FILIAL}`);
 
-    expect(badge.getAttribute('title')).toBe(BADGE_TITLE);
+    expect(screen.getByTestId(`unit-release-action-${FILIAL}`).getAttribute('title')).toBe(BADGE_TITLE);
   });
 
-  it('o clique no badge não dispara a seleção da filial (stopPropagation)', () => {
+  it('o clique no badge não borbulha para o card da unidade', () => {
     const { onOpenAdmin } = renderSelector(UserRole.ADMIN);
-    const card = screen.getByText(FILIAL).closest('button') as HTMLButtonElement;
-    const badge = screen.getByTestId(`unit-release-action-${FILIAL}`);
 
-    fireEvent.click(badge);
+    fireEvent.click(screen.getByTestId(`unit-release-action-${FILIAL}`));
 
-    // Se o clique borbulhasse para o card, o botão receberia o evento e a
-    // filial mudaria de estado; o handler do badge corta a propagação.
-    expect(card).toBeTruthy();
+    // Uma única navegação: o handler do badge corta a propagação, então o card
+    // não dispara uma segunda abertura.
     expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+  });
+
+  it('auditor: clicar no card NÃO abre configuração (só escolhe a filial)', () => {
+    const { onOpenAdmin } = renderSelector(UserRole.AUDITOR);
+
+    fireEvent.click(unitCard());
+
+    expect(onOpenAdmin).not.toHaveBeenCalled();
+    expect(screen.getByText(FILIAL)).toBeTruthy();
   });
 
   it('auditor: não recebe o badge acionável — só a trava', () => {

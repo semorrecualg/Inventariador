@@ -7297,6 +7297,7 @@ useEffect(() => {
               onNavigate={pushScreen}
    onLoadDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
    databaseMode={databaseMode}
+   initialUnit={screenParams?.unitName || ''}
    units={fullCompaniesWithStatus
      .filter(c => {
        // Regra de Visualização: Admin e Audidtor veem as unidades autorizadas
