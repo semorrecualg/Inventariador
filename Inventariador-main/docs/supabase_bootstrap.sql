@@ -389,6 +389,7 @@ ALTER TABLE public.locations ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public.campaigns ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public.campaign_snapshots ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public.asset_logs ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public.unit_configs ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public."asset-photos" ALTER COLUMN id SET DEFAULT gen_random_uuid();
 
 -- ============================================================================

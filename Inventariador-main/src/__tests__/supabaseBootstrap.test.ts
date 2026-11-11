@@ -2,7 +2,7 @@
 // Regressão para docs/supabase_bootstrap.sql:
 //  - impede o retorno do DO/EXECUTE/format() dinâmico (erros 42601 e 26000 que
 //    aconteceram ao rodar o script no SQL Editor do Supabase);
-//  - garante as 9 políticas estáticas (p_all) e a resiliência a schema legado
+//  - garante as 10 políticas estáticas (p_all) e a resiliência a schema legado
 //    (ALTER TABLE ... ADD COLUMN IF NOT EXISTS — erro 42703).
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -26,7 +26,8 @@ const APP_TABLES = [
   'campaigns',
   'campaign_snapshots',
   'asset_logs',
-  'asset-photos'
+  'asset-photos',
+  'unit_configs'
 ] as const;
 
 describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42703)', () => {
@@ -43,9 +44,9 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     expect(doBlocks.length).toBeLessThanOrEqual(1);
   });
 
-  it('tem exatamente 9 pares DROP + CREATE POLICY (estático, um por tabela)', () => {
-    expect(codeLines.filter((l) => l.startsWith('DROP POLICY IF EXISTS')).length).toBe(9);
-    expect(codeLines.filter((l) => l.startsWith('CREATE POLICY')).length).toBe(9);
+  it('tem exatamente 10 pares DROP + CREATE POLICY (estático, um por tabela)', () => {
+    expect(codeLines.filter((l) => l.startsWith('DROP POLICY IF EXISTS')).length).toBe(10);
+    expect(codeLines.filter((l) => l.startsWith('CREATE POLICY')).length).toBe(10);
   });
 
   it('todas as políticas usam o nome fixo p_all (nunca interpolado)', () => {
@@ -55,7 +56,7 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     expect(policyLines.every((l) => /(?:CREATE POLICY|DROP POLICY IF EXISTS) p_all ON/.test(l))).toBe(true);
   });
 
-  it('cobre as 9 tabelas do app com CREATE TABLE IF NOT EXISTS', () => {
+  it('cobre as 10 tabelas do app com CREATE TABLE IF NOT EXISTS', () => {
     for (const t of APP_TABLES) {
       const ident = t === 'asset-photos' ? '"asset-photos"' : t;
       expect(sql).toContain(`CREATE TABLE IF NOT EXISTS public.${ident}`);
@@ -122,7 +123,8 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
       'campaigns',
       'campaign_snapshots',
       'asset_logs',
-      'asset-photos'
+      'asset-photos',
+      'unit_configs'
     ];
     for (const t of ID_DEFAULT_TABLES) {
       const ident = t === 'asset-photos' ? '"asset-photos"' : t;
