@@ -147,6 +147,44 @@ CREATE UNIQUE INDEX IF NOT EXISTS inventory_config_tenant_filial_key
   ON public.inventory_config (tenantid, filial);
 
 -- ============================================================================
+-- 2-B. UNIT_CONFIGS — configuracao/ancora GPS por unidade
+--      Lida por fetchUnitConfigs, fetchTenantFiliais e AssetControlModule. Nao
+--      existia no projeto (PGRST205: "Could not find the table
+--      'public.unit_configs'"), por isso as filiais em modo nuvem caiam sempre
+--      para os dados locais e os cards ficavam em "FALTA ANCORA GPS E CAMPANHA".
+--      Colunas espelham a interface UnitConfig (src/types.ts).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.unit_configs (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenantid      text NOT NULL,
+  filial        text,
+  unit_id       text,
+  _unitid       text,
+  lat           numeric(18,10) DEFAULT 0,
+  lng           numeric(18,10) DEFAULT 0,
+  radius_meters numeric DEFAULT 200,
+  is_active     boolean DEFAULT true,
+  updated_by    text,
+  created_at    timestamptz DEFAULT now(),
+  updated_at    timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS filial text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS unit_id text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS _unitid text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS lat numeric(18,10) DEFAULT 0;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS lng numeric(18,10) DEFAULT 0;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS radius_meters numeric DEFAULT 200;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS updated_by text;
+
+CREATE UNIQUE INDEX IF NOT EXISTS unit_configs_tenant_filial_key
+  ON public.unit_configs (tenantid, filial);
+
+-- ============================================================================
 -- 3. AUDIT_LOGS — trilha de auditoria
 --    (FONTE DO ERRO 42703: tabela legada sem a coluna created_at — corrigido
 --     pelos ALTERs abaixo)
@@ -362,6 +400,7 @@ ALTER TABLE public."asset-photos" ALTER COLUMN id SET DEFAULT gen_random_uuid();
 -- ============================================================================
 ALTER TABLE public.assets            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_config  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.unit_configs      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_permissions  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.locations         ENABLE ROW LEVEL SECURITY;
@@ -375,6 +414,9 @@ CREATE POLICY p_all ON public.assets FOR ALL TO anon, authenticated USING (true)
 
 DROP POLICY IF EXISTS p_all ON public.inventory_config;
 CREATE POLICY p_all ON public.inventory_config FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_all ON public.unit_configs;
+CREATE POLICY p_all ON public.unit_configs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS p_all ON public.audit_logs;
 CREATE POLICY p_all ON public.audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
