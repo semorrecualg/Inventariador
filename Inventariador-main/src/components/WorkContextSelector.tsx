@@ -50,7 +50,9 @@ interface WorkContextSelectorProps {
   /**
    * Navegação administrativa a partir do próprio CONTRATO DE TRABALHO: as
    * liberações exclusivas de ADMIN/MASTER (filiais, campanhas, campos, QR,
-   * base de dados, cargas, licenças, unidade operacional).
+   * base de dados, cargas, licenças). A UNIDADE OPERACIONAL (âncora GPS +
+   * campanha que liberam o inventário) é aberta pelo badge "Âncora e Campanha"
+   * de cada unidade desta tela — o painel não a duplica.
    */
   onOpenAdmin?: (screen: AppScreen, params?: NavigationParams) => void;
 }
@@ -422,9 +424,42 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                           </div>
                         </div>
                         {pending ? (
-                          <div className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0">
-                            <Lock size={14} />
-                          </div>
+                          isAdmin ? (
+                            /* BADGE "ÂNCORA E CAMPANHA" (admin/master): abre a UNIDADE
+                               OPERACIONAL — a tela que configura âncora GPS + campanha e
+                               com isso libera o inventário. Antes era só decorativo (o
+                               caminho era Painel Completo → Unidade Operacional) e o
+                               clique não fazia nada. `stopPropagation` impede que o
+                               clique selecione a filial em vez de abrir a config. */
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              title="Âncora e campanha que liberam o inventário"
+                              aria-label={`Configurar âncora e campanha de ${opt.label}`}
+                              data-testid={`unit-release-action-${opt.filial}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenAdmin?.(AppScreen.UNIT_SELECTION);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  onOpenAdmin?.(AppScreen.UNIT_SELECTION);
+                                }
+                              }}
+                              className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0 cursor-pointer hover:bg-amber-100 active:scale-95 transition-all"
+                            >
+                              <Lock size={14} />
+                            </div>
+                          ) : (
+                            <div
+                              className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0"
+                              title="O administrador define âncora e campanha na Unidade Operacional"
+                            >
+                              <Lock size={14} />
+                            </div>
+                          )
                         ) : isChosen ? (
                           <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
                             <Check size={16} />
@@ -508,11 +543,12 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
               </div>
             </div>
 
-            {/* LIBERAÇÕES · ADMIN/MASTER — uma única entrada. Todas as
-                ferramentas (unidade/âncora/campanha, acessos, filiais, eventos,
-                campos, QR, base, cargas, licenças, integridade, fotos e
-                Protheus) vivem no PAINEL COMPLETO do hub; manter a lista aqui
-                duplicava cada botão sem acrescentar nenhuma regra. */}
+            {/* LIBERAÇÕES · ADMIN/MASTER — uma única entrada. As ferramentas
+                (acessos, filiais, campanhas, campos, QR, base, cargas, licenças,
+                integridade, fotos e Protheus) vivem no PAINEL COMPLETO do hub;
+                manter a lista aqui duplicava cada botão sem acrescentar nenhuma
+                regra. A exceção é a UNIDADE OPERACIONAL (âncora + campanha), que
+                é configurada pelo badge de cada unidade, logo acima. */}
             {isAdmin && (
               <div>
                 <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">

@@ -19,7 +19,6 @@ import {
   ChevronLeft,
   DatabaseZap,
   Building2,
-  Landmark,
   Trash2,
   Tag,
   QrCode,
@@ -584,8 +583,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.CAMPAIGN_MANAGEMENT); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
                 <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Calendar size={16} /></div>
                 <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Eventos</h4>
-                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Campanhas de Inventário</p>
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Campanhas de Inventário</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Criar, ativar e encerrar campanhas por unidade</p>
                 </div>
               </button>
 
@@ -594,17 +593,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Filiais</h4>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Configurador e Sincronizador de Unidades</p>
-                </div>
-              </button>
-
-              {/* UNIDADE OPERACIONAL: cadastro da unidade + âncora GPS + campanha.
-                  É desta tela (admin/master) que sai a liberação do inventário
-                  para o auditor — ele não passa por aqui. */}
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.UNIT_SELECTION); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Landmark size={16} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Unidade Operacional</h4>
-                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Âncora e campanha que liberam o inventário</p>
                 </div>
               </button>
 
