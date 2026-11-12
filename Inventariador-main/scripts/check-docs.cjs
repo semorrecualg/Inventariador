@@ -39,10 +39,9 @@ const PLACEHOLDER_RE = /(<|…|\*|\|)/;
 // ("a criar `x.sql`", "Criar `src/repositories/`" em checklist) ou depois
 // ("`src/repositories/` — planejada"). Antes bastava a palavra aparecer em
 // qualquer ponto da linha, o que deixava passar referências realmente quebradas.
-const PLANNED_BEFORE_RE =
-  /(?:a criar|planejad[oa]s?|pendente|pendência|nunca foi criad[oa]|deixou de existir)\s*[:\-–—]?\s*\(?\s*$/i;
-const PLANNED_AFTER_RE =
-  /^[\s)\]|,;:.\-–—(*]{0,12}(?:a criar|planejad[oa]s?|pendente|pendência|nunca foi criad[oa]|deixou de existir)/i;
+const PLANNED_MARKERS = 'a criar|planejad[oa]s?|pendente|pendência|nunca foi criad[oa]|deixou de existir';
+const PLANNED_BEFORE_RE = new RegExp(String.raw`(?:${PLANNED_MARKERS})\s*[:\-–—]?\s*\(?\s*$`, 'i');
+const PLANNED_AFTER_RE = new RegExp(String.raw`^[\s)\]|,;:.\-–—(*]{0,12}(?:${PLANNED_MARKERS})`, 'i');
 const CHECKLIST_CREATE_RE = /(?:^|[-*]\s*\[[ xX]\]\s*)Criar\s*$/;
 
 /** A referência só está "declarada como planeada" se o marcador colar nela. */
