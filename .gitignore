@@ -28,3 +28,9 @@ create_junction.bat
 
 # Node dependencies — never commit
 node_modules/
+
+# Artefactos locais de desenvolvimento — nunca versionar
+.tools/
+artifacts/
+/verify-supabase.mjs
+Inventariador-main/vite.preview.temp.mts

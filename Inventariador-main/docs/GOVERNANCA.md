@@ -197,9 +197,14 @@ nunca entra em variável `VITE_*`.
 npm run verify:governanca              # git + env + Supabase (rede)
 npm run verify:governanca -- --offline # só git + env (uso em modo INTERNAL)
 npm run verify:governanca -- --use-example  # testa o host do .env.example
+npm run check:docs                     # links e referências dos docs (roda no CI)
 ```
 
-Checa, em sequência: estrutura do repo → branch/limpeza/fast-forward vs `origin/main`
+`check:docs` percorre todos os `.md` do repositório e falha (exit `1`) em link
+relativo ou referência de ficheiro que não exista. Referências declaradas como
+planeadas («a criar», «Criar …», «planejada», «nunca foi criado») são aceites.
+
+`verify:governanca` checa, em sequência: estrutura do repo → branch/limpeza/fast-forward vs `origin/main`
 → presença das variáveis → REST + AUTH do Supabase → tabelas essenciais.
 **Nunca imprime valores de chaves**, apenas presença.
 
