@@ -202,7 +202,9 @@ npm run check:docs                     # links e referências dos docs (roda no 
 
 `check:docs` percorre todos os `.md` do repositório e falha (exit `1`) em link
 relativo ou referência de ficheiro que não exista. Referências declaradas como
-planeadas («a criar», «Criar …», «planejada», «nunca foi criado») são aceites.
+planeadas («a criar», «Criar» em checklist, «planejada», «nunca foi criado») são
+aceites **só quando o marcador está colado à referência** (antes ou depois dela):
+a palavra solta noutro ponto da linha não isenta nada.
 
 `verify:governanca` checa, em sequência: estrutura do repo → branch/limpeza/fast-forward vs `origin/main`
 → presença das variáveis → REST + AUTH do Supabase → tabelas essenciais.

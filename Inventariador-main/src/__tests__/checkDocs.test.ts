@@ -37,6 +37,13 @@ describe('check-docs — gate de referências dos docs', () => {
     expect(result.stderr).toBe('');
   });
 
+  it('palavra "Criar" longe da referência não isenta (regra apertada)', () => {
+    const result = runAgainst('Criar isto mais tarde. O ficheiro é `src/nao-existe-xyz.ts`.\n');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/nao-existe-xyz.ts');
+  });
+
   it('link markdown relativo quebrado também falha', () => {
     const result = runAgainst('[quebrado](docs/nao-existe-abc.md)\n');
 

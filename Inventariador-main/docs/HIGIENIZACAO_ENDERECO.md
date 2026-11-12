@@ -284,9 +284,9 @@ Consolidado na seção 2.2. Resumo executivo por categoria:
    e migração Dexie `version(5)` idempotente (dry-run) para dados existentes + regeneração de
    `addresses`. Exige nova `version(n)` + atualização de `SCHEMA_BASELINE.md` e
    `schemaBaseline.test.ts`.
-4. **Fase D (Supabase — planejada, aguarda aprovação):** `scripts/migrate-endereco-supabase.sql`
-   (a criar) seguindo a convenção `reconcile_*` de `scripts/migrate-tenantid-supabase.sql` e
-   `scripts/migrate-unitid-supabase.sql`, **escopada ao
+4. **Fase D (Supabase — planejada, aguarda aprovação):** o script
+   `scripts/migrate-endereco-supabase.sql` (a criar) segue a convenção `reconcile_*` de
+   `scripts/migrate-tenantid-supabase.sql` e `scripts/migrate-unitid-supabase.sql`, **escopada ao
    schema `staging`**: (1) pré-checks em `information_schema`; (2) merge `"ENDERECO"` → `endereco`
    apenas onde `endereco` vazia (esperado: 0 linhas — divergência medida = 0); (3) reescrita de
    políticas RLS/índices/constraints que referenciem `"ENDERECO"`; (4) `DROP` da coluna

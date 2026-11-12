@@ -7,9 +7,10 @@
  *   2. referência de ficheiro em backticks (`src/App.tsx`, `docs/X.md`, `scripts/x.sql`)
  *      que não existe.
  *
- * Referências declaradas como planeadas ("a criar", "Criar", "planejada",
- * "pendência", "nunca foi criado", "deixou de existir") são aceites: não são
- * links quebrados, são intenção documentada.
+ * Referências declaradas como planeadas ("a criar", "Criar" em checklist,
+ * "planejada", "pendência", "nunca foi criado", "deixou de existir") são aceites
+ * apenas quando o marcador está COLADO à referência (antes ou depois dela);
+ * a palavra solta noutro ponto da linha já não isenta nada.
  *
  * Corre no CI (`npm run check:docs`). Uso local: `node scripts/check-docs.cjs`.
  */
@@ -33,7 +34,32 @@ const MD_LINK_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 const FILE_REF_RE = /`([^`\n]+?\.(?:md|sql|json|ya?ml|cjs|mjs|ts|tsx|sh))`/g;
 const PATH_REF_RE = /`((?:docs|scripts|\.github|src|public)\/[^`\n\s]+)`/g;
 const PLACEHOLDER_RE = /(<|…|\*|\|)/;
-const PLANNED_RE = /a criar|Criar |planejad|Planejada|pendência|nunca foi criado|deixou de existir/i;
+
+// Marcadores de "artefacto planeado", exigidos ADJACENTES à referência: antes
+// ("a criar `x.sql`", "Criar `src/repositories/`" em checklist) ou depois
+// ("`src/repositories/` — planejada"). Antes bastava a palavra aparecer em
+// qualquer ponto da linha, o que deixava passar referências realmente quebradas.
+const PLANNED_BEFORE_RE =
+  /(?:a criar|planejad[oa]s?|pendente|pendência|nunca foi criad[oa]|deixou de existir|removid[oa]s?|criad[oa]s?)\s*[:\-–—]?\s*\(?\s*$/i;
+const PLANNED_AFTER_RE =
+  /^[\s)\]|,;:.\-–—(*]{0,12}(?:a criar|planejad[oa]s?|pendente|pendência|nunca foi criad[oa]|deixou de existir|removid[oa]s?|criad[oa]s?)/i;
+const CHECKLIST_CREATE_RE = /(?:^|[-*]\s*\[[ xX]\]\s*)Criar\s*$/;
+
+/** A referência só está "declarada como planeada" se o marcador colar nela. */
+function isDeclaredPlanned(line, token) {
+  const needle = '`' + token + '`';
+  let from = 0;
+  for (;;) {
+    const index = line.indexOf(needle, from);
+    if (index === -1) return false;
+    const before = line.slice(Math.max(0, index - 48), index);
+    const after = line.slice(index + needle.length);
+    if (PLANNED_BEFORE_RE.test(before)) return true;
+    if (CHECKLIST_CREATE_RE.test(before)) return true;
+    if (PLANNED_AFTER_RE.test(after)) return true;
+    from = index + 1;
+  }
+}
 
 function findRepoRoot(start) {
   let dir = start;
@@ -107,7 +133,6 @@ for (const file of mdFiles) {
   }
 
   const lines = text.split('\n');
-  const linesOf = ref => lines.filter(line => line.includes('`' + ref + '`'));
 
   for (const raw of refs) {
     if (/^(https?:|mailto:)/i.test(raw) || PLACEHOLDER_RE.test(raw)) continue;
@@ -116,8 +141,8 @@ for (const file of mdFiles) {
       if (resolves(file, ref)) continue;
       if (!ref.includes('/') && basenames.has(ref)) continue; // nome solto: existe nalguma pasta
       if (allFiles.some(candidate => candidate.endsWith('/' + ref))) continue; // caminho parcial
-      const declared = linesOf(raw);
-      if (declared.length > 0 && declared.every(line => PLANNED_RE.test(line))) continue;
+      const occurrences = lines.filter(line => line.includes('`' + raw + '`'));
+      if (occurrences.length > 0 && occurrences.every(line => isDeclaredPlanned(line, raw))) continue;
       broken.push({ file: rel(file), ref, kind: 'referência' });
     }
   }
