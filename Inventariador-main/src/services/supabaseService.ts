@@ -2246,28 +2246,78 @@ const fetchFullInventoryImpl = async (
 };
 
 /**
- * Assina mudanças em tempo real na tabela de configuração do inventário
+ * Id da linha de configuração do contrato: `config_<TENANT>`.
+ *
+ * A configuração do contrato vive nessa linha (não em `global_config`). O tenant
+ * é resolvido pela mesma ordem do resto do serviço; `default`/vazio são
+ * sentinelas (linha global), não contratos → `null`.
  */
-export const subscribeToInventoryChanges = (onUpdate: (payload: Partial<InventoryState>) => void) => {
+export const configSubscriptionId = (tenantid?: string | string[]): string | null => {
+  const invalid = new Set(['', 'undefined', 'null', 'default']);
+  const raw = [
+    Array.isArray(tenantid) ? tenantid[0] : tenantid,
+    readLocalTenantId(),
+    readSessionTenantId()
+  ]
+    .map(t => (t === undefined || t === null ? '' : String(t).trim()))
+    .find(t => !invalid.has(t.toLowerCase()));
+
+  if (!raw) return null;
+
+  const cleanTenant = encodeURIComponent(raw.replace(/[%_\s]+/g, ''));
+  if (!cleanTenant || invalid.has(cleanTenant.toLowerCase())) return null;
+
+  return `config_${cleanTenant}`;
+};
+
+/**
+ * Assina mudanças em tempo real na configuração do contrato.
+ *
+ * O contrato vive em `config_<TENANT>`; `global_config` continua subscrito como
+ * reserva (linha legada ou instalação sem contrato). Antes o filtro era fixo em
+ * `id=eq.global_config`, por isso uma atualização de `config_<TENANT>` nunca era
+ * detetada.
+ *
+ * O payload do realtime é a linha crua: entregamos o mesmo mapeamento do pull
+ * (`mapCloudConfigRow`), em camelCase e sem a identidade da linha.
+ */
+export const subscribeToInventoryChanges = (
+  onUpdate: (payload: Partial<InventoryState>) => void,
+  tenantid?: string | string[]
+) => {
   if (!supabase) return null;
 
-  const channel = supabase
-    .channel('inventory_config_changes')
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'inventory_config',
-        filter: 'id=eq.global_config'
-      },
-      (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => {
-        onUpdate(payload.new);
-      }
-    )
-    .subscribe();
+  const contractId = configSubscriptionId(tenantid);
+  const ids = contractId ? [contractId, 'global_config'] : ['global_config'];
 
-  return channel;
+  const deliver = (row: Record<string, unknown>) => {
+    const mapped = mapCloudConfigRow(row);
+    if (Object.keys(mapped).length > 0) onUpdate(mapped);
+  };
+
+  const channels = ids.map(id =>
+    supabase
+      .channel(`inventory_config_changes_${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'inventory_config',
+          filter: `id=eq.${id}`
+        },
+        (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => {
+          deliver(payload.new || {});
+        }
+      )
+      .subscribe()
+  );
+
+  return {
+    unsubscribe: () => {
+      channels.forEach(channel => { void channel.unsubscribe(); });
+    }
+  };
 };
 
 /**

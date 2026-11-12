@@ -2941,6 +2941,7 @@ useEffect(() => {
     // Check periodically
     const interval = setInterval(updatePendingCount, 10000);
 
+    // A config do contrato vive em config_<TENANT>; global_config fica como reserva.
     const subscription = subscribeToInventoryChanges((newConfig) => {
       if (newConfig && newConfig.lastUpdated) {
         const cloudTime = new Date(newConfig.lastUpdated).getTime();
@@ -2951,7 +2952,7 @@ useEffect(() => {
           setIsCloudUpdatePending(true);
         }
       }
-    });
+    }, user?.tenantid);
 
     const assetSubscription = subscribeToAssetChanges(user?.tenantid || '', (payload) => {
       const { eventType, new: newAssetData, old: oldAssetData } = payload;
