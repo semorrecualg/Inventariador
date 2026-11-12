@@ -1050,7 +1050,22 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
           if (val === undefined || val === null) return null;
           const num = Number(val);
           return isNaN(num) ? null : num;
-        })()
+        })(),
+        // CONFERÊNCIA (quem e quando): viaja no schema quando as colunas existem
+        // (scripts/assets-conferencia.sql). Se ainda não existirem, o sendBatch
+        // remove a coluna e reenvia o lote — nunca derruba a sincronização.
+        conferido: Boolean(
+          cleanAsset._conferido === true ||
+          Number(cleanAsset._conferido) === 1 ||
+          String(cleanAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM' ||
+          String(cleanAsset.status || '').toUpperCase().includes('CONFERIDO')
+        ),
+        auditor: (cleanAsset._auditor !== undefined && cleanAsset._auditor !== null
+          ? String(cleanAsset._auditor).trim()
+          : '') || null,
+        data_leitura: (cleanAsset._dataLeitura !== undefined && cleanAsset._dataLeitura !== null
+          ? String(cleanAsset._dataLeitura)
+          : null)
       };
 
       byKey.set(`${row.tenantid}|${row.primarykey}`, {
@@ -1921,6 +1936,43 @@ export const fetchFullInventory = async (
  * Implementação real da paginação. Nunca chamar diretamente fora do wrapper
  * fetchFullInventory (que resolve o tenantid e deduplica requisições).
  */
+/**
+ * Converte uma linha do Postgres em `Asset`, preservando a CONFERÊNCIA.
+ *
+ * O upsert só envia colunas do schema remoto, e a conferência (quem conferiu e
+ * quando) não tinha coluna: reinstalar o app devolvia a base sem autor nem data.
+ * Com `scripts/assets-conferencia.sql` aplicado, as colunas `conferido`,
+ * `auditor` e `data_leitura` vêm na linha. Sem elas, `status = 'CONFERIDO'`
+ * continua a bastar para o item voltar marcado como conferido (só perde
+ * autor/data, que a nuvem nunca guardou).
+ */
+export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
+  const tId = String(row.tenantid || '').trim().toUpperCase();
+  const uId = String(row.filial || row.unit_id || row.unitid || '').trim().toUpperCase();
+
+  const rawConferido = row.conferido;
+  const statusUpper = String(row.status || '').toUpperCase();
+  const conferido =
+    rawConferido === true ||
+    String(rawConferido).toLowerCase() === 'true' ||
+    statusUpper.includes('CONFERIDO') ||
+    String(row.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+
+  const auditor = row.auditor !== undefined && row.auditor !== null ? String(row.auditor).trim() : '';
+  const dataLeitura = row.data_leitura !== undefined && row.data_leitura !== null ? String(row.data_leitura) : '';
+
+  return {
+    ...(row as unknown as Asset),
+    id: row.id as string | number,
+    tenantid: tId,
+    filial: uId,
+    unitid: uId, // Legado
+    _conferido: conferido,
+    ...(auditor ? { _auditor: auditor } : {}),
+    ...(dataLeitura ? { _dataLeitura: dataLeitura } : {}),
+  };
+};
+
 const fetchFullInventoryImpl = async (
   resolvedTenantid: string | string[] | undefined,
   unitid?: string,
@@ -1974,18 +2026,7 @@ const fetchFullInventoryImpl = async (
       }
 
       if (pageData && pageData.length > 0) {
-        const mappedPage = pageData.map((a: Record<string, unknown>) => {
-          const tId = String(a.tenantid || '').trim().toUpperCase();
-          const uId = String(a.filial || a.unit_id || a.unitid || '').trim().toUpperCase();
-
-          return {
-            ...a,
-            id: a.id as string | number,
-            tenantid: tId,
-            filial: uId,
-            unitid: uId      // Legado
-          };
-        }) as Asset[];
+        const mappedPage = pageData.map((a: Record<string, unknown>) => mapCloudAssetRow(a));
         
         assets = [...assets, ...mappedPage];
         logger.info(`>>> [Supabase] Carregados ${assets.length} ativos...`);
