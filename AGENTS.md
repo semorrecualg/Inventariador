@@ -70,7 +70,7 @@ Executar dentro de `Inventariador-main/` (Node do `.nvmrc`, ≥ 22):
   `lint` + `tsc`.
 - Corrigir a causa de uma falha. É proibido mascarar com `eslint-disable`,
   `@ts-ignore`, asserções enfraquecidas ou saltar testes para "ficar verde".
-- Os hooks Husky (`.husky/pre-commit` = lint + tsc, `pre-push` = build) podem não
+- Os hooks Husky (`.husky/pre-commit` = lint + tsc + check:docs, `pre-push` = build) podem não
   estar instalados neste ambiente; mesmo assim os portões são obrigatórios — o CI
   reproduz exatamente os mesmos comandos.
 

@@ -107,7 +107,7 @@ dev local ──commit──▶ branch ──PR──▶ CI verde ──merge─
 2. Commits no padrão já usado no repositório: `feat(escopo):`, `fix(escopo):`,
    `docs(escopo):`, `chore(escopo):` — em português, imperativo, sem ponto final.
 3. **PR obrigatório** para `main`. O merge só acontece com `ci.yml` verde.
-4. O hook `pre-commit` (Husky) roda `npm run lint` + `npx tsc --noEmit` e bloqueia
+4. O hook `pre-commit` (Husky) roda `npm run lint` + `npx tsc --noEmit` + `npm run check:docs` e bloqueia
    mascaramento (`eslint-disable`, `@ts-ignore`), SQL bruto no diff e
    `window.location.reload(`.
    **`git commit --no-verify` é proibido.** Ele foi a causa dos 7 erros de lint que
