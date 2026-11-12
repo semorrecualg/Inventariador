@@ -731,7 +731,12 @@ export const signUp = async (email: string, password: string, username: string, 
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ensureUserProfile = async (email: string, metadata?: Record<string, any>, userId?: string): Promise<any> => {
-  if (getDatabaseMode() === 'INTERNAL') {
+  // Só o build SEM credenciais é local. Um `app_database_mode: INTERNAL` herdado
+  // de sessão offline anterior NÃO pode descartar o perfil real de
+  // user_permissions: o pseudo-perfil local sai com `tenantid` vazio e o login
+  // morria em "Perfil de usuário sem vínculo de empresa ativo", apesar de o
+  // contrato (CICOPAL) estar gravado na nuvem.
+  if (isInternalMode) {
     const lowerEmail = email.toLowerCase();
     const is_admin_new = isAdminEmail(lowerEmail);
     return {
