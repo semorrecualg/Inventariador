@@ -165,6 +165,9 @@ CREATE TABLE IF NOT EXISTS public.unit_configs (
   radius_meters numeric DEFAULT 200,
   is_active     boolean DEFAULT true,
   updated_by    text,
+  -- Flags de política da unidade (hasGps, requireNf...) — jsonb para manter os
+  -- nomes camelCase do tipo UnitConfig (colunas viriam em minúsculas).
+  flags         jsonb DEFAULT '{}'::jsonb,
   created_at    timestamptz DEFAULT now(),
   updated_at    timestamptz DEFAULT now()
 );
@@ -180,6 +183,7 @@ ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS lng numeric(18,10) DEFA
 ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS radius_meters numeric DEFAULT 200;
 ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;
 ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS flags jsonb DEFAULT '{}'::jsonb;
 
 CREATE UNIQUE INDEX IF NOT EXISTS unit_configs_tenant_filial_key
   ON public.unit_configs (tenantid, filial);

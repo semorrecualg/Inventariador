@@ -9,6 +9,7 @@ import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
+import { buildUnitFlags, mergeUnitFlags, pickUnitFlags } from '../utils/unitConfigFlags';
 import { isAdminEmail } from '../utils/authUtils';
 import { pullDedupKey } from '../utils/syncDedup';
 import { normalizeKey } from '../utils/schema';
@@ -3165,6 +3166,76 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
  * Salva ou atualiza a configuração de geofencing de uma unidade
  * Estratégia Local-First: Salva no IndexedDB imediatamente e tenta sincronizar com a nuvem em background
  */
+/**
+ * Persiste as FLAGS DE POLÍTICA da unidade na tabela `unit_configs` da nuvem —
+ * uma linha por (tenantid, filial), com as flags no jsonb `flags`.
+ *
+ * Antes estas regras (exigir NF/seriado/plaqueta, permitir novo ativo/baixa) só
+ * existiam no SQLite/Dexie do aparelho: trocar de dispositivo mostrava a filial
+ * "sem regras". A âncora continua em `inventory_config`; aqui vai a política.
+ *
+ * Não-destrutivo: lê o que já está na nuvem e faz merge antes do upsert, para
+ * um aparelho que só conhece `hasGps` não apagar a regra configurada noutro.
+ * Falha silenciosa (a coluna pode não existir antes do script): o local manda.
+ */
+export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> => {
+  if (!supabase) return false;
+
+  const tenantid = (config.tenantid || readLocalTenantId() || readSessionTenantId() || '')
+    .toString().trim();
+  const filial = (config.filial || config.unit_id || config._unitid || '')
+    .toString().trim();
+  if (!tenantid || !filial) return false;
+
+  const flags = buildUnitFlags(config, hasRealAnchor(config.lat, config.lng));
+
+  try {
+    // 1. Flags já gravadas (outro dispositivo pode saber mais do que este)
+    let stored: unknown = {};
+    try {
+      const { data: rows } = await supabase
+        .from('unit_configs')
+        .select('flags')
+        .eq('tenantid', tenantid)
+        .eq('filial', filial)
+        .limit(1);
+      stored = (rows && rows[0] && (rows[0] as { flags?: unknown }).flags) || {};
+    } catch {
+      /* leitura opcional: segue só com o que este aparelho conhece */
+    }
+
+    const payload = {
+      tenantid,
+      filial,
+      unit_id: filial,
+      lat: Number(config.lat) || 0,
+      lng: Number(config.lng) || 0,
+      radius_meters: Number(config.radius_meters) || 0,
+      is_active: config.is_active !== false,
+      updated_by: String(config.updated_by || 'system'),
+      updated_at: new Date().toISOString(),
+      flags: { ...pickUnitFlags(stored), ...flags }
+    };
+
+    const { error } = await supabase
+      .from('unit_configs')
+      .upsert(payload, { onConflict: 'tenantid,filial' });
+
+    if (error) {
+      // PGRST204 = coluna `flags` ausente (script não executado). Não é queda:
+      // a âncora e as flags locais continuam válidas.
+      logger.warn(`>>> [Supabase] Flags da unidade ${filial} não sincronizaram (Code: ${error.code}): ${error.message}`);
+      return false;
+    }
+
+    logger.info(`>>> [Supabase] Flags da unidade ${filial} sincronizadas com a nuvem.`);
+    return true;
+  } catch (err) {
+    logger.warn('>>> [Supabase] Erro silencioso ao sincronizar flags da unidade:', err);
+    return false;
+  }
+};
+
 export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | string> => {
   try {
     // v25.70: a sincronizacao com a nuvem e tentada sempre que o client Supabase
@@ -3210,7 +3281,10 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       radius_meters: Number(config.radius_meters),
       is_active: Boolean(config.is_active),
       updated_by: String(config.updated_by || 'system'),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      // Flags de política viajam no cache local (e no data do inventory_config):
+      // é isso que faz o chip/regras resolverem offline.
+      flags: buildUnitFlags(config, hasRealAnchor(config.lat, config.lng))
     };
 
     logger.info('>>> [Persistence] Salvando GPS Local-First (Cache):', unitKey);
@@ -3262,6 +3336,9 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
         } else {
           logger.info('>>> [Supabase] Configuração de unidade sincronizada com a nuvem com sucesso!');
         }
+
+        // Política da unidade (flags) na nuvem: mesma unidade, mesma linha.
+        await saveUnitConfigFlags(config);
       } catch (err) {
         logger.warn('>>> [Supabase] Erro silencioso na sincronização:', err);
       }
@@ -3450,6 +3527,52 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
           }
         });
         localStorage.setItem('local_unit_configs', JSON.stringify(updatedLocal));
+      }
+
+      // 3. Flags de política (unit_configs) — a nuvem é a fonte entre
+      // dispositivos. A âncora vem de `inventory_config`; aqui chegam as regras
+      // da filial (exigir NF/seriado/plaqueta...), que antes ficavam só no
+      // aparelho onde foram configuradas.
+      try {
+        const { data: flagRows, error: flagErr } = await supabase
+          .from('unit_configs')
+          .select('filial, unit_id, lat, lng, radius_meters, flags')
+          .eq('tenantid', tenantid);
+
+        if (flagRows && !flagErr) {
+          flagRows.forEach((raw: unknown) => {
+            const row = raw as {
+              filial?: string | null; unit_id?: string | null;
+              lat?: number | null; lng?: number | null;
+              radius_meters?: number | null; flags?: unknown;
+            };
+            const filial = String(row.filial || row.unit_id || '').trim();
+            if (!filial) return;
+
+            const existing = configs[filial];
+            if (existing) {
+              configs[filial] = mergeUnitFlags(existing, row.flags);
+              return;
+            }
+            // Sem âncora em inventory_config: só a linha de flags não vira
+            // configuração — evita unidade fantasma com coordenada 0.
+            if (!hasRealAnchor(row.lat, row.lng)) return;
+            configs[filial] = mergeUnitFlags(
+              {
+                tenantid,
+                filial,
+                unit_id: filial,
+                lat: Number(row.lat),
+                lng: Number(row.lng),
+                radius_meters: Number(row.radius_meters) || 0,
+                is_active: true
+              } as UnitConfig,
+              row.flags
+            );
+          });
+        }
+      } catch (err) {
+        logger.warn('>>> [Supabase] Flags de unidade indisponíveis na nuvem (usa local):', err);
       }
     } catch (err) {
       logger.warn('>>> [Supabase] Falha ao buscar configs da nuvem, usando apenas locais.', err);

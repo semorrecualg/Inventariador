@@ -371,6 +371,13 @@ export interface UnitConfig {
   lng: number;
   radius_meters: number;
   is_active: boolean;
+  /** Flags de política da unidade — sincronizadas em `unit_configs.flags`. */
+  hasGps?: boolean;
+  requireNf?: boolean;
+  requireSeriado?: boolean;
+  requirePlaqueta?: boolean;
+  allowNewAssets?: boolean;
+  allowWriteOffs?: boolean;
   updated_at?: string;
   updated_by?: string;
 }
