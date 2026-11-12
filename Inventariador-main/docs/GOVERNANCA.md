@@ -271,7 +271,8 @@ por cima da versão anterior no telemóvel.
   antes (desinstalar apaga o banco local). Não trocar sem motivo.
 
 Detalhes da chave e do custo de a manter no repositório:
-`keystore/README.md`.
+`keystore/README.md`. Guia passo a passo, para quem usa o app:
+`docs/GUIA_APK.md`.
 
 ---
 
@@ -308,3 +309,4 @@ na conta — se um dia o remote passar para SSH, registrar no painel e trocar a 
 | `docs/MIGRACAO_HIBRIDA.md` | Plano de migração de dados |
 | `CHANGELOG.md` | Histórico de versões |
 | `SKILL.md` | Processo de release |
+| `docs/GUIA_APK.md` | Pedir e instalar o APK (linguagem simples) |
