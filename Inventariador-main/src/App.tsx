@@ -4929,6 +4929,26 @@ useEffect(() => {
     });
   }, [setHistory, selectedUnit]);
 
+  // VOLTAR da configuração da unidade (âncora GPS e campanha): a raiz da
+  // trilha é o CONTRATO DE TRABALHO. O `popScreen` genérico devolvia a tela
+  // intermediária do histórico (lista de unidades) e, quando o histórico tinha
+  // sido reconstruído (boot guard / login), caía no hub da filial — a tela
+  // "Auditoria Inteligente" — sem unidade escolhida. O retorno aqui é
+  // explícito: volta para a ocorrência mais recente do contrato e descarta as
+  // telas de configuração que estavam por cima.
+  const returnToWorkContext = useCallback(() => {
+    setScreenParams(null);
+    setHistory(prev => {
+      const lastContract = prev.lastIndexOf(AppScreen.WORK_CONTEXT_SELECTION);
+      if (lastContract >= 0) {
+        logger.info('>>> [Navigation] Voltar da configuração da unidade para o CONTRATO DE TRABALHO.');
+        return prev.slice(0, lastContract + 1);
+      }
+      logger.info('>>> [Navigation] Voltar da configuração da unidade sem contrato no histórico: abrindo o CONTRATO DE TRABALHO.');
+      return [...prev, AppScreen.WORK_CONTEXT_SELECTION];
+    });
+  }, [setHistory]);
+
   const handleUpdateUnitConfigs = useCallback((configs: UnitConfig[]) => {
     setInventory(prev => ({ ...prev, unitConfigs: configs }));
     setUnitConfigs(configs);
@@ -7292,11 +7312,12 @@ useEffect(() => {
           ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
-              isAdmin={!!(user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
+              isAdmin={isAdminUser(user) || canAccessDatabaseManager(user)}
               isAuditor={!!(user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
               onNavigate={pushScreen}
    onLoadDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
    databaseMode={databaseMode}
+   initialUnit={screenParams?.unitName || ''}
    units={fullCompaniesWithStatus
      .filter(c => {
        // Regra de Visualização: Admin e Audidtor veem as unidades autorizadas
@@ -7394,11 +7415,13 @@ useEffect(() => {
               lastSyncTime={lastSyncTime}
               onConfigGPS={(u) => {
                 setSelectedUnit(u);
-                pushScreen(AppScreen.UNIT_CONFIGURATOR);
+                // A unidade viaja em `unitName`: a tela de GPS abre escopada nela.
+                pushScreen(AppScreen.UNIT_CONFIGURATOR, { unitName: u });
               }}
               onCampaigns={(u) => {
                 setSelectedUnit(u);
-                pushScreen(AppScreen.CAMPAIGN_MANAGEMENT);
+                // Idem para a campanha: escopo estrito da filial clicada.
+                pushScreen(AppScreen.CAMPAIGN_MANAGEMENT, { unitName: u });
               }}
               isImportingBatch={isImportingBatchState}
             />
@@ -7466,14 +7489,14 @@ useEffect(() => {
               isImportingBatch={isImportingBatchState}
             />
           )}
-          {screen === AppScreen.UNIT_CONFIGURATOR && user && (userHasPermission(user, 'configure_units') ? (
+          {screen === AppScreen.UNIT_CONFIGURATOR && user && (userHasPermission(user, 'configure_units') || isAdminUser(user) ? (
             <UnitConfigurator 
               user={user}
               units={unitNames}
-              onBack={popScreen}
+              onBack={returnToWorkContext}
               onUpdateConfigs={handleUpdateUnitConfigs}
               onNavigate={pushScreen}
-              initialUnit={selectedUnit}
+              initialUnit={screenParams?.unitName || selectedUnit}
               onBypassApplied={(cfg) => {
                 // Bypass de seguranca (Fase Ancora GPS): grava coordenada padrao e abre a
                 // flag de Campanha para liberar a esteira operacional (ADDRESS_SELECTION > INVENTORY).
@@ -7561,10 +7584,10 @@ useEffect(() => {
           {screen === AppScreen.QR_CODE_CONFIGURATOR && (isAdmin ? <QrCodeConfigurator assets={inventory.assets} currentQrCodeFields={inventory.qrCodeFields || ['ETIQUETA']} onSave={(f) => setInventory(prev => ({ ...prev, qrCodeFields: f }))} onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.AUDIT_LOGS && (userHasPermission(user, 'view_audit_logs') ? <AuditLogs user={user} onBack={() => setHistory([AppScreen.MAIN_MENU])} databaseMode={databaseMode} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.LOAD_HISTORY && (userHasPermission(user, 'manage_database') ? <LoadHistoryScreen onBack={popScreen} tenantid={(user?.tenantid || readSessionTenantId() || '').toString().trim().toUpperCase()} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
-          {screen === AppScreen.CAMPAIGN_MANAGEMENT && (userHasPermission(user, 'manage_campaigns') ? (
+          {screen === AppScreen.CAMPAIGN_MANAGEMENT && (userHasPermission(user, 'manage_campaigns') || isAdminUser(user) ? (
             <CampaignManager 
               user={user} 
-              onBack={popScreen} 
+              onBack={returnToWorkContext} 
               onActivate={async (id) => {
                 // Unified v2.6 Keys & Session Metadata
                 const tid = (user?.tenantid || readSessionTenantId() || '').toString().trim();
@@ -7606,7 +7629,7 @@ useEffect(() => {
               availableUnits={fullCompaniesWithStatus.map(c => c.name)}
               campaigns={campaigns}
               onRefresh={refreshCampaigns}
-              initialUnit={selectedUnit}
+              initialUnit={screenParams?.unitName || selectedUnit}
               tenantid={currentTenantid}
               unitId={currentUnitId}
               databaseMode={databaseMode}

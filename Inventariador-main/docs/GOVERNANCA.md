@@ -100,7 +100,8 @@ Arquivos de ambiente:
 ## 5. Fluxo de trabalho no git
 
 ```
-dev local ──commit──▶ branch ──PR──▶ CI verde ──merge──▶ main ──▶ APK / Vercel
+dev local ──commit──▶ branch ──PR──▶ CI verde ──merge──▶ main ──▶ Vercel
+                                                     └──▶ APK só sob demanda (§ 9.1)
 ```
 
 1. Branch de trabalho a partir de `main` atualizada (`git fetch` antes).
@@ -219,10 +220,59 @@ rede e de secrets — o CI garante o código; este script garante o **ambiente**
 4. `npm run verify:governanca` — sem falhas.
 5. Versão em `package.json` + entrada no `CHANGELOG.md` (Keep a Changelog).
 6. PR com CI verde → merge em `main`.
-7. APK (Actions) e/ou deploy Vercel gerados a partir do merge.
+7. Deploy Vercel a partir do merge; **APK só sob demanda** (§ 9.1).
 8. Conferir artefato: se o build deveria ser nuvem, validar que **não** caiu em
    INTERNAL (login Supabase funciona).
 9. Tag + release no GitHub com o APK anexado (`SKILL.md` descreve o processo).
+
+### 9.1 APK sob demanda
+
+O `android-build.yml` **não dispara em push para `main`**: o APK nasce apenas
+quando alguém o pede. Três gestos, e só três:
+
+| Gesto | Quando usar |
+|---|---|
+| Actions → **Build Android APK** → **Run workflow** | pedido avulso — testar um commit/branch, validar instalação no campo |
+| push de tag `v*` (`git tag v2.7.4 && git push origin v2.7.4`) | release oficial — a tag é o pedido |
+| comentar **`/apk`** num pull request | validar o commit do PR no telemóvel; o job responde no PR com o link do run |
+
+Regras:
+
+1. O merge em `main` continua a produzir **CI + deploy Vercel**; nada de APK
+   automático (era runner gasto e artefato que ninguém usava).
+2. O workflow valida o que dói no campo e **falha em vez de publicar**: URL do
+   Supabase embutida no bundle (senão o APK arranca em INTERNAL) e assinatura
+   com o keystore estável (senão o Android recusa a instalação por cima).
+   O SHA-256 do APK e do certificado sai no resumo do job.
+3. Artefato fica disponível por 7 dias (`gbr-kardek-apk`). Para release, anexe o
+   APK à tag no GitHub (passo 9) — o artefato do Actions expira.
+4. **A chave de assinatura é fixa (§ 9.2).** Vive no repositório, sem passo
+   manual; chave diferente = “O app não foi instalado”.
+5. **`/apk` exige escrita no repositório.** O job valida a permissão
+   (`admin`/`maintain`/`write`) antes de compilar e falha fechado; PR de fork não
+   gera APK (o código não é do repositório). O build sai do **HEAD do PR**, não
+   de `main`, e um pedido novo no mesmo PR cancela o anterior.
+6. `workflow_dispatch` só aparece na lista de Actions quando este ficheiro já
+   existe em `main`: no primeiro uso, faça o merge e peça o build a seguir. O
+   mesmo vale para `/apk` — o GitHub lê o workflow da branch padrão.
+
+### 9.2 Chave de assinatura do APK
+
+A chave com que **todos** os APKs são assinados está no repositório:
+`keystore/debug.keystore` (chave de *debug*, alias `androiddebugkey`, senhas
+`android`). **Não há passo manual nenhum** — é isso que garante que o APK instala
+por cima da versão anterior no telemóvel.
+
+- O build usa o secret `ANDROID_DEBUG_KEYSTORE_BASE64` **se ele existir** e cai
+  no ficheiro do repositório caso contrário.
+- O certificado (SHA-256) sai no resumo de cada run e o build **falha** se o APK
+  não estiver assinado com ele.
+- Trocar a chave exige desinstalar a app nos aparelhos que já a têm: sincroniza
+  antes (desinstalar apaga o banco local). Não trocar sem motivo.
+
+Detalhes da chave e do custo de a manter no repositório:
+`keystore/README.md`. Guia passo a passo, para quem usa o app:
+`docs/GUIA_APK.md`.
 
 ---
 
@@ -259,3 +309,4 @@ na conta — se um dia o remote passar para SSH, registrar no painel e trocar a 
 | `docs/MIGRACAO_HIBRIDA.md` | Plano de migração de dados |
 | `CHANGELOG.md` | Histórico de versões |
 | `SKILL.md` | Processo de release |
+| `docs/GUIA_APK.md` | Pedir e instalar o APK (linguagem simples) |

@@ -102,8 +102,13 @@ isOwnerEmail(email)                        // email == VITE_ADMIN_EMAIL (case-in
   Trilha de Auditoria, Desmobilizados (SoftDelete), Performance Global,
   Assinatura Digital.
 - Painel Administrativo (Trilha A): Configurar Campos, Configurar QR Code,
-  Acessos, Auditoria, Integridade, Eventos, **Filiais** (UNIT_CONFIGURATOR),
+  Acessos, Auditoria, Integridade, **Filiais** (UNIT_CONFIGURATOR),
   **Banco de Dados** (DATABASE_MANAGER — gate adicional `canAccessDatabaseManager`).
+- **Campanhas de Inventário** (`CAMPAIGN_MANAGEMENT`) e a **UNIDADE OPERACIONAL**
+  (âncora GPS) não têm entrada solta no painel. O caminho é contextual: no
+  CONTRATO DE TRABALHO (`WorkContextSelector`), o card da unidade (ou o badge
+  "Âncora e Campanha") abre a tela da unidade já filtrada naquela filial, onde
+  ficam as duas configurações — âncora GPS e campanha por unidade.
 - Grid de módulos: **CONCILIAÇÃO POR CONTAS** e **ASSINATURA DIGITAL** gated por
   `isAuditor` (Trilha B); INVENTÁRIO / FICHA / ETIQUETAR / CONSULTA livres (Trilha C).
 

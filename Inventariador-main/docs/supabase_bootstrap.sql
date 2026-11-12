@@ -69,6 +69,34 @@ ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS filial text;
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS primarykey text;
 
+-- COLUNAS DO PAYLOAD DE ESPELHAMENTO (src/services/supabaseService.ts -> buildPayload):
+-- uma tabela `assets` criada antes do GBR v2.6 nao as tem, e o PostgREST rejeita o
+-- LOTE INTEIRO com PGRST204 ("Could not find the 'cnpj' column of 'assets' in the
+-- schema cache"). O espelhamento em massa terminava com 0 de 12.636 ativos
+-- sincronizados. Idempotente: no-op quando a coluna ja existe.
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS status text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS etiqueta text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS qt numeric;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS descricaodoativo text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS serial text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS dataaqusic text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS cnpj text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS nomefornecedor text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS notafiscal text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS endereco text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS registro text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS subreg text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS databaixa text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS contacontabil text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS centrodecusto text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS vlraquisic numeric;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS sn1_recno numeric;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS sn3_recno numeric;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS gps_lat numeric(18,10);
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS gps_lng numeric(18,10);
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS "DE_PARA" text;
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS "currentCampaignId" text;
+
 -- SRE ISOLAMENTO DE CONTRATO: a unicidade da chave de origem é POR TENANT —
 -- a mesma chave primária pode existir legitimamente em contratos diferentes
 -- (ex.: base de teste do CLIENTETESTE copiada do CICOPAL). O índice GLOBAL
@@ -119,6 +147,48 @@ CREATE UNIQUE INDEX IF NOT EXISTS inventory_config_tenant_filial_key
   ON public.inventory_config (tenantid, filial);
 
 -- ============================================================================
+-- 2-B. UNIT_CONFIGS — configuracao/ancora GPS por unidade
+--      Lida por fetchUnitConfigs, fetchTenantFiliais e AssetControlModule. Nao
+--      existia no projeto (PGRST205: "Could not find the table
+--      'public.unit_configs'"), por isso as filiais em modo nuvem caiam sempre
+--      para os dados locais e os cards ficavam em "FALTA ANCORA GPS E CAMPANHA".
+--      Colunas espelham a interface UnitConfig (src/types.ts).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.unit_configs (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenantid      text NOT NULL,
+  filial        text,
+  unit_id       text,
+  _unitid       text,
+  lat           numeric(18,10) DEFAULT 0,
+  lng           numeric(18,10) DEFAULT 0,
+  radius_meters numeric DEFAULT 200,
+  is_active     boolean DEFAULT true,
+  updated_by    text,
+  -- Flags de política da unidade (hasGps, requireNf...) — jsonb para manter os
+  -- nomes camelCase do tipo UnitConfig (colunas viriam em minúsculas).
+  flags         jsonb DEFAULT '{}'::jsonb,
+  created_at    timestamptz DEFAULT now(),
+  updated_at    timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS filial text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS unit_id text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS _unitid text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS lat numeric(18,10) DEFAULT 0;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS lng numeric(18,10) DEFAULT 0;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS radius_meters numeric DEFAULT 200;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS updated_by text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS flags jsonb DEFAULT '{}'::jsonb;
+
+CREATE UNIQUE INDEX IF NOT EXISTS unit_configs_tenant_filial_key
+  ON public.unit_configs (tenantid, filial);
+
+-- ============================================================================
 -- 3. AUDIT_LOGS — trilha de auditoria
 --    (FONTE DO ERRO 42703: tabela legada sem a coluna created_at — corrigido
 --     pelos ALTERs abaixo)
@@ -147,6 +217,7 @@ ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS details text;
 ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS origin text;
 ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS new_data jsonb;
 ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS old_data jsonb;
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS tenant_id text;
 
 CREATE INDEX IF NOT EXISTS audit_logs_tenantid_idx ON public.audit_logs (tenantid);
 CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx ON public.audit_logs (created_at DESC);
@@ -285,6 +356,21 @@ ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS asset_id text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS user_email text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS action text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS data jsonb;
+-- O log de auditoria do app grava `details` (logAuditEvent). Sem a coluna, o
+-- PostgREST responde 42703 e a trilha de SYNC_PUSH/SYNC_PULL fica sem registo.
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS details text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS record_id text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS origin text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS table_name text;
+-- Grafia legada `tenant_id`: um trigger criado na base (fora do repositório)
+-- grava o log de ativos com `tenant_id`. Sem a coluna, o INSERT do trigger falha
+-- com 42703, a transação do upsert é abortada e o espelhamento termina com
+-- "0 ativos sincronizados, 12636 rejeitados" — a mensagem cita asset_logs mesmo
+-- que o problema esteja no trigger e não no payload do app (que envia `tenantid`).
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS tenant_id text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS new_data jsonb;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS old_data jsonb;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS "timestamp" timestamptz DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS public."asset-photos" (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -317,6 +403,7 @@ ALTER TABLE public.locations ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public.campaigns ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public.campaign_snapshots ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public.asset_logs ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public.unit_configs ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public."asset-photos" ALTER COLUMN id SET DEFAULT gen_random_uuid();
 
 -- ============================================================================
@@ -328,6 +415,7 @@ ALTER TABLE public."asset-photos" ALTER COLUMN id SET DEFAULT gen_random_uuid();
 -- ============================================================================
 ALTER TABLE public.assets            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_config  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.unit_configs      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_permissions  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.locations         ENABLE ROW LEVEL SECURITY;
@@ -341,6 +429,9 @@ CREATE POLICY p_all ON public.assets FOR ALL TO anon, authenticated USING (true)
 
 DROP POLICY IF EXISTS p_all ON public.inventory_config;
 CREATE POLICY p_all ON public.inventory_config FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_all ON public.unit_configs;
+CREATE POLICY p_all ON public.unit_configs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS p_all ON public.audit_logs;
 CREATE POLICY p_all ON public.audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);

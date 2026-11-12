@@ -51,7 +51,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   initialUnit,
   tenantid: propsTenantid
 }) => {
-  const [isCreating, setIsCreating] = useState(false);
+  // Aberto a partir da unidade (chip CAMPANHA → `initialUnit`): o formulário de
+  // cadastro já nasce aberto e vinculado àquela filial, em vez de exigir o +
+  // dentro da lista de campanhas.
+  const [isCreating, setIsCreating] = useState(!!initialUnit);
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [newCampaignName, setNewCampaignName] = useState('');

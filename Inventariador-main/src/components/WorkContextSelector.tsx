@@ -18,6 +18,7 @@ import { AppModule, AppScreen, UserRole } from '../types';
 import { isAdminUser } from '../services/rbacService';
 import {
   WorkContext,
+  type FilialOption,
   buildFilialOptions,
   groupContextsByTenant,
   normalizeWorkTenant,
@@ -50,7 +51,9 @@ interface WorkContextSelectorProps {
   /**
    * Navegação administrativa a partir do próprio CONTRATO DE TRABALHO: as
    * liberações exclusivas de ADMIN/MASTER (filiais, campanhas, campos, QR,
-   * base de dados, cargas, licenças, unidade operacional).
+   * base de dados, cargas, licenças). A UNIDADE OPERACIONAL (âncora GPS +
+   * campanha que liberam o inventário) é aberta pelo badge "Âncora e Campanha"
+   * de cada unidade desta tela — o painel não a duplica.
    */
   onOpenAdmin?: (screen: AppScreen, params?: NavigationParams) => void;
 }
@@ -135,10 +138,28 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     return baseContracts.find((c) => normalizeWorkTenant(c.tenantid) === tenant)?.filiais ?? [];
   }, [baseContracts, selectedTenant]);
 
-  const filialOptions = useMemo(
-    () => buildFilialOptions({ tenantid: selectedTenant, contexts, baseFiliais }),
-    [selectedTenant, contexts, baseFiliais]
-  );
+  // A lista do perfil manda para quem é de campo; o DONO do contrato (admin/
+  // master) administra a unidade inteira, então ele também enxerga as filiais
+  // REAIS da base local — são elas que recebem âncora e campanha na Unidade
+  // Operacional. Sem isso, um admin cujo perfil declara uma filial só (ou
+  // nenhuma) ficava preso às unidades do perfil e não conseguia abrir as demais
+  // filiais do próprio contrato. A autorização continua valendo: as filiais da
+  // base entram DEPOIS das do perfil e apenas para ADMIN/MASTER.
+  const filialOptions = useMemo(() => {
+    const authorized = buildFilialOptions({ tenantid: selectedTenant, contexts, baseFiliais });
+    if (!isAdmin) return authorized;
+
+    const tenant = normalizeWorkTenant(selectedTenant);
+    const seen = new Set(authorized.map((o) => normalizeWorkFilial(o.filial)));
+    const fromBase: FilialOption[] = [];
+    for (const raw of baseFiliais) {
+      const f = normalizeWorkFilial(raw);
+      if (!f || f === tenant || seen.has(f)) continue;
+      seen.add(f);
+      fromBase.push({ filial: f, label: f });
+    }
+    return fromBase.length ? [...authorized, ...fromBase] : authorized;
+  }, [selectedTenant, contexts, baseFiliais, isAdmin]);
 
   // Pré-seleção: a filial resolvida no login (quando autorizada) ou a primeira
   // opção. O usuário pode trocar livremente entre as autorizadas.
@@ -396,7 +417,16 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                       <button
                         key={opt.filial}
                         type="button"
-                        onClick={() => setSelectedFilial(opt.filial)}
+                        onClick={() => {
+                          // Registra a escolha (o retorno do configurador cai com a
+                          // filial certa) e, para ADMIN/MASTER, abre a configuração
+                          // desta unidade — âncora GPS + campanha — já com a filial
+                          // em parâmetro. O auditor apenas escolhe onde vai inventariar.
+                          setSelectedFilial(opt.filial);
+                          if (isAdmin) {
+                            onOpenAdmin?.(AppScreen.UNIT_SELECTION, { unitName: opt.filial });
+                          }
+                        }}
                         aria-pressed={isChosen}
                         className={`w-full bg-white rounded-2xl px-4 py-3.5 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] ${
                           isChosen ? 'border-accent ring-1 ring-accent/30' : 'border-gray-100'
@@ -422,9 +452,42 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                           </div>
                         </div>
                         {pending ? (
-                          <div className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0">
-                            <Lock size={14} />
-                          </div>
+                          isAdmin ? (
+                            /* BADGE "ÂNCORA E CAMPANHA" (admin/master): abre a UNIDADE
+                               OPERACIONAL — a tela que configura âncora GPS + campanha e
+                               com isso libera o inventário. Antes era só decorativo (o
+                               caminho era Painel Completo → Unidade Operacional) e o
+                               clique não fazia nada. `stopPropagation` impede que o
+                               clique selecione a filial em vez de abrir a config. */
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              title="Âncora e campanha que liberam o inventário"
+                              aria-label={`Configurar âncora e campanha de ${opt.label}`}
+                              data-testid={`unit-release-action-${opt.filial}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenAdmin?.(AppScreen.UNIT_SELECTION);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  onOpenAdmin?.(AppScreen.UNIT_SELECTION);
+                                }
+                              }}
+                              className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0 cursor-pointer hover:bg-amber-100 active:scale-95 transition-all"
+                            >
+                              <Lock size={14} />
+                            </div>
+                          ) : (
+                            <div
+                              className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0"
+                              title="O administrador define âncora e campanha na Unidade Operacional"
+                            >
+                              <Lock size={14} />
+                            </div>
+                          )
                         ) : isChosen ? (
                           <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
                             <Check size={16} />
@@ -508,11 +571,12 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
               </div>
             </div>
 
-            {/* LIBERAÇÕES · ADMIN/MASTER — uma única entrada. Todas as
-                ferramentas (unidade/âncora/campanha, acessos, filiais, eventos,
-                campos, QR, base, cargas, licenças, integridade, fotos e
-                Protheus) vivem no PAINEL COMPLETO do hub; manter a lista aqui
-                duplicava cada botão sem acrescentar nenhuma regra. */}
+            {/* LIBERAÇÕES · ADMIN/MASTER — uma única entrada. As ferramentas
+                (acessos, filiais, campanhas, campos, QR, base, cargas, licenças,
+                integridade, fotos e Protheus) vivem no PAINEL COMPLETO do hub;
+                manter a lista aqui duplicava cada botão sem acrescentar nenhuma
+                regra. A exceção é a UNIDADE OPERACIONAL (âncora + campanha), que
+                é configurada pelo badge de cada unidade, logo acima. */}
             {isAdmin && (
               <div>
                 <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">

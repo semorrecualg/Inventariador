@@ -414,11 +414,14 @@ const Login: React.FC<LoginProps> = ({
         }
       }
 
-      // SOBERANIA LOCAL: apenas os modos INTERNAL bloqueiam autenticação via nuvem.
-      // SUPABASE e SUPABASE_PLUS são ambos modos de nuvem — o processSession persiste
-      // 'SUPABASE' após autenticar no Supabase (ver App.tsx), então exigir PLUS aqui
-      // impedia o login manual na segunda sessão (falso "Supabase desligado").
-      const isCloudMode = databaseMode === DatabaseMode.SUPABASE || databaseMode === DatabaseMode.SUPABASE_PLUS;
+      // SOBERANIA LOCAL: só a AUSÊNCIA de credenciais bloqueia a tentativa na nuvem.
+      // O modo gravado em `app_database_mode` pode ter ficado INTERNAL de uma sessão
+      // offline/demo anterior, e nesse caso o login recusava um utilizador Supabase
+      // válido com "a licença ativa é SOLO" — mesmo com URL e chave no bundle (o
+      // badge da tela lê o ambiente; este guard lia o localStorage). A Barreira Local
+      // já correu antes deste ponto, portanto quem autentica localmente continua a
+      // entrar sem tocar na nuvem; aqui só se decide se vale tentar a nuvem.
+      const isCloudMode = !isInternalMode;
       if (!isCloudMode) {
         logger.info('[Login] [CHECK 2] Licença SOLO/Local ativa (Soberania Offline). Bloqueando tentativa de autenticação direta no Supabase Cloud.');
         setIsLoading(false);

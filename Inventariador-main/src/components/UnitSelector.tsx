@@ -53,6 +53,12 @@ interface UnitSelectorProps {
   isAuditor?: boolean;
   databaseMode?: DatabaseMode;
   isImportingBatch?: boolean; // UX v2.6 Isolated state
+  /**
+   * Unidade a filtrar/destacar ao abrir. Chega do card da unidade no CONTRATO
+   * DE TRABALHO (`NavigationParams.unitName`), para a configuração abrir já
+   * focada naquela filial em vez de na lista inteira.
+   */
+  initialUnit?: string;
   /** Navegação para o MainMenu com painel pré-aberto (tool grid da Unidade Operacional). */
   onNavigate?: (target: AppScreen, params?: NavigationParams) => void;
 }
@@ -78,9 +84,12 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   isAuditor = false, 
   databaseMode,
   isImportingBatch = false,
-  onNavigate
+  onNavigate,
+  initialUnit
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+  // Abertura contextual (contrato de trabalho → card da unidade): a busca nasce
+  // filtrada pela filial clicada, então a tela já abre na configuração dela.
+  const [searchTerm, setSearchTerm] = useState(() => String(initialUnit || '').toUpperCase());
   // Total de ativos das unidades listadas (fallback do indicador da tool grid).
   const totalAssets = units.reduce((acc, u) => acc + (Number(u.assetCount) || 0), 0);
   // Total GERAL da base local (modo INTERNAL/SQLite): soma de todas as filiais
@@ -610,6 +619,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
               // Espelha a coluna 'filial' da base: sem uppercase nem reformatação.
               const displayName = rawName.trim();
               const unitTenant = (unit.tenantid || '').trim().toUpperCase();
+              // Unidade que veio do card do contrato de trabalho: destacada na lista.
+              const isHighlighted = !!initialUnit && normalizeKey(displayName) === normalizeKey(initialUnit);
               const { style, Icon } = getUnitIdentity(displayName, unit.hasData);
               const showTenantBadge = homonymSet.has(displayName.toUpperCase().trim());
 
@@ -621,7 +632,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
                     unit.hasData 
                       ? 'hover:border-accent hover:shadow-md active:scale-[0.99] border-gray-100 cursor-pointer' 
                       : 'opacity-60 cursor-not-allowed border-slate-100'
-                  }`}
+                  } ${isHighlighted ? 'ring-2 ring-accent/40 border-accent/40' : ''}`}
                 >
                   <div className="flex items-center space-x-4 relative z-10 w-full min-w-0 pr-2">
                     <div className={`w-12 h-12 ${style} rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm border flex-shrink-0`}>

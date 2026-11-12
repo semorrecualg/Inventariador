@@ -1,9 +1,31 @@
 name: Build Android APK (versão lida do package.json)
 
+# APK SOB DEMANDA — o build nativo não roda a cada merge em main (gastava
+# vários minutos de runner e produzia um APK que ninguém pediu). Ele nasce em
+# dois gestos, e só neles:
+#   1. pedido explícito: Actions → "Build Android APK" → Run workflow
+#      (branch/commit escolhidos no próprio diálogo); ou
+#   2. release: push de tag `v*` (git tag v2.7.4 && git push origin v2.7.4).
+# O CI de qualidade (lint · tipos · testes · build) continua automático no
+# ci.yml — o que ficou sob demanda é só o artefato Android.
+#   3. pedido por comentário: `/apk` num pull request (só quem tem escrita no
+#      repositório; o build sai do HEAD do PR, nunca de um fork).
 on:
-  push:
-    branches: [ "main", "master" ]
   workflow_dispatch:
+  push:
+    tags: [ "v*" ]
+  issue_comment:
+    types: [ created ]
+
+permissions:
+  contents: read        # checkout do commit pedido
+  pull-requests: read   # ler o HEAD do PR
+  issues: write         # responder no PR (comentário de PR é issue)
+
+concurrency:
+  # Um pedido novo no mesmo PR cancela o anterior: sem builds duplicados.
+  group: apk-${{ github.event.issue.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   NODE_OPTIONS: '--max-old-space-size=4096' 
@@ -12,6 +34,13 @@ jobs:
   build:
     name: Generate APK 
     runs-on: ubuntu-latest
+    # Comentário que não começa por /apk nem chega a abrir run (sem X vermelho
+    # em conversa normal do PR).
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      (github.event.issue.pull_request != null &&
+       startsWith(github.event.comment.body, '/apk'))
 
     env:
       # Identidade do admin: sem isto o APK nasce sem soberania (isAdminEmail
@@ -28,8 +57,77 @@ jobs:
         working-directory: Inventariador-main
 
     steps:
+      # Pedido por comentário: valida QUEM pediu antes de qualquer build.
+      # Fail-closed: sem permissão de escrita (admin/maintain/write) o job para.
+      - name: Validar pedido /apk
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          ASSOC: ${{ github.event.comment.author_association }}
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+
+          pedido="$(printf '%s' "$BODY" | head -1 | tr -d '\r' | awk '{print $1}')"
+          if [ "$pedido" != "/apk" ]; then
+            echo "::error::Pedido ignorado: o comentário tem de começar por /apk."
+            exit 1
+          fi
+
+          perm="$(gh api "repos/$REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null || true)"
+          case "$perm" in
+            admin|maintain|write)
+              echo "Permissão de $ACTOR: $perm — pedido aceite."
+              ;;
+            "")
+              # API sem acesso (token restrito): cai na associação do comentário.
+              case "$ASSOC" in
+                OWNER|MEMBER|COLLABORATOR)
+                  echo "Permissão de $ACTOR: $ASSOC (author_association) — pedido aceite."
+                  ;;
+                *)
+                  echo "::error::$ACTOR não tem permissão de escrita neste repositório (author_association: $ASSOC)."
+                  exit 1
+                  ;;
+              esac
+              ;;
+            *)
+              echo "::error::$ACTOR não tem permissão de escrita neste repositório (permissão: $perm)."
+              exit 1
+              ;;
+          esac
+
+      # O comentário é sobre um PR: o build tem de sair do HEAD dele, não de main.
+      - name: Resolver commit do PR
+        id: request
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          info="$(gh pr view "$PR" --repo "$REPO"             --json headRefOid,headRefName,isCrossRepository,headRepositoryOwner,headRepository)"
+
+          if [ "$(echo "$info" | jq -r .isCrossRepository)" = "true" ]; then
+            echo "::error::PR de fork não gera APK: o código não é deste repositório."
+            exit 1
+          fi
+
+          sha="$(echo "$info" | jq -r .headRefOid)"
+          repo="$(echo "$info" | jq -r '.headRepositoryOwner.login + "/" + .headRepository.name')"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "PR #$PR → $repo@$sha ($(echo "$info" | jq -r .headRefName))"
+
       - name: Checkout Code 
         uses: actions/checkout@v5
+        with:
+          # Pedido por comentário: commit exato do PR. Caso contrário, o ref do run.
+          ref: ${{ steps.request.outputs.sha || github.sha }}
+          repository: ${{ steps.request.outputs.repo || github.repository }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -180,51 +278,33 @@ jobs:
             gradle-cache-${{ runner.os }}-8.11.1-
             gradle-cache-${{ runner.os }}-
 
-      # Sem isto, cada execução do runner gera um debug.keystore novo e o APK
-      # sai assinado por uma chave diferente a cada build: o Android recusa a
-      # instalação por cima da versão anterior ("O app não foi instalado").
-      - name: Keystore de assinatura estável — cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: android-debug-keystore-v1
-
-      - name: Keystore de assinatura estável — secret (prioritário)
+      # A assinatura é a IDENTIDADE do app no telemóvel: se a chave muda, o
+      # Android recusa instalar por cima ("O app não foi instalado").
+      # A chave vive no repositório (keystore/debug.keystore): é uma chave de
+      # DEBUG, com as senhas públicas que o build já espera (alias
+      # androiddebugkey / senha android). Não há passo manual nenhum.
+      # Quem preferir guardá-la fora do repositório cadastra o secret
+      # ANDROID_DEBUG_KEYSTORE_BASE64 — ele passa a mandar sobre o ficheiro.
+      - name: Keystore de assinatura
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-          if [ -z "${KEYSTORE_B64:-}" ]; then
-            echo "Sem secret ANDROID_DEBUG_KEYSTORE_BASE64 — vale o keystore do cache."
-            exit 0
-          fi
           mkdir -p "$HOME/.android"
-          printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
-          echo "Keystore restaurado do secret ANDROID_DEBUG_KEYSTORE_BASE64."
-
-      # O AGP procura o keystore em ANDROID_USER_HOME / ANDROID_SDK_HOME; neste
-      # runner isso aponta para fora de ~/.android, então ele gerava uma chave
-      # nova a cada build (o cache ficava vazio e a assinatura mudava).
-      # Criar o ficheiro aqui e fixar as variáveis garante o mesmo keystore
-      # sempre.
-      - name: Keystore de assinatura estável — criar se ausente
-        run: |
-          set -euo pipefail
-          KS="$HOME/.android/debug.keystore"
-          mkdir -p "$HOME/.android"
-          if [ -f "$KS" ]; then
-            echo "Keystore já presente (cache ou secret) — reutilizado."
+          if [ -n "${KEYSTORE_B64:-}" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+            echo "Keystore: secret ANDROID_DEBUG_KEYSTORE_BASE64."
           else
-            keytool -genkeypair -noprompt \
-              -keystore "$KS" \
-              -storepass android -keypass android \
-              -alias androiddebugkey \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-            echo "Keystore de debug criado; será guardado no cache para os próximos builds."
+            cp keystore/debug.keystore "$HOME/.android/debug.keystore"
+            echo "Keystore: ficheiro do repositório (keystore/debug.keystore)."
           fi
-          keytool -list -v -keystore "$KS" -storepass android -alias androiddebugkey \
-            | grep -m1 'SHA256:' || true
+          if [ ! -s "$HOME/.android/debug.keystore" ]; then
+            echo "::error::Keystore vazio — o ficheiro keystore/debug.keystore não chegou ao runner."
+            exit 1
+          fi
+          FP="$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -m1 'SHA256:' | sed 's/.*SHA256: *//' || true)"
+          echo "Certificado da chave: ${FP:-desconhecido}"
+          echo "| Certificado (SHA-256) | \`${FP:-desconhecido}\` |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build Debug APK
         run: |
@@ -236,6 +316,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace \
             -Pandroid.injected.signing.store.file="$HOME/.android/debug.keystore" \
+            -Pandroid.injected.signing.store.type=PKCS12 \
             -Pandroid.injected.signing.store.password=android \
             -Pandroid.injected.signing.key.alias=androiddebugkey \
             -Pandroid.injected.signing.key.password=android
@@ -243,12 +324,14 @@ jobs:
           find "$HOME" /usr/local/lib/android -name 'debug.keystore' 2>/dev/null | head -5 || true
 
       - name: Renomear APK com versão
+        id: apk
         run: |
           APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
           VERSION=$(node -e "console.log(require('./package.json').version)")
           DATE=$(date +'%Y%m%d')
           NEW_NAME="gbr-kardek-v${VERSION}-${DATE}.apk"
           cp "$APK_PATH" "android/app/build/outputs/apk/debug/${NEW_NAME}"
+          echo "name=${NEW_NAME}" >> "$GITHUB_OUTPUT"
           echo "✅ APK gerado: ${NEW_NAME}"
 
       # Verificação explícita: se o APK sair inválido ou com assinatura trocada,
@@ -325,3 +408,38 @@ jobs:
             ${{ github.workspace }}/Inventariador-main/android/app/build/outputs/apk/debug/gbr-kardek-*.apk.sha256
           retention-days: 7
           if-no-files-found: error
+
+      # Fecha o ciclo do pedido: o run de /apk não aparece nos checks do PR,
+      # então sem este comentário ninguém sabe se o APK saiu (nem onde).
+      - name: Responder no PR
+        if: always() && github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          RESULTADO: ${{ job.status }}
+          ARQUIVO: ${{ steps.apk.outputs.name }}
+          SHA: ${{ steps.request.outputs.sha || github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$RESULTADO" = "success" ]; then
+            {
+              echo "### APK gerado ✅"
+              echo ""
+              echo "| Campo | Valor |"
+              echo "|---|---|"
+              echo "| Ficheiro | \`${ARQUIVO:-gbr-kardek-apk}\` |"
+              echo "| Commit | \`${SHA}\` |"
+              echo "| Run | [abrir]($RUN_URL) |"
+              echo ""
+              echo "Download: **Actions → este run → Artifacts → \`gbr-kardek-apk\`** (7 dias)."
+            } > /tmp/msg.md
+          else
+            {
+              echo "### APK não gerado ❌"
+              echo ""
+              echo "O build terminou em \`${RESULTADO}\`. Veja o log: [abrir run]($RUN_URL)."
+            } > /tmp/msg.md
+          fi
+          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/msg.md

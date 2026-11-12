@@ -1,10 +1,28 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import UnitConfigurator from '../components/UnitConfigurator';
 import { Geolocation } from '@capacitor/geolocation';
+import { saveUnitConfig } from '../services/supabaseService';
 import type { User, UnitConfig } from '../types';
+
+/**
+ * A gravação real (saveUnitConfig) faz upsert no Supabase e importa o SQLite.
+ * Num runner sem credenciais o client cai no URL placeholder e as requisições
+ * ficam pendentes; o `await` dentro de handleSave segurava a notificação ao pai
+ * e o teste falhava com a lista vazia. O alvo deste teste é o componente
+ * (onUpdateConfigs já deve receber a âncora recém-gravada), não a nuvem: aqui a
+ * persistência é stub e o resto do módulo continua real.
+ */
+vi.mock('../services/supabaseService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/supabaseService')>();
+  return {
+    ...actual,
+    saveUnitConfig: vi.fn(async () => true),
+    saveUnitConfigFlags: vi.fn(async () => true),
+  };
+});
 
 const ADMIN: User = { tenantid: 'CICOPAL', email: 'admin@gbr.com', role: 'ADMIN' } as unknown as User;
 
@@ -68,7 +86,7 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     localStorage.clear();
     sessionStorage.clear();
 
-    // Modo INTERNAL → saveUnitConfig retorna true sem tocar a nuvem
+    // Modo INTERNAL (o stub de saveUnitConfig garante que nada toca a rede)
     localStorage.setItem('app_database_mode', 'INTERNAL');
     // Rascunhos preventivos → o efeito semeia currentConfig com coordenadas reais
     sessionStorage.setItem('kardek_temp_gps_lat_010101 CICOPAL GO', '-16.706719');
@@ -111,10 +129,18 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     expect(fixar).toBeTruthy();
     fixar!.click();
 
-    // Espera o fluxo assíncrono do handleSave (geolocalização + persistência local)
-    await until(() => (received.length > 0 ? true : undefined));
+    // Espera o fluxo assíncrono do handleSave (geolocalização + persistência local).
+    // 10s: dá folga ao runner lento sem mascarar espera infinita.
+    await until(() => (received.length > 0 ? true : undefined), 10000);
 
-    expect(received.length).toBeGreaterThan(0);
+    // Diagnóstico legível no resumo do CI: se falhar, diz em que ponto parou e o
+    // que o componente mostrou na tela (ex.: 'SELECIONE UMA UNIDADE', 'BLOQUEADO').
+    const tela = (container.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    expect(
+      vi.mocked(saveUnitConfig),
+      `handleSave parou antes de gravar — tela: ${tela}`,
+    ).toHaveBeenCalled();
+    expect(received.length, `onUpdateConfigs não foi notificado — tela: ${tela}`).toBeGreaterThan(0);
     const saved = received.find((c) => c.unit_id === '010101 CICOPAL GO');
     expect(saved).toBeTruthy();
     expect(Number(saved?.lat)).not.toBe(0);
@@ -124,5 +150,8 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     // Limpeza final: sem raízes órfãs afetando o restante da suíte
     root.unmount();
     container.remove();
-  });
+    // Limite explícito: os dois `until(...)` acima podem esperar até 6 s cada,
+    // então o padrão de 5 s do Vitest matava o teste num runner lento (CI) antes
+    // de o helper desistir. O teste não trava — ele só precisa de mais folga.
+  }, 20000);
 });
