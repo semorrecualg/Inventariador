@@ -2907,6 +2907,13 @@ useEffect(() => {
   // para o canal não ser desligado e religado a cada sincronização.
   const realtimeTenantId = user?.tenantid || '';
 
+  // `pushScreen` não é estável (depende de databaseMode/selectedUnit): o efeito
+  // realtime usa a versão atual por ref, senão mudar de unidade reabria o canal.
+  const realtimePushScreenRef = useRef(pushScreen);
+  useEffect(() => {
+    realtimePushScreenRef.current = pushScreen;
+  }, [pushScreen]);
+
   // Real-time Cloud Sync Listener
   useEffect(() => {
     // Só ativamos os listeners se houver contrato e em modo nuvem
@@ -2940,7 +2947,7 @@ useEffect(() => {
     window.addEventListener('gbr_photo_synced', handlePhotoSynced);
     
     // Expose map opener for Dashboard
-    (window as unknown as { onOpenMap: () => void }).onOpenMap = () => pushScreen(AppScreen.ASSET_MAP);
+    (window as unknown as { onOpenMap: () => void }).onOpenMap = () => realtimePushScreenRef.current(AppScreen.ASSET_MAP);
 
     // Check periodically
     const interval = setInterval(updatePendingCount, 10000);
@@ -3012,7 +3019,7 @@ useEffect(() => {
       if (subscription) subscription.unsubscribe();
       if (assetSubscription) assetSubscription.unsubscribe();
     };
-  }, [databaseMode, realtimeTenantId, pushScreen]);
+  }, [databaseMode, realtimeTenantId]);
 
   // Efeito para forçar sincronização se houver atualização pendente
   // Cloud Update Pending Handler

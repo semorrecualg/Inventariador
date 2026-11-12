@@ -3,33 +3,54 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Contrato do efeito de tempo real em App.tsx.
+ * Contrato do efeito de tempo real em `App.tsx`.
  *
- * O efeito já dependeu de `inventory.lastUpdated`: cada sincronização mudava o
- * valor, o React limpava o efeito e o canal era desligado/religado de imediato
- * (perdendo eventos nesse intervalo). Agora a comparação usa `inventoryRef`
- * (sempre atual) e o efeito só volta a correr quando muda o contrato.
+ * Duas regressões já vistas aqui:
+ *  1. o efeito dependia de `inventory.lastUpdated` → cada sincronização desligava
+ *     e religava os canais, perdendo eventos no intervalo;
+ *  2. `pushScreen` não é estável (depende de `databaseMode`/`selectedUnit`) →
+ *     mudar de unidade reabria os canais sem o contrato mudar.
+ *
+ * A comparação é feita sobre os tokens das dependências e sobre o código sem
+ * comentários, para o teste não falhar por formatação do ficheiro.
  */
 const appSource = readFileSync(fileURLToPath(new URL('../App.tsx', import.meta.url)), 'utf8');
 
 const effectStart = appSource.indexOf('// Real-time Cloud Sync Listener');
-const depsStart = appSource.indexOf('}, [', effectStart);
-const depsLine = appSource.slice(depsStart, appSource.indexOf('\n', depsStart) + 1);
-const effectBlock = appSource.slice(effectStart, depsStart);
-// O código sem comentários: a verificação é sobre o que executa, não sobre o
-// comentário que explica a correção.
-const effectCode = effectBlock.replace(/\/\/[^\n]*/g, '');
+
+/** Primeira lista de dependências de efeito depois do marcador. */
+const depsPattern = /\}\s*,\s*\[([^\]]*)\]\s*\)\s*;/g;
+const depsMatch = (() => {
+  if (effectStart === -1) return null;
+  depsPattern.lastIndex = effectStart;
+  return depsPattern.exec(appSource);
+})();
+
+const effectBlock = depsMatch ? appSource.slice(effectStart, depsMatch.index) : '';
+// Sem comentários: validamos o que executa, não a explicação.
+const effectCode = effectBlock.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+const deps = depsMatch
+  ? depsMatch[1]
+      .split(',')
+      .map(token => token.trim())
+      .filter(Boolean)
+  : [];
 
 describe('efeito realtime de App.tsx', () => {
-  it('encontra o efeito e a sua lista de dependências', () => {
+  it('encontra o efeito e as suas dependências', () => {
     expect(effectStart).toBeGreaterThan(-1);
-    expect(depsStart).toBeGreaterThan(effectStart);
-    expect(depsLine).toContain(']);');
+    expect(depsMatch).not.toBeNull();
+    expect(deps.length).toBeGreaterThan(0);
   });
 
-  it('não depende de inventory.lastUpdated (canal não reabre a cada sincronização)', () => {
-    expect(depsLine).not.toContain('inventory.lastUpdated');
-    expect(depsLine).toBe('}, [databaseMode, realtimeTenantId, pushScreen]);\n');
+  it('só depende do modo de base e do contrato', () => {
+    expect([...deps].sort()).toEqual(['databaseMode', 'realtimeTenantId']);
+  });
+
+  it('não depende de inventory.lastUpdated nem de pushScreen', () => {
+    expect(deps).not.toContain('inventory.lastUpdated');
+    expect(deps).not.toContain('pushScreen');
   });
 
   it('compara o horário pelo ref atual, não pelo valor capturado na render', () => {
@@ -37,9 +58,14 @@ describe('efeito realtime de App.tsx', () => {
     expect(effectCode).not.toContain('inventory.lastUpdated');
   });
 
+  it('usa o pushScreen atual por ref (identidade instável não reabre o canal)', () => {
+    expect(effectCode).toContain('realtimePushScreenRef.current(');
+    expect(effectCode).not.toContain('pushScreen(');
+  });
+
   it('usa o contrato estável nas duas subscrições', () => {
-    expect(effectBlock).toContain('}, realtimeTenantId);');
-    expect(effectBlock).toContain('subscribeToAssetChanges(realtimeTenantId');
-    expect(effectBlock).not.toContain('user?.tenantid');
+    expect(effectCode).toContain('}, realtimeTenantId);');
+    expect(effectCode).toContain('subscribeToAssetChanges(realtimeTenantId');
+    expect(effectCode).not.toContain('user?.tenantid');
   });
 });
