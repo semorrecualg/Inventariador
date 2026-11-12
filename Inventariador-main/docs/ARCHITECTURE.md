@@ -243,7 +243,8 @@ mais, `localDbService`/`syncService`/`supabaseService` só `trim`). Como a chave
 grafia do mesmo ativo virava uma LINHA NOVA — origem das cópias que inflavam a
 Unidade Operacional (50 544 linhas locais onde a nuvem tinha 12 636).
 
-Caminhos que usam a regra: `services/DatabaseLoaderService.ts` (as três cargas),
+Caminhos que usam a regra: `services/DatabaseLoaderService.ts` (`injetarDadosEmLotes`,
+`processExcelFile`, `importExcelBulkData`),
 `services/persistenceService.ts` (`saveCollectedAssetAtomic`),
 `services/localDbService.ts` (`toDexieAsset`, pull/backup), `services/syncService.ts`
 (envio) e `services/supabaseService.ts` (upsert da nuvem).
@@ -254,27 +255,40 @@ ocorrência)`. Mesmo arquivo ⇒ mesmas chaves (reimportar substitui); `ocorrên
 distingue linhas realmente repetidas no mesmo arquivo. A impressão digital ignora
 chaves técnicas (`tenantid`, `filial`, flags `_*`). Ver `utils/assetKey.ts`.
 
-**Guardião de duplicidade por recno** — `utils/recnoGuard.ts` (regra pura) +
+**Guardião de duplicidade por recno** — `utils/recnoGuard.ts` (regra pura: `recnoKeyOf`,
+`sameRecnoData`, `findRecnoCollisions`, `describeRecnoCollision`) +
 `services/recnoGuardService.ts` (índice, auditoria, relatório). Chave de comparação:
-`tenantid + filial + sn1_recno`, com filial normalizada por `normalizeKey`.
+`tenantid + filial + sn1_recno`, com `tenantid` em maiúsculas e filial por
+`normalizeKey(asset.filial_raw || asset.filial)` (`utils/schema.ts`). Recno não
+numérico ou `<= 0` devolve chave vazia e sai da verificação.
 
 - **Não é chave única.** Na base de 2026-11-12, 15 grupos repetem o recno com
   **ativos diferentes** (31 linhas), por isso travar por recno bloquearia registos
   legítimos. Ele entra como segunda linha de defesa, nunca como identidade.
+  Composição medida: 12 grupos / 25 linhas são **etiquetas consecutivas do mesmo
+  `registro`** (`OBRA10228`, `OBRA10282`, `OBRA10284`) — o mesmo recno aplicado a
+  duas linhas seguidas (11 pares + o triplo `2632`); 3 grupos / 6 linhas são ativos
+  de registos e fornecedores diferentes (`6569`, `73317`, `74058`), colisão real de
+  recno. Nenhum desses recnos existe numa linha fora do próprio grupo, e faltam na
+  base os números seguintes da faixa (`76077`/`76078`, `77875`, `76393`/`76394`):
+  o padrão é a coluna do recno avançar de dois em dois, não um deslocamento de uma
+  linha (que deixaria todos os valores distintos).
 - **Divergência** = etiqueta, descrição ou valor diferentes. Campo ausente de um dos
   lados NÃO conta como diferença (a conferência envia registo parcial); valor compara
   com tolerância de centavos e aceita `1.234,56` e `1234.56`.
-- **Ganchos:** fim das três cargas de planilha (`CARGA_PLANILHA`), depois de
-  `saveCollectedAssetAtomic` (`CONFERENCIA`) e o botão *VERIFICAR RECNO* do Gestor de
-  Base (`GESTOR_BASE`).
+- **Ganchos:** `reportRecnoAfterLoad` (private, chamado no fim de
+  `injetarDadosEmLotes`, `processExcelFile` e `importExcelBulkData` —
+  `CARGA_PLANILHA`), depois de `saveCollectedAssetAtomic` (`CONFERENCIA`) e o botão
+  *VERIFICAR RECNO* do Gestor de Base (`reportRecnoCollisions('GESTOR_BASE')`).
 - **Efeito:** nada é bloqueado nem apagado. O caso vai para `audit_logs` com
   `acao = 'ASSET_DUP_SUSPECT'`, `registro_id = TENANT|FILIAL|RECNO`, `details`
   legível e `delta` JSON (`source`, `filial`, `recno`, `rows`, `signature`). O
   registro é idempotente pela `signature`, então recarregar a planilha não repete a
   auditoria.
 - Recno `null`, `0` ou ausente (sobra física, ativo criado no app) não é verificado.
-- Índice em memória com TTL de 30 s, invalidado pelo evento
-  `gbr_local_assets_changed` — a conferência não varre a base a cada toque.
+- Índice em memória com `INDEX_TTL_MS = 30_000`, invalidado por
+  `invalidateRecnoGuardIndex()` e pelo evento `gbr_local_assets_changed` — a
+  conferência não varre a base a cada toque.
 - **Limpeza de cópias** (mesmo tenantid + filial + etiqueta) é outra ferramenta:
   `services/assetDedupService.ts` + `utils/dedupAssets.ts`, com diagnóstico somente
   leitura e relatório antes/depois.
