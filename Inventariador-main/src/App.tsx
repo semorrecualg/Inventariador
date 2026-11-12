@@ -4137,7 +4137,7 @@ useEffect(() => {
     // UNIDADE OPERACIONAL (/unit), que não é da trilha dele. O reconhecimento
     // da Etapa 4 ("lembrar escolha") passa por aqui também, então a trava vale
     // para a reentrada directa no hub.
-    if (module === AppModule.INVENTORY && newFilial && isAuditorUser(user) && !isAdminUser(user)) {
+    if (module === AppModule.INVENTORY && newFilial) {
       const release = readUnitRelease(unitReleaseRef.current, newTenant, newFilial);
       if (release && !release.released) {
         const pending = describeUnitReleaseMissing(release);
@@ -4145,7 +4145,9 @@ useEffect(() => {
         setModalConfig({
           isOpen: true,
           title: 'Unidade aguardando liberação',
-          message: `A unidade ${newFilial} ainda não foi liberada para inventário. O administrador precisa configurar ${pending} na Unidade Operacional.`,
+          message: isAdminUser(user)
+            ? `A unidade ${newFilial} ainda não foi liberada para inventário. Configure ${pending} na Unidade Operacional para liberar.`
+            : `A unidade ${newFilial} ainda não foi liberada para inventário. O administrador precisa configurar ${pending} na Unidade Operacional.`,
           type: 'error',
           onConfirm: () => {}
         });
@@ -4221,7 +4223,7 @@ useEffect(() => {
     // Atalho "Novo usuário" do PAINEL COMPLETO: abre o cadastro já no formulário.
     // Qualquer outra entrada em Acessos chega com o formulário fechado.
     if (target === AppScreen.USER_MANAGEMENT) setOpenAddUserOnEntry(!!params?.openAddUser);
-    if (target === AppScreen.ADDRESS_SELECTION && selectedUnit && isAuditorUser(user) && !isAdminUser(user)) {
+    if (target === AppScreen.ADDRESS_SELECTION && selectedUnit) {
       const release = readUnitRelease(unitReleaseRef.current, user?.tenantid || '', selectedUnit);
       if (release && !release.released) {
         const pending = describeUnitReleaseMissing(release);
@@ -4229,7 +4231,9 @@ useEffect(() => {
         setModalConfig({
           isOpen: true,
           title: 'Unidade aguardando liberação',
-          message: `A unidade ${selectedUnit} ainda não foi liberada para inventário. O administrador precisa configurar ${pending} na Unidade Operacional.`,
+          message: isAdminUser(user)
+            ? `A unidade ${selectedUnit} ainda não foi liberada para inventário. Configure ${pending} na Unidade Operacional para liberar.`
+            : `A unidade ${selectedUnit} ainda não foi liberada para inventário. O administrador precisa configurar ${pending} na Unidade Operacional.`,
           type: 'error',
           onConfirm: () => {}
         });
