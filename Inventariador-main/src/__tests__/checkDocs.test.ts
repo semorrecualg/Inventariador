@@ -44,6 +44,13 @@ describe('check-docs — gate de referências dos docs', () => {
     expect(result.stderr).toContain('src/nao-existe-xyz.ts');
   });
 
+  it('a palavra "criado" ao lado da referência não isenta', () => {
+    const result = runAgainst('Este doc foi criado com `src/nao-existe-xyz.ts` no texto.\n');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/nao-existe-xyz.ts');
+  });
+
   it('link markdown relativo quebrado também falha', () => {
     const result = runAgainst('[quebrado](docs/nao-existe-abc.md)\n');
 
