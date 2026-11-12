@@ -4,6 +4,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import UnitConfigurator from '../components/UnitConfigurator';
 import { Geolocation } from '@capacitor/geolocation';
+import { saveUnitConfig } from '../services/supabaseService';
 import type { User, UnitConfig } from '../types';
 
 /**
@@ -128,14 +129,18 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     expect(fixar).toBeTruthy();
     fixar!.click();
 
-    // Espera o fluxo assíncrono do handleSave (geolocalização + persistência local)
-    await until(() => (received.length > 0 ? true : undefined));
-    if (received.length === 0) {
-      // Diagnóstico: qual mensagem o componente mostrou quando não notificou o pai
-      console.error('>>> SEM NOTIFICAÇÃO. TEXTO NA TELA:', container.textContent?.slice(0, 400));
-    }
+    // Espera o fluxo assíncrono do handleSave (geolocalização + persistência local).
+    // 10s: dá folga ao runner lento sem mascarar espera infinita.
+    await until(() => (received.length > 0 ? true : undefined), 10000);
 
-    expect(received.length).toBeGreaterThan(0);
+    // Diagnóstico legível no resumo do CI: se falhar, diz em que ponto parou e o
+    // que o componente mostrou na tela (ex.: 'SELECIONE UMA UNIDADE', 'BLOQUEADO').
+    const tela = (container.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    expect(
+      vi.mocked(saveUnitConfig),
+      `handleSave parou antes de gravar — tela: ${tela}`,
+    ).toHaveBeenCalled();
+    expect(received.length, `onUpdateConfigs não foi notificado — tela: ${tela}`).toBeGreaterThan(0);
     const saved = received.find((c) => c.unit_id === '010101 CICOPAL GO');
     expect(saved).toBeTruthy();
     expect(Number(saved?.lat)).not.toBe(0);
