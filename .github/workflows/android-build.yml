@@ -1,9 +1,17 @@
 name: Build Android APK (versão lida do package.json)
 
+# APK SOB DEMANDA — o build nativo não roda a cada merge em main (gastava
+# vários minutos de runner e produzia um APK que ninguém pediu). Ele nasce em
+# dois gestos, e só neles:
+#   1. pedido explícito: Actions → "Build Android APK" → Run workflow
+#      (branch/commit escolhidos no próprio diálogo); ou
+#   2. release: push de tag `v*` (git tag v2.7.4 && git push origin v2.7.4).
+# O CI de qualidade (lint · tipos · testes · build) continua automático no
+# ci.yml — o que ficou sob demanda é só o artefato Android.
 on:
-  push:
-    branches: [ "main", "master" ]
   workflow_dispatch:
+  push:
+    tags: [ "v*" ]
 
 env:
   NODE_OPTIONS: '--max-old-space-size=4096' 

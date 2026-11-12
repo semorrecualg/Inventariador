@@ -100,7 +100,8 @@ Arquivos de ambiente:
 ## 5. Fluxo de trabalho no git
 
 ```
-dev local ──commit──▶ branch ──PR──▶ CI verde ──merge──▶ main ──▶ APK / Vercel
+dev local ──commit──▶ branch ──PR──▶ CI verde ──merge──▶ main ──▶ Vercel
+                                                     └──▶ APK só sob demanda (§ 9.1)
 ```
 
 1. Branch de trabalho a partir de `main` atualizada (`git fetch` antes).
@@ -219,10 +220,33 @@ rede e de secrets — o CI garante o código; este script garante o **ambiente**
 4. `npm run verify:governanca` — sem falhas.
 5. Versão em `package.json` + entrada no `CHANGELOG.md` (Keep a Changelog).
 6. PR com CI verde → merge em `main`.
-7. APK (Actions) e/ou deploy Vercel gerados a partir do merge.
+7. Deploy Vercel a partir do merge; **APK só sob demanda** (§ 9.1).
 8. Conferir artefato: se o build deveria ser nuvem, validar que **não** caiu em
    INTERNAL (login Supabase funciona).
 9. Tag + release no GitHub com o APK anexado (`SKILL.md` descreve o processo).
+
+### 9.1 APK sob demanda
+
+O `android-build.yml` **não dispara em push para `main`**: o APK nasce apenas
+quando alguém o pede. Dois gestos, e só dois:
+
+| Gesto | Quando usar |
+|---|---|
+| Actions → **Build Android APK** → **Run workflow** | pedido avulso — testar um commit/branch, validar instalação no campo |
+| push de tag `v*` (`git tag v2.7.4 && git push origin v2.7.4`) | release oficial — a tag é o pedido |
+
+Regras:
+
+1. O merge em `main` continua a produzir **CI + deploy Vercel**; nada de APK
+   automático (era runner gasto e artefato que ninguém usava).
+2. O workflow valida o que dói no campo e **falha em vez de publicar**: URL do
+   Supabase embutida no bundle (senão o APK arranca em INTERNAL) e assinatura
+   com o keystore estável (senão o Android recusa a instalação por cima).
+   O SHA-256 do APK e do certificado sai no resumo do job.
+3. Artefato fica disponível por 7 dias (`gbr-kardek-apk`). Para release, anexe o
+   APK à tag no GitHub (passo 9) — o artefato do Actions expira.
+4. `workflow_dispatch` só aparece na lista de Actions quando este ficheiro já
+   existe em `main`: no primeiro uso, faça o merge e peça o build a seguir.
 
 ---
 
