@@ -82,6 +82,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   // Sincronização Local para Resposta Instantânea v25.50
   const [localCampaigns, setLocalCampaigns] = useState<InventoryCampaign[]>(campaigns);
 
+  // Campanhas já excluídas nesta sessão. O `campaigns` que vem do App só é
+  // recarregado pelo refresh; enquanto isso, ele ainda traz a campanha apagada
+  // e o efeito de sincronização abaixo a devolvia ao ecrã — o utilizador via a
+  // exclusão "não fazer nada".
+  const deletedCampaignIdsRef = React.useRef<Set<string>>(new Set());
+  const withoutDeleted = React.useCallback((list: InventoryCampaign[]): InventoryCampaign[] =>
+    list.filter(c => !deletedCampaignIdsRef.current.has(String(c.id))), []);
+
   // Agrupamento por filial para a visão de manutenção administrativa (todas as campanhas)
   const campaignsByFilial = React.useMemo(() => {
     const groups = new Map<string, InventoryCampaign[]>();
@@ -128,8 +136,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
       logger.info(`>>> [Dexie Native] Campanhas carregadas (local+nuvem):`, parsedCampaigns);
 
-      setLocalCampaigns(parsedCampaigns);
-      return parsedCampaigns;
+      const visible = withoutDeleted(parsedCampaigns);
+      setLocalCampaigns(visible);
+      return visible;
     } catch (err) {
       logger.error(`>>> [Dexie Native] Erro na leitura automática:`, err);
       if (campaigns && campaigns.length > 0) {
@@ -139,7 +148,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     } finally {
       setIsRefreshing(false);
     }
-  }, [initialUnit, propsTenantid, campaigns, user]);
+  }, [initialUnit, propsTenantid, campaigns, user, withoutDeleted]);
 
   React.useEffect(() => {
     fetchLocalCampaignsOnScreen();
@@ -150,9 +159,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     // resultado local+nuvem carregado pela leitura interna quando o state do App
     // ainda está vazio (ex.: refreshCampaigns abortou por falta de tenantid).
     if (campaigns && campaigns.length > 0 && !isRefreshing && !isSaving) {
-      setLocalCampaigns(campaigns);
+      setLocalCampaigns(withoutDeleted(campaigns));
     }
-  }, [campaigns, isRefreshing, isSaving]);
+  }, [campaigns, isRefreshing, isSaving, withoutDeleted]);
 
   // OPERACIONALIZAÇÃO DO BOTÃO REFRESH:
   // Dispara nova consulta direta ao SQLite local, atualiza o estado e força a renderização
@@ -309,10 +318,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     try {
       logger.info(`>>> [Dexie] Executando deleção estrita para ID=${campaignId}`);
       
-      await localDb.campaigns.delete(campaignId);
-      
+      await localDb.campaigns.delete(String(campaignId));
+      // Tombstone da sessão: o `campaigns` vindo do App ainda traz esta linha
+      // até o refresh terminar, e sem isto ela voltava para a lista.
+      deletedCampaignIdsRef.current.add(String(campaignId));
+      setLocalCampaigns(prev => prev.filter(c => String(c.id) !== String(campaignId)));
+
       // Limpeza de ativos relacionados vinculados a essa campanha
-      await localDb.assets.removeCampaignFromAssets(campaignId);
+      await localDb.assets.removeCampaignFromAssets(String(campaignId));
       
       // Também deleta no Supabase em background para continuar funcionando sincronizado se online
       try {
@@ -328,6 +341,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       setIsConfirmDeleteOpen(false);
       setDeletingCampaignId(null);
       setSelectedCampaign(null);
+
+      // O estado do App também tem de esquecer a campanha: sem isto o prop
+      // `campaigns` continuava com ela e reabastecia a lista na tela.
+      try {
+        await Promise.resolve(onRefresh?.());
+      } catch (refreshErr) {
+        logger.warn('>>> [Governance] Refresh do App falhou após excluir campanha:', refreshErr);
+      }
 
       // Re-fetch automático para limpar a tela ou usar navegação se zerar
       const remaining = await fetchLocalCampaignsOnScreen();

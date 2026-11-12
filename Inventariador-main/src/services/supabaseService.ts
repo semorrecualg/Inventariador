@@ -2739,8 +2739,10 @@ export const findAssetGlobally = async (etiqueta: string, tenantid: string): Pro
  * Exclui uma campanha
  */
 export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
+  // Mesma regra do fetchCampaigns: um `app_database_mode: INTERNAL` herdado de
+  // uma sessão anterior não pode transformar a exclusão em local-only — a
+  // campanha continuava na nuvem e voltava na leitura seguinte (merge).
+  const isInternal = getDatabaseMode() === 'INTERNAL';
 
   // Always perform local SQLite deletion first (Soberania Offline-First)
   logger.info('>>> [SQLite] Excluindo campanha do banco físico:', campaignId);
@@ -2763,7 +2765,11 @@ export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
   }
   
   try {
-    const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
+    const { error } = await supabase
+      .from('campaigns')
+      .delete()
+      .eq('id', campaignId)
+      .select('id');
     if (error) {
       logger.warn('>>> [Supabase] Erro ao excluir campanha na nuvem. Empilhando na fila delta:', error);
       if (campaignSyncQueueDelegate) {
