@@ -1257,13 +1257,28 @@ export const downloadBaseToLocal = async (
   }
 
   const PAGE = 1000;
-  const cols = [
+  // `conferido`, `auditor` e `data_leitura` (scripts/assets-conferencia.sql) são
+  // pedidas quando existem. Se o script ainda não correu, a coluna que falta sai
+  // da lista e a carga repete — em vez de falhar com PGRST204 e deixar o
+  // operador sem base nenhuma.
+  const cols: string[] = [
     'id', 'tenantid', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo',
     'serial', 'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 'endereco',
     'registro', 'subreg', 'databaixa', 'contacontabil', 'primarykey',
     'centrodecusto', 'vlraquisic', 'sn1_recno', 'sn3_recno', 'gps_lat', 'gps_lng',
-    'id'
-  ].join(',');
+    'conferido', 'auditor', 'data_leitura'
+  ];
+
+  const dropMissingColumn = (message: string): boolean => {
+    const missing = /'([a-zA-Z0-9_]+)' column/.exec(message)?.[1]
+      || /column "([a-zA-Z0-9_]+)"/.exec(message)?.[1];
+    if (!missing) return false;
+    const index = cols.indexOf(missing);
+    if (index === -1) return false;
+    cols.splice(index, 1);
+    logger.warn(`>>> [Supabase] Coluna '${missing}' não existe em assets: base descarregada sem ela (script pendente).`);
+    return true;
+  };
 
   const filiaisNorm = filiais && filiais.length > 0
     ? filiais.map(f => String(f).trim().toUpperCase()).filter(Boolean)
@@ -1272,15 +1287,20 @@ export const downloadBaseToLocal = async (
   logger.info(`>>> [Supabase] Iniciando download da base do tenant ${tenant}${filiaisNorm && filiaisNorm.length ? ` (filiais: ${filiaisNorm.join(' | ')})` : ' (todas as filiais)'}...`);
 
   // 1. Contagem exata para o progresso
-  let countQuery = supabase.from('assets').select(cols, { count: 'exact' }).eq('tenantid', tenant);
-  if (filiaisNorm && filiaisNorm.length > 0) {
-    countQuery = countQuery.in('filial', filiaisNorm);
-  }
-  const { count, error: countErr } = await countQuery;
-  if (countErr) {
+  let total = 0;
+  for (;;) {
+    let countQuery = supabase.from('assets').select(cols.join(','), { count: 'exact' }).eq('tenantid', tenant);
+    if (filiaisNorm && filiaisNorm.length > 0) {
+      countQuery = countQuery.in('filial', filiaisNorm);
+    }
+    const { count, error: countErr } = await countQuery;
+    if (!countErr) {
+      total = count || 0;
+      break;
+    }
+    if (dropMissingColumn(countErr.message || '')) continue;
     throw new SupabaseNetworkException(`Falha ao consultar a base do tenant: ${countErr.message || 'Erro de esquema.'}`);
   }
-  const total = count || 0;
   if (total === 0) {
     logger.warn(`>>> [Supabase] Base do tenant ${tenant} vazia na Nuvem.`);
     return 0;
@@ -1289,15 +1309,21 @@ export const downloadBaseToLocal = async (
   // 2. Baixa paginado (PostgREST limita a 1000 linhas por requisição)
   const all: Record<string, unknown>[] = [];
   for (let start = 0; start < total; start += PAGE) {
-    let q = supabase.from('assets').select(cols).eq('tenantid', tenant).order('id', { ascending: true }).range(start, start + PAGE - 1);
-    if (filiaisNorm && filiaisNorm.length > 0) {
-      q = q.in('filial', filiaisNorm);
+    for (;;) {
+      let q = supabase.from('assets').select(cols.join(',')).eq('tenantid', tenant).order('id', { ascending: true }).range(start, start + PAGE - 1);
+      if (filiaisNorm && filiaisNorm.length > 0) {
+        q = q.in('filial', filiaisNorm);
+      }
+      const { data, error } = await q;
+      if (error) {
+        if (dropMissingColumn(error.message || '')) continue;
+        throw new SupabaseNetworkException(`Falha ao baixar lote ${start}-${start + PAGE - 1}: ${error.message || 'Erro de esquema.'}`);
+      }
+      // A linha crua do Postgres não tem `_conferido`/`_auditor`/`_dataLeitura`:
+      // a conversão comum (a mesma do pull) traz quem conferiu e quando.
+      all.push(...(data || []).map((row: Record<string, unknown>) => mapCloudAssetRow(row) as unknown as Record<string, unknown>));
+      break;
     }
-    const { data, error } = await q;
-    if (error) {
-      throw new SupabaseNetworkException(`Falha ao baixar lote ${start}-${start + PAGE - 1}: ${error.message || 'Erro de esquema.'}`);
-    }
-    all.push(...(data || []));
     if (onProgress) onProgress(Math.min(start + PAGE, total), total);
   }
 
