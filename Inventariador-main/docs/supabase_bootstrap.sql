@@ -364,6 +364,9 @@ ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS table_name text;
 -- "0 ativos sincronizados, 12636 rejeitados" — a mensagem cita asset_logs mesmo
 -- que o problema esteja no trigger e não no payload do app (que envia `tenantid`).
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS tenant_id text;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS new_data jsonb;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS old_data jsonb;
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS "timestamp" timestamptz DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS public."asset-photos" (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
