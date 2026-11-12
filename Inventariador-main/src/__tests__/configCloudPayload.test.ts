@@ -78,4 +78,21 @@ describe('buildConfigCloudPayload — a config do tenant vai para config_<TENANT
     expect(buildConfigCloudPayload({ status: 'IN_USE', tenantid: 'null' })).toBeNull();
     expect(buildConfigCloudPayload({ status: 'IN_USE' })).toBeNull();
   });
+
+  it('trata `default` como identidade inválida e nunca cria config_default', () => {
+    // `default` é o tenant sentinela da linha global_config: não é um contrato.
+    expect(buildConfigCloudPayload({ status: 'IN_USE', tenantid: 'default' })).toBeNull();
+    expect(buildConfigCloudPayload({ status: 'IN_USE', tenantid: 'DEFAULT' })).toBeNull();
+    expect(buildConfigCloudPayload({ status: 'IN_USE', tenantid: ' Default ' })).toBeNull();
+    expect(buildConfigCloudPayload({ status: 'IN_USE' }, 'default')).toBeNull();
+  });
+
+  it('salta o candidato inválido e usa o próximo válido', () => {
+    localStorage.setItem('tenantid', 'default');
+
+    const built = buildConfigCloudPayload({ tenantid: 'CICOPAL', status: 'IN_USE' });
+
+    expect(built?.configId).toBe('config_CICOPAL');
+    expect(built?.payload.tenantid).toBe('CICOPAL');
+  });
 });

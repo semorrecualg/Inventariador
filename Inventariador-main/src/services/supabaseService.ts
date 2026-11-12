@@ -1388,22 +1388,31 @@ export const buildConfigCloudPayload = (
 
   const source = config as unknown as Record<string, unknown>;
 
+  // `default` é o tenant da linha global (sentinela), não um contrato: gravar
+  // com ele criava uma linha `config_default` que ninguém reivindica.
+  const INVALID_TENANTS = new Set(['', 'undefined', 'null', 'default']);
+  const isInvalidTenant = (value: unknown) => {
+    const raw = value === undefined || value === null ? '' : String(value).trim();
+    return INVALID_TENANTS.has(raw.toLowerCase());
+  };
+
   // Ordem de resolução: tenant explícito do chamador → tenant desta sessão
   // (mesma regra de syncAssetsToCloud) → tenant que veio dentro do objeto.
   // O objeto pode carregar o tenant de uma linha global, por isso fica por último.
-  const resolvedTenantid = (
-    (Array.isArray(tenantid) ? tenantid[0] : tenantid) ||
-    readLocalTenantId() ||
-    readSessionTenantId() ||
-    source.tenantid ||
-    ''
-  ).toString().trim();
+  // Um candidato inválido é saltado: o próximo válido assume o destino.
+  const cleanTenantidRaw = [
+    Array.isArray(tenantid) ? tenantid[0] : tenantid,
+    readLocalTenantId(),
+    readSessionTenantId(),
+    source.tenantid
+  ]
+    .map(candidate => (candidate === undefined || candidate === null ? '' : String(candidate).trim()))
+    .find(candidate => !isInvalidTenant(candidate)) || '';
 
-  const cleanTenantidRaw = resolvedTenantid !== 'undefined' && resolvedTenantid !== 'null' ? resolvedTenantid : '';
   if (!cleanTenantidRaw) return null;
 
   const cleanTenant = encodeURIComponent(cleanTenantidRaw.replace(/[%_\s]+/g, ''));
-  if (!cleanTenant || cleanTenant === 'undefined' || cleanTenant === 'null') return null;
+  if (!cleanTenant || isInvalidTenant(cleanTenant)) return null;
 
   const configId = `config_${cleanTenant}`;
   const payload: Record<string, unknown> = {
