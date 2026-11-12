@@ -27,6 +27,7 @@ import { findHomonymUnits } from '../utils/unitContextUtils';
 import { normalizeKey } from '../utils/schema';
 import { isAdminEmail } from '../utils/authUtils';
 import { isUnitInScope, UnitScopeUser } from '../utils/unitScope';
+import { createUnitCounter } from '../utils/unitAssetStats';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 import type { DexieAsset } from '../services/sqliteService';
@@ -101,6 +102,16 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   const [activeUnitConfigs, setActiveUnitConfigs] = useState<UnitConfig[]>([]);
   const [sqliteUnits, setSqliteUnits] = useState<SqliteUnitStats[]>([]);
   const [statsLoading, setStatsLoading] = useState(true);
+  // Só a primeira leitura mostra o spinner: recarregar não pode esconder a lista.
+  const hasLoadedStats = React.useRef(false);
+  // `units` chega como array novo a cada render do App; o efeito depende da
+  // ASSINATURA (texto), não da identidade do array, para não repetir a varredura.
+  const unitsRef = React.useRef(units);
+  unitsRef.current = units;
+  const unitsSignature = useMemo(
+    () => units.map(u => `${u.tenantid || ''}::${u.filial}`).sort().join('|'),
+    [units]
+  );
 
   // 1. Carrega as configurações de geocerca salvas no IndexedDB (SQLite configs extraídas)
   useEffect(() => {
@@ -124,102 +135,97 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   useEffect(() => {
     let active = true;
     const fetchSqliteUnits = async () => {
-      setLocalTotalAssets(null);
-      setStatsLoading(databaseMode === DatabaseMode.INTERNAL);
+      if (databaseMode !== DatabaseMode.INTERNAL) {
+        if (active) {
+          hasLoadedStats.current = true;
+          setStatsLoading(false);
+        }
+        return;
+      }
+
+      if (active && !hasLoadedStats.current) setStatsLoading(true);
+
       try {
-        if (databaseMode === DatabaseMode.INTERNAL) {
-          let tenantid: string | undefined;
-          // Perfil logado: o escopo de unidades vale igual na base local e na nuvem.
-          let sessionUser: UnitScopeUser | null = null;
-          try {
-            const storedUser = sessionStorage.getItem('app_current_user');
-            if (storedUser) {
-              const parsedUser = JSON.parse(storedUser) as UnitScopeUser & { tenantid?: string };
-              sessionUser = parsedUser;
-              tenantid = resolveTenantId(parsedUser) || undefined;
-            }
-          } catch (err: unknown) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            logger.warn('[UnitSelector] Falha ao ler tenantid do sessionStorage:', errMsg);
+        let tenantid: string | undefined;
+        // Perfil logado: o escopo de unidades vale igual na base local e na nuvem.
+        let sessionUser: UnitScopeUser | null = null;
+        try {
+          const storedUser = sessionStorage.getItem('app_current_user');
+          if (storedUser) {
+            const parsedUser = JSON.parse(storedUser) as UnitScopeUser & { tenantid?: string };
+            sessionUser = parsedUser;
+            tenantid = resolveTenantId(parsedUser) || undefined;
           }
-          
-          const currentTenantid = tenantid? tenantid.trim().toUpperCase() : '';
-          
-          // Fallback Seguro: Usa .filter() na fluent API do Dexie pois tenantid isolado não é um índice no schema atual v2.
-          // Isso garante a extração limpa para o currentTenantid e atende o requisito SRE.
-          let allAssets = await db.local_assets
-            .filter(item => {
-              const tId = String(resolveTenantId(item) || '').trim().toUpperCase();
-              return !currentTenantid || tId === currentTenantid;
-            })
-            .toArray();
-            
-          const isIframe = typeof window !== 'undefined' && window.self !== window.top;
-          if (allAssets.length === 0 && isIframe) {
-            const virtualData = await readVirtualSnapshot();
-            if (virtualData && virtualData.length > 0) {
-              allAssets = virtualData.map((row: unknown) => {
-                const r = row as Record<string, unknown>;
-                return {
-                  id: String(r.primarykey || r.id || ''),
-                  primarykey: String(r.primarykey || r.id || ''),
-                  tenantid: String(resolveTenantId(r) || 'GBR_DEFAULT'),
-                  filial: String(r.filial || r._unitid || 'FILIAL_DEFAULT'),
-                  status: String(r.status || 'Pendente'),
-                  _conferido: Number(r._conferido ?? 0),
-                  _is_deleted: Number(r._is_deleted ?? 0)
-                } as unknown as DexieAsset;
-              });
-            }
-          }
-            
-          const nonDeleted = allAssets.filter(a => a._is_deleted === 0);
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          logger.warn('[UnitSelector] Falha ao ler tenantid do sessionStorage:', errMsg);
+        }
 
-          // Identidade da unidade = chave normalizada (agrupa grafias equivalentes);
-          // rótulo exibido = valor bruto da coluna 'filial', como está na base.
-          const unitLabels = new Map<string, string>();
-          const registerUnit = (raw: unknown) => {
-            const label = raw === null || raw === undefined ? '' : String(raw);
-            const key = normalizeKey(label);
-            if (!key) return;
-            if (!unitLabels.has(key)) unitLabels.set(key, label);
-          };
+        const currentTenantid = tenantid ? tenantid.trim().toUpperCase() : '';
 
-          // Rótulo = texto exato da planilha (filial_raw); identidade = filial (normalizada).
-          nonDeleted.forEach(a => registerUnit((a as { filial_raw?: string }).filial_raw || a.filial));
+        // Identidade da unidade = chave normalizada (agrupa grafias equivalentes);
+        // rótulo exibido = valor bruto da coluna 'filial', como está na base.
+        const counter = createUnitCounter();
+        const configList = await db.unit_configs.toArray();
 
-          const configList = await db.unit_configs.toArray();
-          
-          // A regra de ouro (Soberania da Filial): Inclui todas as filiais vindas via props (que vieram do cloud/sessão),
-          // mais as que possuem ativos locais, mais as que possuem GPS configurado.
-          // Propriedades (nuvem/sessão) e GPS entram apenas como fallback de rótulo
-          // quando a filial não aparece em nenhum ativo da base local.
-          units.forEach(u => registerUnit(u.filial));
-          configList.forEach(c => registerUnit(c.filial || c.nome));
+        // Propriedades (nuvem/sessão) e GPS entram apenas como fallback de rótulo
+        // quando a filial não aparece em nenhum ativo da base local.
+        unitsRef.current.forEach(u => counter.addLabel(u.filial));
+        configList.forEach(c => counter.addLabel(c.filial || c.nome));
 
-          const mapped: SqliteUnitStats[] = Array.from(unitLabels.entries())
-            // Restrição do perfil (auditor contratado por filial) — a MESMA regra
-            // do modo nuvem; sem isso a base local entregava todas as filiais.
-            .filter(([, label]) => isUnitInScope(sessionUser, label, currentTenantid))
-            .map(([key, label]) => {
-            const filialAssets = nonDeleted.filter(a => normalizeKey(a.filial) === key);
-            const checkedAssets = filialAssets.filter(a => a._conferido === 1);
-            return {
-              filial: label,
-              displayName: label,
-              tenantid: currentTenantid,
-              total: Math.max(0, filialAssets.length),
-              checked: Math.max(0, checkedAssets.length)
-            };
+        // UMA passagem pela tabela. Antes, o código trazia todos os ativos para
+        // memória e voltava a varrê-los uma vez POR UNIDADE (O(n × unidades)):
+        // com ~50 mil linhas o ecrã ficava minutos em "Carregando Unidades...".
+        let matched = 0;
+        const keepRow = (item: unknown) => {
+          const asset = item as DexieAsset;
+          const rowTenant = String(resolveTenantId(asset) || '').trim().toUpperCase();
+          if (currentTenantid && rowTenant !== currentTenantid) return;
+          matched += 1;
+          if (asset._is_deleted !== 0) return;
+          const rawFilial = (asset as { filial_raw?: string }).filial_raw || asset.filial;
+          counter.count(rawFilial, asset._conferido);
+        };
+
+        await db.local_assets.each(keepRow);
+
+        // Snapshot virtual (preview/iframe sem base carregada): só quando a base
+        // local não entregou nenhuma linha do contrato.
+        const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+        if (matched === 0 && isIframe) {
+          const virtualData = await readVirtualSnapshot();
+          (virtualData || []).forEach((row: unknown) => {
+            const r = row as Record<string, unknown>;
+            keepRow({
+              id: String(r.primarykey || r.id || ''),
+              primarykey: String(r.primarykey || r.id || ''),
+              tenantid: String(resolveTenantId(r) || 'GBR_DEFAULT'),
+              filial: String(r.filial || r._unitid || 'FILIAL_DEFAULT'),
+              status: String(r.status || 'Pendente'),
+              _conferido: Number(r._conferido ?? 0),
+              _is_deleted: Number(r._is_deleted ?? 0)
+            });
           });
+        }
 
-          if (active) {
-            setSqliteUnits(mapped);
-            // Total geral da base local (todas as filiais reais do contrato ativo).
-            setLocalTotalAssets(mapped.reduce((acc, m) => acc + m.total, 0));
-            setStatsLoading(false);
-          }
-        } else if (active) {
+        const mapped: SqliteUnitStats[] = counter
+          .entries()
+          // Restrição do perfil (auditor contratado por filial) — a MESMA regra
+          // do modo nuvem; sem isso a base local entregava todas as filiais.
+          .filter(({ label }) => isUnitInScope(sessionUser, label, currentTenantid))
+          .map((entry) => ({
+            filial: entry.label,
+            displayName: entry.label,
+            tenantid: currentTenantid,
+            total: Math.max(0, entry.total),
+            checked: Math.max(0, entry.checked)
+          }));
+
+        if (active) {
+          setSqliteUnits(mapped);
+          // Total geral da base local (todas as filiais reais do contrato ativo).
+          setLocalTotalAssets(mapped.reduce((acc, m) => acc + m.total, 0));
+          hasLoadedStats.current = true;
           setStatsLoading(false);
         }
       } catch (err: unknown) {
@@ -233,7 +239,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
     return () => {
       active = false;
     };
-  }, [databaseMode, units]);
+  }, [databaseMode, unitsSignature]);
 
   // Refs para estabilizar as funções callbacks externas e evitar loops infinitos de render
   const onSelectRef = React.useRef(onSelect);
