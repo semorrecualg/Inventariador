@@ -2,29 +2,38 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { supabase, subscribeToInventoryChanges, configSubscriptionId } from '../services/supabaseService';
 
+type ChangePayload = { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string };
+type ChannelFilter = { filter?: string };
+
+type FakeChannel = {
+  name: unknown;
+  event?: string;
+  config?: ChannelFilter;
+  callback?: (payload: ChangePayload) => void;
+  unsubscribe: ReturnType<typeof vi.fn>;
+  on: (event: string, config: ChannelFilter, callback: (payload: ChangePayload) => void) => FakeChannel;
+  subscribe: () => FakeChannel;
+};
+
+const supabaseStub = supabase as unknown as { channel: (name: string) => FakeChannel };
+
 /**
  * A config do contrato vive em `config_<TENANT>`; `global_config` é reserva.
  * Antes o realtime filtrava só `id=eq.global_config`, por isso uma atualização
  * vinda da nuvem para o contrato nunca era detetada.
  */
 describe('realtime de inventory_config — contrato primeiro, global_config como reserva', () => {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  let channels: any[];
+  let channels: FakeChannel[];
 
-  const fakeChannel = (name: unknown) => {
-    const ch: any = {
-      name,
-      config: null,
-      callback: null,
-      unsubscribe: vi.fn(),
-      on: (event: string, config: unknown, callback: unknown) => {
-        ch.event = event;
-        ch.config = config;
-        ch.callback = callback;
-        return ch;
-      },
-      subscribe: () => ch
+  const fakeChannel = (name: unknown): FakeChannel => {
+    const ch = { name, unsubscribe: vi.fn() } as FakeChannel;
+    ch.on = (event, config, callback) => {
+      ch.event = event;
+      ch.config = config;
+      ch.callback = callback;
+      return ch;
     };
+    ch.subscribe = () => ch;
     channels.push(ch);
     return ch;
   };
@@ -34,7 +43,7 @@ describe('realtime de inventory_config — contrato primeiro, global_config como
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'SUPABASE');
-    vi.spyOn(supabase as any, 'channel').mockImplementation((name: unknown) => fakeChannel(name));
+    vi.spyOn(supabaseStub, 'channel').mockImplementation((name: string) => fakeChannel(name));
   });
 
   afterEach(() => {
@@ -48,7 +57,7 @@ describe('realtime de inventory_config — contrato primeiro, global_config como
 
     expect(subscription).not.toBeNull();
     expect(channels).toHaveLength(2);
-    expect(channels.map(c => c.config.filter)).toEqual([
+    expect(channels.map(c => c.config?.filter)).toEqual([
       'id=eq.config_CICOPAL',
       'id=eq.global_config'
     ]);
@@ -61,7 +70,7 @@ describe('realtime de inventory_config — contrato primeiro, global_config como
     const onUpdate = vi.fn();
     subscribeToInventoryChanges(onUpdate, 'CICOPAL');
 
-    channels[0].callback({
+    channels[0].callback?.({
       new: {
         id: 'config_CICOPAL',
         tenantid: 'CICOPAL',
@@ -85,7 +94,7 @@ describe('realtime de inventory_config — contrato primeiro, global_config como
 
     expect(subscription).not.toBeNull();
     expect(channels).toHaveLength(1);
-    expect(channels[0].config.filter).toBe('id=eq.global_config');
+    expect(channels[0].config?.filter).toBe('id=eq.global_config');
   });
 
   it('desliga os dois canais ao desmontar', () => {

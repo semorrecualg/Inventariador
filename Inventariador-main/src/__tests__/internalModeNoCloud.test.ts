@@ -3,22 +3,29 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { supabase, saveUnitConfig, saveUnitConfigFlags, getDatabaseMode } from '../services/supabaseService';
 
+/** O cliente real é grande; aqui só interessa o método que iria à nuvem. */
+const supabaseStub = supabase as unknown as { from: (table: string) => unknown };
+
+function watchCloudCalls() {
+  return {
+    fromSpy: vi.spyOn(supabaseStub, 'from'),
+    fetchSpy: vi.spyOn(globalThis, 'fetch')
+  };
+}
+
 /**
  * Modo INTERNAL = zero chamadas à nuvem (docs/ARCHITECTURE.md §10).
  * Aqui a prova é dupla: o cliente Supabase não é usado (`from`) e nenhum
  * pedido de rede sai pelo `fetch`. O dado continua a ficar no aparelho.
  */
 describe('Modo INTERNAL — saveUnitConfig/saveUnitConfigFlags não tocam a nuvem', () => {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  let fromSpy: any;
-  let fetchSpy: any;
+  let spies: ReturnType<typeof watchCloudCalls>;
 
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'INTERNAL');
-    fromSpy = vi.spyOn(supabase as any, 'from');
-    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    spies = watchCloudCalls();
   });
 
   afterEach(() => {
@@ -42,8 +49,8 @@ describe('Modo INTERNAL — saveUnitConfig/saveUnitConfigFlags não tocam a nuve
     const result = await saveUnitConfig(anchor as never);
 
     expect(result).toBe(true);
-    expect(fromSpy).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(spies.fromSpy).not.toHaveBeenCalled();
+    expect(spies.fetchSpy).not.toHaveBeenCalled();
     // A âncora não se perde: fica no cache local do aparelho.
     expect(localStorage.getItem('local_unit_configs') || '').toContain('010101 CICOPAL GO');
   });
@@ -52,7 +59,7 @@ describe('Modo INTERNAL — saveUnitConfig/saveUnitConfigFlags não tocam a nuve
     const result = await saveUnitConfigFlags({ ...anchor, requireNf: true } as never);
 
     expect(result).toBe(false);
-    expect(fromSpy).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(spies.fromSpy).not.toHaveBeenCalled();
+    expect(spies.fetchSpy).not.toHaveBeenCalled();
   });
 });
