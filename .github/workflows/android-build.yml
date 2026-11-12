@@ -278,51 +278,31 @@ jobs:
             gradle-cache-${{ runner.os }}-8.11.1-
             gradle-cache-${{ runner.os }}-
 
-      # Sem isto, cada execução do runner gera um debug.keystore novo e o APK
-      # sai assinado por uma chave diferente a cada build: o Android recusa a
-      # instalação por cima da versão anterior ("O app não foi instalado").
-      - name: Keystore de assinatura estável — cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: android-debug-keystore-v1
-
-      - name: Keystore de assinatura estável — secret (prioritário)
+      # A assinatura é a IDENTIDADE do app no telemóvel: se a chave muda, o
+      # Android recusa instalar por cima ("O app não foi instalado"). Por isso a
+      # chave vem SEMPRE do secret — nunca de cache (expira) nem de geração
+      # automática (inventa uma chave nova em cada runner). O keystore é gerado
+      # uma única vez pelo workflow "Gerar keystore de assinatura (uma vez)".
+      - name: Keystore de assinatura (obrigatório)
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
           if [ -z "${KEYSTORE_B64:-}" ]; then
-            echo "Sem secret ANDROID_DEBUG_KEYSTORE_BASE64 — vale o keystore do cache."
-            exit 0
+            echo "::error::Secret ANDROID_DEBUG_KEYSTORE_BASE64 ausente. Sem ele a chave de assinatura mudaria entre builds e o telemóvel recusaria a instalação por cima de uma versão anterior. Gere a chave em Actions -> 'Gerar keystore de assinatura (uma vez)' e cadastre o conteudo como secret."
+            exit 1
           fi
           mkdir -p "$HOME/.android"
           printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
-          echo "Keystore restaurado do secret ANDROID_DEBUG_KEYSTORE_BASE64."
-
-      # O AGP procura o keystore em ANDROID_USER_HOME / ANDROID_SDK_HOME; neste
-      # runner isso aponta para fora de ~/.android, então ele gerava uma chave
-      # nova a cada build (o cache ficava vazio e a assinatura mudava).
-      # Criar o ficheiro aqui e fixar as variáveis garante o mesmo keystore
-      # sempre.
-      - name: Keystore de assinatura estável — criar se ausente
-        run: |
-          set -euo pipefail
-          KS="$HOME/.android/debug.keystore"
-          mkdir -p "$HOME/.android"
-          if [ -f "$KS" ]; then
-            echo "Keystore já presente (cache ou secret) — reutilizado."
-          else
-            keytool -genkeypair -noprompt \
-              -keystore "$KS" \
-              -storepass android -keypass android \
-              -alias androiddebugkey \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-            echo "Keystore de debug criado; será guardado no cache para os próximos builds."
+          if [ ! -s "$HOME/.android/debug.keystore" ]; then
+            echo "::error::O secret ANDROID_DEBUG_KEYSTORE_BASE64 não decodificou num keystore. Copie o conteúdo de ANDROID_DEBUG_KEYSTORE_BASE64.txt inteiro (uma linha, sem quebras)."
+            exit 1
           fi
-          keytool -list -v -keystore "$KS" -storepass android -alias androiddebugkey \
-            | grep -m1 'SHA256:' || true
+          echo "Keystore restaurado do secret ANDROID_DEBUG_KEYSTORE_BASE64."
+          # Fingerprint da chave usada: fica no log e no resumo do run.
+          FP="$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -m1 'SHA256:' | sed 's/.*SHA256: *//' || true)"
+          echo "Certificado da chave: ${FP:-desconhecido}"
+          echo "| Certificado (SHA-256) | \`${FP:-desconhecido}\` |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build Debug APK
         run: |
