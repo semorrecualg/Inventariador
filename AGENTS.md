@@ -90,5 +90,5 @@ Inventariador/                 ← raiz do repositório git (este AGENTS.md)
 └── Inventariador-main/        ← raiz do APP (package.json, vite, src, docs)
 ```
 
-O app é **subdiretório** do repositório: é isso que os dois workflows e o
-`vercel.json` assumem. Não mover para a raiz; não criar `package.json` na raiz.
+O app é **subdiretório** do repositório: é isso que os dois workflows assumem.
+Não mover para a raiz; não criar `package.json` na raiz.

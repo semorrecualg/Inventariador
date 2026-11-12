@@ -181,7 +181,6 @@ Duas fontes de verdade que devem andar juntas:
 | `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` / `VITE_SUPABASE_SCHEMA` | Cloud mode multi-tenant (ativa o SUPABASE) | sim p/ modo nuvem |
 | `VITE_ADMIN_EMAIL` | Override do e-mail admin (default `semorr@gmail.com`) | não |
 | `APP_URL` / `SHARED_APP_URL` | `vite.config.ts` `define` | não |
-| `VITE_API_URL` | Deploy (Vercel) | não |
 
 ### 7.2 Modos de banco (`DatabaseMode`)
 `INTERNAL` · `INTERNAL_PLUS` · `SUPABASE` · `SUPABASE_PLUS` — hoje **SUPABASE** com
@@ -247,4 +246,3 @@ Supabase (colunas e políticas RLS recriadas via script SQL v2).
 | `SKILL.md` | Skill de release (changelog/versão/GitHub release) |
 | `CHANGELOG.md` | Histórico de versões (v2.6.0) |
 | `TROUBLESHOOTING.md` | Problemas conhecidos e instalação |
-| `VERCEL_DEPLOYMENT.md` | Guia de deploy Vercel |

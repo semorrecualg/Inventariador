@@ -45,7 +45,7 @@ interface StatCardProps {
 /**
  * Individual stat card used in the Quick Stats grid.
  * Extracted to module level with React.memo to prevent remount on every Dashboard render
- * (Vercel Best Practice: rerender-no-inline-components).
+ * (Boas práticas React: rerender-no-inline-components).
  */
 const StatCard = React.memo(function StatCard({
   label,
@@ -101,7 +101,7 @@ const StatCard = React.memo(function StatCard({
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899'];
 
-// Vercel Best Practice: hoist pure utility functions outside component
+// Boas práticas React: hoist pure utility functions outside component
 // (rerender-no-inline-components) — avoids recreating on every render
 const formatCurrency = (val: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
@@ -173,7 +173,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
     }
   }, [assets, selectedUnit]);
 
-  // Vercel Best Practice: stable callback for StatCard hint triggers
+  // Boas práticas React: stable callback for StatCard hint triggers
   // (rerender-memo) — prevents inline arrow from defeating React.memo
   const handleHint = useCallback(
     (label: string, text: string) => setHintOverlay({ label, text }),
@@ -372,11 +372,11 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       .slice(0, 5);
   }, [auditSource]);
 
-  // Vercel Best Practice: StatCard extracted to module level with React.memo
+  // Boas práticas React: StatCard extracted to module level with React.memo
   // formatCurrency hoisted to module level
   // (rerender-no-inline-components)
 
-  // Vercel Best Practice: memoize callback for stable reference across renders
+  // Boas práticas React: memoize callback for stable reference across renders
   // (rerender-memo)
   const handleExport = useCallback(
     (filterFn: (a: Asset) => boolean, fileName: string) => {
