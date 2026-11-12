@@ -87,6 +87,19 @@ describe('buildConfigCloudPayload — a config do tenant vai para config_<TENANT
     expect(buildConfigCloudPayload({ status: 'IN_USE' }, 'default')).toBeNull();
   });
 
+  it('prefere o tenant da própria config ao contrato antigo guardado no aparelho', () => {
+    // Contrato antigo no localStorage não pode receber a config de outro contrato.
+    localStorage.setItem('tenantid', 'CONTRATO_ANTIGO');
+
+    const built = buildConfigCloudPayload(
+      { tenantid: 'CICOPAL', status: 'IN_USE' },
+      undefined
+    );
+
+    expect(built?.configId).toBe('config_CICOPAL');
+    expect(built?.payload.tenantid).toBe('CICOPAL');
+  });
+
   it('salta o candidato inválido e usa o próximo válido', () => {
     localStorage.setItem('tenantid', 'default');
 

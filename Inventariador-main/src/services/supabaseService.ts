@@ -1396,15 +1396,16 @@ export const buildConfigCloudPayload = (
     return INVALID_TENANTS.has(raw.toLowerCase());
   };
 
-  // Ordem de resolução: tenant explícito do chamador → tenant desta sessão
-  // (mesma regra de syncAssetsToCloud) → tenant que veio dentro do objeto.
-  // O objeto pode carregar o tenant de uma linha global, por isso fica por último.
+  // Ordem de resolução: tenant explícito do chamador → tenant válido dentro da
+  // própria config → tenant desta sessão (localStorage/sessionStorage), que só
+  // serve de último recurso: um contrato antigo guardado no aparelho não pode
+  // receber a configuração de outro contrato.
   // Um candidato inválido é saltado: o próximo válido assume o destino.
   const cleanTenantidRaw = [
     Array.isArray(tenantid) ? tenantid[0] : tenantid,
+    source.tenantid,
     readLocalTenantId(),
-    readSessionTenantId(),
-    source.tenantid
+    readSessionTenantId()
   ]
     .map(candidate => (candidate === undefined || candidate === null ? '' : String(candidate).trim()))
     .find(candidate => !isInvalidTenant(candidate)) || '';
