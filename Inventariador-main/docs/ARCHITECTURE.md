@@ -228,6 +228,57 @@ Supabase, chaves legadas são mapeadas automaticamente — `_unitid`/`unit_id`/`
 → `filial` (em `assets`, `user_permissions`, `inventory_config`) e variantes de
 tenant → `tenantid`. É **read-compat intencional**: não remover nem "corrigir".
 
+### 7.7 Chave canônica do ativo e guardião de duplicidade (`sn1_recno`)
+
+**Regra única da chave** — `utils/assetKey.ts` (`sanitizeAssetKey`, `resolveAssetKey`,
+`fallbackAssetKey`, `createFallbackKeyAllocator`). Todo caminho que grava ativo usa a
+MESMA regra: `String` → `trim` → `toUpperCase` → expurgo de tudo o que não é `A-Z`,
+`0-9` ou `-`. A ordem de resolução é `primarykey` → `etiqueta` → `tag` → chave
+DERIVADA do conteúdo.
+
+Por que existe: cada gravador normalizava à sua maneira (`injetarDadosEmLotes` só
+maiúsculas, `processExcelFile` caixa original, `saveCollectedAssetAtomic` expurgo a
+mais, `localDbService`/`syncService`/`supabaseService` só `trim`). Como a chave local
+é composta `[tenantid + primarykey]` (schema v7, `services/sqliteService.ts`), cada
+grafia do mesmo ativo virava uma LINHA NOVA — origem das cópias que inflavam a
+Unidade Operacional (50 544 linhas locais onde a nuvem tinha 12 636).
+
+Caminhos que usam a regra: `services/DatabaseLoaderService.ts` (as três cargas),
+`services/persistenceService.ts` (`saveCollectedAssetAtomic`),
+`services/localDbService.ts` (`toDexieAsset`, pull/backup), `services/syncService.ts`
+(envio) e `services/supabaseService.ts` (upsert da nuvem).
+
+O `ALT-<aleatório>` foi removido: linha sem nenhuma identidade recebe
+`SEM-ETIQUETA-<16 hex>` = `uuidV5(tenantid | filial | impressão digital do conteúdo |
+ocorrência)`. Mesmo arquivo ⇒ mesmas chaves (reimportar substitui); `ocorrência`
+distingue linhas realmente repetidas no mesmo arquivo. A impressão digital ignora
+chaves técnicas (`tenantid`, `filial`, flags `_*`). Ver `utils/assetKey.ts`.
+
+**Guardião de duplicidade por recno** — `utils/recnoGuard.ts` (regra pura) +
+`services/recnoGuardService.ts` (índice, auditoria, relatório). Chave de comparação:
+`tenantid + filial + sn1_recno`, com filial normalizada por `normalizeKey`.
+
+- **Não é chave única.** Na base de 2026-11-12, 15 grupos repetem o recno com
+  **ativos diferentes** (31 linhas), por isso travar por recno bloquearia registos
+  legítimos. Ele entra como segunda linha de defesa, nunca como identidade.
+- **Divergência** = etiqueta, descrição ou valor diferentes. Campo ausente de um dos
+  lados NÃO conta como diferença (a conferência envia registo parcial); valor compara
+  com tolerância de centavos e aceita `1.234,56` e `1234.56`.
+- **Ganchos:** fim das três cargas de planilha (`CARGA_PLANILHA`), depois de
+  `saveCollectedAssetAtomic` (`CONFERENCIA`) e o botão *VERIFICAR RECNO* do Gestor de
+  Base (`GESTOR_BASE`).
+- **Efeito:** nada é bloqueado nem apagado. O caso vai para `audit_logs` com
+  `acao = 'ASSET_DUP_SUSPECT'`, `registro_id = TENANT|FILIAL|RECNO`, `details`
+  legível e `delta` JSON (`source`, `filial`, `recno`, `rows`, `signature`). O
+  registro é idempotente pela `signature`, então recarregar a planilha não repete a
+  auditoria.
+- Recno `null`, `0` ou ausente (sobra física, ativo criado no app) não é verificado.
+- Índice em memória com TTL de 30 s, invalidado pelo evento
+  `gbr_local_assets_changed` — a conferência não varre a base a cada toque.
+- **Limpeza de cópias** (mesmo tenantid + filial + etiqueta) é outra ferramenta:
+  `services/assetDedupService.ts` + `utils/dedupAssets.ts`, com diagnóstico somente
+  leitura e relatório antes/depois.
+
 ---
 
 ## 8. Mapa de telas — esteira operacional de campo
