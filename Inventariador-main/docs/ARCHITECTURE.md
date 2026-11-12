@@ -236,6 +236,14 @@ bloqueiam sync sem tenant na tela de login). Upsert `onConflict('tenantid, id')`
   (RLS/quota/rede) — o fecho da campanha não fica sem histórico. `getCampaignSnapshot`
   lê a nuvem primeiro e cai no Dexie quando a nuvem não tem o laudo ou responde
   com erro. O modo do `fetchUnitConfigs` (GPS) segue a mesma regra dos campanhas.
+- **Modo: um resolver só.** `getDatabaseMode()` devolve o modo efetivo;
+  `isOnlineDatabaseMode()` separa `INTERNAL`/`INTERNAL_PLUS` de
+  `SUPABASE`/`SUPABASE_PLUS` (o `=== 'SUPABASE'` do `ModuleSelector` tratava
+  `SUPABASE_PLUS` como offline); `getInitialDatabaseMode()` é o default dos
+  estados iniciais (`App` inventário, `App.databaseMode`, `uiStore`), que antes
+  divergiam entre INTERNAL e SUPABASE_PLUS com a chave ausente. `logAuditEvent`
+  também usa `getDatabaseMode()`: num build sem credenciais o registo vai para o
+  Dexie em vez de tentar um Supabase inexistente.
 - **Modo INTERNAL (`isInternalMode=true`): nenhuma chamada de rede** (bloqueio no App.tsx).
 - `navigator.storage.persist()` evita que o SO limpe o IndexedDB.
 

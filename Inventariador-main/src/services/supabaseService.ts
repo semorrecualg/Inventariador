@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot } from '../types';
+import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot, DatabaseMode } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 import { sanitizeForSupabase } from './utils';
 import { localDb } from './localDbService';
@@ -119,6 +119,23 @@ export const getDatabaseMode = () => {
   if (isInternalMode) return 'INTERNAL';
   return localStorage.getItem('app_database_mode') || 'SUPABASE';
 };
+
+/**
+ * Sessão com nuvem? `INTERNAL` e `INTERNAL_PLUS` são base local; `SUPABASE` e
+ * `SUPABASE_PLUS` falam com o Supabase. Uma comparação a `'SUPABASE'` exacto
+ * tratava `SUPABASE_PLUS` como offline.
+ */
+export const isOnlineDatabaseMode = (mode?: string | null): boolean =>
+  !String(mode ?? getDatabaseMode()).startsWith('INTERNAL');
+
+/**
+ * Modo inicial do app (App e uiStore). Regra única:
+ * - `INTERNAL` quando o build não tem credenciais ou o modo INTERNAL está gravado;
+ * - `SUPABASE_PLUS` em memória quando há credenciais (é o valor que o App já usava
+ *   e que `databaseMode.startsWith('SUPABASE')` aceita).
+ */
+export const getInitialDatabaseMode = (): DatabaseMode =>
+  (getDatabaseMode() === 'INTERNAL' ? DatabaseMode.INTERNAL : DatabaseMode.SUPABASE_PLUS);
 
 // Teste de conexão expandido (REST e AUTH) - Removido auto-run para evitar loops em modo offline
 export const testSupabaseConnection = async () => {
@@ -488,7 +505,10 @@ export const logAuditEvent = async (entry: {
     // Ignora silenciosamente durante a carga em lote para isolar o SQLite local
     return;
   }
-  const isInternal = localStorage.getItem('app_database_mode') === 'INTERNAL';
+  // `getDatabaseMode()`: sem a chave gravada e sem credenciais no build isto é
+  // INTERNAL. Antes a leitura crua dava `false` e o log tentava o Supabase num
+  // build offline, perdendo o registo de auditoria.
+  const isInternal = getDatabaseMode() === 'INTERNAL';
 
   // Se for modo interno, salva no Dexie
   if (isInternal) {
