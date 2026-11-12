@@ -104,7 +104,8 @@ function toDexieAsset(asset: Asset): DexieAsset {
     obj.currentCampaignId = null;
   }
 
-  const primarykey = String(asset.primarykey || asset.id || '');
+  // Chave canônica única: pull da nuvem, backup e carga gravam a mesma chave.
+  const primarykey = sanitizeAssetKey(asset.primarykey || asset.id || '');
   obj.primarykey = primarykey;
   obj.id = primarykey;
 
@@ -872,6 +873,7 @@ export async function isStoragePersisted() {
 
 import { showRecoveryToast } from './NavigationGuardService';
 import { logger } from '../utils/logger';
+import { sanitizeAssetKey } from '../utils/assetKey';
 
 let winWorkspaceHandle: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
 

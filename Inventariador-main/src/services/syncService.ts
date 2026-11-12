@@ -1,10 +1,12 @@
 import { Capacitor } from '@capacitor/core';
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
-import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate } from './supabaseService';
+import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode } from './supabaseService';
 import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
+import { sanitizeAssetKey } from '../utils/assetKey';
 import { resolveTenantId } from '../utils/tenantUtils';
+import { matchUnitKeys } from '../utils/schema';
 
 export interface UserSessionData {
   id: string;
@@ -19,6 +21,76 @@ export interface SyncResult {
   failedCount?: number;
   error?: string;
 }
+
+/**
+ * Trava do envio para a nuvem.
+ *
+ * Existia aqui uma constante `IS_OFFLINE_FIRST_PHASE` fixa em `true`, repetida
+ * em QUATRO funções: cada uma devolvia sucesso com 0 registros e não enviava
+ * nada. O app dizia "sincronizado", o ativo ficava `_is_synced = 0` e a etiqueta
+ * PENDENTE NUVEM nunca saía — mesmo com o Supabase conectado e o login correto.
+ */
+const canPushToCloud = (): boolean => Capacitor.isNativePlatform();
+
+const SYNC_DISCARD_AUDIT = 'SYNC_PENDING_DISCARDED';
+/** Janela em que o mesmo descarte não volta a ser registrado (o ciclo roda a cada 60 s). */
+const SYNC_DISCARD_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * A filial do registo e a da sessão podem estar escritas de formas diferentes:
+ * `010101`, `010101 CICOPAL GO`, `010101-CICOPAL-GO`. Comparar as strings cruas
+ * descartava pendentes legítimos — o ativo conferido nunca subia.
+ */
+const filialMatchesSession = (recordFilial: unknown, sessionFilial: string): boolean =>
+  matchUnitKeys(String(recordFilial ?? ''), sessionFilial);
+
+/**
+ * Registra em `audit_logs` quando o filtro de contrato/filial descarta TODOS os
+ * pendentes do aparelho. Sem isto o ciclo devolvia sucesso com 0 registros e o
+ * operador via a base pendente sem nenhuma explicação.
+ */
+const auditDiscardedPending = async (
+  userId: string,
+  pending: ReadonlyArray<Record<string, unknown>>,
+  target: { tenantid: string; filial: string },
+): Promise<void> => {
+  try {
+    const tenants = Array.from(new Set(pending.map((record) => readLegacyRecordTenant(record).trim().toUpperCase() || '(vazio)'))).sort();
+    const filiais = Array.from(new Set(pending.map((record) => String(record.filial ?? record._unitid ?? '').trim().toUpperCase() || '(vazio)'))).sort();
+    const registroId = `${target.tenantid}|${target.filial}`;
+    const signature = `${pending.length}|${tenants.join(',')}|${filiais.join(',')}`;
+
+    const recentes = await db.audit_logs
+      .filter((log) => log.acao === SYNC_DISCARD_AUDIT && log.registro_id === registroId)
+      .toArray();
+    const jaRegistado = recentes.some((log) => {
+      if (Date.now() - new Date(String(log.updated_at || 0)).getTime() > SYNC_DISCARD_WINDOW_MS) return false;
+      try {
+        return JSON.parse(String(log.delta || '{}')).signature === signature;
+      } catch {
+        return false;
+      }
+    });
+    if (jaRegistado) return;
+
+    const details = `Todos os ${pending.length} ativo(s) pendente(s) foram descartados pelo filtro de contrato/filial. `
+      + `Sessão: contrato ${target.tenantid} · filial ${target.filial}. `
+      + `Pendentes: contrato(s) ${tenants.join(', ')} · filial(is) ${filiais.join(', ')}. `
+      + `Nada foi apagado: os registos continuam pendentes no aparelho.`;
+
+    await sqliteService.logAuditEvent(
+      userId,
+      SYNC_DISCARD_AUDIT,
+      'local_assets',
+      registroId,
+      details,
+      JSON.stringify({ signature, session: target, pending: { count: pending.length, tenants, filiais } })
+    );
+    logger.warn(`>>> [Sync Guard] ${details}`);
+  } catch (err) {
+    logger.warn('>>> [Sync Guard] Falha ao registrar o descarte de pendentes:', err);
+  }
+};
 
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 const CAMPAIGN_QUEUE_STORE = 'gbr_campaign_sync_queue';
@@ -189,8 +261,7 @@ export const getPendingCampaignSyncItems = async (): Promise<CampaignSyncItem[]>
 };
 
 export const processCampaignSyncQueue = async (): Promise<{ success: boolean; processedCount: number }> => {
-  const IS_OFFLINE_FIRST_PHASE = true;
-  if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+  if (!canPushToCloud()) {
     return { success: true, processedCount: 0 };
   }
   const user = getUserFromLocalStorage();
@@ -208,8 +279,9 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
     }
     return { success: false, processedCount: 0 };
   }
-  const currentMode = localStorage.getItem('app_database_mode');
-  if (currentMode?.startsWith('INTERNAL')) {
+  // `getDatabaseMode()` devolve INTERNAL apenas quando não há credenciais: um
+  // INTERNAL herdado no localStorage não pode congelar o DELETE/UPDATE remoto.
+  if (getDatabaseMode() === 'INTERNAL') {
     return { success: false, processedCount: 0 };
   }
   if (!navigator.onLine) return { success: false, processedCount: 0 };
@@ -265,8 +337,7 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
 
 export const photoSyncManager = {
   processPhotoSyncQueue: async (): Promise<{ success: boolean; uploadCount: number; failedCount: number }> => {
-    const IS_OFFLINE_FIRST_PHASE = true;
-    if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+    if (!canPushToCloud()) {
       return { success: true, uploadCount: 0, failedCount: 0 };
     }
     const user = getUserFromLocalStorage();
@@ -290,8 +361,9 @@ export const photoSyncManager = {
     }
     if (!navigator.onLine) return { success: false, uploadCount: 0, failedCount: 0 };
 
-    const currentMode = localStorage.getItem('app_database_mode');
-    if (currentMode?.startsWith('INTERNAL')) {
+    // `getDatabaseMode()` em vez do valor cru do localStorage: sem a chave gravada
+    // a fila de fotos ficava parada enquanto o resto do app usava a nuvem.
+    if (getDatabaseMode() === 'INTERNAL') {
       logger.info('[Sync Photo] Sincronização suspensa: Modo OFFLINE/INTERNO ativo.');
       return { success: false, uploadCount: 0, failedCount: 0 };
     }
@@ -385,8 +457,7 @@ const _syncService = {
   isStringInvalid,
 
   processDataSyncQueue: async (): Promise<SyncResult> => {
-    const IS_OFFLINE_FIRST_PHASE = true;
-    if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+    if (!canPushToCloud()) {
       return { success: true, processedCount: 0 };
     }
     const user = getUserFromLocalStorage();
@@ -416,11 +487,18 @@ const _syncService = {
       // Filtro de Multi-Tenancy e Unidade com custo documentado para campos não indexados (apenas filial e _is_synced são indexados no store da v1)
       const records = (pendingRecords || []).filter(record => {
         const isTenantMatch = readLegacyRecordTenant(record).trim().toUpperCase() === tenantidClean.toUpperCase();
-        const isFilialMatch = String(record.filial || record._unitid || '').trim().toUpperCase() === filialClean.toUpperCase();
+        const isFilialMatch = filialMatchesSession(record.filial || record._unitid, filialClean);
         return isTenantMatch && isFilialMatch;
       });
 
       if (records.length === 0) {
+        // Nada casou: pode ser só um pendente de outra unidade do mesmo
+        // contrato, mas o operador tem de saber que NADA subiu e por quê.
+        await auditDiscardedPending(
+          user.id,
+          pendingRecords as unknown as ReadonlyArray<Record<string, unknown>>,
+          { tenantid: tenantidClean, filial: filialClean }
+        );
         return { success: true, processedCount: 0, failedCount: 0 };
       }
 
@@ -434,7 +512,8 @@ const _syncService = {
           break;
         }
 
-        const pKey = record.primarykey || record.id || '';
+        // Chave canônica única: o que sobe para a nuvem é o mesmo `primarykey` local.
+        const pKey = sanitizeAssetKey(record.primarykey || record.id);
         if (isStringInvalid(pKey)) {
           failedPrimaryKeys.push(String(pKey));
           continue;
@@ -452,7 +531,7 @@ const _syncService = {
           if (!supabase) throw new Error("Instância do Supabase indisponível.");
           
           // 2. VETO A PAYLOADS POLUÍDOS E TRANCA tenantid: Enviar apenas colunas oficiais exigidas e trancas ocultas (21 índices contábeis)
-          const payload = {
+          const payload: Record<string, unknown> = {
             tenantid: tenantidClean,
             filial: filialClean,
             status: record.status !== undefined && record.status !== null ? String(record.status).trim() : 'ATIVO',
@@ -469,7 +548,7 @@ const _syncService = {
             subreg: record.subreg !== undefined && record.subreg !== null ? String(record.subreg).trim() : null,
             databaixa: record.databaixa !== undefined && record.databaixa !== null ? String(record.databaixa).trim() : null,
             contacontabil: record.contacontabil !== undefined && record.contacontabil !== null ? String(record.contacontabil).trim() : null,
-            primarykey: String(pKey).trim(),
+            primarykey: pKey,
             centrodecusto: record.centrodecusto !== undefined && record.centrodecusto !== null ? String(record.centrodecusto).trim() : null,
             vlraquisic: record.vlraquisic !== undefined && record.vlraquisic !== null ? Number(record.vlraquisic) : 0,
             sn1_recno: record.sn1_recno !== undefined && record.sn1_recno !== null ? Number(record.sn1_recno) : null,
@@ -477,12 +556,32 @@ const _syncService = {
             DE_PARA: record.DE_PARA !== undefined && record.DE_PARA !== null ? String(record.DE_PARA).trim() : null,
             gps_lat: record.gps_lat !== undefined && record.gps_lat !== null ? Number(record.gps_lat) : null,
             gps_lng: record.gps_lng !== undefined && record.gps_lng !== null ? Number(record.gps_lng) : null,
-            currentCampaignId: record.currentCampaignId !== undefined && record.currentCampaignId !== null ? String(record.currentCampaignId).trim() : null
+            currentCampaignId: record.currentCampaignId !== undefined && record.currentCampaignId !== null ? String(record.currentCampaignId).trim() : null,
+            // CONFERÊNCIA (quem e quando): sem estas três colunas o ativo subia,
+            // mas a nuvem nunca sabia que ele tinha sido conferido no aparelho.
+            conferido: Boolean(
+              Number(record._conferido) === 1 ||
+              String(record.status || '').toUpperCase().includes('CONFERIDO')
+            ),
+            auditor: record._auditor !== undefined && record._auditor !== null ? String(record._auditor).trim() || null : null,
+            data_leitura: record._dataLeitura !== undefined && record._dataLeitura !== null ? String(record._dataLeitura) : null
           };
 
-          const { error: supabaseErr } = await supabase
-            .from('assets')
-            .upsert(payload);
+          // O envio repete sem a coluna que a nuvem ainda não tem (PGRST204), em
+          // vez de rejeitar o ativo inteiro por causa de `conferido`/`auditor`/
+          // `data_leitura` (scripts/assets-conferencia.sql).
+          let supabaseErr: { message?: string; status?: string | number; code?: string | number } | null = null;
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            const { error } = await supabase.from('assets').upsert(payload);
+            supabaseErr = error;
+            if (!error) break;
+            const message = String(error.message || '');
+            const missingColumn = /'([a-zA-Z0-9_]+)' column/.exec(message)?.[1]
+              || /column "([a-zA-Z0-9_]+)"/.exec(message)?.[1];
+            if (!missingColumn || !(missingColumn in payload)) break;
+            logger.warn(`>>> [Sync] Coluna "${missingColumn}" não existe na nuvem — reenviando sem ela.`);
+            delete payload[missingColumn];
+          }
 
           if (!supabaseErr) {
             syncedPrimaryKeys.push(String(pKey));
@@ -743,8 +842,7 @@ const scheduleNextCycle = () => {
 };
 
 const runSyncLoopCycle = async () => {
-  const IS_OFFLINE_FIRST_PHASE = true;
-  if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+  if (!canPushToCloud()) {
     scheduleNextCycle();
     return;
   }

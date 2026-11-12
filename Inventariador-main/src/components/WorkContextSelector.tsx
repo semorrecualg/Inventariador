@@ -180,9 +180,14 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     ? describeUnitReleaseMissing(chosenRelease)
     : '';
 
-  // Trava de entrada: só o auditor de campo é impedido; o admin precisa passar
-  // para configurar a unidade.
-  const canProceed = !!selectedTenant && !!selectedModule && !(isAuditorOnly && chosenPending);
+  // Trava de entrada: unidade sem âncora GPS E campanha não abre o módulo de
+  // INVENTÁRIO — vale para TODOS os perfis, inclusive o admin (bug real: o
+  // admin escolhia a unidade "AGUARDANDO LIBERAÇÃO", escolhia INVENTARIADOR e
+  // caía na Auditoria Inteligente). O admin não perde o caminho de configuração:
+  // o card e o badge continuam abrindo a Unidade Operacional, onde ele define a
+  // âncora e a campanha que liberam a unidade.
+  const blockedByRelease = selectedModule === AppModule.INVENTORY && !!chosenPending;
+  const canProceed = !!selectedTenant && !!selectedModule && !blockedByRelease;
 
   const getTenantIdentity = (tenantid: string) => {
     const hash = tenantid.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
@@ -623,6 +628,13 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
           <ShieldCheck size={15} />
           Acessar o Módulo
         </button>
+        {blockedByRelease && (
+          <p className="text-[9px] font-extrabold uppercase tracking-wider text-amber-600 text-center leading-relaxed">
+            {isAdmin
+              ? `Unidade aguardando liberação (falta ${chosenPending}). Configure âncora GPS e campanha na Unidade Operacional.`
+              : `Unidade aguardando liberação (falta ${chosenPending}). Peça ao administrador para liberar.`}
+          </p>
+        )}
         <button
           type="button"
           onClick={onLogout}

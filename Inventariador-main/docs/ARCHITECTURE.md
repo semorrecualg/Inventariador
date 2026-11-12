@@ -211,6 +211,39 @@ bloqueiam sync sem tenant na tela de login). Upsert `onConflict('tenantid, id')`
 índice único composto `(tenantid, primarykey)` no `docs/supabase_bootstrap.sql`.
 `syncService.ts`: fila de sync (assetId + photoBlob), `photoSyncManager`,
 `processDataSyncQueue`, `addCampaignToSyncQueue`, `checkHardwareSafety`.
+- **Envio do aparelho (`syncService.canPushToCloud`):** `processDataSyncQueue`,
+  `processCampaignSyncQueue`, `photoSyncManager` e `runSyncLoopCycle` só correm com
+  `Capacitor.isNativePlatform()`. Até 2026-11 havia uma constante fixa
+  (`IS_OFFLINE_FIRST_PHASE = true`) nas quatro: devolviam sucesso com 0 registros e
+  nada subia — a etiqueta **PENDENTE NUVEM** ficava para sempre, com o Supabase
+  conectado. O payload leva agora `conferido`, `auditor` e `data_leitura`
+  (`scripts/assets-conferencia.sql`) e, se a coluna ainda não existir na nuvem, o
+  envio repete sem ela em vez de rejeitar o ativo. O filtro de filial compara por
+  `matchUnitKeys` (`utils/schema.ts`), então `010101`, `010101 CICOPAL GO` e
+  `010101-CICOPAL-GO` são a mesma unidade — antes a comparação era string crua e
+  descartava pendentes legítimos. Quando o filtro descarta TODOS os pendentes, o
+  caso vai para `audit_logs` (`SYNC_PENDING_DISCARDED`, um por situação a cada
+  10 min) com a contagem e os contratos/filiais dos registos ignorados.
+- **Modo de base nas campanhas (`getDatabaseMode`):** `deleteCampaign`,
+  `updateCampaignStatus` e a fila de campanhas decidiam o modo com
+  `localStorage.getItem('app_database_mode') || 'INTERNAL'`. Sem a chave gravada
+  (primeira sessão do aparelho) o `DELETE`/`UPDATE` remoto era pulado enquanto o
+  `fetchCampaigns` consultava a nuvem — a alteração voltava no merge. Os três
+  passaram a usar `getDatabaseMode()`, que só é INTERNAL sem credenciais no build
+  ou com INTERNAL gravado de propósito.
+- **Laudo da campanha (snapshot):** `createCampaignSnapshot` grava **sempre** uma
+  cópia no Dexie, mesmo quando a fonte é a nuvem e mesmo se o `insert` falhar
+  (RLS/quota/rede) — o fecho da campanha não fica sem histórico. `getCampaignSnapshot`
+  lê a nuvem primeiro e cai no Dexie quando a nuvem não tem o laudo ou responde
+  com erro. O modo do `fetchUnitConfigs` (GPS) segue a mesma regra dos campanhas.
+- **Modo: um resolver só.** `getDatabaseMode()` devolve o modo efetivo;
+  `isOnlineDatabaseMode()` separa `INTERNAL`/`INTERNAL_PLUS` de
+  `SUPABASE`/`SUPABASE_PLUS` (o `=== 'SUPABASE'` do `ModuleSelector` tratava
+  `SUPABASE_PLUS` como offline); `getInitialDatabaseMode()` é o default dos
+  estados iniciais (`App` inventário, `App.databaseMode`, `uiStore`), que antes
+  divergiam entre INTERNAL e SUPABASE_PLUS com a chave ausente. `logAuditEvent`
+  também usa `getDatabaseMode()`: num build sem credenciais o registo vai para o
+  Dexie em vez de tentar um Supabase inexistente.
 - **Modo INTERNAL (`isInternalMode=true`): nenhuma chamada de rede** (bloqueio no App.tsx).
 - `navigator.storage.persist()` evita que o SO limpe o IndexedDB.
 
@@ -227,6 +260,79 @@ legadas para `tenantid`) e `scripts/migrate-unitid-supabase.sql` (drop de `_unit
 Supabase, chaves legadas são mapeadas automaticamente — `_unitid`/`unit_id`/`unitid`
 → `filial` (em `assets`, `user_permissions`, `inventory_config`) e variantes de
 tenant → `tenantid`. É **read-compat intencional**: não remover nem "corrigir".
+
+### 7.7 Chave canônica do ativo e guardião de duplicidade (`sn1_recno`)
+
+**Regra única da chave** — `utils/assetKey.ts` (`sanitizeAssetKey`, `resolveAssetKey`,
+`fallbackAssetKey`, `createFallbackKeyAllocator`). Todo caminho que grava ativo usa a
+MESMA regra: `String` → `trim` → `toUpperCase` → expurgo de tudo o que não é `A-Z`,
+`0-9` ou `-`. A ordem de resolução é `primarykey` → `etiqueta` → `tag` → chave
+DERIVADA do conteúdo.
+
+Por que existe: cada gravador normalizava à sua maneira (`injetarDadosEmLotes` só
+maiúsculas, `processExcelFile` caixa original, `saveCollectedAssetAtomic` expurgo a
+mais, `localDbService`/`syncService`/`supabaseService` só `trim`). Como a chave local
+é composta `[tenantid + primarykey]` (schema v7, `services/sqliteService.ts`), cada
+grafia do mesmo ativo virava uma LINHA NOVA — origem das cópias que inflavam a
+Unidade Operacional (50 544 linhas locais onde a nuvem tinha 12 636).
+
+Caminhos que usam a regra: `services/DatabaseLoaderService.ts` (`injetarDadosEmLotes`,
+`processExcelFile`, `importExcelBulkData`),
+`services/persistenceService.ts` (`saveCollectedAssetAtomic`),
+`services/localDbService.ts` (`toDexieAsset`, pull/backup), `services/syncService.ts`
+(envio) e `services/supabaseService.ts` (upsert da nuvem).
+
+O `ALT-<aleatório>` foi removido: linha sem nenhuma identidade recebe
+`SEM-ETIQUETA-<16 hex>` = `uuidV5(tenantid | filial | impressão digital do conteúdo |
+ocorrência)`. Mesmo arquivo ⇒ mesmas chaves (reimportar substitui); `ocorrência`
+distingue linhas realmente repetidas no mesmo arquivo. A impressão digital ignora
+chaves técnicas (`tenantid`, `filial`, flags `_*`). Ver `utils/assetKey.ts`.
+
+**Guardião de duplicidade por recno** — `utils/recnoGuard.ts` (regra pura: `recnoKeyOf`,
+`sameRecnoData`, `findRecnoCollisions`, `describeRecnoCollision`) +
+`services/recnoGuardService.ts` (índice, auditoria, relatório). Chave de comparação:
+`tenantid + filial + sn1_recno`, com `tenantid` em maiúsculas e filial por
+`normalizeKey(asset.filial_raw || asset.filial)` (`utils/schema.ts`). Recno não
+numérico ou `<= 0` devolve chave vazia e sai da verificação.
+
+- **Não é chave única.** Na base de 2026-11-12, 15 grupos repetem o recno com
+  **ativos diferentes** (31 linhas), por isso travar por recno bloquearia registos
+  legítimos. Ele entra como segunda linha de defesa, nunca como identidade.
+  Composição medida: 12 grupos / 25 linhas são **etiquetas consecutivas do mesmo
+  `registro`** (`OBRA10228`, `OBRA10282`, `OBRA10284`) — o mesmo recno aplicado a
+  duas linhas seguidas (11 pares + o triplo `2632`); 3 grupos / 6 linhas são ativos
+  de registos e fornecedores diferentes (`6569`, `73317`, `74058`), colisão real de
+  recno. Nenhum desses recnos existe numa linha fora do próprio grupo, e faltam na
+  base os números seguintes da faixa (`76077`/`76078`, `77875`, `76393`/`76394`):
+  o padrão é a coluna do recno avançar de dois em dois, não um deslocamento de uma
+  linha (que deixaria todos os valores distintos).
+- **Divergência** = etiqueta, descrição ou valor diferentes. Campo ausente de um dos
+  lados NÃO conta como diferença (a conferência envia registo parcial); valor compara
+  com tolerância de centavos e aceita `1.234,56` e `1234.56`.
+- **Ganchos:** `reportRecnoAfterLoad` (private, chamado no fim de
+  `injetarDadosEmLotes`, `processExcelFile` e `importExcelBulkData` —
+  `CARGA_PLANILHA`), depois de `saveCollectedAssetAtomic` (`CONFERENCIA`) e o botão
+  *VERIFICAR RECNO* do Gestor de Base (`reportRecnoCollisions('GESTOR_BASE')`).
+- **Efeito:** nada é bloqueado nem apagado. O caso vai para `audit_logs` com
+  `acao = 'ASSET_DUP_SUSPECT'`, `registro_id = TENANT|FILIAL|RECNO`, `details`
+  legível e `delta` JSON (`source`, `filial`, `recno`, `rows`, `signature`). O
+  registro é idempotente pela `signature`, então recarregar a planilha não repete a
+  auditoria.
+- **Relatório em duas seções:** `LINHA_SEGUINTE` (etiquetas consecutivas do mesmo
+  `registro` — o recno do primeiro item repetido na linha seguinte) e
+  `ORIGENS_DIFERENTES` (registos distintos dividindo o recno). O Gestor de Base mostra
+  as contagens de cada seção e exporta CSV (`recnoReportToCsv` →
+  `RECNO_DUPLICIDADE_AAAAMMDD.csv`, separador `;`, BOM): uma linha por ativo, com
+  `tipo`, `tenantid`, `filial`, `recno`, `registro`, `etiqueta`, `primarykey`,
+  `descricao`, `valor`, `qt`, `status`, `databaixa`, `endereco`, `notafiscal`,
+  `nomefornecedor`, `dataaqusic`, `contacontabil`, `centrodecusto` e `grupo`.
+- Recno `null`, `0` ou ausente (sobra física, ativo criado no app) não é verificado.
+- Índice em memória com `INDEX_TTL_MS = 30_000`, invalidado por
+  `invalidateRecnoGuardIndex()` e pelo evento `gbr_local_assets_changed` — a
+  conferência não varre a base a cada toque.
+- **Limpeza de cópias** (mesmo tenantid + filial + etiqueta) é outra ferramenta:
+  `services/assetDedupService.ts` + `utils/dedupAssets.ts`, com diagnóstico somente
+  leitura e relatório antes/depois.
 
 ---
 
