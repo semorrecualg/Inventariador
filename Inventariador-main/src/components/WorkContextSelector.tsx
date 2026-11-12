@@ -18,6 +18,7 @@ import { AppModule, AppScreen, UserRole } from '../types';
 import { isAdminUser } from '../services/rbacService';
 import {
   WorkContext,
+  type FilialOption,
   buildFilialOptions,
   groupContextsByTenant,
   normalizeWorkTenant,
@@ -137,10 +138,28 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     return baseContracts.find((c) => normalizeWorkTenant(c.tenantid) === tenant)?.filiais ?? [];
   }, [baseContracts, selectedTenant]);
 
-  const filialOptions = useMemo(
-    () => buildFilialOptions({ tenantid: selectedTenant, contexts, baseFiliais }),
-    [selectedTenant, contexts, baseFiliais]
-  );
+  // A lista do perfil manda para quem é de campo; o DONO do contrato (admin/
+  // master) administra a unidade inteira, então ele também enxerga as filiais
+  // REAIS da base local — são elas que recebem âncora e campanha na Unidade
+  // Operacional. Sem isso, um admin cujo perfil declara uma filial só (ou
+  // nenhuma) ficava preso às unidades do perfil e não conseguia abrir as demais
+  // filiais do próprio contrato. A autorização continua valendo: as filiais da
+  // base entram DEPOIS das do perfil e apenas para ADMIN/MASTER.
+  const filialOptions = useMemo(() => {
+    const authorized = buildFilialOptions({ tenantid: selectedTenant, contexts, baseFiliais });
+    if (!isAdmin) return authorized;
+
+    const tenant = normalizeWorkTenant(selectedTenant);
+    const seen = new Set(authorized.map((o) => normalizeWorkFilial(o.filial)));
+    const fromBase: FilialOption[] = [];
+    for (const raw of baseFiliais) {
+      const f = normalizeWorkFilial(raw);
+      if (!f || f === tenant || seen.has(f)) continue;
+      seen.add(f);
+      fromBase.push({ filial: f, label: f });
+    }
+    return fromBase.length ? [...authorized, ...fromBase] : authorized;
+  }, [selectedTenant, contexts, baseFiliais, isAdmin]);
 
   // Pré-seleção: a filial resolvida no login (quando autorizada) ou a primeira
   // opção. O usuário pode trocar livremente entre as autorizadas.

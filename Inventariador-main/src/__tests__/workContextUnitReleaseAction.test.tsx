@@ -16,8 +16,9 @@ import WorkContextSelector from '../components/WorkContextSelector';
 import { AppScreen, UserRole } from '../types';
 import type { User } from '../types';
 import { buildUnitReleaseMap } from '../utils/unitRelease';
+import { listContracts } from '../utils/tenantCatalog';
 
-// A tela lê o catálogo da base local no mount; aqui o catálogo é irrelevante.
+// A tela lê o catálogo da base local no mount; por padrão vazio.
 vi.mock('../utils/tenantCatalog', () => ({
   listContracts: vi.fn().mockResolvedValue([])
 }));
@@ -107,6 +108,49 @@ describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
 
     expect(onOpenAdmin).not.toHaveBeenCalled();
     expect(screen.getByText(FILIAL)).toBeTruthy();
+  });
+
+  it('admin: enxerga também as filiais reais do contrato na base local', async () => {
+    vi.mocked(listContracts).mockResolvedValueOnce([
+      { tenantid: TENANT, filiais: [FILIAL, '010105 CICOPAL PA', '010201 SNACKS PA'] }
+    ]);
+    const onOpenAdmin = vi.fn();
+    render(
+      React.createElement(WorkContextSelector, {
+        user: buildUser(UserRole.ADMIN),
+        contexts: [{ tenantid: TENANT, filial: FILIAL }],
+        unitRelease: releaseMap,
+        onSelect: vi.fn(),
+        onLogout: vi.fn(),
+        onOpenAdmin
+      })
+    );
+
+    // A filial do perfil continua; as demais filiais da base entram para o dono
+    // do contrato (é nelas que ele configura âncora e campanha).
+    expect(await screen.findByText('010105 CICOPAL PA')).toBeTruthy();
+    expect(screen.getByText('010201 SNACKS PA')).toBeTruthy();
+    expect(screen.getByText('3 opções')).toBeTruthy();
+  });
+
+  it('auditor: a base NÃO amplia a lista — continua restrito ao perfil', async () => {
+    vi.mocked(listContracts).mockResolvedValueOnce([
+      { tenantid: TENANT, filiais: [FILIAL, '010105 CICOPAL PA'] }
+    ]);
+    render(
+      React.createElement(WorkContextSelector, {
+        user: buildUser(UserRole.AUDITOR),
+        contexts: [{ tenantid: TENANT, filial: FILIAL }],
+        unitRelease: releaseMap,
+        onSelect: vi.fn(),
+        onLogout: vi.fn(),
+        onOpenAdmin: vi.fn()
+      })
+    );
+
+    // O catálogo carrega no mount; a filial extra nunca aparece para o auditor.
+    await screen.findByText('CONTRATO (TENANTID)');
+    expect(screen.queryByText('010105 CICOPAL PA')).toBeNull();
   });
 
   it('auditor: não recebe o badge acionável — só a trava', () => {
