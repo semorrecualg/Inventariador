@@ -218,7 +218,12 @@ bloqueiam sync sem tenant na tela de login). Upsert `onConflict('tenantid, id')`
   nada subia — a etiqueta **PENDENTE NUVEM** ficava para sempre, com o Supabase
   conectado. O payload leva agora `conferido`, `auditor` e `data_leitura`
   (`scripts/assets-conferencia.sql`) e, se a coluna ainda não existir na nuvem, o
-  envio repete sem ela em vez de rejeitar o ativo.
+  envio repete sem ela em vez de rejeitar o ativo. O filtro de filial compara por
+  `matchUnitKeys` (`utils/schema.ts`), então `010101`, `010101 CICOPAL GO` e
+  `010101-CICOPAL-GO` são a mesma unidade — antes a comparação era string crua e
+  descartava pendentes legítimos. Quando o filtro descarta TODOS os pendentes, o
+  caso vai para `audit_logs` (`SYNC_PENDING_DISCARDED`, um por situação a cada
+  10 min) com a contagem e os contratos/filiais dos registos ignorados.
 - **Modo INTERNAL (`isInternalMode=true`): nenhuma chamada de rede** (bloqueio no App.tsx).
 - `navigator.storage.persist()` evita que o SO limpe o IndexedDB.
 

@@ -115,12 +115,117 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     expect(envelopes[1]).toMatchObject({ auditor: 'semorr@gmail.com' });
   });
 
-  it('não envia nada quando o recno pertence a outro contrato', async () => {
+  it('não envia nada quando o ativo pertence a outro contrato', async () => {
     await db.local_assets.put(asset({ tenantid: 'OUTRO', filial: '010101 CICOPAL GO' }) as never);
 
     const result = await processDataSyncQueue();
 
     expect(result.processedCount).toBe(0);
     expect(upsert).not.toHaveBeenCalled();
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_PENDING_DISCARDED').toArray();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].details).toContain('OUTRO');
+  });
+
+  it('aceita o mesmo rótulo de unidade escrito de outra forma', async () => {
+    await db.local_assets.put(asset({ filial: '010101 CICOPAL GO' }) as never);
+    sessionStorage.setItem('filial', '010101');
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBeGreaterThan(0);
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(await db.audit_logs.filter((log) => log.acao === 'SYNC_PENDING_DISCARDED').count()).toBe(0);
+  });
+});
+
+describe('filtro de filial da fila — tolerância ao rótulo da unidade', () => {
+  const variacoes: Array<[string, string]> = [
+    ['010101 CICOPAL GO', '010101'],
+    ['010101', '010101 CICOPAL GO'],
+    ['010101-CICOPAL-GO', '010101 CICOPAL GO'],
+    ['010101 cicopal go', '010101 CICOPAL GO'],
+    [' 010101  CICOPAL  GO ', '010101 CICOPAL GO']
+  ];
+
+  beforeEach(async () => {
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    await db.local_assets.clear();
+    await db.audit_logs.clear();
+    localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));
+    sessionStorage.setItem('tenantid', 'CICOPAL');
+  });
+
+  it.each(variacoes)('sincroniza com filial do registo %s e da sessão %s', async (registro, sessao) => {
+    await db.local_assets.put(asset({ filial: registro }) as never);
+    sessionStorage.setItem('filial', sessao);
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBeGreaterThan(0);
+    expect(upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('NÃO mistura unidades diferentes do mesmo contrato', async () => {
+    await db.local_assets.put(asset({ filial: '010105 CICOPAL PA' }) as never);
+    sessionStorage.setItem('filial', '010101 CICOPAL GO');
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBe(0);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('descarte de pendentes — registro em audit_logs', () => {
+  beforeEach(async () => {
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    await db.local_assets.clear();
+    await db.audit_logs.clear();
+    localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));
+    sessionStorage.setItem('tenantid', 'CICOPAL');
+    sessionStorage.setItem('filial', '010101 CICOPAL GO');
+  });
+
+  const discardLogs = () => db.audit_logs.filter((log) => log.acao === 'SYNC_PENDING_DISCARDED').toArray();
+
+  it('diz na auditoria quantos pendentes caíram e de que contrato/filial eram', async () => {
+    await db.local_assets.bulkPut([
+      asset({ primarykey: 'PK-1', id: 'PK-1', filial: '010105 CICOPAL PA' }) as never,
+      asset({ primarykey: 'PK-2', id: 'PK-2', filial: '010201 SNACKS PA' }) as never
+    ]);
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBe(0);
+    expect(upsert).not.toHaveBeenCalled();
+
+    const logs = await discardLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].registro_id).toBe('CICOPAL|010101 CICOPAL GO');
+    expect(logs[0].details).toContain('Todos os 2 ativo(s) pendente(s)');
+    expect(logs[0].details).toContain('010105 CICOPAL PA');
+    expect(logs[0].details).toContain('010201 SNACKS PA');
+    expect(logs[0].details).toContain('Nada foi apagado');
+    expect(JSON.parse(String(logs[0].delta))).toMatchObject({
+      pending: { count: 2 }
+    });
+
+    // O ciclo roda a cada 60 s: a mesma situação não vira uma enxurrada de logs.
+    await processDataSyncQueue();
+    expect(await discardLogs()).toHaveLength(1);
+  });
+
+  it('não registra nada quando há pendentes que casam com a sessão', async () => {
+    await db.local_assets.bulkPut([
+      asset({ primarykey: 'PK-1', id: 'PK-1' }) as never,
+      asset({ primarykey: 'PK-2', id: 'PK-2', filial: '010105 CICOPAL PA' }) as never
+    ]);
+
+    await processDataSyncQueue();
+
+    expect(await discardLogs()).toHaveLength(0);
   });
 });

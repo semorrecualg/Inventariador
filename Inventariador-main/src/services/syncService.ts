@@ -6,6 +6,7 @@ import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { resolveTenantId } from '../utils/tenantUtils';
+import { matchUnitKeys } from '../utils/schema';
 
 export interface UserSessionData {
   id: string;
@@ -30,6 +31,66 @@ export interface SyncResult {
  * PENDENTE NUVEM nunca saía — mesmo com o Supabase conectado e o login correto.
  */
 const canPushToCloud = (): boolean => Capacitor.isNativePlatform();
+
+const SYNC_DISCARD_AUDIT = 'SYNC_PENDING_DISCARDED';
+/** Janela em que o mesmo descarte não volta a ser registrado (o ciclo roda a cada 60 s). */
+const SYNC_DISCARD_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * A filial do registo e a da sessão podem estar escritas de formas diferentes:
+ * `010101`, `010101 CICOPAL GO`, `010101-CICOPAL-GO`. Comparar as strings cruas
+ * descartava pendentes legítimos — o ativo conferido nunca subia.
+ */
+const filialMatchesSession = (recordFilial: unknown, sessionFilial: string): boolean =>
+  matchUnitKeys(String(recordFilial ?? ''), sessionFilial);
+
+/**
+ * Registra em `audit_logs` quando o filtro de contrato/filial descarta TODOS os
+ * pendentes do aparelho. Sem isto o ciclo devolvia sucesso com 0 registros e o
+ * operador via a base pendente sem nenhuma explicação.
+ */
+const auditDiscardedPending = async (
+  userId: string,
+  pending: ReadonlyArray<Record<string, unknown>>,
+  target: { tenantid: string; filial: string },
+): Promise<void> => {
+  try {
+    const tenants = Array.from(new Set(pending.map((record) => readLegacyRecordTenant(record).trim().toUpperCase() || '(vazio)'))).sort();
+    const filiais = Array.from(new Set(pending.map((record) => String(record.filial ?? record._unitid ?? '').trim().toUpperCase() || '(vazio)'))).sort();
+    const registroId = `${target.tenantid}|${target.filial}`;
+    const signature = `${pending.length}|${tenants.join(',')}|${filiais.join(',')}`;
+
+    const recentes = await db.audit_logs
+      .filter((log) => log.acao === SYNC_DISCARD_AUDIT && log.registro_id === registroId)
+      .toArray();
+    const jaRegistado = recentes.some((log) => {
+      if (Date.now() - new Date(String(log.updated_at || 0)).getTime() > SYNC_DISCARD_WINDOW_MS) return false;
+      try {
+        return JSON.parse(String(log.delta || '{}')).signature === signature;
+      } catch {
+        return false;
+      }
+    });
+    if (jaRegistado) return;
+
+    const details = `Todos os ${pending.length} ativo(s) pendente(s) foram descartados pelo filtro de contrato/filial. `
+      + `Sessão: contrato ${target.tenantid} · filial ${target.filial}. `
+      + `Pendentes: contrato(s) ${tenants.join(', ')} · filial(is) ${filiais.join(', ')}. `
+      + `Nada foi apagado: os registos continuam pendentes no aparelho.`;
+
+    await sqliteService.logAuditEvent(
+      userId,
+      SYNC_DISCARD_AUDIT,
+      'local_assets',
+      registroId,
+      details,
+      JSON.stringify({ signature, session: target, pending: { count: pending.length, tenants, filiais } })
+    );
+    logger.warn(`>>> [Sync Guard] ${details}`);
+  } catch (err) {
+    logger.warn('>>> [Sync Guard] Falha ao registrar o descarte de pendentes:', err);
+  }
+};
 
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 const CAMPAIGN_QUEUE_STORE = 'gbr_campaign_sync_queue';
@@ -424,11 +485,18 @@ const _syncService = {
       // Filtro de Multi-Tenancy e Unidade com custo documentado para campos não indexados (apenas filial e _is_synced são indexados no store da v1)
       const records = (pendingRecords || []).filter(record => {
         const isTenantMatch = readLegacyRecordTenant(record).trim().toUpperCase() === tenantidClean.toUpperCase();
-        const isFilialMatch = String(record.filial || record._unitid || '').trim().toUpperCase() === filialClean.toUpperCase();
+        const isFilialMatch = filialMatchesSession(record.filial || record._unitid, filialClean);
         return isTenantMatch && isFilialMatch;
       });
 
       if (records.length === 0) {
+        // Nada casou: pode ser só um pendente de outra unidade do mesmo
+        // contrato, mas o operador tem de saber que NADA subiu e por quê.
+        await auditDiscardedPending(
+          user.id,
+          pendingRecords as unknown as ReadonlyArray<Record<string, unknown>>,
+          { tenantid: tenantidClean, filial: filialClean }
+        );
         return { success: true, processedCount: 0, failedCount: 0 };
       }
 
