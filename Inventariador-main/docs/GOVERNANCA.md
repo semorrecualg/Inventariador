@@ -228,12 +228,13 @@ rede e de secrets — o CI garante o código; este script garante o **ambiente**
 ### 9.1 APK sob demanda
 
 O `android-build.yml` **não dispara em push para `main`**: o APK nasce apenas
-quando alguém o pede. Dois gestos, e só dois:
+quando alguém o pede. Três gestos, e só três:
 
 | Gesto | Quando usar |
 |---|---|
 | Actions → **Build Android APK** → **Run workflow** | pedido avulso — testar um commit/branch, validar instalação no campo |
 | push de tag `v*` (`git tag v2.7.4 && git push origin v2.7.4`) | release oficial — a tag é o pedido |
+| comentar **`/apk`** num pull request | validar o commit do PR no telemóvel; o job responde no PR com o link do run |
 
 Regras:
 
@@ -245,8 +246,13 @@ Regras:
    O SHA-256 do APK e do certificado sai no resumo do job.
 3. Artefato fica disponível por 7 dias (`gbr-kardek-apk`). Para release, anexe o
    APK à tag no GitHub (passo 9) — o artefato do Actions expira.
-4. `workflow_dispatch` só aparece na lista de Actions quando este ficheiro já
-   existe em `main`: no primeiro uso, faça o merge e peça o build a seguir.
+4. **`/apk` exige escrita no repositório.** O job valida a permissão
+   (`admin`/`maintain`/`write`) antes de compilar e falha fechado; PR de fork não
+   gera APK (o código não é do repositório). O build sai do **HEAD do PR**, não
+   de `main`, e um pedido novo no mesmo PR cancela o anterior.
+5. `workflow_dispatch` só aparece na lista de Actions quando este ficheiro já
+   existe em `main`: no primeiro uso, faça o merge e peça o build a seguir. O
+   mesmo vale para `/apk` — o GitHub lê o workflow da branch padrão.
 
 ---
 
