@@ -318,6 +318,27 @@ cai para INTERNAL em vez de rebentar.
 | `components/Login.tsx` — badge | `AMBIENTE: MOBILE (LOCAL)` (âmbar) vs `SUPABASE (WEB)` (verde) |
 | `screens/DatabaseManagerScreen.tsx` | botão de espelhamento para a nuvem `disabled` em INTERNAL |
 
+**O que vai para a nuvem, e para onde** (contrato aplicado em
+`services/supabaseService.ts`):
+
+- **INTERNAL = nada sai do aparelho.** `syncConfigToCloud`, `saveUnitConfig` e
+  `saveUnitConfigFlags` retornam antes de tocar o cliente Supabase. A âncora GPS e as flags
+  de política continuam no SQLite/Dexie/`localStorage`; nenhuma gravação e nenhuma entrada
+  em `audit_logs` na nuvem acontece. Coberto por `src/__tests__/internalModeNoCloud.test.ts`
+  (falha se `supabase.from` ou `fetch` forem chamados).
+- **Em modo nuvem, a config do contrato sobe para `config_<TENANT>`** em `inventory_config`,
+  gravada pelo `id` (chave primária). A identidade da linha vem **sempre** do tenant do
+  contrato — nunca do objeto `config`: `buildConfigCloudPayload` descarta `id`/`tenantid`
+  vindos do objeto, tenta o tenant da config antes do tenant guardado no aparelho e trata
+  `default` (tenant sentinela da linha `global_config`) como identidade inválida, para não
+  criar `config_default`.
+- **O pull não leva identidade para o estado.** `mapCloudConfigRow` descarta `id`,
+  `tenantid`, `filial`, `data`, `metadata`, `created_at` e `updated_at` da linha: o estado
+  guarda apenas a política do contrato, e nenhum gravador repete o erro de escrever em
+  `global_config`.
+- **Falha de gravação deixa rasto:** a config que não sobe registra
+  `audit_logs.action = 'CONFIG_SYNC_FAIL'` com o código e a mensagem do erro.
+
 **Modos de falha da credencial** (diagnóstico rápido):
 
 | Causa | Sintoma | Onde se vê |

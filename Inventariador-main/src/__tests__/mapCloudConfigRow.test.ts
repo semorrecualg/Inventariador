@@ -27,6 +27,27 @@ describe('mapCloudConfigRow — a identidade da linha não entra no estado', () 
     expect(mapped.darkMode).toBe(true);
   });
 
+  it('descarta filial, data, metadata, created_at e updated_at da linha', () => {
+    const mapped = mapCloudConfigRow({
+      id: 'config_CICOPAL',
+      tenantid: 'CICOPAL',
+      filial: '010101 CICOPAL GO',
+      data: { lat: -16.706719, lng: -49.106422 },
+      metadata: { origem: 'admin' },
+      created_at: '2026-11-08T19:10:02.291815+00:00',
+      updated_at: '2026-11-12T02:59:07.536Z',
+      status: 'IN_USE',
+      last_updated: '2026-11-12T02:59:07.536Z'
+    });
+
+    for (const key of ['id', 'tenantid', 'filial', 'data', 'metadata', 'created_at', 'createdAt', 'updated_at', 'updatedAt']) {
+      expect(key in mapped).toBe(false);
+    }
+    // A política do contrato continua a passar.
+    expect(mapped.status).toBe('IN_USE');
+    expect(mapped.lastUpdated).toBe('2026-11-12T02:59:07.536Z');
+  });
+
   it('descarta também o tenantId em camelCase (estado antigo reintroduzido)', () => {
     const mapped = mapCloudConfigRow({ tenantId: 'default', status: 'IN_USE' });
 

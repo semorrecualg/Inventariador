@@ -2039,11 +2039,11 @@ export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
 /**
  * Converte a linha de `inventory_config` na parte de configuração do estado.
  *
- * Os campos de identidade da LINHA (`id` e `tenantid`) ficam de fora: não são
- * configuração do contrato e, dentro do estado, qualquer gravador que fizesse
- * spread os copiava de volta para o payload — foi assim que a configuração
- * voltava sempre para a linha de origem (`global_config`, tenant `default`) em
- * vez de `config_<TENANT>`.
+ * Os campos de IDENTIDADE da linha ficam de fora: `id`, `tenantid`, `filial`,
+ * `data`, `metadata`, `created_at` e `updated_at`. Não são política do contrato:
+ * dentro do estado, qualquer gravador que fizesse spread os copiava de volta
+ * para o payload — foi assim que a configuração voltava sempre para a linha de
+ * origem (`global_config`, tenant `default`) em vez de `config_<TENANT>`.
  */
 const CONFIG_REVERSE_MAPPING: Record<string, string> = {
   'last_updated': 'lastUpdated',
@@ -2062,6 +2062,19 @@ const CONFIG_REVERSE_MAPPING: Record<string, string> = {
   'database_mode': 'databaseMode'
 };
 
+const CONFIG_IDENTITY_KEYS = new Set([
+  'id',
+  'tenantid',
+  'tenantId',
+  'filial',
+  'data',
+  'metadata',
+  'created_at',
+  'createdAt',
+  'updated_at',
+  'updatedAt'
+]);
+
 export const mapCloudConfigRow = (
   row: Record<string, unknown> | null | undefined
 ): Partial<InventoryState> => {
@@ -2069,7 +2082,7 @@ export const mapCloudConfigRow = (
   if (!row) return mapped as Partial<InventoryState>;
 
   Object.keys(row).forEach(key => {
-    if (key === 'id' || key === 'tenantid' || key === 'tenantId') return;
+    if (CONFIG_IDENTITY_KEYS.has(key)) return;
     const camelKey = CONFIG_REVERSE_MAPPING[key] || key;
     mapped[camelKey] = row[key];
   });
