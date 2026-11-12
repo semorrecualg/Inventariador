@@ -337,6 +337,12 @@ cai para INTERNAL em vez de rebentar.
   `global_config`.
 - **Falha de gravação deixa rasto:** a config que não sobe registra
   `audit_logs.action = 'CONFIG_SYNC_FAIL'` com o código e a mensagem do erro.
+- **A conferência (quem e quando) sobe junto com o ativo**, nas colunas
+  `assets.conferido`, `assets.auditor` e `assets.data_leitura`, criadas por
+  `scripts/assets-conferencia.sql` (idempotente; backfill incluído). Sem o script, o lote
+  descarta a coluna em falta e reenvia (`PGRST204`) e o pull devolve o item marcado por
+  `status = 'CONFERIDO'`, mas fica sem autor/data: correr o script não é pré-requisito para
+  sincronizar, é o que impede perder o autor e a data ao reinstalar o app.
 
 **Modos de falha da credencial** (diagnóstico rápido):
 
