@@ -2036,6 +2036,47 @@ export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
   };
 };
 
+/**
+ * Converte a linha de `inventory_config` na parte de configuração do estado.
+ *
+ * Os campos de identidade da LINHA (`id` e `tenantid`) ficam de fora: não são
+ * configuração do contrato e, dentro do estado, qualquer gravador que fizesse
+ * spread os copiava de volta para o payload — foi assim que a configuração
+ * voltava sempre para a linha de origem (`global_config`, tenant `default`) em
+ * vez de `config_<TENANT>`.
+ */
+const CONFIG_REVERSE_MAPPING: Record<string, string> = {
+  'last_updated': 'lastUpdated',
+  'editable_fields': 'editableFields',
+  'qr_code_fields': 'qrCodeFields',
+  'scanner_mode': 'scannerMode',
+  'scan_feedback_mode': 'scanFeedbackMode',
+  'inventory_search_mode': 'inventorySearchMode',
+  'immersive_mode': 'immersiveMode',
+  'dark_mode': 'darkMode',
+  'battery_saver': 'batterySaver',
+  'protheus_integration_enabled': 'protheusIntegrationEnabled',
+  'protheus_api_url': 'protheusApiUrl',
+  'mandatory_photo_on_divergence': 'mandatoryPhotoOnDivergence',
+  'mandatory_photo_on_new_item': 'mandatoryPhotoOnNewItem',
+  'database_mode': 'databaseMode'
+};
+
+export const mapCloudConfigRow = (
+  row: Record<string, unknown> | null | undefined
+): Partial<InventoryState> => {
+  const mapped: Record<string, unknown> = {};
+  if (!row) return mapped as Partial<InventoryState>;
+
+  Object.keys(row).forEach(key => {
+    if (key === 'id' || key === 'tenantid' || key === 'tenantId') return;
+    const camelKey = CONFIG_REVERSE_MAPPING[key] || key;
+    mapped[camelKey] = row[key];
+  });
+
+  return mapped as Partial<InventoryState>;
+};
+
 const fetchFullInventoryImpl = async (
   resolvedTenantid: string | string[] | undefined,
   unitid?: string,
@@ -2164,29 +2205,8 @@ const fetchFullInventoryImpl = async (
       };
     }
 
-    // Mapeamento reverso de snake_case para camelCase
-    const reverseMapping: Record<string, string> = {
-      'last_updated': 'lastUpdated',
-      'editable_fields': 'editableFields',
-      'qr_code_fields': 'qrCodeFields',
-      'scanner_mode': 'scannerMode',
-      'scan_feedback_mode': 'scanFeedbackMode',
-      'inventory_search_mode': 'inventorySearchMode',
-      'immersive_mode': 'immersiveMode',
-      'dark_mode': 'darkMode',
-      'battery_saver': 'batterySaver',
-      'protheus_integration_enabled': 'protheusIntegrationEnabled',
-      'protheus_api_url': 'protheusApiUrl',
-      'mandatory_photo_on_divergence': 'mandatoryPhotoOnDivergence',
-      'mandatory_photo_on_new_item': 'mandatoryPhotoOnNewItem',
-      'database_mode': 'databaseMode'
-    };
-
-    const mappedConfig: Record<string, unknown> = {};
-    Object.keys(config).forEach(key => {
-      const camelKey = reverseMapping[key] || key;
-      mappedConfig[camelKey] = (config as Record<string, unknown>)[key];
-    });
+    // Sem id/tenantid: a identidade da linha não entra no estado (ver mapCloudConfigRow).
+    const mappedConfig = mapCloudConfigRow(config as Record<string, unknown>);
 
     if (onComplete) {
       logger.info(`>>> [Supabase] Invocando onComplete() de forma atômica no final da paginação.`);
@@ -2204,7 +2224,7 @@ const fetchFullInventoryImpl = async (
 
     return {
       assets: assets,
-      config: mappedConfig as Partial<InventoryState>
+      config: mappedConfig
     };
   } catch (err) {
     logger.error('Erro inesperado ao buscar inventário completo:', err);
