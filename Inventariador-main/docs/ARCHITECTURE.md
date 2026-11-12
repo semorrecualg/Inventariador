@@ -211,6 +211,14 @@ bloqueiam sync sem tenant na tela de login). Upsert `onConflict('tenantid, id')`
 índice único composto `(tenantid, primarykey)` no `docs/supabase_bootstrap.sql`.
 `syncService.ts`: fila de sync (assetId + photoBlob), `photoSyncManager`,
 `processDataSyncQueue`, `addCampaignToSyncQueue`, `checkHardwareSafety`.
+- **Envio do aparelho (`syncService.canPushToCloud`):** `processDataSyncQueue`,
+  `processCampaignSyncQueue`, `photoSyncManager` e `runSyncLoopCycle` só correm com
+  `Capacitor.isNativePlatform()`. Até 2026-11 havia uma constante fixa
+  (`IS_OFFLINE_FIRST_PHASE = true`) nas quatro: devolviam sucesso com 0 registros e
+  nada subia — a etiqueta **PENDENTE NUVEM** ficava para sempre, com o Supabase
+  conectado. O payload leva agora `conferido`, `auditor` e `data_leitura`
+  (`scripts/assets-conferencia.sql`) e, se a coluna ainda não existir na nuvem, o
+  envio repete sem ela em vez de rejeitar o ativo.
 - **Modo INTERNAL (`isInternalMode=true`): nenhuma chamada de rede** (bloqueio no App.tsx).
 - `navigator.storage.persist()` evita que o SO limpe o IndexedDB.
 

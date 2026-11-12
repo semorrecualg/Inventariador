@@ -21,6 +21,16 @@ export interface SyncResult {
   error?: string;
 }
 
+/**
+ * Trava do envio para a nuvem.
+ *
+ * Existia aqui uma constante `IS_OFFLINE_FIRST_PHASE` fixa em `true`, repetida
+ * em QUATRO funções: cada uma devolvia sucesso com 0 registros e não enviava
+ * nada. O app dizia "sincronizado", o ativo ficava `_is_synced = 0` e a etiqueta
+ * PENDENTE NUVEM nunca saía — mesmo com o Supabase conectado e o login correto.
+ */
+const canPushToCloud = (): boolean => Capacitor.isNativePlatform();
+
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 const CAMPAIGN_QUEUE_STORE = 'gbr_campaign_sync_queue';
 
@@ -190,8 +200,7 @@ export const getPendingCampaignSyncItems = async (): Promise<CampaignSyncItem[]>
 };
 
 export const processCampaignSyncQueue = async (): Promise<{ success: boolean; processedCount: number }> => {
-  const IS_OFFLINE_FIRST_PHASE = true;
-  if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+  if (!canPushToCloud()) {
     return { success: true, processedCount: 0 };
   }
   const user = getUserFromLocalStorage();
@@ -266,8 +275,7 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
 
 export const photoSyncManager = {
   processPhotoSyncQueue: async (): Promise<{ success: boolean; uploadCount: number; failedCount: number }> => {
-    const IS_OFFLINE_FIRST_PHASE = true;
-    if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+    if (!canPushToCloud()) {
       return { success: true, uploadCount: 0, failedCount: 0 };
     }
     const user = getUserFromLocalStorage();
@@ -386,8 +394,7 @@ const _syncService = {
   isStringInvalid,
 
   processDataSyncQueue: async (): Promise<SyncResult> => {
-    const IS_OFFLINE_FIRST_PHASE = true;
-    if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+    if (!canPushToCloud()) {
       return { success: true, processedCount: 0 };
     }
     const user = getUserFromLocalStorage();
@@ -454,7 +461,7 @@ const _syncService = {
           if (!supabase) throw new Error("Instância do Supabase indisponível.");
           
           // 2. VETO A PAYLOADS POLUÍDOS E TRANCA tenantid: Enviar apenas colunas oficiais exigidas e trancas ocultas (21 índices contábeis)
-          const payload = {
+          const payload: Record<string, unknown> = {
             tenantid: tenantidClean,
             filial: filialClean,
             status: record.status !== undefined && record.status !== null ? String(record.status).trim() : 'ATIVO',
@@ -479,12 +486,32 @@ const _syncService = {
             DE_PARA: record.DE_PARA !== undefined && record.DE_PARA !== null ? String(record.DE_PARA).trim() : null,
             gps_lat: record.gps_lat !== undefined && record.gps_lat !== null ? Number(record.gps_lat) : null,
             gps_lng: record.gps_lng !== undefined && record.gps_lng !== null ? Number(record.gps_lng) : null,
-            currentCampaignId: record.currentCampaignId !== undefined && record.currentCampaignId !== null ? String(record.currentCampaignId).trim() : null
+            currentCampaignId: record.currentCampaignId !== undefined && record.currentCampaignId !== null ? String(record.currentCampaignId).trim() : null,
+            // CONFERÊNCIA (quem e quando): sem estas três colunas o ativo subia,
+            // mas a nuvem nunca sabia que ele tinha sido conferido no aparelho.
+            conferido: Boolean(
+              Number(record._conferido) === 1 ||
+              String(record.status || '').toUpperCase().includes('CONFERIDO')
+            ),
+            auditor: record._auditor !== undefined && record._auditor !== null ? String(record._auditor).trim() || null : null,
+            data_leitura: record._dataLeitura !== undefined && record._dataLeitura !== null ? String(record._dataLeitura) : null
           };
 
-          const { error: supabaseErr } = await supabase
-            .from('assets')
-            .upsert(payload);
+          // O envio repete sem a coluna que a nuvem ainda não tem (PGRST204), em
+          // vez de rejeitar o ativo inteiro por causa de `conferido`/`auditor`/
+          // `data_leitura` (scripts/assets-conferencia.sql).
+          let supabaseErr: { message?: string; status?: string | number; code?: string | number } | null = null;
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            const { error } = await supabase.from('assets').upsert(payload);
+            supabaseErr = error;
+            if (!error) break;
+            const message = String(error.message || '');
+            const missingColumn = /'([a-zA-Z0-9_]+)' column/.exec(message)?.[1]
+              || /column "([a-zA-Z0-9_]+)"/.exec(message)?.[1];
+            if (!missingColumn || !(missingColumn in payload)) break;
+            logger.warn(`>>> [Sync] Coluna "${missingColumn}" não existe na nuvem — reenviando sem ela.`);
+            delete payload[missingColumn];
+          }
 
           if (!supabaseErr) {
             syncedPrimaryKeys.push(String(pKey));
@@ -745,8 +772,7 @@ const scheduleNextCycle = () => {
 };
 
 const runSyncLoopCycle = async () => {
-  const IS_OFFLINE_FIRST_PHASE = true;
-  if (IS_OFFLINE_FIRST_PHASE || !Capacitor.isNativePlatform()) {
+  if (!canPushToCloud()) {
     scheduleNextCycle();
     return;
   }
