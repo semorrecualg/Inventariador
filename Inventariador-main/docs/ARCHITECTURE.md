@@ -415,6 +415,15 @@ emissão posterior à rotação), sem revelar o valor.
    ONBOARDING → `MODULE_SELECTION` (não `DASHBOARD` — guarda da Barreira Canônica),
    CHANGE_PWD → `UNIT_SELECTION` com desvio para `MAIN_MENU` em base vazia + admin.
    Novo teste de contrato `navigationMap.test.ts` garante rota única por tela e zero órfãs.
+6. **Configuração do contrato nunca chegava a `config_<TENANT>`** — o pull entregava ao
+   estado o `id`/`tenantid` da linha de origem (`global_config`/`default`) e o
+   `syncConfigToCloud` copiava-os para o payload, gravando sempre na linha global.
+   → a identidade da linha passou a vir só do tenant do contrato (`buildConfigCloudPayload`),
+   o pull deixou de entregar identidade ao estado (`mapCloudConfigRow`: `id`, `tenantid`,
+   `filial`, `data`, `metadata`, `created_at`, `updated_at`), `default` é identidade inválida,
+   o upsert usa o `id` (PK) e a falha fica em `audit_logs` (`CONFIG_SYNC_FAIL`). Em INTERNAL
+   nada sai do aparelho. Ver §10. Coberto por `configCloudPayload`, `mapCloudConfigRow`,
+   `syncConfigToCloud` e `internalModeNoCloud`.
 
 ---
 
@@ -450,6 +459,10 @@ emissão posterior à rotação), sem revelar o valor.
 - Provisionamento MASTER: `LicenseProvisioning`/`tenantProvisioningService` com senha
   forte (`passwordPolicy`) — validar fluxo completo ponta a ponta no device.
 - Fluxo "base vazia": admin cai no Gestor de Base — validar carga de `.db`/Excel.
+
+- Configuração do contrato na nuvem: **resolvido** (sem pendência) — a config sobe para
+  `config_<TENANT>`, o pull não leva identidade da linha para o estado e falhas de gravação
+  ficam em `audit_logs` (`CONFIG_SYNC_FAIL`). Ver §10 e §12.6.
 
 Rastreamento público: **GitHub Issue #6** (`semorrecualg/Inventariador`).
 
