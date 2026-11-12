@@ -95,9 +95,10 @@ export function pickCanonical(rec: Record<string, unknown>, lowerKey: string): u
 | `src/components/Dashboard.tsx` | `AUDITOR_*` (420-422) | ENDERECO |
 | `src/services/reportService.ts` | Payload de relatório (20) → lower | ENDERECO |
 | `src/utils/qrUtils.ts` | Campos do QR (25) → lower | ENDERECO, ETIQUETA, REGISTRO… |
-| `src/stores/inventoryStore.ts` | `editableFields` (102) → lower | DESCRICAODOATIVO, SERIAL, ENDERECO |
+| `src/App.tsx` | `editableFields` padrão (257) → lower | DESCRICAODOATIVO, SERIAL, ENDERECO |
 | `src/services/supabaseService.ts` | `mapColumnName`: **garantir cobertura** dos canônicos lower do contrato (hoje cobre `_unitid`→`filial` e tenant); **nada muda no schema public** | PRIMARYKEY, SUBREG, CNPJ… |
-| `src/services/{tagService,protheusService,depreciationService,stressTestService,demoSeed,reportGenerator,persistenceService,addressParser}.ts` | Alinhar payloads/escritas ao lower (reutilizando helpers) | vários |
+| `src/services/{tagService,protheusService,depreciationService,stressTestService,demoSeed,persistenceService}.ts` | Alinhar payloads/escritas ao lower (reutilizando helpers) | vários |
+| `src/utils/reportGenerator.ts` · `src/services/utils/addressParser.ts` | Idem (estes dois saíram de `src/services/`) | vários |
 
 ### 3.2 Arquivos de leitura/UI (C1 também, mas baixo risco — via `pickCanonical`)
 
@@ -381,7 +382,7 @@ alinhado ao contrato do `public`). Sem achados SRE pendentes na Fase C.
 | Typecheck | `npx tsc -b --noEmit` (ou `npm run build` em CI) | — |
 | Testes | `npx vitest run` | 144 existentes + novos |
 | Contrato | `schemaBaseline.test.ts` atualizado (verno 5) | baseline v4 → v5 com justificativa no doc |
-| Novos testes | `normalize.test.ts` (K/T), `pickCanonical.test.ts`, `loaderNormalization.test.ts`, `migrationV5.test.ts`, `mapColumnName.test.ts` | regras por classe |
+| Novos testes | `normalize.test.ts` (K/T), `pickCanonical.test.ts`, `loaderNormalization.test.ts`, `migrationV5.test.ts` — `mapColumnName.test.ts` nunca foi criado (pendência declarada) | regras por classe |
 | Varredura final ✅ | `grep -rwE 'ETIQUETA|ENDERECO|…' src/` **fora** de `schema.ts` (dict) → **~0** (§8.1) | residual aceito: leituras de entrada do `normalizeAssetContract` (gateway de ingestão) + strings de label/UI |
 
 Sequência de execução por subfase: **C1 → gate → C2 → gate → C3 → gate → C4 (version(5) +

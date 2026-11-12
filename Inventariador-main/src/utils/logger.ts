@@ -2,7 +2,7 @@
  * Logger estruturado para o ecossistema GBR KARDEK v24.50-PROD.
  *
  * Substitui console.log/warn/error diretamente por logger.info/warn/error.
- * Em produção (VITE_PRODUCTION=true ou VERCEL_ENV=production), suprime
+ * Em produção (VITE_PRODUCTION=true ou build de produção do Vite), suprime
  * logs abaixo do nível configurado (default: 'warn'), exceto em desenvolvimento.
  *
  * Uso:
@@ -27,7 +27,7 @@ const LOG_LEVELS: Record<LogLevel, number> = {
  */
 function getMinLevel(): LogLevel {
   if (typeof process !== 'undefined' && process.env) {
-    if (process.env.VITE_PRODUCTION === 'true' || process.env.VERCEL_ENV === 'production') {
+    if (process.env.VITE_PRODUCTION === 'true') {
       return 'warn';
     }
   }

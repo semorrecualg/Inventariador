@@ -38,11 +38,10 @@ Inventariador/                  ← raiz do repositório git
 ```
 
 **O app é um subdiretório do repositório.** Isso é intencional e assumido pelos
-dois workflows (`defaults.run.working-directory: Inventariador-main`) e pelo
-`vercel.json` dentro de `Inventariador-main/`.
+dois workflows (`defaults.run.working-directory: Inventariador-main`).
 
 > ⚠️ **Não mova o app para a raiz** sem uma tarefa dedicada: são ~330 arquivos e
-> quebra CI, APK, Vercel e metade dos links de documentação. O achatamento só vale
+> quebra CI, APK e metade dos links de documentação. O achatamento só vale
 > com PR único e janela de release.
 
 Arquivos na **raiz do app** (`Inventariador-main/`): `.env.example`, `.env.test`
@@ -53,15 +52,15 @@ na raiz do repositório é erro — os órfãos herdados foram removidos.
 
 ## 3. Ambientes e variáveis
 
-| Variável | Local (`.env`) | CI (`ci.yml`) | APK (`android-build`) | Vercel | Segredo? |
-|---|---|---|---|---|---|
-| `VITE_SUPABASE_URL` | obrigatória p/ modo nuvem | secret → build | secret | env do projeto | publishable |
-| `VITE_SUPABASE_ANON_KEY` | obrigatória p/ modo nuvem | secret → build | secret | env do projeto | **publishable** |
-| `VITE_SUPABASE_SCHEMA` | `public` | default | default | default | não |
-| `VITE_ADMIN_EMAIL` | obrigatória | `vars` (fallback `semorr@gmail.com`) | idem | idem | não |
-| `VITE_ENVIRONMENT` | `development` / `production` | default | default | `production` | não |
-| `VITE_PROTHEUS_API_URL` | opcional | — | — | — | não |
-| `GEMINI_API_KEY` | opcional, **sem** prefixo `VITE_` | secret | — | server-side | **sim** |
+| Variável | Local (`.env`) | CI (`ci.yml`) | APK (`android-build`) | Segredo? |
+|---|---|---|---|---|
+| `VITE_SUPABASE_URL` | obrigatória p/ modo nuvem | secret → build | secret | publishable |
+| `VITE_SUPABASE_ANON_KEY` | obrigatória p/ modo nuvem | secret → build | secret | **publishable** |
+| `VITE_SUPABASE_SCHEMA` | `public` | default | default | não |
+| `VITE_ADMIN_EMAIL` | obrigatória | `vars` (fallback `semorr@gmail.com`) | idem | não |
+| `VITE_ENVIRONMENT` | `development` / `production` | default | `production` | não |
+| `VITE_PROTHEUS_API_URL` | opcional | — | — | não |
+| `GEMINI_API_KEY` | opcional, **sem** prefixo `VITE_` | secret | — | **sim** |
 
 **Modo do banco** é derivado, nunca configurado à mão:
 `isInternalMode = !(VITE_SUPABASE_URL && VITE_SUPABASE_ANON_KEY)`.
@@ -87,10 +86,10 @@ Arquivos de ambiente:
    antigos) — e `VITE_ADMIN_EMAIL`. Ela é pública por design do Supabase; a proteção
    real é **RLS** (§ 7).
 2. **Secret** (nunca no cliente, nunca em `VITE_*`): `service_role`, `GEMINI_API_KEY`,
-   senhas, tokens de CI. Vai em *Settings → Secrets* (GitHub/Vercel) ou no `.env` local.
+   senhas, tokens de CI. Vai em *Settings → Secrets* (GitHub) ou no `.env` local.
 3. `service_role` **jamais** em variável `VITE_*`: tudo que tem esse prefixo é embutido
    no JS público. Uma `service_role` no front = banco inteiro exposto.
-4. Rotação: trocar a chave no painel → atualizar secrets do GitHub/Vercel → `npm run
+4. Rotação: trocar a chave no painel → atualizar os secrets do GitHub → `npm run
    verify:governanca` → um build de validação. Nunca rotacione sem os dois lados.
 5. `.env` nunca é commitado. O `.gitignore` da raiz bloqueia `.env` e `.env.*`,
    com exceção explícita de `Inventariador-main/.env.test` (sem segredos).
@@ -100,7 +99,7 @@ Arquivos de ambiente:
 ## 5. Fluxo de trabalho no git
 
 ```
-dev local ──commit──▶ branch ──PR──▶ CI verde ──merge──▶ main ──▶ Vercel
+dev local ──commit──▶ branch ──PR──▶ CI verde ──merge──▶ main
                                                      └──▶ APK só sob demanda (§ 9.1)
 ```
 
@@ -108,7 +107,7 @@ dev local ──commit──▶ branch ──PR──▶ CI verde ──merge─
 2. Commits no padrão já usado no repositório: `feat(escopo):`, `fix(escopo):`,
    `docs(escopo):`, `chore(escopo):` — em português, imperativo, sem ponto final.
 3. **PR obrigatório** para `main`. O merge só acontece com `ci.yml` verde.
-4. O hook `pre-commit` (Husky) roda `npm run lint` + `npx tsc --noEmit` e bloqueia
+4. O hook `pre-commit` (Husky) roda `npm run lint` + `npx tsc --noEmit` + `npm run check:docs` e bloqueia
    mascaramento (`eslint-disable`, `@ts-ignore`), SQL bruto no diff e
    `window.location.reload(`.
    **`git commit --no-verify` é proibido.** Ele foi a causa dos 7 erros de lint que
@@ -160,7 +159,7 @@ continua sendo pública por design. A **secret key** (`sb_secret_...`) / `servic
 nunca entra em variável `VITE_*`.
 
 > Histórico: o projeto anterior (`celiuyaycrnrhjuodydl`) morreu — `NXDOMAIN` em DNS
-> público. Se algum ambiente (Vercel, secrets do GitHub, máquina de outro dev) ainda
+> público. Se algum ambiente (secrets do GitHub, máquina de outro dev) ainda
 > apontar para ele, corrija antes de investigar sintomas de login.
 
 ### 7.2 Como reconectar (runbook)
@@ -173,7 +172,7 @@ nunca entra em variável `VITE_*`.
 4. Conferir tabelas: `assets`, `user_permissions`, `inventory_config`, `audit_logs`,
    `tenants`, `filial`. Se houver legado incompatível, ver cabeçalho do bootstrap.
 5. Cadastrar `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` em *GitHub → Settings →
-   Secrets* (usados pelo `android-build.yml`) e nas envs da Vercel.
+   Secrets* (usados pelo `ci.yml` e pelo `android-build.yml`).
 6. Rodar `npm run verify:governanca` (§ 8) e fazer um login real de teste.
 
 ### 7.3 Uso e limites
@@ -198,9 +197,16 @@ nunca entra em variável `VITE_*`.
 npm run verify:governanca              # git + env + Supabase (rede)
 npm run verify:governanca -- --offline # só git + env (uso em modo INTERNAL)
 npm run verify:governanca -- --use-example  # testa o host do .env.example
+npm run check:docs                     # links e referências dos docs (roda no CI)
 ```
 
-Checa, em sequência: estrutura do repo → branch/limpeza/fast-forward vs `origin/main`
+`check:docs` percorre todos os `.md` do repositório e falha (exit `1`) em link
+relativo ou referência de ficheiro que não exista. Referências declaradas como
+planeadas («a criar», «Criar» em checklist, «planejada», «nunca foi criado») são
+aceites **só quando o marcador está colado à referência** (antes ou depois dela):
+a palavra solta noutro ponto da linha não isenta nada.
+
+`verify:governanca` checa, em sequência: estrutura do repo → branch/limpeza/fast-forward vs `origin/main`
 → presença das variáveis → REST + AUTH do Supabase → tabelas essenciais.
 **Nunca imprime valores de chaves**, apenas presença.
 
@@ -220,7 +226,7 @@ rede e de secrets — o CI garante o código; este script garante o **ambiente**
 4. `npm run verify:governanca` — sem falhas.
 5. Versão em `package.json` + entrada no `CHANGELOG.md` (Keep a Changelog).
 6. PR com CI verde → merge em `main`.
-7. Deploy Vercel a partir do merge; **APK só sob demanda** (§ 9.1).
+7. **APK só sob demanda** (§ 9.1); a entrega web fica no que for publicado a partir de `main`.
 8. Conferir artefato: se o build deveria ser nuvem, validar que **não** caiu em
    INTERNAL (login Supabase funciona).
 9. Tag + release no GitHub com o APK anexado (`SKILL.md` descreve o processo).
@@ -238,8 +244,8 @@ quando alguém o pede. Três gestos, e só três:
 
 Regras:
 
-1. O merge em `main` continua a produzir **CI + deploy Vercel**; nada de APK
-   automático (era runner gasto e artefato que ninguém usava).
+1. O merge em `main` continua a produzir **CI**; nada de APK automático (era runner
+   gasto e artefato que ninguém usava).
 2. O workflow valida o que dói no campo e **falha em vez de publicar**: URL do
    Supabase embutida no bundle (senão o APK arranca em INTERNAL) e assinatura
    com o keystore estável (senão o Android recusa a instalação por cima).
@@ -280,7 +286,7 @@ Detalhes da chave e do custo de a manter no repositório:
 
 | # | Pendência | Impacto | Depende de |
 |---|---|---|---|
-| 1 | Secrets `VITE_SUPABASE_*` não cadastrados no GitHub (Actions) e Vercel | APK e deploy Vercel nascem INTERNAL | Passo 5 do runbook (§ 7.2) — é ação no painel, em minutos |
+| 1 | Secrets `VITE_SUPABASE_*` não cadastrados no GitHub (Actions) | APK nasce INTERNAL | Passo 5 do runbook (§ 7.2) — é ação no painel, em minutos |
 | 2 | RLS permissiva (`p_all`) | Anon key lê além do tenant | Hardening por `tenantid` (pós-reconexão) |
 | 3 | E2E Playwright fora do CI | Regressão de fluxo só manual | Decisão de custo/benefício |
 | 4 | Teste de login real no Supabase | AUTH saudável e tabelas OK, mas nenhum signup/sessão de ponta a ponta validado | Conta de teste no projeto |

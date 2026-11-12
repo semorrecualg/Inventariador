@@ -2685,7 +2685,10 @@ useEffect(() => {
         setInventory(prev => {
           // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
           const cloudCompanies = cloudData.config.companies || [];
-          const cloudAssets = cloudData.assets || [];
+          // Ativo que veio da nuvem ESTÁ na nuvem: chega marcado como sincronizado.
+          // Sem isto, tudo o que é descarregado ficava "PENDENTE NUVEM" para
+          // sempre — o upsert só envia colunas do schema remoto, nunca `_is_synced`.
+          const cloudAssets: Asset[] = (cloudData.assets || []).map(a => ({ ...a, _is_synced: 1 }));
           
           // SEGURANÇA + ISOLAMENTO SRE: Se a nuvem retornou 0 ativos mas temos
           // dados locais, mantemos a base local SOMENTE se ela pertencer ao
@@ -2751,7 +2754,14 @@ useEffect(() => {
           }
 
           // MERGE: Preserva alterações locais que ainda não foram sincronizadas
-          const mergedAssets = [...cloudAssets];
+          // Etiqueta honesta: o ativo desceu da nuvem, mas se existe localmente
+          // com _is_synced = 0 há alteração deste aparelho que ainda não subiu —
+          // nesse caso continua a valer "PENDENTE NUVEM".
+          const localById = new Map(prev.assets.map(a => [String(a.id), a]));
+          const mergedAssets = cloudAssets.map(cloudAsset => {
+            const local = localById.get(String(cloudAsset.id));
+            return local && Number(local._is_synced) === 0 ? { ...cloudAsset, _is_synced: 0 } : cloudAsset;
+          });
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           
           if (dirtyIds.length > 0) {
@@ -2893,10 +2903,21 @@ useEffect(() => {
     }
   }, [databaseMode, screen, isSyncing, pushLocalChanges, user]);
 
+  // Contrato ativo dos canais de tempo real: só muda quando muda o contrato,
+  // para o canal não ser desligado e religado a cada sincronização.
+  const realtimeTenantId = user?.tenantid || '';
+
+  // `pushScreen` não é estável (depende de databaseMode/selectedUnit): o efeito
+  // realtime usa a versão atual por ref, senão mudar de unidade reabria o canal.
+  const realtimePushScreenRef = useRef(pushScreen);
+  useEffect(() => {
+    realtimePushScreenRef.current = pushScreen;
+  }, [pushScreen]);
+
   // Real-time Cloud Sync Listener
   useEffect(() => {
-    // Só ativamos os listeners se o usuário estiver logado e em modo nuvem
-    if (!user || databaseMode === DatabaseMode.INTERNAL) return;
+    // Só ativamos os listeners se houver contrato e em modo nuvem
+    if (!realtimeTenantId || databaseMode === DatabaseMode.INTERNAL) return;
 
     // Update pending photos count
     const updatePendingCount = async () => {
@@ -2926,24 +2947,29 @@ useEffect(() => {
     window.addEventListener('gbr_photo_synced', handlePhotoSynced);
     
     // Expose map opener for Dashboard
-    (window as unknown as { onOpenMap: () => void }).onOpenMap = () => pushScreen(AppScreen.ASSET_MAP);
+    (window as unknown as { onOpenMap: () => void }).onOpenMap = () => realtimePushScreenRef.current(AppScreen.ASSET_MAP);
 
     // Check periodically
     const interval = setInterval(updatePendingCount, 10000);
 
+    // A config do contrato vive em config_<TENANT>; global_config fica como reserva.
     const subscription = subscribeToInventoryChanges((newConfig) => {
       if (newConfig && newConfig.lastUpdated) {
         const cloudTime = new Date(newConfig.lastUpdated).getTime();
-        const localTime = inventory.lastUpdated ? new Date(inventory.lastUpdated).getTime() : 0;
+        // Referência sempre atual (o efeito já não depende de inventory.lastUpdated,
+        // senão o canal era desligado/religado a cada sincronização).
+        const localTime = inventoryRef.current.lastUpdated
+          ? new Date(inventoryRef.current.lastUpdated).getTime()
+          : 0;
 
         // Se o tempo na nuvem for maior que o local, significa que houve uma carga externa (Admin)
         if (cloudTime > localTime + 5000) { // Margem de 5s para evitar auto-sync do próprio update
           setIsCloudUpdatePending(true);
         }
       }
-    });
+    }, realtimeTenantId);
 
-    const assetSubscription = subscribeToAssetChanges(user?.tenantid || '', (payload) => {
+    const assetSubscription = subscribeToAssetChanges(realtimeTenantId, (payload) => {
       const { eventType, new: newAssetData, old: oldAssetData } = payload;
       const newAsset = newAssetData as unknown as Asset;
       const oldAsset = oldAssetData as unknown as Asset;
@@ -2993,7 +3019,7 @@ useEffect(() => {
       if (subscription) subscription.unsubscribe();
       if (assetSubscription) assetSubscription.unsubscribe();
     };
-  }, [databaseMode, inventory.lastUpdated, user, pushScreen]);
+  }, [databaseMode, realtimeTenantId]);
 
   // Efeito para forçar sincronização se houver atualização pendente
   // Cloud Update Pending Handler
@@ -3937,7 +3963,11 @@ useEffect(() => {
           const shouldSyncCloud = hasSupabase && databaseMode === DatabaseMode.SUPABASE && (dirtyAssets.length > 0 || inventory.lastUpdated !== lastSyncTime);
           
           if (shouldSyncCloud) {
-            setIsSyncing(true);
+            // Autosave de fundo: não usa `isSyncing`, que abre o ecrã inteiro
+            // "SINCRONIZANDO BASE / baixando dados da nuvem" — texto que aqui
+            // nem é verdade (grava-se o retrato local e os ativos sujos). O
+            // overlay bloqueava o operador 3 s depois de cada conferência, e é
+            // isso que se sentia como "sincronizar a base toda".
             try {
               await saveInventory(inventory, dirtyAssets, true);
               setLastSyncTime(inventory.lastUpdated || new Date().toISOString());
@@ -3945,8 +3975,6 @@ useEffect(() => {
             } catch (err) {
               setSyncError('Erro na sincronização');
               logger.error('Sync error:', err);
-            } finally {
-              setIsSyncing(false);
             }
           } else {
             // FAST PATH: Salva apenas a config se não houver necessidade de sync pesado
@@ -5008,7 +5036,9 @@ useEffect(() => {
       clearTimeout(cloudQueueTimerRef.current);
       cloudQueueTimerRef.current = null;
     }
-    if (databaseMode !== DatabaseMode.SUPABASE) {
+    // SUPABASE_PLUS é o modo em memória com credenciais presentes: exigir a
+    // igualdade exacta a 'SUPABASE' desligava a fila nesse arranque.
+    if (!databaseMode.startsWith('SUPABASE')) {
       cloudQueueRef.current.clear();
       return;
     }
@@ -5046,7 +5076,7 @@ useEffect(() => {
   }, [flushCloudQueue]);
 
   const queueCloudSync = useCallback((assets: Asset[]) => {
-    if (databaseMode !== DatabaseMode.SUPABASE || assets.length === 0) return;
+    if (!databaseMode.startsWith('SUPABASE') || assets.length === 0) return;
     assets.forEach(a => cloudQueueRef.current.set(String(a.id), a));
     scheduleCloudFlush();
   }, [databaseMode, scheduleCloudFlush]);

@@ -70,7 +70,7 @@ Executar dentro de `Inventariador-main/` (Node do `.nvmrc`, ≥ 22):
   `lint` + `tsc`.
 - Corrigir a causa de uma falha. É proibido mascarar com `eslint-disable`,
   `@ts-ignore`, asserções enfraquecidas ou saltar testes para "ficar verde".
-- Os hooks Husky (`.husky/pre-commit` = lint + tsc, `pre-push` = build) podem não
+- Os hooks Husky (`.husky/pre-commit` = lint + tsc + check:docs, `pre-push` = build) podem não
   estar instalados neste ambiente; mesmo assim os portões são obrigatórios — o CI
   reproduz exatamente os mesmos comandos.
 
@@ -90,5 +90,5 @@ Inventariador/                 ← raiz do repositório git (este AGENTS.md)
 └── Inventariador-main/        ← raiz do APP (package.json, vite, src, docs)
 ```
 
-O app é **subdiretório** do repositório: é isso que os dois workflows e o
-`vercel.json` assumem. Não mover para a raiz; não criar `package.json` na raiz.
+O app é **subdiretório** do repositório: é isso que os dois workflows assumem.
+Não mover para a raiz; não criar `package.json` na raiz.

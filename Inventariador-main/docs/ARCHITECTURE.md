@@ -264,7 +264,6 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
 | `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` / `VITE_SUPABASE_SCHEMA` | Cloud mode (`SUPABASE_PLUS`) — schema multi-tenant padronizado | não |
 | `VITE_ADMIN_EMAIL` | Override do e-mail admin (default `semorr@gmail.com`) | não |
 | `APP_URL` / `SHARED_APP_URL` | `vite.config.ts` `define` | não |
-| `VITE_API_URL` | `vercel.json` (deploy) | não |
 
 `DatabaseMode`: `INTERNAL` · `INTERNAL_PLUS` · `SUPABASE` · `SUPABASE_PLUS`.
 `isInternalMode = !(VITE_SUPABASE_URL && VITE_SUPABASE_ANON_KEY)`: sem credenciais →
@@ -317,6 +316,33 @@ cai para INTERNAL em vez de rebentar.
 | `App.tsx` — Base Oficial | modal "build não compilado com as chaves" e recusa de abertura |
 | `components/Login.tsx` — badge | `AMBIENTE: MOBILE (LOCAL)` (âmbar) vs `SUPABASE (WEB)` (verde) |
 | `screens/DatabaseManagerScreen.tsx` | botão de espelhamento para a nuvem `disabled` em INTERNAL |
+
+**O que vai para a nuvem, e para onde** (contrato aplicado em
+`services/supabaseService.ts`):
+
+- **INTERNAL = nada sai do aparelho.** `syncConfigToCloud`, `saveUnitConfig` e
+  `saveUnitConfigFlags` retornam antes de tocar o cliente Supabase. A âncora GPS e as flags
+  de política continuam no SQLite/Dexie/`localStorage`; nenhuma gravação e nenhuma entrada
+  em `audit_logs` na nuvem acontece. Coberto por `src/__tests__/internalModeNoCloud.test.ts`
+  (falha se `supabase.from` ou `fetch` forem chamados).
+- **Em modo nuvem, a config do contrato sobe para `config_<TENANT>`** em `inventory_config`,
+  gravada pelo `id` (chave primária). A identidade da linha vem **sempre** do tenant do
+  contrato — nunca do objeto `config`: `buildConfigCloudPayload` descarta `id`/`tenantid`
+  vindos do objeto, tenta o tenant da config antes do tenant guardado no aparelho e trata
+  `default` (tenant sentinela da linha `global_config`) como identidade inválida, para não
+  criar `config_default`.
+- **O pull não leva identidade para o estado.** `mapCloudConfigRow` descarta `id`,
+  `tenantid`, `filial`, `data`, `metadata`, `created_at` e `updated_at` da linha: o estado
+  guarda apenas a política do contrato, e nenhum gravador repete o erro de escrever em
+  `global_config`.
+- **Falha de gravação deixa rasto:** a config que não sobe registra
+  `audit_logs.action = 'CONFIG_SYNC_FAIL'` com o código e a mensagem do erro.
+- **A conferência (quem e quando) sobe junto com o ativo**, nas colunas
+  `assets.conferido`, `assets.auditor` e `assets.data_leitura`, criadas por
+  `scripts/assets-conferencia.sql` (idempotente; backfill incluído). Sem o script, o lote
+  descarta a coluna em falta e reenvia (`PGRST204`) e o pull devolve o item marcado por
+  `status = 'CONFERIDO'`, mas fica sem autor/data: correr o script não é pré-requisito para
+  sincronizar, é o que impede perder o autor e a data ao reinstalar o app.
 
 **Modos de falha da credencial** (diagnóstico rápido):
 
@@ -394,6 +420,15 @@ emissão posterior à rotação), sem revelar o valor.
    ONBOARDING → `MODULE_SELECTION` (não `DASHBOARD` — guarda da Barreira Canônica),
    CHANGE_PWD → `UNIT_SELECTION` com desvio para `MAIN_MENU` em base vazia + admin.
    Novo teste de contrato `navigationMap.test.ts` garante rota única por tela e zero órfãs.
+6. **Configuração do contrato nunca chegava a `config_<TENANT>`** — o pull entregava ao
+   estado o `id`/`tenantid` da linha de origem (`global_config`/`default`) e o
+   `syncConfigToCloud` copiava-os para o payload, gravando sempre na linha global.
+   → a identidade da linha passou a vir só do tenant do contrato (`buildConfigCloudPayload`),
+   o pull deixou de entregar identidade ao estado (`mapCloudConfigRow`: `id`, `tenantid`,
+   `filial`, `data`, `metadata`, `created_at`, `updated_at`), `default` é identidade inválida,
+   o upsert usa o `id` (PK) e a falha fica em `audit_logs` (`CONFIG_SYNC_FAIL`). Em INTERNAL
+   nada sai do aparelho. Ver §10. Coberto por `configCloudPayload`, `mapCloudConfigRow`,
+   `syncConfigToCloud` e `internalModeNoCloud`.
 
 ---
 
@@ -429,6 +464,10 @@ emissão posterior à rotação), sem revelar o valor.
 - Provisionamento MASTER: `LicenseProvisioning`/`tenantProvisioningService` com senha
   forte (`passwordPolicy`) — validar fluxo completo ponta a ponta no device.
 - Fluxo "base vazia": admin cai no Gestor de Base — validar carga de `.db`/Excel.
+
+- Configuração do contrato na nuvem: **resolvido** (sem pendência) — a config sobe para
+  `config_<TENANT>`, o pull não leva identidade da linha para o estado e falhas de gravação
+  ficam em `audit_logs` (`CONFIG_SYNC_FAIL`). Ver §10 e §12.6.
 
 Rastreamento público: **GitHub Issue #6** (`semorrecualg/Inventariador`).
 

@@ -120,7 +120,7 @@ runtime** (`toUpperCase().trim()`) em vez de na carga.
 - `src/services/utils/addressParser.ts -> 5, 15 -> codigo_endereco: cleanStr(input.codigo_endereco).replace(/[^A-Z0-9-]/g, '') (UPPER + expurgo Excel — padrão SRE §6)`
 - `src/services/persistenceService.ts -> 200 -> codigo_endereco: trim().toUpperCase().replace(/[^A-Z0-9-]/g, '')`
 - `src/services/reportService.ts -> 20 -> payload de relatório: 'ENDERECO': a.ENDERECO (chave UPPER)`
-- `src/stores/inventoryStore.ts -> 102 -> editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO']`
+- `src/App.tsx -> 257 -> editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO']` (o antigo `inventoryStore` deixou de existir; o estado vive no `App`)
 - `src/utils/qrUtils.ts -> 25 -> campos QR incluem 'ENDERECO'`
 - `src/constants/schema.ts -> 11 -> DB_ASSET_COLUMNS (variações maiúsculas Excel, inclui 'ENDERECO')`
 - `src/constants/schema.ts -> 21 -> canônicas minúsculas (…'notafiscal', 'endereco'…)`
@@ -211,7 +211,7 @@ Consolidado na seção 2.2. Resumo executivo por categoria:
 
 | Categoria | Contagem aprox. (touchpoints) | Exemplo-chave |
 |---|---|---|
-| Chave UPPER `ENDERECO` como propriedade de objeto (runtime/UI/payloads) | ~30 | `App.tsx:219`, `AssetDetail.tsx:463`, `reportService.ts:20`, `inventoryStore.ts:102`, `qrUtils.ts:25` |
+| Chave UPPER `ENDERECO` como propriedade de objeto (runtime/UI/payloads) | ~30 | `App.tsx:219` e `:257`, `AssetDetail.tsx:463`, `reportService.ts:20`, `qrUtils.ts:25` |
 | Leitura híbrida tolerante `ENDERECO \|\| endereco` | 2 | `App.tsx:1893`, `Inventory.tsx:639` |
 | Normalização de valor em runtime (`toUpperCase().trim()`) | ~15 | `App.tsx:1899, 4223, 4838` |
 | Alias de cabeçalho no loader (11 sinônimos → canônico) | 3 | `DatabaseLoaderService.ts:182, 351, 618` |
@@ -284,8 +284,9 @@ Consolidado na seção 2.2. Resumo executivo por categoria:
    e migração Dexie `version(5)` idempotente (dry-run) para dados existentes + regeneração de
    `addresses`. Exige nova `version(n)` + atualização de `SCHEMA_BASELINE.md` e
    `schemaBaseline.test.ts`.
-4. **Fase D (Supabase — planejada, aguarda aprovação):** `scripts/migrate-endereco-supabase.sql`
-   seguindo a convenção `reconcile_*` de `migrate-tenantid/unitid-supabase.sql`, **escopada ao
+4. **Fase D (Supabase — planejada, aguarda aprovação):** o script
+   `scripts/migrate-endereco-supabase.sql` (a criar) segue a convenção `reconcile_*` de
+   `scripts/migrate-tenantid-supabase.sql` e `scripts/migrate-unitid-supabase.sql`, **escopada ao
    schema `staging`**: (1) pré-checks em `information_schema`; (2) merge `"ENDERECO"` → `endereco`
    apenas onde `endereco` vazia (esperado: 0 linhas — divergência medida = 0); (3) reescrita de
    políticas RLS/índices/constraints que referenciem `"ENDERECO"`; (4) `DROP` da coluna
@@ -391,7 +392,7 @@ Comando executado (por campo, case-sensitive): `grep -rw '<CHAVE_UPPER>' src/` v
 | `CONTACONTABIL` | 2 | 33 | lower dominante |
 
 **Distribuição por arquivo (40+ arquivos, amostra):** `src/utils/schema.ts`, `src/utils/qrUtils.ts`,
-`src/utils/reportGenerator.ts`, `src/types.ts`, `src/stores/{inventoryStore,uiStore}.ts`,
+`src/utils/reportGenerator.ts`, `src/types.ts`, `src/App.tsx`, `src/stores/uiStore.ts`,
 `src/services/{supabaseService,reportService,tagService,protheusService,depreciationService,
 stressTestService,demoSeed,DatabaseLoaderService}.ts`, `src/components/*` (Inventory, AssetDetail,
 Dashboard, AssetMap, AssetLedger, PublicKardex, TrustOnboarding, FieldConfigurator, Labeling…).
