@@ -246,9 +246,8 @@ Regras:
    O SHA-256 do APK e do certificado sai no resumo do job.
 3. Artefato fica disponível por 7 dias (`gbr-kardek-apk`). Para release, anexe o
    APK à tag no GitHub (passo 9) — o artefato do Actions expira.
-4. **A chave de assinatura é obrigatória (§ 9.2).** O build falha alto se o
-   secret `ANDROID_DEBUG_KEYSTORE_BASE64` não existir: não há cache nem chave
-   gerada na hora, porque chave diferente = “O app não foi instalado”.
+4. **A chave de assinatura é fixa (§ 9.2).** Vive no repositório, sem passo
+   manual; chave diferente = “O app não foi instalado”.
 5. **`/apk` exige escrita no repositório.** O job valida a permissão
    (`admin`/`maintain`/`write`) antes de compilar e falha fechado; PR de fork não
    gera APK (o código não é do repositório). O build sai do **HEAD do PR**, não
@@ -257,32 +256,22 @@ Regras:
    existe em `main`: no primeiro uso, faça o merge e peça o build a seguir. O
    mesmo vale para `/apk` — o GitHub lê o workflow da branch padrão.
 
-### 9.2 Chave de assinatura do APK (uma vez)
+### 9.2 Chave de assinatura do APK
 
-O APK é a identidade do app no telemóvel: **se a chave muda, a instalação por
-cima falha**. Por isso a chave é uma só, guardada num secret, e o
-`android-build.yml` **falha** se ela não existir (sem cache, sem geração
-automática).
+A chave com que **todos** os APKs são assinados está no repositório:
+`keystore/debug.keystore` (chave de *debug*, alias `androiddebugkey`, senhas
+`android`). **Não há passo manual nenhum** — é isso que garante que o APK instala
+por cima da versão anterior no telemóvel.
 
-**Cadastrar a chave (uma vez):**
+- O build usa o secret `ANDROID_DEBUG_KEYSTORE_BASE64` **se ele existir** e cai
+  no ficheiro do repositório caso contrário.
+- O certificado (SHA-256) sai no resumo de cada run e o build **falha** se o APK
+  não estiver assinado com ele.
+- Trocar a chave exige desinstalar a app nos aparelhos que já a têm: sincroniza
+  antes (desinstalar apaga o banco local). Não trocar sem motivo.
 
-1. Actions → **Gerar keystore de assinatura (uma vez)** → **Run workflow**.
-2. Baixe o artefacto `android-debug-keystore` e abra
-   `ANDROID_DEBUG_KEYSTORE_BASE64.txt`.
-3. Copie **tudo** (é uma linha só) e cadastre em Settings → Secrets and
-   variables → Actions → **New repository secret**, com o nome exato
-   `ANDROID_DEBUG_KEYSTORE_BASE64`.
-4. Volte ao run e **Delete run** — a chave não deve ficar pendurada em artefactos.
-5. Guarde o SHA-256 que aparece no resumo do run: é o certificado que o APK deve
-   mostrar em todas as builds.
-
-**Trocar de chave custa uma desinstalação.** A primeira versão assinada com a
-chave nova **não instala por cima** da anterior (assinaturas diferentes). Antes
-de a instalar: sincronize os dados de campo (desinstalar apaga o banco local) e
-desinstale a versão antiga no aparelho.
-
-O build publica o SHA-256 do APK e do certificado no resumo do run; o passo de
-verificação compara-os e falha se não baterem.
+Detalhes da chave e do custo de a manter no repositório:
+`keystore/README.md`.
 
 ---
 

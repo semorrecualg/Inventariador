@@ -279,27 +279,29 @@ jobs:
             gradle-cache-${{ runner.os }}-
 
       # A assinatura é a IDENTIDADE do app no telemóvel: se a chave muda, o
-      # Android recusa instalar por cima ("O app não foi instalado"). Por isso a
-      # chave vem SEMPRE do secret — nunca de cache (expira) nem de geração
-      # automática (inventa uma chave nova em cada runner). O keystore é gerado
-      # uma única vez pelo workflow "Gerar keystore de assinatura (uma vez)".
-      - name: Keystore de assinatura (obrigatório)
+      # Android recusa instalar por cima ("O app não foi instalado").
+      # A chave vive no repositório (keystore/debug.keystore): é uma chave de
+      # DEBUG, com as senhas públicas que o build já espera (alias
+      # androiddebugkey / senha android). Não há passo manual nenhum.
+      # Quem preferir guardá-la fora do repositório cadastra o secret
+      # ANDROID_DEBUG_KEYSTORE_BASE64 — ele passa a mandar sobre o ficheiro.
+      - name: Keystore de assinatura
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-          if [ -z "${KEYSTORE_B64:-}" ]; then
-            echo "::error::Secret ANDROID_DEBUG_KEYSTORE_BASE64 ausente. Sem ele a chave de assinatura mudaria entre builds e o telemóvel recusaria a instalação por cima de uma versão anterior. Gere a chave em Actions -> 'Gerar keystore de assinatura (uma vez)' e cadastre o conteudo como secret."
-            exit 1
-          fi
           mkdir -p "$HOME/.android"
-          printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          if [ -n "${KEYSTORE_B64:-}" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+            echo "Keystore: secret ANDROID_DEBUG_KEYSTORE_BASE64."
+          else
+            cp keystore/debug.keystore "$HOME/.android/debug.keystore"
+            echo "Keystore: ficheiro do repositório (keystore/debug.keystore)."
+          fi
           if [ ! -s "$HOME/.android/debug.keystore" ]; then
-            echo "::error::O secret ANDROID_DEBUG_KEYSTORE_BASE64 não decodificou num keystore. Copie o conteúdo de ANDROID_DEBUG_KEYSTORE_BASE64.txt inteiro (uma linha, sem quebras)."
+            echo "::error::Keystore vazio — o ficheiro keystore/debug.keystore não chegou ao runner."
             exit 1
           fi
-          echo "Keystore restaurado do secret ANDROID_DEBUG_KEYSTORE_BASE64."
-          # Fingerprint da chave usada: fica no log e no resumo do run.
           FP="$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -m1 'SHA256:' | sed 's/.*SHA256: *//' || true)"
           echo "Certificado da chave: ${FP:-desconhecido}"
           echo "| Certificado (SHA-256) | \`${FP:-desconhecido}\` |" >> "$GITHUB_STEP_SUMMARY"
@@ -314,6 +316,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace \
             -Pandroid.injected.signing.store.file="$HOME/.android/debug.keystore" \
+            -Pandroid.injected.signing.store.type=PKCS12 \
             -Pandroid.injected.signing.store.password=android \
             -Pandroid.injected.signing.key.alias=androiddebugkey \
             -Pandroid.injected.signing.key.password=android
