@@ -51,6 +51,13 @@ describe('check-docs — gate de referências dos docs', () => {
     expect(result.stderr).toContain('src/nao-existe-xyz.ts');
   });
 
+  it('a palavra "removido" ao lado da referência não isenta', () => {
+    const result = runAgainst('O antigo `src/nao-existe-xyz.ts` foi removido.\n');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/nao-existe-xyz.ts');
+  });
+
   it('link markdown relativo quebrado também falha', () => {
     const result = runAgainst('[quebrado](docs/nao-existe-abc.md)\n');
 
