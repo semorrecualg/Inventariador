@@ -33,7 +33,21 @@ export interface DedupFilialReport {
   removed: number;
 }
 
+export interface DedupExample {
+  /** Identidade normalizada: tenantid|filial|etiqueta. */
+  key: string;
+  keeper: string;
+  removed: string[];
+}
+
 export interface DedupReport {
+  /** Id da entrada em `audit_logs` (vazio no diagnóstico, que não escreve nada). */
+  auditId: string;
+  /**
+   * Até 5 grupos com as chaves envolvidas. É o que mostra QUAL caminho gravou a
+   * cópia (maiúsculas vs minúsculas, com/sem espaços, `ALT-` aleatório, etc.).
+   */
+  examples: DedupExample[];
   before: number;
   after: number;
   removed: number;
@@ -83,6 +97,7 @@ const keyIdOf = (row: DedupRow): string => primaryKeyOf(row).join('\u0000');
  */
 export async function previewAssetDuplicateCleanup(): Promise<DedupReport> {
   const tables: DedupTableReport[] = [];
+  let examples: DedupExample[] = [];
   let perFilial: DedupFilialReport[] = [];
   let before = 0;
   let removed = 0;
@@ -110,11 +125,16 @@ export async function previewAssetDuplicateCleanup(): Promise<DedupReport> {
       groupsWithCopies = plan.groups.length;
       withoutIdentity = plan.withoutIdentity;
       patched = plan.groups.filter((group) => Object.keys(group.patch).length > 0).length;
+      examples = plan.groups.slice(0, 5).map((group) => ({
+        key: group.key,
+        keeper: String(group.keeper.primarykey),
+        removed: group.removed.map((row) => String(row.primarykey))
+      }));
       perFilial = summarizePerFilial(rows, removedKeys);
     }
   }
 
-  return { before, after: before - removed, removed, groupsWithCopies, withoutIdentity, patched, tables, perFilial };
+  return { auditId: '', examples, before, after: before - removed, removed, groupsWithCopies, withoutIdentity, patched, tables, perFilial };
 }
 
 /**
@@ -141,11 +161,62 @@ export async function applyAssetDuplicateCleanup(): Promise<DedupReport> {
     });
   }
 
+  const auditId = await logDedupAudit(report);
+  report.auditId = auditId;
+
+  // A Unidade Operacional guarda o total em estado: sem este aviso o ecrã
+  // continua a somar as linhas que acabaram de sair da base.
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gbr_local_assets_changed', { detail: { removed: report.removed } }));
+  }
+
   logger.info(
     `[DEDUP] Cópias removidas: ${report.removed} (antes ${report.before} · depois ${report.after}) em ${report.groupsWithCopies} grupo(s).`
   );
 
   return report;
+}
+
+const currentUserEmail = (): string => {
+  try {
+    const raw = typeof window !== 'undefined' ? sessionStorage.getItem('app_current_user') : null;
+    if (!raw) return '';
+    const parsed = JSON.parse(raw) as { email?: string };
+    return String(parsed?.email || '').trim();
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Grava o resultado da limpeza em `audit_logs` (antes/depois, removidos e o
+ * detalhe por filial). `delta` leva os números em JSON para poderem ser lidos
+ * sem interpretar texto.
+ */
+async function logDedupAudit(report: DedupReport): Promise<string> {
+  const auditId = `DEDUP_${Date.now()}_${Math.random().toString(36).slice(2, 9).toUpperCase()}`;
+  const porFilial = report.perFilial.map((f) => `${f.filial} ${f.before}→${f.after} (-${f.removed})`).join(' · ');
+  await db.audit_logs.put({
+    id: auditId,
+    usuario: currentUserEmail() || 'SISTEMA',
+    acao: 'DEDUP_ASSETS',
+    tabela: 'assets',
+    registro_id: 'DEDUP_ASSETS',
+    details: `Limpeza de cópias por tenantid + filial + etiqueta: ${report.before} → ${report.after} (removidas ${report.removed}) em ${report.groupsWithCopies} grupo(s); sem etiqueta (intocados): ${report.withoutIdentity}. Por filial: ${porFilial}`,
+    delta: JSON.stringify({
+      before: report.before,
+      after: report.after,
+      removed: report.removed,
+      groupsWithCopies: report.groupsWithCopies,
+      withoutIdentity: report.withoutIdentity,
+      patched: report.patched,
+      perFilial: report.perFilial,
+      examples: report.examples,
+      tables: report.tables
+    }),
+    updated_at: new Date().toISOString()
+  });
+  return auditId;
 }
 
 /** Linhas do relatório, para o log do Gestor de Base. */
@@ -159,6 +230,9 @@ export function formatDedupReport(report: DedupReport): string[] {
   });
   report.perFilial.slice(0, 8).forEach((filial) => {
     lines.push(`[DEDUP] ${filial.filial}: ${filial.before} → ${filial.after} (-${filial.removed})`);
+  });
+  report.examples.forEach((example) => {
+    lines.push(`[DEDUP] ex. fica "${example.keeper}" · saem ${example.removed.map((k) => `"${k}"`).join(', ')}`);
   });
   return lines;
 }

@@ -104,6 +104,14 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
   const [statsLoading, setStatsLoading] = useState(true);
   // Só a primeira leitura mostra o spinner: recarregar não pode esconder a lista.
   const hasLoadedStats = React.useRef(false);
+  // Recálculo forçado: limpeza de cópias, restauro de backup ou carga nova mexem
+  // na tabela sem mudar a lista de unidades, e o total ficaria com o valor velho.
+  const [statsRevision, setStatsRevision] = useState(0);
+  useEffect(() => {
+    const reload = () => setStatsRevision((value) => value + 1);
+    window.addEventListener('gbr_local_assets_changed', reload);
+    return () => window.removeEventListener('gbr_local_assets_changed', reload);
+  }, []);
   // `units` chega como array novo a cada render do App; o efeito depende da
   // ASSINATURA (texto), não da identidade do array, para não repetir a varredura.
   const unitsRef = React.useRef(units);
@@ -239,7 +247,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
     return () => {
       active = false;
     };
-  }, [databaseMode, unitsSignature]);
+  }, [databaseMode, unitsSignature, statsRevision]);
 
   // Refs para estabilizar as funções callbacks externas e evitar loops infinitos de render
   const onSelectRef = React.useRef(onSelect);

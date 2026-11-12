@@ -48,6 +48,7 @@ describe('assetDedupService — limpeza de cópias na base local', () => {
     await db.local_assets.clear();
     await db.ativos.clear();
     await db.assets.clear();
+    await db.audit_logs.clear();
   });
 
   it('diagnóstico mostra antes/depois sem alterar nada', async () => {
@@ -110,6 +111,67 @@ describe('assetDedupService — limpeza de cópias na base local', () => {
     expect(second.removed).toBe(0);
     expect(second.before).toBe(1);
     expect(second.after).toBe(1);
+  });
+
+  it('grava o resultado da limpeza em audit_logs (antes/depois e por filial)', async () => {
+    await seed([
+      asset({ primarykey: 'A1' }),
+      asset({ primarykey: 'A2' }),
+      asset({ primarykey: 'A3', _conferido: 1 }),
+      asset({ primarykey: 'B1', filial: '010102 CICOPAL GO', filial_raw: '010102 CICOPAL GO' }),
+      asset({ primarykey: 'B2', filial: '010102 CICOPAL GO', filial_raw: '010102 CICOPAL GO', etiqueta: 'E9', tag: 'E9' })
+    ]);
+
+    const report = await applyAssetDuplicateCleanup();
+    expect(report.auditId).not.toBe('');
+
+    const logs = await db.audit_logs.toArray();
+    const entry = logs.find((log) => log.id === report.auditId);
+    expect(entry).toBeDefined();
+    expect(entry?.acao).toBe('DEDUP_ASSETS');
+    expect(entry?.tabela).toBe('assets');
+    expect(entry?.details).toContain('removidas');
+
+    const delta = JSON.parse(String(entry?.delta));
+    expect(delta).toMatchObject({ before: 5, after: 3, removed: 2 });
+    expect(delta.perFilial).toEqual([
+      { filial: '010101 CICOPAL GO', before: 3, after: 1, removed: 2 },
+      { filial: '010102 CICOPAL GO', before: 2, after: 2, removed: 0 }
+    ]);
+    expect(delta.tables.map((t: { table: string }) => t.table)).toEqual(['local_assets', 'ativos', 'assets']);
+    // As chaves divergentes viajam no relatório: é o que diz qual caminho gravou
+    // a cópia (`ARQUIVO1` vs `arquivo1`, `ALT-...`, com/sem espaços).
+    expect(delta.examples.length).toBeGreaterThan(0);
+    expect(delta.examples[0]).toMatchObject({
+      key: 'CICOPAL|010101 CICOPAL GO|E1',
+      keeper: 'A3',
+      removed: ['A1', 'A2']
+    });
+  });
+
+  it('diagnóstico não escreve em audit_logs', async () => {
+    await seed([asset({ primarykey: 'A1' }), asset({ primarykey: 'A2' })]);
+
+    const report = await previewAssetDuplicateCleanup();
+    expect(report.auditId).toBe('');
+    expect(await db.audit_logs.count()).toBe(0);
+  });
+
+  it('avisa a Unidade Operacional para voltar a contar depois da limpeza', async () => {
+    await seed([asset({ primarykey: 'A1' }), asset({ primarykey: 'A2' })]);
+
+    let received = 0;
+    const listener = (event: Event) => {
+      received = Number((event as CustomEvent<{ removed: number }>).detail?.removed ?? 0);
+    };
+    window.addEventListener('gbr_local_assets_changed', listener);
+    try {
+      await applyAssetDuplicateCleanup();
+    } finally {
+      window.removeEventListener('gbr_local_assets_changed', listener);
+    }
+
+    expect(received).toBe(1);
   });
 
   it('base sem cópias fica intacta', async () => {
