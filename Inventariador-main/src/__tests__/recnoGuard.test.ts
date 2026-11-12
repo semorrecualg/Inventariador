@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   describeRecnoCollision,
   findRecnoCollisions,
+  recnoCollisionKindOf,
   recnoKeyOf,
   sameRecnoData,
+  summarizeRecnoRow,
   type RecnoCandidate
 } from '../utils/recnoGuard';
 
@@ -92,6 +94,42 @@ describe('recnoGuard · conflitos', () => {
     ]);
     expect(collisions).toHaveLength(1);
     expect(collisions[0].filial).toBe('010102 CICOPAL GO');
+  });
+
+  it('separa recno repetido na LINHA SEGUINTE de origens diferentes', () => {
+    const linhaSeguinte = findRecnoCollisions([
+      base({ primarykey: 'PK-1', registro: 'OBRA10282', etiqueta: '010101OBRA102820214' }),
+      base({ primarykey: 'PK-2', registro: 'OBRA10282', etiqueta: '010101OBRA102820215', vlraquisic: 3.49 })
+    ]);
+    expect(linhaSeguinte[0].kind).toBe('LINHA_SEGUINTE');
+
+    const origens = findRecnoCollisions([
+      base({ primarykey: 'PK-1', registro: 'OBRA10282', etiqueta: '002070' }),
+      base({ primarykey: 'PK-2', registro: 'P000162883', etiqueta: '002075', vlraquisic: 3.49 })
+    ]);
+    expect(origens[0].kind).toBe('ORIGENS_DIFERENTES');
+  });
+
+  it('mesmo registro com etiquetas NÃO vizinhas também é origem diferente', () => {
+    const [collision] = findRecnoCollisions([
+      base({ primarykey: 'PK-1', registro: 'OBRA10228', etiqueta: '010101OBRA102280301' }),
+      base({ primarykey: 'PK-2', registro: 'OBRA10228', etiqueta: '010101OBRA102280310', vlraquisic: 3.49 })
+    ]);
+    expect(collision.kind).toBe('ORIGENS_DIFERENTES');
+  });
+
+  it('triplo de etiquetas consecutivas do mesmo registro continua sendo linha seguinte', () => {
+    const rows = [
+      base({ primarykey: 'PK-1', registro: 'OBRA10284', etiqueta: '010101OBRA102840007' }),
+      base({ primarykey: 'PK-2', registro: 'OBRA10284', etiqueta: '010101OBRA102840008' }),
+      base({ primarykey: 'PK-3', registro: 'OBRA10284', etiqueta: '010101OBRA102840009' })
+    ].map(summarizeRecnoRow);
+    expect(recnoCollisionKindOf(rows)).toBe('LINHA_SEGUINTE');
+  });
+
+  it('sem registro não dá para afirmar que é a linha seguinte', () => {
+    const rows = [base({ etiqueta: '010101OBRA102820214' }), base({ etiqueta: '010101OBRA102820215' })].map(summarizeRecnoRow);
+    expect(recnoCollisionKindOf(rows)).toBe('ORIGENS_DIFERENTES');
   });
 
   it('descreve o caso em uma linha de relatório', () => {

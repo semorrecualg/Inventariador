@@ -23,6 +23,16 @@ export interface RecnoCandidate {
   descricaodoativo?: unknown;
   vlraquisic?: unknown;
   primarykey?: unknown;
+  registro?: unknown;
+  qt?: unknown;
+  status?: unknown;
+  databaixa?: unknown;
+  endereco?: unknown;
+  notafiscal?: unknown;
+  nomefornecedor?: unknown;
+  dataaqusic?: unknown;
+  contacontabil?: unknown;
+  centrodecusto?: unknown;
 }
 
 export interface RecnoRowSummary {
@@ -30,7 +40,28 @@ export interface RecnoRowSummary {
   etiqueta: string;
   descricao: string;
   valor: number;
+  /** Campos que o operador leva ao Protheus (relatório e CSV). */
+  registro: string;
+  qt: string;
+  status: string;
+  databaixa: string;
+  endereco: string;
+  notafiscal: string;
+  nomefornecedor: string;
+  dataaqusic: string;
+  contacontabil: string;
+  centrodecusto: string;
 }
+
+/**
+ * Duas leituras do mesmo repetição de recno:
+ * - `LINHA_SEGUINTE`: etiquetas consecutivas do MESMO registro — o recno do
+ *   primeiro item apareceu repetido na linha seguinte (planilha preenchida por
+ *   arrasto / célula mesclada). É o caso dos pares `OBRA…`.
+ * - `ORIGENS_DIFERENTES`: registos (ou etiquetas não vizinhas), isto é, dois
+ *   ativos distintos dividindo o recno no Protheus.
+ */
+export type RecnoCollisionKind = 'LINHA_SEGUINTE' | 'ORIGENS_DIFERENTES';
 
 export interface RecnoCollision {
   /** `TENANTID|FILIAL|RECNO` — identidade do conflito. */
@@ -38,6 +69,7 @@ export interface RecnoCollision {
   tenantid: string;
   filial: string;
   recno: number;
+  kind: RecnoCollisionKind;
   rows: RecnoRowSummary[];
   /** Assinatura estável do conflito (evita auditoria repetida). */
   signature: string;
@@ -81,8 +113,43 @@ export const summarizeRecnoRow = (asset: RecnoCandidate): RecnoRowSummary => ({
   primarykey: text(asset.primarykey),
   etiqueta: text(asset.etiqueta).toUpperCase(),
   descricao: normalizeKey(asset.descricaodoativo),
-  valor: valueOf(asset.vlraquisic)
+  valor: valueOf(asset.vlraquisic),
+  registro: text(asset.registro),
+  qt: text(asset.qt),
+  status: text(asset.status),
+  databaixa: text(asset.databaixa),
+  endereco: text(asset.endereco),
+  notafiscal: text(asset.notafiscal),
+  nomefornecedor: text(asset.nomefornecedor),
+  dataaqusic: text(asset.dataaqusic),
+  contacontabil: text(asset.contacontabil),
+  centrodecusto: text(asset.centrodecusto)
 });
+
+/** Últimos dígitos da etiqueta (`…OBRA102820214` → `102820214`). */
+const trailingNumber = (etiqueta: string): number | null => {
+  const match = /(\d+)$/.exec(etiqueta);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+/**
+ * Separa os dois diagnósticos do relatório: recno repetido na LINHA SEGUINTE
+ * (mesmo registro, etiquetas vizinhas) ou ativos de ORIGENS DIFERENTES.
+ */
+export const recnoCollisionKindOf = (rows: ReadonlyArray<RecnoRowSummary>): RecnoCollisionKind => {
+  if (rows.length < 2) return 'ORIGENS_DIFERENTES';
+  const registro = text(rows[0].registro).toUpperCase();
+  if (!registro) return 'ORIGENS_DIFERENTES';
+  if (rows.some((row) => text(row.registro).toUpperCase() !== registro)) return 'ORIGENS_DIFERENTES';
+
+  const numbers = rows.map((row) => trailingNumber(row.etiqueta));
+  if (numbers.some((value) => value === null)) return 'ORIGENS_DIFERENTES';
+  const ordered = (numbers as number[]).sort((a, b) => a - b);
+  const consecutive = ordered.every((value, index) => index === 0 || value - ordered[index - 1] === 1);
+  return consecutive ? 'LINHA_SEGUINTE' : 'ORIGENS_DIFERENTES';
+};
 
 /**
  * Mesmos dados? Compara etiqueta, descrição e valor — é o que separa "a mesma
@@ -147,6 +214,7 @@ export const findRecnoCollisions = (assets: ReadonlyArray<RecnoCandidate>): Recn
       tenantid: group.tenantid,
       filial: group.filial,
       recno: group.recno,
+      kind: recnoCollisionKindOf(rows),
       rows,
       signature: signatureOf(rows)
     });

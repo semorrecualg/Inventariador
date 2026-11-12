@@ -3,6 +3,7 @@ import type { DexieAsset } from './sqliteService';
 import {
   describeRecnoCollision,
   findRecnoCollisions,
+  recnoCollisionKindOf,
   recnoKeyOf,
   sameRecnoData,
   summarizeRecnoRow,
@@ -171,14 +172,15 @@ export async function reportRecnoConflictForAsset(
   if (conflicts.length === 0) return { collisions: [], logged: 0 };
 
   const group = [asset, ...conflicts];
+  const rows = group.map((row): RecnoRowSummary => summarizeRecnoRow(row));
   const collision: RecnoCollision = {
     key: recnoKeyOf(asset),
     tenantid: String(asset.tenantid ?? '').trim().toUpperCase(),
     filial: String(asset.filial_raw || asset.filial || '').trim(),
     recno: Number(asset.sn1_recno),
-    rows: group.map((row): RecnoRowSummary => summarizeRecnoRow(row)),
-    signature: group
-      .map(summarizeRecnoRow)
+    kind: recnoCollisionKindOf(rows),
+    rows,
+    signature: rows
       .map((row) => `${row.etiqueta}~${row.valor.toFixed(2)}~${row.descricao}`)
       .sort()
       .join('||')
@@ -188,14 +190,145 @@ export async function reportRecnoConflictForAsset(
   return { collisions: [collision], logged };
 }
 
-/** Linhas de relatório para o log do Gestor de Base. */
+/** Quantos casos cada seção do relatório mostra no log antes de resumir. */
+const RECNO_REPORT_SECTION_LIMIT = 20;
+
+const countRows = (collisions: ReadonlyArray<RecnoCollision>): number =>
+  collisions.reduce((total, collision) => total + collision.rows.length, 0);
+
+/**
+ * Linhas de relatório para o log do Gestor de Base, separadas por diagnóstico:
+ * recno repetido na LINHA SEGUINTE (mesmo registro, etiquetas vizinhas) e
+ * ativos de ORIGENS DIFERENTES (recno compartilhado entre registos).
+ */
 export function formatRecnoReport(report: RecnoReport): string[] {
   if (report.collisions.length === 0) {
     return ['[RECNO] Nenhuma duplicidade por tenantid + filial + sn1_recno na base local.'];
   }
+
+  const linhaSeguinte = report.collisions.filter((collision) => collision.kind === 'LINHA_SEGUINTE');
+  const origensDiferentes = report.collisions.filter((collision) => collision.kind === 'ORIGENS_DIFERENTES');
   const lines = [
-    `[RECNO] ${report.collisions.length} caso(s) de possível duplicidade · ${report.logged} novo(s) em audit_logs`
+    `[RECNO] ${report.collisions.length} caso(s) · ${countRows(report.collisions)} linha(s) · ${report.logged} novo(s) em audit_logs`
   ];
-  report.collisions.slice(0, 20).forEach((collision) => lines.push(describeRecnoCollision(collision)));
+
+  const pushSection = (title: string, cases: ReadonlyArray<RecnoCollision>): void => {
+    if (cases.length === 0) return;
+    lines.push(`[RECNO] ${title} — ${cases.length} caso(s) · ${countRows(cases)} linha(s)`);
+    cases
+      .slice(0, RECNO_REPORT_SECTION_LIMIT)
+      .forEach((collision) => lines.push(`  ${describeRecnoCollision(collision)}`));
+    if (cases.length > RECNO_REPORT_SECTION_LIMIT) {
+      lines.push(`  ... e ${cases.length - RECNO_REPORT_SECTION_LIMIT} caso(s) — veja o CSV exportado.`);
+    }
+  };
+
+  pushSection('Recno repetido na LINHA SEGUINTE (mesmo registro, etiquetas vizinhas)', linhaSeguinte);
+  pushSection('Ativos de ORIGENS DIFERENTES (recno compartilhado)', origensDiferentes);
+  lines.push('[RECNO] Nada foi bloqueado nem apagado. Use EXPORTAR CSV para levar a lista ao Protheus.');
   return lines;
+}
+
+/**
+ * Colunas do CSV do relatório — o que o operador confere no Protheus (SN1).
+ * A primeira coluna separa os dois diagnósticos do relatório.
+ */
+export const RECNO_CSV_COLUMNS = [
+  'tipo',
+  'tenantid',
+  'filial',
+  'recno',
+  'registro',
+  'etiqueta',
+  'primarykey',
+  'descricao',
+  'valor',
+  'qt',
+  'status',
+  'databaixa',
+  'endereco',
+  'notafiscal',
+  'nomefornecedor',
+  'dataaqusic',
+  'contacontabil',
+  'centrodecusto',
+  'grupo'
+] as const;
+
+const csvCell = (value: string): string => {
+  const escaped = value.replace(/"/g, '""');
+  return /[";\r\n]/.test(value) ? `"${escaped}"` : escaped;
+};
+
+const kindOrder = (kind: RecnoCollision['kind']): number => (kind === 'LINHA_SEGUINTE' ? 0 : 1);
+
+const sortForReport = (a: RecnoCollision, b: RecnoCollision): number =>
+  kindOrder(a.kind) - kindOrder(b.kind) || a.filial.localeCompare(b.filial) || a.recno - b.recno;
+
+/**
+ * CSV do relatório (separador `;`, BOM para o Excel pt-BR abrir acentos).
+ * Uma linha por ATIVO envolvido; a coluna `grupo` (R1, R2, …) amarra as linhas
+ * do mesmo recno, e `tipo` diz se é repetição na linha seguinte ou origem
+ * diferente.
+ */
+export function recnoReportToCsv(report: RecnoReport): string {
+  const lines = [RECNO_CSV_COLUMNS.join(';')];
+  const ordered = [...report.collisions].sort(sortForReport);
+
+  ordered.forEach((collision, index) => {
+    const grupo = `R${index + 1}`;
+    collision.rows.forEach((row) => {
+      const values: Record<(typeof RECNO_CSV_COLUMNS)[number], string> = {
+        tipo: collision.kind,
+        tenantid: collision.tenantid,
+        filial: collision.filial,
+        recno: String(collision.recno),
+        registro: row.registro,
+        etiqueta: row.etiqueta,
+        primarykey: row.primarykey,
+        descricao: row.descricao,
+        valor: row.valor.toFixed(2),
+        qt: row.qt,
+        status: row.status,
+        databaixa: row.databaixa,
+        endereco: row.endereco,
+        notafiscal: row.notafiscal,
+        nomefornecedor: row.nomefornecedor,
+        dataaqusic: row.dataaqusic,
+        contacontabil: row.contacontabil,
+        centrodecusto: row.centrodecusto,
+        grupo
+      };
+      lines.push(RECNO_CSV_COLUMNS.map((column) => csvCell(values[column])).join(';'));
+    });
+  });
+
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
+}
+
+/** Nome do ficheiro exportado (um por dia, fácil de reconhecer no telemóvel). */
+export function recnoReportCsvFileName(date: Date = new Date()): string {
+  return `RECNO_DUPLICIDADE_${date.toISOString().slice(0, 10).replace(/-/g, '')}.csv`;
+}
+
+/**
+ * Baixa o CSV no navegador/telemóvel. Devolve o nome do ficheiro para o log
+ * (no teste, sem `document`, o nome sai igual e nada é descarregado).
+ */
+export function downloadRecnoReportCsv(report: RecnoReport): string {
+  const fileName = recnoReportCsvFileName();
+  const csv = recnoReportToCsv(report);
+  if (typeof document === 'undefined') return fileName;
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  return fileName;
 }

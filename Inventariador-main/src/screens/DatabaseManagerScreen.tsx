@@ -7,9 +7,9 @@ import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clea
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
-import { formatRecnoReport, reportRecnoCollisions } from '../services/recnoGuardService';
+import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
-import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen } from 'lucide-react';
+import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const data = await DatabaseLoaderService.extrairDadosDaPlanilha(file);
@@ -286,6 +286,15 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   // ── Guardião suave de duplicidade por recno (tenantid + filial + sn1_recno) ──
   const [recnoRunning, setRecnoRunning] = useState<boolean>(false);
   const [recnoLines, setRecnoLines] = useState<string[]>([]);
+  const [recnoReport, setRecnoReport] = useState<RecnoReport | null>(null);
+
+  const recnoCounts = (() => {
+    if (!recnoReport) return null;
+    const linha = recnoReport.collisions.filter((c) => c.kind === 'LINHA_SEGUINTE');
+    const origens = recnoReport.collisions.filter((c) => c.kind === 'ORIGENS_DIFERENTES');
+    const rows = (list: typeof linha) => list.reduce((total, c) => total + c.rows.length, 0);
+    return { linha: linha.length, linhaRows: rows(linha), origens: origens.length, origensRows: rows(origens) };
+  })();
 
   const handleRecnoCheck = async () => {
     if (recnoRunning) return;
@@ -296,6 +305,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       const lines = formatRecnoReport(report);
       lines.forEach(addLog);
       setRecnoLines(lines);
+      setRecnoReport(report.collisions.length > 0 ? report : null);
       showRecoveryToast(
         report.collisions.length === 0
           ? 'Nenhuma duplicidade por recno na base local.'
@@ -305,6 +315,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       addLog(`[SRE_RECNO ERROR] ${errMsg}`);
+      setRecnoReport(null);
       showRecoveryToast('Falha na verificação por recno — nada foi alterado.', 'red');
     } finally {
       setRecnoRunning(false);
@@ -686,6 +697,36 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           >
             <AlertTriangle size={14} />
             <span>{recnoRunning ? '...' : 'VERIFICAR RECNO'}</span>
+          </button>
+          {recnoCounts && (
+            <div className="grid grid-cols-2 gap-2">
+              <div className="px-2 py-2 bg-amber-950/30 border border-amber-900/30 rounded-lg">
+                <p className="text-[8px] font-black uppercase tracking-wider text-amber-400">Linha seguinte</p>
+                <p className="text-[10px] font-mono text-amber-100 mt-0.5">
+                  {recnoCounts.linha} caso(s) · {recnoCounts.linhaRows} linha(s)
+                </p>
+              </div>
+              <div className="px-2 py-2 bg-rose-950/30 border border-rose-900/30 rounded-lg">
+                <p className="text-[8px] font-black uppercase tracking-wider text-rose-400">Origens diferentes</p>
+                <p className="text-[10px] font-mono text-rose-100 mt-0.5">
+                  {recnoCounts.origens} caso(s) · {recnoCounts.origensRows} linha(s)
+                </p>
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            disabled={!recnoReport}
+            onClick={() => {
+              if (!recnoReport) return;
+              const fileName = downloadRecnoReportCsv(recnoReport);
+              addLog(`[SRE_RECNO] CSV exportado: ${fileName}`);
+              showRecoveryToast(`Relatório exportado: ${fileName}`, 'blue');
+            }}
+            className="flex items-center justify-center space-x-2 px-4 py-3 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 text-slate-100 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-slate-700/50"
+          >
+            <Download size={14} />
+            <span>EXPORTAR CSV</span>
           </button>
           {recnoLines.length > 0 && (
             <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">

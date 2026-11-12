@@ -285,6 +285,14 @@ numérico ou `<= 0` devolve chave vazia e sai da verificação.
   legível e `delta` JSON (`source`, `filial`, `recno`, `rows`, `signature`). O
   registro é idempotente pela `signature`, então recarregar a planilha não repete a
   auditoria.
+- **Relatório em duas seções:** `LINHA_SEGUINTE` (etiquetas consecutivas do mesmo
+  `registro` — o recno do primeiro item repetido na linha seguinte) e
+  `ORIGENS_DIFERENTES` (registos distintos dividindo o recno). O Gestor de Base mostra
+  as contagens de cada seção e exporta CSV (`recnoReportToCsv` →
+  `RECNO_DUPLICIDADE_AAAAMMDD.csv`, separador `;`, BOM): uma linha por ativo, com
+  `tipo`, `tenantid`, `filial`, `recno`, `registro`, `etiqueta`, `primarykey`,
+  `descricao`, `valor`, `qt`, `status`, `databaixa`, `endereco`, `notafiscal`,
+  `nomefornecedor`, `dataaqusic`, `contacontabil`, `centrodecusto` e `grupo`.
 - Recno `null`, `0` ou ausente (sobra física, ativo criado no app) não é verificado.
 - Índice em memória com `INDEX_TTL_MS = 30_000`, invalidado por
   `invalidateRecnoGuardIndex()` e pelo evento `gbr_local_assets_changed` — a
