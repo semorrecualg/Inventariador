@@ -112,6 +112,7 @@ import { saveInventory, loadInventory, clearInventory, clearMultipleInventories,
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
 import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
+import { isSyncLockStuck } from './services/syncQueueGuards';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 import { determineAssetTag } from './services/tagService';
@@ -878,6 +879,8 @@ useEffect(() => {
     userRef.current = user;
   }, [user]);
   const isSyncRunningRef = useRef<boolean>(false);
+  // Início do ciclo em andamento: base do watchdog que liberta uma trava presa.
+  const syncCycleStartedAtRef = useRef<number>(0);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
   const inventoryRef = useRef<InventoryState>(inventory);
@@ -1143,12 +1146,23 @@ useEffect(() => {
       if (!user || (!user.tenantid && !user.tenantid) || !sessionStorage.getItem('filial')) {
         return;
       }
+      // Watchdog: se o ciclo anterior passou de 2 minutos, a trava ficou presa
+      // (pedido sem resposta). Liberta e segue, em vez de ficar mudo para sempre.
+      if (isSyncLockStuck(isSyncRunningRef.current, syncCycleStartedAtRef.current)) {
+        logger.warn(
+          `>>> [Background Sync Watchdog] Ciclo anterior preso há mais de 2 min — libertando a trava (iniciado em ${new Date(syncCycleStartedAtRef.current).toISOString()}).`
+        );
+        isSyncRunningRef.current = false;
+        syncCycleStartedAtRef.current = 0;
+      }
+
       // Se o dispositivo estiver offline ou uma sincronização já estiver ativa, aborta o ciclo
       if (!navigator.onLine || isSyncRunningRef.current) {
         return;
       }
 
       isSyncRunningRef.current = true;
+      syncCycleStartedAtRef.current = Date.now();
       logger.info(">>> [Background Sync] Iniciando ciclo automático de atualização...");
 
       try {
@@ -1166,6 +1180,7 @@ useEffect(() => {
       } finally {
         // Libera a trava para o próximo ciclo de 60 segundos ou evento
         isSyncRunningRef.current = false;
+        syncCycleStartedAtRef.current = 0;
       }
     };
 
@@ -1180,10 +1195,38 @@ useEffect(() => {
 
     window.addEventListener('online', handleNetworkReconnection);
 
+    // Gatilho de retomada: o Android suspende os timers da WebView em segundo
+    // plano, então o ciclo de 60 s não corre com o app minimizado — e ao voltar
+    // o operador esperava até um minuto sem nada subir. Com o listener, o ciclo
+    // roda no instante em que o app volta ao primeiro plano.
+    let appStateHandle: { remove: () => Promise<void> } | null = null;
+    let disposed = false;
+    const registerAppStateListener = async () => {
+      try {
+        const { App: CapacitorApp } = await import('@capacitor/app');
+        const handle = await CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+          if (!isActive) return;
+          logger.info('>>> [Background Sync] App voltou ao primeiro plano: disparando ciclo.');
+          triggerBackgroundSync();
+        });
+        if (disposed) {
+          void handle.remove();
+        } else {
+          appStateHandle = handle;
+        }
+      } catch (err) {
+        // PWA/browser sem plugin nativo: o timer e o evento `online` continuam.
+        logger.warn('>>> [Background Sync] appStateChange indisponível nesta plataforma:', err);
+      }
+    };
+    void registerAppStateListener();
+
     // Limpeza de memória ao desmontar o ecossistema do App
     return () => {
+      disposed = true;
       clearInterval(syncIntervalId);
       window.removeEventListener('online', handleNetworkReconnection);
+      if (appStateHandle) void appStateHandle.remove();
     };
   }, [user]);
 

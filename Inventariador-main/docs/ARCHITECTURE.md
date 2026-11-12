@@ -244,6 +244,19 @@ bloqueiam sync sem tenant na tela de login). Upsert `onConflict('tenantid, id')`
   divergiam entre INTERNAL e SUPABASE_PLUS com a chave ausente. `logAuditEvent`
   também usa `getDatabaseMode()`: num build sem credenciais o registo vai para o
   Dexie em vez de tentar um Supabase inexistente.
+- **Fila resiliente (`services/syncQueueGuards.ts`):** quatro guardas que faltavam
+  quando o envio perdeu progresso em campo (2026-11-12: 15 de 45 conferidos
+  chegaram à nuvem e os 45 continuavam PENDENTE NUVEM).
+  1. `markRecordSynced` grava `_is_synced = 1` nos três stores **logo após** cada
+     upsert confirmado; antes a marcação era um lote no fim do laço e uma quebra
+     a meio perdia tudo o que já tinha subido.
+  2. `withUpsertTimeout` limita cada pedido a `UPSERT_TIMEOUT_MS` (15 s) — sem
+     isso um `fetch` pendurado (troca 4G→5G, tela bloqueada) congela a fila e
+     nunca liberta `isSyncRunningRef`.
+  3. `isSyncLockStuck` é o watchdog: ciclo acima de `SYNC_CYCLE_STUCK_MS`
+     (2 min) tem a trava libertada no tick seguinte, em vez de silêncio eterno.
+  4. `App.addListener('appStateChange')` dispara o ciclo quando o app volta ao
+     primeiro plano (o Android suspende os timers da WebView em segundo plano).
 - **Modo INTERNAL (`isInternalMode=true`): nenhuma chamada de rede** (bloqueio no App.tsx).
 - `navigator.storage.persist()` evita que o SO limpe o IndexedDB.
 

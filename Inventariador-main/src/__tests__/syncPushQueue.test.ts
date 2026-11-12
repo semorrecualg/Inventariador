@@ -127,6 +127,71 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     expect(logs[0].details).toContain('OUTRO');
   });
 
+  it('marca cada registo logo após o sucesso, mesmo que o seguinte falhe', async () => {
+    await db.local_assets.bulkPut([
+      asset({ primarykey: 'PK-A', id: 'PK-A' }) as never,
+      asset({ primarykey: 'PK-B', id: 'PK-B' }) as never
+    ]);
+
+    // Rede cai no segundo registo: o primeiro já subiu e TEM de ficar marcado.
+    // Antes a marcação só acontecia no fim do laço — uma quebra a meio perdia
+    // o progresso e o operador via 45 pendentes com 15 já na nuvem.
+    upsert.mockImplementation((payload: Record<string, unknown>) =>
+      payload.primarykey === 'PK-A'
+        ? Promise.resolve({ error: null })
+        : Promise.reject(new Error('rede caiu'))
+    );
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBe(1);
+    expect(result.failedCount).toBe(1);
+
+    const enviado = await db.local_assets.where('primarykey').equals('PK-A').first();
+    const pendente = await db.local_assets.where('primarykey').equals('PK-B').first();
+    expect(Number(enviado?._is_synced)).toBe(1);
+    expect(Number(pendente?._is_synced)).toBe(0);
+
+    // A falha fica registada na auditoria para não ser invisível.
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_RECORD_EXCEPTION').toArray();
+    expect(logs).toHaveLength(1);
+    expect(String(logs[0].registro_id)).toBe('PK-B');
+
+    // No ciclo seguinte só o que falhou é reenviado.
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    await processDataSyncQueue();
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect((upsert.mock.calls[0][0] as Record<string, unknown>).primarykey).toBe('PK-B');
+  });
+
+  it('marca cada registo ANTES de tentar o próximo (progresso não se perde)', async () => {
+    await db.local_assets.bulkPut([
+      asset({ primarykey: 'PK-A', id: 'PK-A' }) as never,
+      asset({ primarykey: 'PK-B', id: 'PK-B' }) as never
+    ]);
+
+    // Fotografa o estado local no instante de cada upsert. No código antigo a
+    // marcação era um lote no fim do ciclo: no segundo envio nada estava
+    // marcado, e qualquer interrupção (rede, app em segundo plano, pedido
+    // pendurado) perdia o progresso — 15 de 45 subiram e 45 ficaram pendentes.
+    const marcadosPorEnvio: string[] = [];
+    upsert.mockImplementation(async () => {
+      const locais = await db.local_assets.toArray();
+      marcadosPorEnvio.push(
+        locais.filter(r => Number(r._is_synced) === 1).map(r => String(r.primarykey)).sort().join(',')
+      );
+      return { error: null };
+    });
+
+    const result = await processDataSyncQueue();
+    expect(result.processedCount).toBe(2);
+
+    // No primeiro envio nada está marcado; no segundo, o primeiro já está.
+    expect(marcadosPorEnvio[0]).toBe('');
+    expect(marcadosPorEnvio[1]).toBe('PK-A');
+  });
+
   it('aceita o mesmo rótulo de unidade escrito de outra forma', async () => {
     await db.local_assets.put(asset({ filial: '010101 CICOPAL GO' }) as never);
     sessionStorage.setItem('filial', '010101');
