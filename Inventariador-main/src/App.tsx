@@ -2685,7 +2685,10 @@ useEffect(() => {
         setInventory(prev => {
           // Se a config da nuvem não trouxer a lista de empresas, extraímos dos ativos
           const cloudCompanies = cloudData.config.companies || [];
-          const cloudAssets = cloudData.assets || [];
+          // Ativo que veio da nuvem ESTÁ na nuvem: chega marcado como sincronizado.
+          // Sem isto, tudo o que é descarregado ficava "PENDENTE NUVEM" para
+          // sempre — o upsert só envia colunas do schema remoto, nunca `_is_synced`.
+          const cloudAssets: Asset[] = (cloudData.assets || []).map(a => ({ ...a, _is_synced: 1 }));
           
           // SEGURANÇA + ISOLAMENTO SRE: Se a nuvem retornou 0 ativos mas temos
           // dados locais, mantemos a base local SOMENTE se ela pertencer ao
@@ -2751,7 +2754,14 @@ useEffect(() => {
           }
 
           // MERGE: Preserva alterações locais que ainda não foram sincronizadas
-          const mergedAssets = [...cloudAssets];
+          // Etiqueta honesta: o ativo desceu da nuvem, mas se existe localmente
+          // com _is_synced = 0 há alteração deste aparelho que ainda não subiu —
+          // nesse caso continua a valer "PENDENTE NUVEM".
+          const localById = new Map(prev.assets.map(a => [String(a.id), a]));
+          const mergedAssets = cloudAssets.map(cloudAsset => {
+            const local = localById.get(String(cloudAsset.id));
+            return local && Number(local._is_synced) === 0 ? { ...cloudAsset, _is_synced: 0 } : cloudAsset;
+          });
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           
           if (dirtyIds.length > 0) {
@@ -3937,7 +3947,11 @@ useEffect(() => {
           const shouldSyncCloud = hasSupabase && databaseMode === DatabaseMode.SUPABASE && (dirtyAssets.length > 0 || inventory.lastUpdated !== lastSyncTime);
           
           if (shouldSyncCloud) {
-            setIsSyncing(true);
+            // Autosave de fundo: não usa `isSyncing`, que abre o ecrã inteiro
+            // "SINCRONIZANDO BASE / baixando dados da nuvem" — texto que aqui
+            // nem é verdade (grava-se o retrato local e os ativos sujos). O
+            // overlay bloqueava o operador 3 s depois de cada conferência, e é
+            // isso que se sentia como "sincronizar a base toda".
             try {
               await saveInventory(inventory, dirtyAssets, true);
               setLastSyncTime(inventory.lastUpdated || new Date().toISOString());
@@ -3945,8 +3959,6 @@ useEffect(() => {
             } catch (err) {
               setSyncError('Erro na sincronização');
               logger.error('Sync error:', err);
-            } finally {
-              setIsSyncing(false);
             }
           } else {
             // FAST PATH: Salva apenas a config se não houver necessidade de sync pesado
@@ -5008,7 +5020,9 @@ useEffect(() => {
       clearTimeout(cloudQueueTimerRef.current);
       cloudQueueTimerRef.current = null;
     }
-    if (databaseMode !== DatabaseMode.SUPABASE) {
+    // SUPABASE_PLUS é o modo em memória com credenciais presentes: exigir a
+    // igualdade exacta a 'SUPABASE' desligava a fila nesse arranque.
+    if (!databaseMode.startsWith('SUPABASE')) {
       cloudQueueRef.current.clear();
       return;
     }
@@ -5046,7 +5060,7 @@ useEffect(() => {
   }, [flushCloudQueue]);
 
   const queueCloudSync = useCallback((assets: Asset[]) => {
-    if (databaseMode !== DatabaseMode.SUPABASE || assets.length === 0) return;
+    if (!databaseMode.startsWith('SUPABASE') || assets.length === 0) return;
     assets.forEach(a => cloudQueueRef.current.set(String(a.id), a));
     scheduleCloudFlush();
   }, [databaseMode, scheduleCloudFlush]);
