@@ -18,7 +18,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
-import { isAdminUser } from '../utils/authUtils';
+import { isAdminUser, userHasPermission } from '../services/rbacService';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot, fetchCampaigns, fetchAllCampaigns } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { db } from '../services/sqliteService';
@@ -89,6 +89,15 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   const deletedCampaignIdsRef = React.useRef<Set<string>>(new Set());
   const withoutDeleted = React.useCallback((list: InventoryCampaign[]): InventoryCampaign[] =>
     list.filter(c => !deletedCampaignIdsRef.current.has(String(c.id))), []);
+
+  // Mesmo critério do ecrã de campanhas (App.tsx: `userHasPermission(user,
+  // 'manage_campaigns') || isAdminUser(user)`). O botão do cartão não tinha
+  // verificação nenhuma: qualquer perfil que chegasse ao ecrã apagava campanha,
+  // enquanto o botão da ficha exigia admin. Agora os dois usam este gate.
+  const canManageCampaigns = React.useMemo(
+    () => isAdminUser(user) || userHasPermission(user, 'manage_campaigns'),
+    [user]
+  );
 
   // Agrupamento por filial para a visão de manutenção administrativa (todas as campanhas)
   const campaignsByFilial = React.useMemo(() => {
@@ -605,7 +614,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   </button>
                 </div>
 
-                {(isAdminUser(user)) && (
+                {canManageCampaigns && (
                   <button 
                     onClick={() => {
                       setDeletingCampaignId(selectedCampaign.id);
@@ -702,7 +711,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                     </div>
 
                     {/* Botões de Ação na Base do Card */}
-                    <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-800/60">
+                    <div className={`grid ${canManageCampaigns ? 'grid-cols-2' : 'grid-cols-1'} gap-2 mt-4 pt-4 border-t border-slate-800/60`}>
                       {/* Ativar a Campanha */}
                       {campaign.id === currentCampaignId ? (
                         <div className="py-2 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 flex items-center justify-center gap-1.5">
@@ -725,16 +734,18 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                       )}
 
                       {/* Excluir Campanha */}
-                      <button
-                        onClick={() => {
-                          setDeletingCampaignId(campaign.id);
-                          setIsConfirmDeleteOpen(true);
-                        }}
-                        className="py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-500 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1"
-                      >
-                        <Trash2 size={12} />
-                        <span>Excluir</span>
-                      </button>
+                      {canManageCampaigns && (
+                        <button
+                          onClick={() => {
+                            setDeletingCampaignId(campaign.id);
+                            setIsConfirmDeleteOpen(true);
+                          }}
+                          className="py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-500 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1"
+                        >
+                          <Trash2 size={12} />
+                          <span>Excluir</span>
+                        </button>
+                      )}
                     </div>
                   </motion.div>
                     ))}

@@ -13,11 +13,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 
-const { deleteCampaignMock, localDeleteMock, removeCampaignFromAssetsMock, fetchCampaignsMock } = vi.hoisted(() => ({
+const { deleteCampaignMock, localDeleteMock, removeCampaignFromAssetsMock, fetchCampaignsMock, adminFlag, manageCampaignsFlag } = vi.hoisted(() => ({
   deleteCampaignMock: vi.fn().mockResolvedValue(true),
   localDeleteMock: vi.fn().mockResolvedValue(undefined),
   removeCampaignFromAssetsMock: vi.fn().mockResolvedValue(undefined),
-  fetchCampaignsMock: vi.fn()
+  fetchCampaignsMock: vi.fn(),
+  // Controlam o gate de exclusão: isAdminUser (RBAC) e manage_campaigns.
+  adminFlag: { value: true },
+  manageCampaignsFlag: { value: true }
 }));
 
 vi.mock('motion/react', async () => {
@@ -47,8 +50,17 @@ vi.mock('../utils/logger', () => ({
 }));
 
 vi.mock('../utils/authUtils', () => ({
-  isAdminUser: () => true,
-  userHasPermission: () => true
+  isAdminUser: () => adminFlag.value,
+  userHasPermission: () => manageCampaignsFlag.value
+}));
+
+// O gate de exclusão vive no RBAC (mesmo módulo que o ecrã usa em App.tsx).
+vi.mock('../services/rbacService', () => ({
+  isAdminUser: () => adminFlag.value,
+  userHasPermission: (...args: [unknown, string]) =>
+    args[1] === 'manage_campaigns' ? manageCampaignsFlag.value : false,
+  isAuditorUser: () => false,
+  hasPermission: () => false
 }));
 
 vi.mock('../services/sqliteService', () => ({
@@ -114,6 +126,8 @@ const renderManager = (list: InventoryCampaign[], onRefresh = vi.fn()) => (
 describe('CampaignManager — exclusão de campanha', () => {
   beforeEach(() => {
     cleanup();
+    adminFlag.value = true;
+    manageCampaignsFlag.value = true;
     deleteCampaignMock.mockClear();
     localDeleteMock.mockClear();
     removeCampaignFromAssetsMock.mockClear();
@@ -154,6 +168,35 @@ describe('CampaignManager — exclusão de campanha', () => {
       expect(screen.queryByText('Inventário nov 2026')).toBeNull();
     });
     expect(screen.getByText('Nova campanha nov 2026')).toBeTruthy();
+  });
+
+  it('mostra Excluir no cartão e na ficha com manage_campaigns, mesmo sem ser admin', async () => {
+    adminFlag.value = false;
+    manageCampaignsFlag.value = true;
+    render(renderManager(campaigns));
+
+    expect(await screen.findByText('Inventário nov 2026')).toBeTruthy();
+    fireEvent.click(screen.getAllByText('Excluir')[0]);
+    fireEvent.click(screen.getByText('Cancelar'));
+    await waitFor(() => expect(screen.queryByText('ALERTA CRÍTICO')).toBeNull());
+
+    fireEvent.click(screen.getByText('Inventário nov 2026'));
+    expect(await screen.findByText('Excluir Campanha')).toBeTruthy();
+  });
+
+  it('esconde Excluir do cartão e da ficha sem admin e sem manage_campaigns', async () => {
+    adminFlag.value = false;
+    manageCampaignsFlag.value = false;
+    render(renderManager(campaigns));
+
+    expect(await screen.findByText('Inventário nov 2026')).toBeTruthy();
+    // Cartão: nenhum botão de exclusão, mas a campanha continua visível.
+    expect(screen.queryByText('Excluir')).toBeNull();
+
+    // Ficha: abre pelos dados do cartão e também não oferece exclusão.
+    fireEvent.click(screen.getByText('Inventário nov 2026'));
+    expect(await screen.findByText('Arquivar')).toBeTruthy();
+    expect(screen.queryByText('Excluir Campanha')).toBeNull();
   });
 
   it('cancelar mantém a campanha na lista e não apaga nada', async () => {
