@@ -15,6 +15,7 @@ import { pullDedupKey } from '../utils/syncDedup';
 import { normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
+import { sanitizeAssetKey } from '../utils/assetKey';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -1007,7 +1008,9 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         throw new Error("Sessão Expirada: Contrato ausente para sincronização.");
       }
 
-      const assetPrimaryKey = String(cleanAsset.primarykey !== undefined && cleanAsset.primarykey !== null ? cleanAsset.primarykey : '').trim() || String(cleanAsset.id || '');
+      // Chave canônica única (utils/assetKey): a carga, o pull e o envio usam a
+      // MESMA grafia — sem isso o upsert criava uma linha por variante da chave.
+      const assetPrimaryKey = sanitizeAssetKey(cleanAsset.primarykey) || sanitizeAssetKey(cleanAsset.id);
 
       // Projeção estrita de colunas GBR v2.6 sem campos fantasmas, usando tenantid e _unitid direto, preenchendo id com a propriedade primarykey
       const row: Record<string, unknown> = {

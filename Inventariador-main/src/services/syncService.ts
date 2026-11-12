@@ -4,6 +4,7 @@ import { SyncQueueItem } from '../types';
 import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate } from './supabaseService';
 import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
+import { sanitizeAssetKey } from '../utils/assetKey';
 import { resolveTenantId } from '../utils/tenantUtils';
 
 export interface UserSessionData {
@@ -434,7 +435,8 @@ const _syncService = {
           break;
         }
 
-        const pKey = record.primarykey || record.id || '';
+        // Chave canônica única: o que sobe para a nuvem é o mesmo `primarykey` local.
+        const pKey = sanitizeAssetKey(record.primarykey || record.id);
         if (isStringInvalid(pKey)) {
           failedPrimaryKeys.push(String(pKey));
           continue;
@@ -469,7 +471,7 @@ const _syncService = {
             subreg: record.subreg !== undefined && record.subreg !== null ? String(record.subreg).trim() : null,
             databaixa: record.databaixa !== undefined && record.databaixa !== null ? String(record.databaixa).trim() : null,
             contacontabil: record.contacontabil !== undefined && record.contacontabil !== null ? String(record.contacontabil).trim() : null,
-            primarykey: String(pKey).trim(),
+            primarykey: pKey,
             centrodecusto: record.centrodecusto !== undefined && record.centrodecusto !== null ? String(record.centrodecusto).trim() : null,
             vlraquisic: record.vlraquisic !== undefined && record.vlraquisic !== null ? Number(record.vlraquisic) : 0,
             sn1_recno: record.sn1_recno !== undefined && record.sn1_recno !== null ? Number(record.sn1_recno) : null,

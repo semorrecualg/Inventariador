@@ -9,6 +9,7 @@ import { generateChecksum } from './utils';
 import { normalizeAssetContract } from '../utils/schema';
 import { FileSystemStorageService } from './FileSystemStorageService';
 import { logger } from '../utils/logger';
+import { sanitizeAssetKey } from '../utils/assetKey';
 
 // Chaves base para o armazenamento
 const BASE_ASSETS_KEY = 'inventory_assets_v24';
@@ -221,15 +222,12 @@ export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
 
 export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & { primarykey: string }): Promise<void> {
   // Higienização dos indexadores principais conforme diretrizes de governança GBR
-  if (assetData.primarykey) {
-    assetData.primarykey = String(assetData.primarykey).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  }
-  if (assetData.etiqueta) {
-    assetData.etiqueta = String(assetData.etiqueta).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  }
-  if (assetData.tag) {
-    assetData.tag = String(assetData.tag).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  }
+  // Chave canônica única (utils/assetKey): a mesma regra da carga da planilha,
+  // do pull da nuvem e do envio. Antes esta função expurgava separadores a mais
+  // e criava uma chave diferente da que a carga gravou para o mesmo ativo.
+  if (assetData.primarykey) assetData.primarykey = sanitizeAssetKey(assetData.primarykey);
+  if (assetData.etiqueta) assetData.etiqueta = sanitizeAssetKey(assetData.etiqueta);
+  if (assetData.tag) assetData.tag = sanitizeAssetKey(assetData.tag);
 
   // Bloqueia e sequencia as tabelas envolvidas em modo Read-Write
   await db.transaction('rw', [db.local_assets, db.ativos], async () => {
