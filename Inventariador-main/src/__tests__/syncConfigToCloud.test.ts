@@ -1,8 +1,22 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { supabase, syncConfigToCloud, getDatabaseMode } from '../services/supabaseService';
+// ============================================================================
+// syncConfigToCloud.test.ts — Regressão (run #98): o job de testes do CI NÃO
+// recebe os secrets do Supabase, por isso `isInternalMode` valia `true`, o
+// módulo nascia em modo INTERNAL e `syncConfigToCloud` saía cedo — o teste caía
+// com "expected 'INTERNAL' to be 'SUPABASE'" e a promessa rejeitada nunca
+// acontecia. As credenciais falsas abaixo são fixadas ANTES do import dinâmico
+// (mesmo padrão de fetchTenantFiliais.test.ts), de modo que o resultado não
+// depende do ambiente de quem corre os testes.
+// ============================================================================
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import type * as SupabaseService from '../services/supabaseService';
 
-const supabaseStub = supabase as unknown as { from: (table: string) => unknown };
+vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
+vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
+
+let syncConfigToCloud: typeof SupabaseService.syncConfigToCloud;
+let getDatabaseMode: typeof SupabaseService.getDatabaseMode;
+let supabaseStub: { from: (table: string) => unknown };
 
 function stubTables() {
   const upsert = vi.fn();
@@ -28,6 +42,13 @@ describe('syncConfigToCloud — modo nuvem', () => {
     lastUpdated: '2026-11-12T02:59:07.536Z',
     darkMode: true
   };
+
+  beforeAll(async () => {
+    const mod = await import('../services/supabaseService');
+    syncConfigToCloud = mod.syncConfigToCloud;
+    getDatabaseMode = mod.getDatabaseMode;
+    supabaseStub = mod.supabase as unknown as { from: (table: string) => unknown };
+  });
 
   beforeEach(() => {
     localStorage.clear();
