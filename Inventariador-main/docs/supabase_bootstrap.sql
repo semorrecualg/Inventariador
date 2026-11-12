@@ -213,6 +213,7 @@ ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS details text;
 ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS origin text;
 ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS new_data jsonb;
 ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS old_data jsonb;
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS tenant_id text;
 
 CREATE INDEX IF NOT EXISTS audit_logs_tenantid_idx ON public.audit_logs (tenantid);
 CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx ON public.audit_logs (created_at DESC);
@@ -357,6 +358,12 @@ ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS details text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS record_id text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS origin text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS table_name text;
+-- Grafia legada `tenant_id`: um trigger criado na base (fora do repositório)
+-- grava o log de ativos com `tenant_id`. Sem a coluna, o INSERT do trigger falha
+-- com 42703, a transação do upsert é abortada e o espelhamento termina com
+-- "0 ativos sincronizados, 12636 rejeitados" — a mensagem cita asset_logs mesmo
+-- que o problema esteja no trigger e não no payload do app (que envia `tenantid`).
+ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS tenant_id text;
 
 CREATE TABLE IF NOT EXISTS public."asset-photos" (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
