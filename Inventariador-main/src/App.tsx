@@ -2903,10 +2903,14 @@ useEffect(() => {
     }
   }, [databaseMode, screen, isSyncing, pushLocalChanges, user]);
 
+  // Contrato ativo dos canais de tempo real: só muda quando muda o contrato,
+  // para o canal não ser desligado e religado a cada sincronização.
+  const realtimeTenantId = user?.tenantid || '';
+
   // Real-time Cloud Sync Listener
   useEffect(() => {
-    // Só ativamos os listeners se o usuário estiver logado e em modo nuvem
-    if (!user || databaseMode === DatabaseMode.INTERNAL) return;
+    // Só ativamos os listeners se houver contrato e em modo nuvem
+    if (!realtimeTenantId || databaseMode === DatabaseMode.INTERNAL) return;
 
     // Update pending photos count
     const updatePendingCount = async () => {
@@ -2945,16 +2949,20 @@ useEffect(() => {
     const subscription = subscribeToInventoryChanges((newConfig) => {
       if (newConfig && newConfig.lastUpdated) {
         const cloudTime = new Date(newConfig.lastUpdated).getTime();
-        const localTime = inventory.lastUpdated ? new Date(inventory.lastUpdated).getTime() : 0;
+        // Referência sempre atual (o efeito já não depende de inventory.lastUpdated,
+        // senão o canal era desligado/religado a cada sincronização).
+        const localTime = inventoryRef.current.lastUpdated
+          ? new Date(inventoryRef.current.lastUpdated).getTime()
+          : 0;
 
         // Se o tempo na nuvem for maior que o local, significa que houve uma carga externa (Admin)
         if (cloudTime > localTime + 5000) { // Margem de 5s para evitar auto-sync do próprio update
           setIsCloudUpdatePending(true);
         }
       }
-    }, user?.tenantid);
+    }, realtimeTenantId);
 
-    const assetSubscription = subscribeToAssetChanges(user?.tenantid || '', (payload) => {
+    const assetSubscription = subscribeToAssetChanges(realtimeTenantId, (payload) => {
       const { eventType, new: newAssetData, old: oldAssetData } = payload;
       const newAsset = newAssetData as unknown as Asset;
       const oldAsset = oldAssetData as unknown as Asset;
@@ -3004,7 +3012,7 @@ useEffect(() => {
       if (subscription) subscription.unsubscribe();
       if (assetSubscription) assetSubscription.unsubscribe();
     };
-  }, [databaseMode, inventory.lastUpdated, user, pushScreen]);
+  }, [databaseMode, realtimeTenantId, pushScreen]);
 
   // Efeito para forçar sincronização se houver atualização pendente
   // Cloud Update Pending Handler
