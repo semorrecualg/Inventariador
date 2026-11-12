@@ -1333,21 +1333,31 @@ export const downloadBaseToLocal = async (
   return all.length;
 };
 
-export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
-  if (getDatabaseMode() === 'INTERNAL') return;
-  if (!supabase || !navigator.onLine) return;
-  
+/**
+ * Monta a linha de `inventory_config` que representa a configuração do tenant
+ * (`id = config_<TENANT>`).
+ *
+ * A identidade da linha (id/tenantid) vem SEMPRE do tenant resolvido, nunca do
+ * objeto `config`. A configuração que desce da nuvem traz o `id`/`tenantid` da
+ * LINHA de origem (`global_config` / `default`); ao subir de volta, esses campos
+ * faziam o app gravar nessa mesma linha — era por isso que `config_<TENANT>`
+ * nunca nascia e a leitura caía sempre no `global_config`.
+ */
+export const buildConfigCloudPayload = (
+  config: Omit<InventoryState, 'assets'> | Record<string, unknown>,
+  tenantid?: string | string[]
+): { configId: string; tenantid: string; payload: Record<string, unknown> } | null => {
   // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
   // IMPORTANTE: battery_saver é omitido para garantir compatibilidade estrita até que o backend processe a nova estrutura
   const allowedKeys = [
-    'id', 
-    'companies', 
-    'last_updated', 
+    'id',
+    'companies',
+    'last_updated',
     'status',
-    'editable_fields', 
-    'qr_code_fields', 
-    'scanner_mode', 
-    'scan_feedback_mode', 
+    'editable_fields',
+    'qr_code_fields',
+    'scanner_mode',
+    'scan_feedback_mode',
     'inventory_search_mode',
     'immersive_mode',
     'dark_mode',
@@ -1359,43 +1369,6 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'tenantid'
   ];
 
-  const resolvedTenantid = (
-    (Array.isArray(tenantid) ? tenantid[0] : tenantid) ||
-    (config as Record<string, unknown>).tenantid ||
-    (config as Record<string, unknown>).tenantid ||
-    readLocalTenantId() ||
-    readSessionTenantId() ||
-    ''
-  ).toString().trim();
-
-  const cleanTenantidRaw = resolvedTenantid !== 'undefined' && resolvedTenantid !== 'null' ? resolvedTenantid : '';
-
-  if (!cleanTenantidRaw) {
-    logger.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantid ausente.");
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
-        detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. O envio das configurações foi bloqueado." }
-      }));
-    }
-    return; // Interrompe a operação de sync
-  }
-
-  const cleanTenant = encodeURIComponent(cleanTenantidRaw.replace(/[%_\s]+/g, ''));
-  if (!cleanTenant || cleanTenant === 'undefined' || cleanTenant === 'null') {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
-        detail: { message: "Contrato inválido para sincronização. Por favor, reautentique para carregar a sessão." }
-      }));
-    }
-    return; // Interrompe a operação de sync
-  }
-  const configId = `config_${cleanTenant}`;
-
-  const payload: Record<string, unknown> = {
-    id: configId,
-    tenantid: cleanTenant
-  };
-  
   // Mapeamento de camelCase para snake_case
   const mapping: Record<string, string> = {
     'lastUpdated': 'last_updated',
@@ -1413,30 +1386,84 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'databaseMode': 'database_mode'
   };
 
-  Object.keys(config).forEach(key => {
+  const source = config as unknown as Record<string, unknown>;
+
+  // Ordem de resolução: tenant explícito do chamador → tenant desta sessão
+  // (mesma regra de syncAssetsToCloud) → tenant que veio dentro do objeto.
+  // O objeto pode carregar o tenant de uma linha global, por isso fica por último.
+  const resolvedTenantid = (
+    (Array.isArray(tenantid) ? tenantid[0] : tenantid) ||
+    readLocalTenantId() ||
+    readSessionTenantId() ||
+    source.tenantid ||
+    ''
+  ).toString().trim();
+
+  const cleanTenantidRaw = resolvedTenantid !== 'undefined' && resolvedTenantid !== 'null' ? resolvedTenantid : '';
+  if (!cleanTenantidRaw) return null;
+
+  const cleanTenant = encodeURIComponent(cleanTenantidRaw.replace(/[%_\s]+/g, ''));
+  if (!cleanTenant || cleanTenant === 'undefined' || cleanTenant === 'null') return null;
+
+  const configId = `config_${cleanTenant}`;
+  const payload: Record<string, unknown> = {
+    id: configId,
+    tenantid: cleanTenant
+  };
+
+  Object.keys(source).forEach(key => {
     const dbKey = mapping[key] || key;
     // Omitimos explicitamente o batterySaver ou battery_saver para garantir a blindagem do payload
     if (key === 'batterySaver' || key === 'battery_saver' || dbKey === 'battery_saver') {
       return;
     }
-    if (allowedKeys.includes(dbKey)) {
-      const val = (config as Record<string, unknown>)[key];
-      // Impedimos o envio de campos nulos ou indefinidos de infraestrutura para evitar a quebra do interceptor do v2.6
-      if (val !== undefined && val !== null) {
-        if (dbKey === 'tenantid' && (!val || val === 'undefined' || val === 'null' || String(val).trim() === '')) {
-          return; // ignora valores inválidos de tenantid no config
-        }
-        payload[dbKey] = val;
-      }
+    // Identidade nunca vem do objeto (ver comentário da função).
+    if (dbKey === 'id' || dbKey === 'tenantid') return;
+    if (!allowedKeys.includes(dbKey)) return;
+    const val = source[key];
+    // Impedimos o envio de campos nulos ou indefinidos de infraestrutura para evitar a quebra do interceptor do v2.6
+    if (val !== undefined && val !== null) {
+      payload[dbKey] = val;
     }
   });
 
+  return { configId, tenantid: cleanTenant, payload };
+};
+
+export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
+  if (getDatabaseMode() === 'INTERNAL') return;
+  if (!supabase || !navigator.onLine) return;
+
+  const built = buildConfigCloudPayload(config, tenantid);
+  if (!built) {
+    logger.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantid ausente.");
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+        detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. O envio das configurações foi bloqueado." }
+      }));
+    }
+    return; // Interrompe a operação de sync
+  }
+
+  const { configId, tenantid: tenant, payload } = built;
+
   const { error } = await supabase
     .from('inventory_config')
-    .upsert(payload);
+    .upsert(payload, { onConflict: 'id' });
 
   if (error) {
     logger.error('Error syncing config to Supabase:', error);
+    // Diagnóstico durável: antes, uma falha aqui só existia na consola do
+    // aparelho e `config_<TENANT>` ficava a faltar sem rasto nenhum.
+    void logAuditEvent({
+      user_email: 'system',
+      action: 'CONFIG_SYNC_FAIL',
+      table_name: 'inventory_config',
+      record_id: configId,
+      details: `Falha ao gravar ${configId} (Code: ${error.code || 'sem código'}): ${error.message}`,
+      tenantid: tenant,
+      origin: 'SYNC'
+    }).catch(() => { /* auditoria é diagnóstico: nunca derruba o fluxo */ });
     throw error;
   }
 };
@@ -3246,7 +3273,8 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
  * Falha silenciosa (a coluna pode não existir antes do script): o local manda.
  */
 export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> => {
-  if (!supabase) return false;
+  // Modo INTERNAL = zero chamadas de rede (docs/ARCHITECTURE.md §10).
+  if (!supabase || getDatabaseMode() === 'INTERNAL') return false;
 
   const tenantid = (config.tenantid || readLocalTenantId() || readSessionTenantId() || '')
     .toString().trim();
@@ -3305,8 +3333,8 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
 
 export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | string> => {
   try {
-    // v25.70: a sincronizacao com a nuvem e tentada sempre que o client Supabase
-    // estiver configurado, independente do modo (try-catch interno = offline-first).
+    // A sincronizacao com a nuvem so acontece em modo de nuvem (try-catch
+    // interno = offline-first): em INTERNAL nada sai do aparelho.
 
     // 1. SALVAMENTO SQLITE (Prioritário para Soberania de Dados)
     try {
@@ -3371,7 +3399,10 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       logger.warn('>>> [Persistence] Falha ao espelhar GPS no Dexie:', dexieErr);
     }
 
-    if (!supabase) return true;
+    // Modo INTERNAL = zero chamadas de rede (docs/ARCHITECTURE.md §10). A âncora
+    // e as flags já ficaram no SQLite/Dexie acima; sem esta guarda, um aparelho
+    // em modo interno gravava em `inventory_config` e disparava auditoria.
+    if (!supabase || getDatabaseMode() === 'INTERNAL') return true;
 
   // 2. SINCRONIZAÇÃO EM NUVEM (falha silenciosa nao bloqueia o fluxo local)
   const syncToCloud = async () => {
