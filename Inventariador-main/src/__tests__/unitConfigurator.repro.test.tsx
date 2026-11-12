@@ -124,5 +124,8 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     // Limpeza final: sem raízes órfãs afetando o restante da suíte
     root.unmount();
     container.remove();
-  });
+    // Limite explícito: os dois `until(...)` acima podem esperar até 6 s cada,
+    // então o padrão de 5 s do Vitest matava o teste num runner lento (CI) antes
+    // de o helper desistir. O teste não trava — ele só precisa de mais folga.
+  }, 20000);
 });
