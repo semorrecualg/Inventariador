@@ -3112,6 +3112,50 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
 };
 
 /**
+ * Grava o laudo no Dexie do aparelho. Existe separado porque a cópia local é
+ * obrigatória nos DOIS modos: se a nuvem recusar (RLS/rede), o fecho da campanha
+ * não pode ficar sem histórico.
+ */
+const persistSnapshotLocally = async (snapshot: CampaignSnapshot): Promise<void> => {
+  await db.campaign_snapshots.put({
+    id: snapshot.id,
+    campaign_id: snapshot.campaign_id,
+    assets_data: JSON.stringify(snapshot.assets_data),
+    metadata: JSON.stringify(snapshot.metadata),
+    closed_at: snapshot.snapshot_date,
+    closed_by: snapshot.closed_by || '',
+    tenantid: snapshot.tenantid
+  });
+};
+
+/**
+ * Lê o laudo mais recente gravado no aparelho (Dexie).
+ */
+const readLocalSnapshot = async (campaignId: string): Promise<CampaignSnapshot | null> => {
+  try {
+    const snapshots = await db.campaign_snapshots.where('campaign_id').equals(campaignId).toArray();
+    if (snapshots.length === 0) return null;
+
+    // Sort by closed_at descending (latest first)
+    snapshots.sort((a, b) => b.closed_at.localeCompare(a.closed_at));
+
+    const row = snapshots[0];
+    return {
+      id: row.id,
+      campaign_id: row.campaign_id,
+      assets_data: JSON.parse(row.assets_data),
+      metadata: JSON.parse(row.metadata),
+      snapshot_date: row.closed_at,
+      closed_by: row.closed_by,
+      tenantid: row.tenantid || readLocalTenantId() || readSessionTenantId() || ''
+    } as CampaignSnapshot;
+  } catch (err) {
+    logger.error('>>> [SQLite] Erro ao recuperar snapshot:', err);
+    return null;
+  }
+};
+
+/**
  * Cria um Snapshot (Congelamento) de todos os ativos de uma campanha.
  * Isso garante que o Laudo Final seja imutável conforme CPC 27.
  */
@@ -3176,15 +3220,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
           tenantid: tenantid
         };
 
-        await db.campaign_snapshots.put({
-          id: snapshot.id,
-          campaign_id: snapshot.campaign_id,
-          assets_data: JSON.stringify(snapshot.assets_data),
-          metadata: JSON.stringify(snapshot.metadata),
-          closed_at: snapshot.snapshot_date,
-          closed_by: snapshot.closed_by || '',
-          tenantid: snapshot.tenantid
-        });
+        await persistSnapshotLocally(snapshot);
 
         logger.info('>>> [SQLite] Snapshot criado com sucesso.');
         return true;
@@ -3231,6 +3267,23 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             cpc_compliance: 'CPC 27 / NBC TG 27'
         };
 
+        // 3.1 Cópia local do laudo ANTES da nuvem: se o insert falhar (RLS, quota,
+        // rede), o fecho da campanha continua com histórico no aparelho.
+        try {
+            await persistSnapshotLocally({
+                id: `snap_${campaignId}_${Date.now()}`,
+                campaign_id: campaignId,
+                assets_data: assets as unknown as Asset[],
+                metadata: stats,
+                snapshot_date: new Date().toISOString(),
+                closed_by: closedBy,
+                tenantid,
+            } as CampaignSnapshot);
+            logger.info('>>> [Snapshot] Cópia local do laudo gravada (fallback offline).');
+        } catch (localErr) {
+            logger.warn('>>> [Snapshot] Falha ao gravar a cópia local do laudo:', localErr);
+        }
+
         // 4. Salva o Snapshot em JSONB (Alta eficiência de armazenamento v24.50)
         // Isso evita criar 12k linhas extras no banco, preservando o limite free de 500MB
         const { error: snapshotError } = await supabase
@@ -3274,31 +3327,11 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
 
     if (isInternal) {
       logger.info('>>> [SQLite] Recuperando Snapshot da campanha:', campaignId);
-      try {
-        const snapshots = await db.campaign_snapshots.where('campaign_id').equals(campaignId).toArray();
-        if (snapshots.length === 0) return null;
-        
-        // Sort by closed_at descending (latest first)
-        snapshots.sort((a, b) => b.closed_at.localeCompare(a.closed_at));
-        
-        const row = snapshots[0];
-        return {
-          id: row.id,
-          campaign_id: row.campaign_id,
-          assets_data: JSON.parse(row.assets_data),
-          metadata: JSON.parse(row.metadata),
-          snapshot_date: row.closed_at,
-          closed_by: row.closed_by,
-          tenantid: row.tenantid || readLocalTenantId() || readSessionTenantId() || ''
-        } as CampaignSnapshot;
-      } catch (err) {
-        logger.error('>>> [SQLite] Erro ao recuperar snapshot:', err);
-        return null;
-      }
+      return await readLocalSnapshot(campaignId);
     }
 
-    if (!supabase) return null;
-    
+    if (!supabase) return await readLocalSnapshot(campaignId);
+
     try {
         const { data, error } = await supabase
             .from('campaign_snapshots')
@@ -3307,9 +3340,23 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
             .maybeSingle();
 
         if (error) throw error;
-        return data as CampaignSnapshot;
+        if (data) return data as CampaignSnapshot;
+
+        // Campanha encerrada sem rede (ou antes do insert na nuvem): o laudo do
+        // aparelho continua a valer em vez de aparecer "sem snapshot".
+        const local = await readLocalSnapshot(campaignId);
+        if (local) {
+          logger.info('>>> [Snapshot] Nuvem sem laudo — usando o snapshot gravado no aparelho.');
+          return local;
+        }
+        return null;
     } catch (err) {
         logger.error('Erro ao buscar snapshot:', err);
+        const local = await readLocalSnapshot(campaignId);
+        if (local) {
+          logger.info('>>> [Snapshot] Nuvem indisponível — usando o snapshot gravado no aparelho.');
+          return local;
+        }
         return null;
     }
 };
@@ -3561,8 +3608,9 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
  * Busca as configurações de geofencing combinando Local e Nuvem
  */
 export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
+  // Mesma regra do resto do módulo: sem a chave gravada, decide pelas credenciais
+  // do build — antes o GPS ficava só local enquanto o app já usava a nuvem.
+  const isInternal = getDatabaseMode() === 'INTERNAL';
   
   try {
     const configs: Record<string, UnitConfig> = {};

@@ -56,6 +56,15 @@ import { photoSyncManager } from '../services/syncService';
 const client = supabaseModule.supabase as unknown as { from: (table: string) => unknown };
 
 const campaignRow = { id: 'camp-a', tenantid: 'CICOPAL', filial: '010101 CICOPAL GO' };
+const dexieSnapshotRow = {
+  id: 'snap-local',
+  campaign_id: 'camp-a',
+  assets_data: JSON.stringify([{ id: 'a1' }]),
+  metadata: JSON.stringify({ total: 1 }),
+  closed_at: '2026-11-12T10:00:00.000Z',
+  closed_by: 'ana@gbr.com',
+  tenantid: 'CICOPAL'
+};
 const assetRow = { id: 'a1', _conferido: true, filial: '010101 CICOPAL GO' };
 
 const stubCloud = () => {
@@ -109,9 +118,10 @@ describe('snapshots e fila de fotos — modo resolvido por getDatabaseMode()', (
     expect(ok).toBe(true);
     expect(cloud.from).toHaveBeenCalledWith('campaign_snapshots');
     expect(cloud.insertSnapshot).toHaveBeenCalled();
-    // O caminho local não foi usado.
+    // A base local NÃO foi a fonte dos dados...
     expect(getCampaignsMock).not.toHaveBeenCalled();
-    expect(snapshotPutMock).not.toHaveBeenCalled();
+    // ...mas o laudo também ficou copiado no aparelho (fallback).
+    expect(snapshotPutMock).toHaveBeenCalledTimes(1);
   });
 
   it('createCampaignSnapshot com INTERNAL gravado continua no SQLite', async () => {
@@ -145,6 +155,83 @@ describe('snapshots e fila de fotos — modo resolvido por getDatabaseMode()', (
 
     expect(toArrayMock).toHaveBeenCalled();
     expect(cloud.maybeSingle).not.toHaveBeenCalled();
+  });
+
+  it('createCampaignSnapshot grava também a cópia local do laudo quando a nuvem aceita', async () => {
+    localStorage.removeItem('app_database_mode');
+    const cloud = stubCloud();
+
+    const ok = await supabaseModule.createCampaignSnapshot('camp-a', 'ana@gbr.com');
+
+    expect(ok).toBe(true);
+    expect(cloud.insertSnapshot).toHaveBeenCalled();
+    expect(snapshotPutMock).toHaveBeenCalledTimes(1);
+    const localRow = snapshotPutMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(localRow.campaign_id).toBe('camp-a');
+    expect(JSON.parse(String(localRow.assets_data))).toHaveLength(1);
+  });
+
+  it('createCampaignSnapshot mantém o laudo no aparelho quando a nuvem recusa o insert', async () => {
+    localStorage.removeItem('app_database_mode');
+    const cloud = stubCloud();
+    cloud.insertSnapshot.mockResolvedValue({ error: { message: 'permission denied for table campaign_snapshots' } });
+
+    const ok = await supabaseModule.createCampaignSnapshot('camp-a', 'ana@gbr.com');
+
+    // A nuvem falhou (resultado honesto) mas o laudo não se perdeu.
+    expect(ok).toBe(false);
+    expect(snapshotPutMock).toHaveBeenCalledTimes(1);
+    expect((snapshotPutMock.mock.calls[0][0] as Record<string, unknown>).campaign_id).toBe('camp-a');
+  });
+
+  it('getCampaignSnapshot cai no Dexie quando a nuvem não tem o laudo', async () => {
+    localStorage.removeItem('app_database_mode');
+    const cloud = stubCloud();
+    cloud.maybeSingle.mockResolvedValue({ data: null, error: null });
+    toArrayMock.mockResolvedValue([dexieSnapshotRow]);
+
+    const snap = await supabaseModule.getCampaignSnapshot('camp-a');
+
+    expect(cloud.maybeSingle).toHaveBeenCalled();
+    expect(toArrayMock).toHaveBeenCalled();
+    expect(snap).toMatchObject({ id: 'snap-local', campaign_id: 'camp-a' });
+  });
+
+  it('getCampaignSnapshot cai no Dexie quando a nuvem responde com erro', async () => {
+    localStorage.removeItem('app_database_mode');
+    const cloud = stubCloud();
+    cloud.maybeSingle.mockResolvedValue({ data: null, error: { message: 'network down' } });
+    toArrayMock.mockResolvedValue([dexieSnapshotRow]);
+
+    const snap = await supabaseModule.getCampaignSnapshot('camp-a');
+
+    expect(snap).toMatchObject({ id: 'snap-local' });
+  });
+
+  it('fetchUnitConfigs consulta a nuvem quando o modo não está gravado', async () => {
+    localStorage.removeItem('app_database_mode');
+    localStorage.setItem('local_unit_configs', JSON.stringify({
+      CICOPAL_010101: { filial: '010101 CICOPAL GO', tenantid: 'CICOPAL', lat: -16.6, lng: -49.2 }
+    }));
+    const from = vi.spyOn(client, 'from').mockReturnValue({
+      select: () => ({ eq: async () => ({ data: [], error: null }) })
+    } as never);
+
+    await supabaseModule.fetchUnitConfigs('CICOPAL');
+
+    expect(from).toHaveBeenCalledWith('inventory_config');
+  });
+
+  it('fetchUnitConfigs respeita o INTERNAL gravado de propósito', async () => {
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    localStorage.setItem('local_unit_configs', JSON.stringify({
+      CICOPAL_010101: { filial: '010101 CICOPAL GO', tenantid: 'CICOPAL', lat: -16.6, lng: -49.2 }
+    }));
+    const from = vi.spyOn(client, 'from').mockReturnValue({} as never);
+
+    await supabaseModule.fetchUnitConfigs('CICOPAL');
+
+    expect(from).not.toHaveBeenCalled();
   });
 
   it('a fila de fotos não para quando o modo não está gravado', async () => {

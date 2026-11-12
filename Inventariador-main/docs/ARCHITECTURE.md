@@ -231,6 +231,11 @@ bloqueiam sync sem tenant na tela de login). Upsert `onConflict('tenantid, id')`
   `fetchCampaigns` consultava a nuvem — a alteração voltava no merge. Os três
   passaram a usar `getDatabaseMode()`, que só é INTERNAL sem credenciais no build
   ou com INTERNAL gravado de propósito.
+- **Laudo da campanha (snapshot):** `createCampaignSnapshot` grava **sempre** uma
+  cópia no Dexie, mesmo quando a fonte é a nuvem e mesmo se o `insert` falhar
+  (RLS/quota/rede) — o fecho da campanha não fica sem histórico. `getCampaignSnapshot`
+  lê a nuvem primeiro e cai no Dexie quando a nuvem não tem o laudo ou responde
+  com erro. O modo do `fetchUnitConfigs` (GPS) segue a mesma regra dos campanhas.
 - **Modo INTERNAL (`isInternalMode=true`): nenhuma chamada de rede** (bloqueio no App.tsx).
 - `navigator.storage.persist()` evita que o SO limpe o IndexedDB.
 
