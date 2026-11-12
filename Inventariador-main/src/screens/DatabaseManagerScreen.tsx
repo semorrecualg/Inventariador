@@ -7,6 +7,7 @@ import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clea
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
+import { formatRecnoReport, reportRecnoCollisions } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
 import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen } from 'lucide-react';
 
@@ -281,6 +282,34 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   // então o bulkPut não substitui e a Unidade Operacional soma 4× os ativos.
   const [dedupRunning, setDedupRunning] = useState<boolean>(false);
   const [dedupLines, setDedupLines] = useState<string[]>([]);
+
+  // ── Guardião suave de duplicidade por recno (tenantid + filial + sn1_recno) ──
+  const [recnoRunning, setRecnoRunning] = useState<boolean>(false);
+  const [recnoLines, setRecnoLines] = useState<string[]>([]);
+
+  const handleRecnoCheck = async () => {
+    if (recnoRunning) return;
+    setRecnoRunning(true);
+    addLog('[SRE_RECNO] Verificando duplicidade por tenantid + filial + sn1_recno (nada é bloqueado)...');
+    try {
+      const report = await reportRecnoCollisions('GESTOR_BASE');
+      const lines = formatRecnoReport(report);
+      lines.forEach(addLog);
+      setRecnoLines(lines);
+      showRecoveryToast(
+        report.collisions.length === 0
+          ? 'Nenhuma duplicidade por recno na base local.'
+          : `${report.collisions.length} possível(is) duplicidade(s) por recno — verifique o relatório.`,
+        'blue'
+      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      addLog(`[SRE_RECNO ERROR] ${errMsg}`);
+      showRecoveryToast('Falha na verificação por recno — nada foi alterado.', 'red');
+    } finally {
+      setRecnoRunning(false);
+    }
+  };
 
   const handleDedupClick = async (apply: boolean) => {
     if (dedupRunning) return;
@@ -634,6 +663,37 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <UploadCloud size={14} />
             <span>{isUploading ? `CARREGANDO: ${progress}%` : "SELECIONAR E CARREGAR PLANILHA"}</span>
           </button>
+        </div>
+
+        {/* Guardião suave de duplicidade por recno (Protheus sn1_recno) */}
+        <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col space-y-3">
+          <div className="flex items-center space-x-3">
+            <div className="p-3 bg-cyan-950/40 text-cyan-400 rounded-full border border-cyan-900/30">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Duplicidade por Recno</h3>
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
+                Mesmo contrato + filial + sn1_recno com etiqueta, descrição ou valor diferentes. Só avisa.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={recnoRunning}
+            onClick={handleRecnoCheck}
+            className="flex items-center justify-center space-x-2 px-4 py-3 bg-cyan-700 hover:bg-cyan-600 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-cyan-600/20"
+          >
+            <AlertTriangle size={14} />
+            <span>{recnoRunning ? '...' : 'VERIFICAR RECNO'}</span>
+          </button>
+          {recnoLines.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">
+              {recnoLines.map((line, index) => (
+                <p key={`recno-${index}`} className="text-[9px] font-mono text-slate-300 break-words">{line}</p>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Limpeza de cópias repetidas: mesmo tenantid + filial + etiqueta */}

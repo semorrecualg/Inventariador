@@ -10,6 +10,8 @@ import { normalizeAssetContract } from '../utils/schema';
 import { FileSystemStorageService } from './FileSystemStorageService';
 import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
+import { reportRecnoConflictForAsset } from './recnoGuardService';
+import type { RecnoCandidate } from '../utils/recnoGuard';
 
 // Chaves base para o armazenamento
 const BASE_ASSETS_KEY = 'inventory_assets_v24';
@@ -229,6 +231,10 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
   if (assetData.etiqueta) assetData.etiqueta = sanitizeAssetKey(assetData.etiqueta);
   if (assetData.tag) assetData.tag = sanitizeAssetKey(assetData.tag);
 
+  // Guarda o registo gravado: a verificação de recno corre FORA da transação
+  // (a auditoria vive noutra tabela e não pode entrar neste escopo).
+  let mergedData: DexieAsset | null = null;
+
   // Bloqueia e sequencia as tabelas envolvidas em modo Read-Write
   await db.transaction('rw', [db.local_assets, db.ativos], async () => {
     // Chave composta [tenantid+primarykey] — o tenantid é o muro entre contratos.
@@ -237,7 +243,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
     const existingActive = await db.ativos.get(assetKey);
     const existingLocal = await db.local_assets.get(assetKey);
 
-    const mergedData = {
+    mergedData = {
       ...(existingActive || {}),
       ...(existingLocal || {}),
       ...assetData,
@@ -245,7 +251,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
       _conferido: 1,
       _is_synced: 0,
       updated_at: new Date().toISOString()
-    };
+    } as unknown as DexieAsset;
 
     // Escrita atômica sequencial
     await db.local_assets.put(mergedData as DexieAsset);
@@ -253,6 +259,14 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
       await db.ativos.update(assetKey, { _conferido: 1 });
     }
   });
+
+  // Guardião suave: recno repetido com etiqueta/descrição/valor diferentes vira
+  // registro de auditoria (ASSET_DUP_SUSPECT). Não bloqueia a conferência.
+  try {
+    await reportRecnoConflictForAsset(mergedData as unknown as RecnoCandidate, 'CONFERENCIA');
+  } catch (err: unknown) {
+    logger.warn('[RECNO] Falha ao verificar duplicidade na conferência:', err instanceof Error ? err.message : String(err));
+  }
 
   // Espelhamento físico em background no disco rígido do dispositivo (Anti-Limpeza).
   // Antes esta rotina lia a base INTEIRA (toArray) e regravava o JSON completo a

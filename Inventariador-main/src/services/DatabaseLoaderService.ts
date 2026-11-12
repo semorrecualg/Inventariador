@@ -7,6 +7,7 @@ import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
 import { normalizeFieldValue, normalizeDateISO, normalizeNumeric } from '../utils/normalize';
 import { contentFingerprint, createFallbackKeyAllocator, resolveAssetKey, sanitizeAssetKey } from '../utils/assetKey';
+import { reportRecnoCollisions } from './recnoGuardService';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -154,6 +155,21 @@ export class DatabaseLoaderService {
   private BATCH_SIZE = 200;
   private static CHUNK_SIZE = 200; // Política SRE imperativa
 
+
+  /**
+   * Guardião suave de duplicidade por `tenantid + filial + sn1_recno`: roda no
+   * fim da carga, compara etiqueta/descrição/valor e registra em `audit_logs` o
+   * que divergir. Falha aqui NUNCA derruba a carga.
+   */
+  private static async reportRecnoAfterLoad(): Promise<void> {
+    try {
+      await reportRecnoCollisions('CARGA_PLANILHA');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn('[RECNO] Falha ao verificar duplicidade por recno após a carga:', message);
+    }
+  }
+
   static async extrairDadosDaPlanilha(file: Blob): Promise<unknown[]> {
     const reader = new FileReader();
     const dataBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
@@ -260,6 +276,7 @@ export class DatabaseLoaderService {
       }
       logger.info(`[SRE_LOADER] Lote injetado. Progresso: ${registrosProcessados}/${dadosBrutos.length}`);
     }
+    await DatabaseLoaderService.reportRecnoAfterLoad();
     return registrosProcessados;
   }
 
@@ -517,6 +534,7 @@ export class DatabaseLoaderService {
       // Isolamento restabelecido sem dependência de sqliteService
     }
 
+    await DatabaseLoaderService.reportRecnoAfterLoad();
     return totalInseridos;
   }
 
@@ -776,6 +794,7 @@ export class DatabaseLoaderService {
       rawExcelData = null;
     }
 
+    await DatabaseLoaderService.reportRecnoAfterLoad();
     return totalInserted;
   }
 
