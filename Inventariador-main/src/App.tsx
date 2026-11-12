@@ -4929,6 +4929,26 @@ useEffect(() => {
     });
   }, [setHistory, selectedUnit]);
 
+  // VOLTAR da configuração da unidade (âncora GPS e campanha): a raiz da
+  // trilha é o CONTRATO DE TRABALHO. O `popScreen` genérico devolvia a tela
+  // intermediária do histórico (lista de unidades) e, quando o histórico tinha
+  // sido reconstruído (boot guard / login), caía no hub da filial — a tela
+  // "Auditoria Inteligente" — sem unidade escolhida. O retorno aqui é
+  // explícito: volta para a ocorrência mais recente do contrato e descarta as
+  // telas de configuração que estavam por cima.
+  const returnToWorkContext = useCallback(() => {
+    setScreenParams(null);
+    setHistory(prev => {
+      const lastContract = prev.lastIndexOf(AppScreen.WORK_CONTEXT_SELECTION);
+      if (lastContract >= 0) {
+        logger.info('>>> [Navigation] Voltar da configuração da unidade para o CONTRATO DE TRABALHO.');
+        return prev.slice(0, lastContract + 1);
+      }
+      logger.info('>>> [Navigation] Voltar da configuração da unidade sem contrato no histórico: abrindo o CONTRATO DE TRABALHO.');
+      return [...prev, AppScreen.WORK_CONTEXT_SELECTION];
+    });
+  }, [setHistory]);
+
   const handleUpdateUnitConfigs = useCallback((configs: UnitConfig[]) => {
     setInventory(prev => ({ ...prev, unitConfigs: configs }));
     setUnitConfigs(configs);
@@ -7473,7 +7493,7 @@ useEffect(() => {
             <UnitConfigurator 
               user={user}
               units={unitNames}
-              onBack={popScreen}
+              onBack={returnToWorkContext}
               onUpdateConfigs={handleUpdateUnitConfigs}
               onNavigate={pushScreen}
               initialUnit={screenParams?.unitName || selectedUnit}
@@ -7567,7 +7587,7 @@ useEffect(() => {
           {screen === AppScreen.CAMPAIGN_MANAGEMENT && (userHasPermission(user, 'manage_campaigns') || isAdminUser(user) ? (
             <CampaignManager 
               user={user} 
-              onBack={popScreen} 
+              onBack={returnToWorkContext} 
               onActivate={async (id) => {
                 // Unified v2.6 Keys & Session Metadata
                 const tid = (user?.tenantid || readSessionTenantId() || '').toString().trim();
