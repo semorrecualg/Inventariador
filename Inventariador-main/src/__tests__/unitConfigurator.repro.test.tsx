@@ -1,10 +1,27 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import UnitConfigurator from '../components/UnitConfigurator';
 import { Geolocation } from '@capacitor/geolocation';
 import type { User, UnitConfig } from '../types';
+
+/**
+ * A gravação real (saveUnitConfig) faz upsert no Supabase e importa o SQLite.
+ * Num runner sem credenciais o client cai no URL placeholder e as requisições
+ * ficam pendentes; o `await` dentro de handleSave segurava a notificação ao pai
+ * e o teste falhava com a lista vazia. O alvo deste teste é o componente
+ * (onUpdateConfigs já deve receber a âncora recém-gravada), não a nuvem: aqui a
+ * persistência é stub e o resto do módulo continua real.
+ */
+vi.mock('../services/supabaseService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/supabaseService')>();
+  return {
+    ...actual,
+    saveUnitConfig: vi.fn(async () => true),
+    saveUnitConfigFlags: vi.fn(async () => true),
+  };
+});
 
 const ADMIN: User = { tenantid: 'CICOPAL', email: 'admin@gbr.com', role: 'ADMIN' } as unknown as User;
 
@@ -68,7 +85,7 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     localStorage.clear();
     sessionStorage.clear();
 
-    // Modo INTERNAL → saveUnitConfig retorna true sem tocar a nuvem
+    // Modo INTERNAL (o stub de saveUnitConfig garante que nada toca a rede)
     localStorage.setItem('app_database_mode', 'INTERNAL');
     // Rascunhos preventivos → o efeito semeia currentConfig com coordenadas reais
     sessionStorage.setItem('kardek_temp_gps_lat_010101 CICOPAL GO', '-16.706719');
@@ -113,6 +130,10 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
 
     // Espera o fluxo assíncrono do handleSave (geolocalização + persistência local)
     await until(() => (received.length > 0 ? true : undefined));
+    if (received.length === 0) {
+      // Diagnóstico: qual mensagem o componente mostrou quando não notificou o pai
+      console.error('>>> SEM NOTIFICAÇÃO. TEXTO NA TELA:', container.textContent?.slice(0, 400));
+    }
 
     expect(received.length).toBeGreaterThan(0);
     const saved = received.find((c) => c.unit_id === '010101 CICOPAL GO');
