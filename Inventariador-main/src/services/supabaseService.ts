@@ -3116,8 +3116,9 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
  * Isso garante que o Laudo Final seja imutável conforme CPC 27.
  */
 export const createCampaignSnapshot = async (campaignId: string, closedBy: string): Promise<boolean> => {
-    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-    const isInternal = mode === 'INTERNAL';
+    // Mesma regra do fetchCampaigns/deleteCampaign/updateCampaignStatus: sem a
+    // chave gravada o snapshot ia só para o SQLite e a nuvem ficava sem o laudo.
+    const isInternal = getDatabaseMode() === 'INTERNAL';
 
     if (isInternal) {
       logger.info('>>> [SQLite] Criando Snapshot de Campanha (Encerramento)...');
@@ -3269,8 +3270,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
  * Busca o Snapshot histórico de uma campanha encerrada.
  */
 export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignSnapshot | null> => {
-    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-    const isInternal = mode === 'INTERNAL';
+    const isInternal = getDatabaseMode() === 'INTERNAL';
 
     if (isInternal) {
       logger.info('>>> [SQLite] Recuperando Snapshot da campanha:', campaignId);

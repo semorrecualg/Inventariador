@@ -361,8 +361,9 @@ export const photoSyncManager = {
     }
     if (!navigator.onLine) return { success: false, uploadCount: 0, failedCount: 0 };
 
-    const currentMode = localStorage.getItem('app_database_mode');
-    if (currentMode?.startsWith('INTERNAL')) {
+    // `getDatabaseMode()` em vez do valor cru do localStorage: sem a chave gravada
+    // a fila de fotos ficava parada enquanto o resto do app usava a nuvem.
+    if (getDatabaseMode() === 'INTERNAL') {
       logger.info('[Sync Photo] Sincronização suspensa: Modo OFFLINE/INTERNO ativo.');
       return { success: false, uploadCount: 0, failedCount: 0 };
     }
