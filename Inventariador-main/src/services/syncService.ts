@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
-import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate } from './supabaseService';
+import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode } from './supabaseService';
 import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
@@ -279,8 +279,9 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
     }
     return { success: false, processedCount: 0 };
   }
-  const currentMode = localStorage.getItem('app_database_mode');
-  if (currentMode?.startsWith('INTERNAL')) {
+  // `getDatabaseMode()` devolve INTERNAL apenas quando não há credenciais: um
+  // INTERNAL herdado no localStorage não pode congelar o DELETE/UPDATE remoto.
+  if (getDatabaseMode() === 'INTERNAL') {
     return { success: false, processedCount: 0 };
   }
   if (!navigator.onLine) return { success: false, processedCount: 0 };

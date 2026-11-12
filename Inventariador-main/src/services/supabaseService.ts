@@ -3007,8 +3007,9 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
  * Outlines/Atualiza o status de uma campanha com suporte offline-first hibrido
  */
 export const updateCampaignStatus = async (campaignId: string, status: CampaignStatus, closedBy?: string): Promise<boolean> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
+  // Mesma regra do fetchCampaigns/deleteCampaign: um `app_database_mode: INTERNAL`
+  // herdado de sessão anterior não pode impedir o UPDATE na nuvem.
+  const isInternal = getDatabaseMode() === 'INTERNAL';
 
   // Always perform local SQLite update first (Soberania Offline-First)
   logger.info('>>> [SQLite] Atualizando status da campanha:', campaignId, 'para', status);

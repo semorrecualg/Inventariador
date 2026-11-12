@@ -224,6 +224,13 @@ bloqueiam sync sem tenant na tela de login). Upsert `onConflict('tenantid, id')`
   descartava pendentes legítimos. Quando o filtro descarta TODOS os pendentes, o
   caso vai para `audit_logs` (`SYNC_PENDING_DISCARDED`, um por situação a cada
   10 min) com a contagem e os contratos/filiais dos registos ignorados.
+- **Modo de base nas campanhas (`getDatabaseMode`):** `deleteCampaign`,
+  `updateCampaignStatus` e a fila de campanhas decidiam o modo com
+  `localStorage.getItem('app_database_mode') || 'INTERNAL'`. Sem a chave gravada
+  (primeira sessão do aparelho) o `DELETE`/`UPDATE` remoto era pulado enquanto o
+  `fetchCampaigns` consultava a nuvem — a alteração voltava no merge. Os três
+  passaram a usar `getDatabaseMode()`, que só é INTERNAL sem credenciais no build
+  ou com INTERNAL gravado de propósito.
 - **Modo INTERNAL (`isInternalMode=true`): nenhuma chamada de rede** (bloqueio no App.tsx).
 - `navigator.storage.persist()` evita que o SO limpe o IndexedDB.
 
