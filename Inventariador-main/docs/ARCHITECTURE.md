@@ -194,6 +194,16 @@ ausente/vazio. O `tenantid` vem **sempre da planilha** — nunca valor fixo em c
   `updateAsset`, `getLocationsWithStats(unitId, search)`, `clear`.
 - `getLocationsWithStats` alimenta o `AddressSelector` (endereços indexados — sem table scan).
 - `Inventory.tsx` filtra ativos por endereço/unidade e renderiza virtualizado (Virtuoso).
+- **Conferência em lote por plaqueta (`utils/etiquetaGroup.ts`):** uma plaqueta pode
+  identificar vários registros (itens diferentes com o mesmo número). A leitura
+  digitada agrupava; o **clique item a item** só agrupava quando a base trazia a coluna
+  `TAG_DUPLICIDADE = 'ETIQUETA+1REGISTRO'` e ainda exigia a mesma filial — sem a coluna,
+  cada item era conferido isolado e os irmãos ficavam pendentes. Agora
+  `findPlaquetaGroup` agrupa os **pendentes** da mesma plaqueta em **qualquer unidade** e
+  o clique abre a lista para o auditor ver e confirmar (checkbox por item).
+  `splitIdsByUnit` separa a unidade atual dos itens de outra unidade, que são adotados
+  (`filial` da sessão + `TAG_INVENTARIO = ADOTADO_EXTERNO`) ao confirmar — sem a adoção a
+  fila de envio os descartaria por não casarem com a filial da sessão.
 - Regras SRE do projeto: manipular dados **só via API Dexie** (proibido SQL raw); isolar por
   tenant (`[tenantid+filial]`); gravação bloqueada com bateria < 5% (`checkHardwareSafety`).
 

@@ -28,6 +28,7 @@ import { normalizeKey } from '../utils/schema';
 import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
+import { findPlaquetaGroup, splitIdsByUnit } from '../utils/etiquetaGroup';
 import { AssetListItem } from './AssetListItem';
 import PreferencesPanel from './PreferencesPanel';
 import { resolvePersistedTag } from '../services/tagService';
@@ -476,6 +477,11 @@ const Inventory: React.FC<InventoryProps> = ({
   const [isLocSearching, setIsLocSearching] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
+
+  // Conferência em lote disparada pelo clique no item (plaqueta repetida).
+  const [batchGroup, setBatchGroup] = useState<Asset[]>([]);
+  const [batchCheckedIds, setBatchCheckedIds] = useState<Set<string>>(new Set());
+  const [isBatchGroupSaving, setIsBatchGroupSaving] = useState(false);
   const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
   const [scannedResult, setScannedResult] = useState<string | null>(null);
 
@@ -1153,14 +1159,27 @@ const Inventory: React.FC<InventoryProps> = ({
   }, [allAssets, handleUpdateAssetWithBackup, onBulkUpdateAssets, selectedUnit, selectedLocation]);
 
   const handleAssetClick = useCallback(async (asset: Asset) => {
-    const etq = normalizeKey(asset.etiqueta || "");
-    const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedUnit || '');
     const assetCompKey = normalizeKey(asset.filial || asset._unitid || '');
-    
+
     // BLOQUEIO DE SEGURANÇA: Se já foi conferido, mostra modal de duplicidade e impede abertura
     if (asset._conferido) {
       setDuplicateAsset(asset);
+      return;
+    }
+
+    // CONFERÊNCIA EM LOTE PELA PLAQUETA (mesma regra da leitura digitada).
+    // Antes dependia da coluna `TAG_DUPLICIDADE = 'ETIQUETA+1REGISTRO'` — que a
+    // maioria das bases não traz — e exigia a mesma filial, então clicar nos
+    // itens conferia um a um e os irmãos da plaqueta ficavam pendentes.
+    // Agora: 2+ registros pendentes com a mesma plaqueta, em QUALQUER unidade,
+    // abrem a lista para o auditor ver e confirmar. Agrupa também o item de
+    // outra filial (antes ele era adotado direto, sem mostrar os irmãos).
+    const grupoPlaqueta = findPlaquetaGroup(asset, allAssets);
+    if (grupoPlaqueta.length >= 2) {
+      setBatchGroup(grupoPlaqueta);
+      setBatchCheckedIds(new Set(grupoPlaqueta.map(a => String(a.id)).filter(Boolean)));
+      setCommittedSearch('');
       return;
     }
 
@@ -1176,23 +1195,8 @@ const Inventory: React.FC<InventoryProps> = ({
       return;
     }
 
-    if (isBatch && etq && etq !== "ETIQUETAR" && !asset._conferido) {
-      const related = allAssets.filter(a => {
-        const sameEtq = normalizeKey(a.etiqueta || "") === etq;
-        const sameComp = normalizeKey(a.filial || a._unitid || "") === currentCompKey;
-        const statusUpper = String(a.status || '').toUpperCase();
-        const isNotBaixado = !statusUpper.includes('BAIXA') && !a.databaixa;
-        return sameEtq && sameComp && isNotBaixado && !a._conferido;
-      });
-
-      if (related.length > 1) {
-        const ids = related.map(a => String(a.id));
-        await onBulkUpdateAssets(ids);
-        return;
-      }
-    }
     onSelectAsset(asset);
-  }, [allAssets, onSelectAsset, handleUpdateAssetWithBackup, onBulkUpdateAssets, selectedUnit, selectedLocation]);
+  }, [allAssets, onSelectAsset, handleUpdateAssetWithBackup, selectedUnit, selectedLocation]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -1231,6 +1235,41 @@ const Inventory: React.FC<InventoryProps> = ({
     } else {
       const allIds = filteredAssets.map(a => String(a.id));
       setSelectedIds(new Set(allIds));
+    }
+  };
+
+  const handleConfirmBatchGroup = async () => {
+    const selecionados = batchGroup.filter(a => batchCheckedIds.has(String(a.id)));
+    if (selecionados.length === 0) {
+      setBatchGroup([]);
+      setBatchCheckedIds(new Set());
+      return;
+    }
+
+    const { mesmaUnidade, outraUnidade } = splitIdsByUnit(selecionados, selectedUnit || '');
+    setIsBatchGroupSaving(true);
+    try {
+      if (mesmaUnidade.length > 0) {
+        await onBulkUpdateAssets(mesmaUnidade);
+      }
+      if (outraUnidade.length > 0) {
+        // Mesma regra da adoção individual: o item de outra unidade passa a
+        // pertencer à unidade em que está a ser conferido — sem isso a fila de
+        // envio o descartaria por não casar com a filial da sessão.
+        await onBulkUpdateAssets(outraUnidade, {
+          filial: selectedUnit || '',
+          TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO
+        });
+      }
+      setDisplayValue('');
+      setCommittedSearch('');
+    } catch (err) {
+      logger.error(">>> [Inventory] Erro na conferência em lote da plaqueta:", err);
+      alert(`Falha na conferência em lote: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsBatchGroupSaving(false);
+      setBatchGroup([]);
+      setBatchCheckedIds(new Set());
     }
   };
 
@@ -1406,6 +1445,93 @@ const Inventory: React.FC<InventoryProps> = ({
           </div>,
           document.body
         )}
+
+      {/* Modal de Conferência em Lote — plaqueta repetida (clique no item) */}
+      {batchGroup.length > 0 && createPortal(
+        <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-md rounded-[2rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn flex flex-col max-h-[90vh]">
+            <button
+              onClick={() => { setBatchGroup([]); setBatchCheckedIds(new Set()); }}
+              className="absolute top-3 right-3 z-10 p-2 rounded-full text-ink-muted hover:bg-slate-100 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="bg-accent p-5 text-white">
+              <div className="flex items-center gap-2">
+                <CheckSquare size={18} />
+                <span className="text-[9px] font-black uppercase tracking-widest text-white/70">Plaqueta repetida — conferência em lote</span>
+              </div>
+              <h3 className="text-xl font-black uppercase italic tracking-tighter leading-none mt-1">
+                Plaqueta {batchGroup[0]?.etiqueta || ''}
+              </h3>
+              <p className="text-[10px] font-bold text-white/80 uppercase tracking-widest mt-2">
+                {batchGroup.length} registros nesta plaqueta
+              </p>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-2">
+              <p className="text-[10px] font-bold text-ink-muted uppercase tracking-wide leading-relaxed px-1">
+                Marque só os itens fisicamente conferidos. Itens de outra unidade são adotados para {selectedUnit || 'esta unidade'} ao confirmar.
+              </p>
+              {batchGroup.map(item => {
+                const id = String(item.id);
+                const outraUnidade = normalizeKey(item.filial || item._unitid || '') !== normalizeKey(selectedUnit || '') && !!normalizeKey(item.filial || item._unitid || '');
+                return (
+                  <label
+                    key={id}
+                    className="flex items-start gap-3 p-3 rounded-xl border border-border bg-bg-main cursor-pointer active:scale-[0.995] transition-all"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={batchCheckedIds.has(id)}
+                      onChange={() => setBatchCheckedIds(prev => {
+                        const novo = new Set(prev);
+                        if (novo.has(id)) novo.delete(id); else novo.add(id);
+                        return novo;
+                      })}
+                      className="mt-1 w-4 h-4 accent-[color:var(--accent,#0f766e)] shrink-0"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[11px] font-black text-ink font-mono truncate">{item.etiqueta || '—'} · {String(item.registro || id)}</span>
+                      <span className="block text-[10px] font-bold text-ink-muted leading-snug line-clamp-2">{item.descricaodoativo || 'Sem descrição'}</span>
+                      <span className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-[8px] font-black uppercase tracking-wider text-ink-muted">{item.filial || 'SEM UNIDADE'}</span>
+                        {item.endereco && (
+                          <span className="text-[8px] font-black uppercase tracking-wider text-ink-muted">· {item.endereco}</span>
+                        )}
+                        {outraUnidade && (
+                          <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/10 text-warning border border-warning/20">Outra unidade</span>
+                        )}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="p-4 border-t border-border flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => { setBatchGroup([]); setBatchCheckedIds(new Set()); }}
+                className="flex-1 py-3.5 rounded-xl border border-border text-ink-muted font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBatchGroup}
+                disabled={isBatchGroupSaving || batchCheckedIds.size === 0}
+                className="flex-1 py-3.5 rounded-xl bg-success text-white font-black uppercase text-[10px] tracking-widest shadow-lg active:scale-95 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {isBatchGroupSaving ? <Loader2 size={14} className="animate-spin" /> : <CheckSquare size={14} />}
+                Conferir {batchCheckedIds.size}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {isSettingsOpen && (
         <PreferencesPanel
