@@ -28,7 +28,7 @@ import { normalizeKey } from '../utils/schema';
 import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
-import { findPlaquetaGroup, splitIdsByUnit } from '../utils/etiquetaGroup';
+import { findBatchGroup, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
 import { AssetListItem } from './AssetListItem';
 import PreferencesPanel from './PreferencesPanel';
 import { resolvePersistedTag } from '../services/tagService';
@@ -1037,8 +1037,9 @@ const Inventory: React.FC<InventoryProps> = ({
 
       if (term) {
         const etq = normalizeKeyFast(a.etiqueta || '');
+        const reg = normalizeKeyFast(a.registro || '');
         const descText = String(a.descricaodoativo || '').toUpperCase();
-        if (!(etq === term || etq.includes(term) || descText.includes(searchUpper))) continue;
+        if (!(etq === term || etq.includes(term) || reg === term || reg.includes(term) || descText.includes(searchUpper))) continue;
       } else {
         // Baixado não conferido não entra no giro (o hub só o conta quando localizado).
         const isBaixado = String(a.status || '').toUpperCase().includes('BAIXA') || !!a.databaixa;
@@ -1098,20 +1099,44 @@ const Inventory: React.FC<InventoryProps> = ({
     : 0;
   const pendingSearchCount = filteredAssets.filter(a => !a._conferido).length;
 
-  const handleConfirmSearchBatch = async () => {
+  /**
+   * Leitura digitada e clique no item usam o MESMO modal de conferência em
+   * lote (`batchGroup`): a barra do resultado da busca só monta o grupo e abre
+   * a lista para o auditor ver e confirmar, em vez de conferir às cegas.
+   */
+  const handleConfirmSearchBatch = () => {
     const pendingInSearch = filteredAssets.filter(a => !a._conferido);
     if (pendingInSearch.length === 0) return;
-    
-    const ids = pendingInSearch.map(a => String(a.id));
-    try {
-      await onBulkUpdateAssets(ids);
-      setCommittedSearch('');
-      setDisplayValue('');
-    } catch (err) {
-      logger.error(">>> [Inventory] Erro na gravação de lote:", err);
-      alert(`Falha crítica na injeção ou atualização em lote: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const grupo = findBatchGroup(pendingInSearch[0], allAssets, selectedUnit || activeFilialKey);
+    const alvo = grupo.length >= 2 ? grupo : pendingInSearch;
+    setBatchGroup(alvo);
+    setBatchCheckedIds(new Set(alvo.map(a => String(a.id)).filter(Boolean)));
+    setCommittedSearch('');
+    setDisplayValue('');
   };
+
+  /**
+   * Leitura digitada: quando o código digitado forma lote (plaqueta ou registro
+   * repetido), abre o modal automaticamente — antes o resultado só aparecia
+   * como lista filtrada e o auditor tinha de conferir um a um.
+   */
+  useEffect(() => {
+    const term = normalizeKeyFast(committedSearch || '');
+    if (!term) return;
+    const daUnidade = allAssets.filter(a => belongsToUnit(a, activeFilialKey));
+    const alvo = daUnidade.find(a => {
+      if (a._conferido) return false;
+      const etq = normalizeKeyFast(a.etiqueta || '');
+      const reg = normalizeKeyFast(a.registro || '');
+      return etq === term || reg === term;
+    });
+    if (!alvo) return;
+    const grupo = findBatchGroup(alvo, allAssets, selectedUnit || activeFilialKey);
+    if (grupo.length < 2) return;
+    setBatchGroup(grupo);
+    setBatchCheckedIds(new Set(grupo.map(a => String(a.id)).filter(Boolean)));
+  }, [committedSearch, allAssets, activeFilialKey, selectedUnit]);
+
 
   const handleMakeDecision = useCallback(async (id: string, decision: 'YES' | 'NO') => {
     if (decision === 'NO') return;
@@ -1175,10 +1200,10 @@ const Inventory: React.FC<InventoryProps> = ({
     // Agora: 2+ registros pendentes com a mesma plaqueta, em QUALQUER unidade,
     // abrem a lista para o auditor ver e confirmar. Agrupa também o item de
     // outra filial (antes ele era adotado direto, sem mostrar os irmãos).
-    const grupoPlaqueta = findPlaquetaGroup(asset, allAssets);
-    if (grupoPlaqueta.length >= 2) {
-      setBatchGroup(grupoPlaqueta);
-      setBatchCheckedIds(new Set(grupoPlaqueta.map(a => String(a.id)).filter(Boolean)));
+    const grupoLote = findBatchGroup(asset, allAssets, selectedUnit || activeFilialKey);
+    if (grupoLote.length >= 2) {
+      setBatchGroup(grupoLote);
+      setBatchCheckedIds(new Set(grupoLote.map(a => String(a.id)).filter(Boolean)));
       setCommittedSearch('');
       return;
     }
@@ -1196,7 +1221,7 @@ const Inventory: React.FC<InventoryProps> = ({
     }
 
     onSelectAsset(asset);
-  }, [allAssets, onSelectAsset, handleUpdateAssetWithBackup, selectedUnit, selectedLocation]);
+  }, [allAssets, onSelectAsset, handleUpdateAssetWithBackup, selectedUnit, selectedLocation, activeFilialKey]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -1246,21 +1271,14 @@ const Inventory: React.FC<InventoryProps> = ({
       return;
     }
 
-    const { mesmaUnidade, outraUnidade } = splitIdsByUnit(selecionados, selectedUnit || '');
+    // O App (bulkUpdateAssets) grava a conferência no ENDEREÇO DO INVENTÁRIO
+    // (`_localMaster`) e resolve a TAG: mesmo endereço → CONFERIDO; endereço
+    // diferente → ADOTADO; outra unidade → ADOTADO EXTERNO. Aqui só se envia a
+    // lista — nada de mexer no endereço de origem (senão o ADOTADO se perde).
+    const ids = selecionados.map(a => String(a.id)).filter(Boolean);
     setIsBatchGroupSaving(true);
     try {
-      if (mesmaUnidade.length > 0) {
-        await onBulkUpdateAssets(mesmaUnidade);
-      }
-      if (outraUnidade.length > 0) {
-        // Mesma regra da adoção individual: o item de outra unidade passa a
-        // pertencer à unidade em que está a ser conferido — sem isso a fila de
-        // envio o descartaria por não casar com a filial da sessão.
-        await onBulkUpdateAssets(outraUnidade, {
-          filial: selectedUnit || '',
-          TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO
-        });
-      }
+      await onBulkUpdateAssets(ids);
       setDisplayValue('');
       setCommittedSearch('');
     } catch (err) {
@@ -1446,7 +1464,7 @@ const Inventory: React.FC<InventoryProps> = ({
           document.body
         )}
 
-      {/* Modal de Conferência em Lote — plaqueta repetida (clique no item) */}
+      {/* Modal de Conferência em Lote — plaqueta OU registro repetido (clique e leitura) */}
       {batchGroup.length > 0 && createPortal(
         <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md animate-fadeIn">
           <div className="bg-white w-full max-w-md rounded-[2rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn flex flex-col max-h-[90vh]">
@@ -1460,23 +1478,24 @@ const Inventory: React.FC<InventoryProps> = ({
             <div className="bg-accent p-5 text-white">
               <div className="flex items-center gap-2">
                 <CheckSquare size={18} />
-                <span className="text-[9px] font-black uppercase tracking-widest text-white/70">Plaqueta repetida — conferência em lote</span>
+                <span className="text-[9px] font-black uppercase tracking-widest text-white/70">{batchLabel(batchGroup).titulo} — conferência em lote</span>
               </div>
               <h3 className="text-xl font-black uppercase italic tracking-tighter leading-none mt-1">
-                Plaqueta {batchGroup[0]?.etiqueta || ''}
+                {batchLabel(batchGroup).subtitulo || 'Lote'}
               </h3>
               <p className="text-[10px] font-bold text-white/80 uppercase tracking-widest mt-2">
-                {batchGroup.length} registros nesta plaqueta
+                {batchGroup.length} registros · {splitByAddress(batchGroup, selectedLocation).outroEndereco.length} de outro endereço
               </p>
             </div>
 
             <div className="p-4 overflow-y-auto space-y-2">
               <p className="text-[10px] font-bold text-ink-muted uppercase tracking-wide leading-relaxed px-1">
-                Marque só os itens fisicamente conferidos. Itens de outra unidade são adotados para {selectedUnit || 'esta unidade'} ao confirmar.
+                Marque só os itens fisicamente conferidos. O item de outro endereço é registado no endereço do inventário ao confirmar (ADOTADO).
               </p>
               {batchGroup.map(item => {
                 const id = String(item.id);
-                const outraUnidade = normalizeKey(item.filial || item._unitid || '') !== normalizeKey(selectedUnit || '') && !!normalizeKey(item.filial || item._unitid || '');
+                const enderecoInventario = normalizeKey(selectedLocation || '');
+                const outroEndereco = !!enderecoInventario && addressKey(item) !== enderecoInventario;
                 return (
                   <label
                     key={id}
@@ -1500,8 +1519,8 @@ const Inventory: React.FC<InventoryProps> = ({
                         {item.endereco && (
                           <span className="text-[8px] font-black uppercase tracking-wider text-ink-muted">· {item.endereco}</span>
                         )}
-                        {outraUnidade && (
-                          <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/10 text-warning border border-warning/20">Outra unidade</span>
+                        {outroEndereco && (
+                          <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/10 text-warning border border-warning/20">Outro endereço · ADOTADO</span>
                         )}
                       </span>
                     </span>
