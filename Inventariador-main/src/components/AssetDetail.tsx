@@ -43,7 +43,8 @@ import { reverseGeocode } from '../services/geocodingService';
 import { determineAssetTag, getTagMetadata, normalizeString } from '../services/tagService';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { logger } from '../utils/logger';
-import { GPS_ACCURACY, distanceMeters, getPreciseFixGuard } from '../utils/gpsCoreBridge';
+import { getPreciseFix } from '../utils/gpsUtils';
+import { GPS_ACCURACY, distanceMeters } from '../utils/gpsCore';
 import { hasRealAnchor } from '../utils/gpsAnchors';
 
 const formatReadingTime = (isoStr?: string) => {
@@ -249,7 +250,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
         }
         const anchor = { lat: Number(config?.lat), lng: Number(config?.lng) };
 
-        const fix = await getPreciseFixGuard(GPS_ACCURACY.COLLECT);
+        const fix = await getPreciseFix(GPS_ACCURACY.COLLECT);
         if (!fix) {
           logger.info('>>> [AssetDetail GPS] Sem leitura precisa; mantendo a coordenada atual do ativo.');
           return;

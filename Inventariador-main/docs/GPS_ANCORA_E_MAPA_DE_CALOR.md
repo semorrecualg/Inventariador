@@ -16,7 +16,6 @@ Complementa `docs/ARCHITECTURE.md` e `docs/VISAO_MALHA_AUDITORIA_CAMPO.md`.
 |---|---|
 | `src/utils/gpsCore.ts` | **Núcleo único** (novo): validação, faixas de precisão, filtro anti-jitter, suavização e conversão de leitura. Puro, sem React/Capacitor. |
 | `src/utils/gpsUtils.ts` | Porta de entrada do sensor: `getPreciseFix()` (leitura real ou `null`), `getCurrentDeviceLocation()` (com contingência marcada), `getCurrentLocation()` (cache de 30s), `startAutonomousTracking` / `stopAutonomousTracking` (`watchPosition`), `calculateDistance`, `convertAltitudeToFloor`. |
-| `src/utils/gpsCoreBridge.ts` | Ponte de import: reexporta o núcleo + `getPreciseFix` para componentes não precisarem de dois imports. |
 | `src/components/PermissionGate.tsx` | Pede a permissão de localização (`@capacitor/geolocation`). |
 | `src/services/permissionsService.ts` | Verifica/concede permissões de GPS no fluxo de onboarding. |
 
@@ -130,8 +129,7 @@ Regras:
 
 | Constante | Valor | Uso |
 |---|---|---|
-| `ANCHOR` | 30 m | fixar a âncora de uma unidade |
-| `COLLECT` | 50 m | carimbar posição do ativo, decidir geocerca |
+| `COLLECT` | 50 m | carimbar posição do ativo e decidir geocerca |
 | `DISCARD` | 150 m | acima disto é ruído: fora do mapa |
 | `MAX_JUMP_METERS` | 300 m | salto considerado impossível |
 
@@ -183,8 +181,8 @@ Regras:
 
 ## 6. O que **não** foi testado
 
-- Sensor real em aparelho Android: os limites (30/50/150 m) são conservadores,
-  mas precisam de validação em campo.
+- Sensor real em aparelho Android: os limites (50/150 m) são conservadores, mas
+  precisam de validação em campo.
 - `watchPosition` em `@capacitor/geolocation` com `maximumAge: 60000`: o
   comportamento exato difere do navegador e deve ser confirmado no APK.
 - Mapa de calor com base grande (12.636 ativos) após o novo filtro: verificar se

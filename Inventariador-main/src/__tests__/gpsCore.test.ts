@@ -2,10 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   GPS_ACCURACY,
   GpsJitterFilter,
-  gpsQualityOf,
   isValidCoordinate,
   isPreciseFix,
-  smoothFixes,
   toGpsFix,
   distanceMeters,
 } from '../utils/gpsCore';
@@ -33,20 +31,12 @@ describe('gpsCore — isValidCoordinate', () => {
 
 describe('gpsCore — precisão e qualidade', () => {
   it('só considera precisa dentro do limite pedido', () => {
-    expect(isPreciseFix({ accuracy: 10 }, GPS_ACCURACY.ANCHOR)).toBe(true);
-    expect(isPreciseFix({ accuracy: 40 }, GPS_ACCURACY.ANCHOR)).toBe(false);
+    expect(isPreciseFix({ accuracy: 10 }, 30)).toBe(true);
+    expect(isPreciseFix({ accuracy: 40 }, 30)).toBe(false);
     expect(isPreciseFix({ accuracy: 40 }, GPS_ACCURACY.COLLECT)).toBe(true);
     expect(isPreciseFix({ accuracy: 0 }, GPS_ACCURACY.COLLECT)).toBe(false);
     expect(isPreciseFix({ accuracy: Number.NaN }, GPS_ACCURACY.COLLECT)).toBe(false);
     expect(isPreciseFix(null)).toBe(false);
-  });
-
-  it('classifica a qualidade para a UI', () => {
-    expect(gpsQualityOf({ accuracy: 12 })).toBe('ALTA');
-    expect(gpsQualityOf({ accuracy: 45 })).toBe('MEDIA');
-    expect(gpsQualityOf({ accuracy: 120 })).toBe('BAIXA');
-    expect(gpsQualityOf({ accuracy: 900 })).toBe('INVALIDA');
-    expect(gpsQualityOf(null)).toBe('INVALIDA');
   });
 });
 
@@ -80,7 +70,7 @@ describe('gpsCore — GpsJitterFilter', () => {
   });
 
   it('descarta precisão acima do limite', () => {
-    const filter = new GpsJitterFilter({ maxAccuracyM: GPS_ACCURACY.ANCHOR });
+    const filter = new GpsJitterFilter({ maxAccuracyM: 30 });
     expect(filter.accept({ ...CURITIBA, accuracy: 90, source: 'sensor', at: 0 }, 0)).toBe(false);
   });
 
@@ -101,19 +91,10 @@ describe('gpsCore — GpsJitterFilter', () => {
   });
 });
 
-describe('gpsCore — distância e suavização', () => {
+describe('gpsCore — distância', () => {
   it('calcula distância entre pontos', () => {
     const d = distanceMeters(CURITIBA, { lat: CURITIBA.lat + 0.001, lng: CURITIBA.lng });
     expect(d).toBeGreaterThan(100);
     expect(d).toBeLessThan(125);
-  });
-
-  it('suaviza dando mais peso à leitura mais precisa', () => {
-    const previous = { ...CURITIBA, accuracy: 50, source: 'sensor' as const, at: 0 };
-    const next = { lat: CURITIBA.lat + 0.001, lng: CURITIBA.lng, accuracy: 5, source: 'sensor' as const, at: 1000 };
-    const smoothed = smoothFixes(previous, next);
-    // A leitura de 5 m domina: resultado próximo de `next`.
-    expect(smoothed.lat).toBeGreaterThan(CURITIBA.lat + 0.0008);
-    expect(smoothed.accuracy).toBe(5);
   });
 });

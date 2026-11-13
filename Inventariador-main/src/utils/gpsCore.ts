@@ -34,8 +34,6 @@ export interface GpsFix {
 
 /** Faixas de precisão (metros) usadas como contrato em todo o app. */
 export const GPS_ACCURACY = {
-  /** Precisão exigida para FIXAR a âncora de uma unidade. */
-  ANCHOR: 30,
   /** Precisão exigida para carimbar a posição de um ativo no mapa de calor. */
   COLLECT: 50,
   /** Acima disto a leitura é ruído de rede/ célula e é descartada. */
@@ -45,10 +43,10 @@ export const GPS_ACCURACY = {
 } as const
 
 /** Intervalo mínimo (ms) entre duas gravações de posição do mesmo ativo. */
-export const GPS_MIN_INTERVAL_MS = 30_000;
+const GPS_MIN_INTERVAL_MS = 30_000;
 
 /** Deslocamento mínimo (m) para considerar que o aparelho realmente se moveu. */
-export const GPS_MIN_MOVE_METERS = 5;
+const GPS_MIN_MOVE_METERS = 5;
 
 /**
  * Coordenada geograficamente válida e utilizável.
@@ -78,19 +76,6 @@ export const isPreciseFix = (
   return Number.isFinite(acc) && acc > 0 && acc <= maxAccuracyM;
 };
 
-/** Rótulo de qualidade para exibir na tela e para decidir gravação. */
-export type GpsQuality = 'ALTA' | 'MEDIA' | 'BAIXA' | 'INVALIDA';
-
-export const gpsQualityOf = (fix: Pick<GpsFix, 'accuracy'> | null | undefined): GpsQuality => {
-  if (!fix) return 'INVALIDA';
-  const acc = Number(fix.accuracy);
-  if (!Number.isFinite(acc) || acc <= 0) return 'INVALIDA';
-  if (acc <= GPS_ACCURACY.ANCHOR) return 'ALTA';
-  if (acc <= GPS_ACCURACY.COLLECT) return 'MEDIA';
-  if (acc <= GPS_ACCURACY.DISCARD) return 'BAIXA';
-  return 'INVALIDA';
-};
-
 /** Distância em metros entre dois pontos (Haversine). */
 export const distanceMeters = (a: { lat: number; lng: number }, b: { lat: number; lng: number }): number => {
   const R = 6_371_000;
@@ -103,7 +88,7 @@ export const distanceMeters = (a: { lat: number; lng: number }, b: { lat: number
   return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 };
 
-export interface JitterOptions {
+interface JitterOptions {
   /** Precisão máxima aceita (m). Default: `GPS_ACCURACY.COLLECT`. */
   maxAccuracyM?: number;
   /** Salto máximo aceito entre duas leituras (m). Default: `MAX_JUMP_METERS`. */
@@ -182,22 +167,6 @@ export class GpsJitterFilter {
     return true;
   }
 }
-
-/**
- * Suaviza a posição usando a precisão como peso: leitura mais precisa puxa mais
- * o resultado. Evita o "pulinho" do ponto no mapa entre duas leituras seguidas.
- */
-export const smoothFixes = (previous: GpsFix | null, next: GpsFix): GpsFix => {
-  if (!previous || previous.source !== next.source) return next;
-  const wPrev = 1 / Math.max(previous.accuracy, 1);
-  const wNext = 1 / Math.max(next.accuracy, 1);
-  const total = wPrev + wNext;
-  return {
-    ...next,
-    lat: (previous.lat * wPrev + next.lat * wNext) / total,
-    lng: (previous.lng * wPrev + next.lng * wNext) / total,
-  };
-};
 
 /**
  * Converte o que veio do sensor (Web/Capacitor) num `GpsFix` ou `null`.
