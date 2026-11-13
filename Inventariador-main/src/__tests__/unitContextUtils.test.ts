@@ -8,7 +8,8 @@ import {
   resolveBootUnitFilter,
   resolveBootPullPlan,
   normalizeUnitNames,
-  unitListScope
+  unitListScope,
+  decideUnitListAction
 } from '../utils/unitContextUtils';
 
 describe('resolveUnitFilter — filtro de filial dos pulls do fluxo inicial (Etapa 2)', () => {
@@ -196,5 +197,60 @@ describe('unitListScope — lista de filiais presa ao utilizador e ao contrato',
     expect(unitListScope('auditor@x.com', 'CLIENTETESTE')).not.toBe(base); // outro contrato
     expect(unitListScope('outro@x.com', 'CICOPAL')).not.toBe(base); // outra conta
     expect(unitListScope(null, 'CICOPAL')).not.toBe(base); // sem sessão
+  });
+});
+
+describe('decideUnitListAction — o que fazer com a lista de filiais guardada', () => {
+  const base = {
+    storedScope: null as string | null,
+    scope: unitListScope('auditor@x.com', 'CICOPAL'),
+    tenantid: 'CICOPAL',
+    isLocalDatabase: false,
+    online: true,
+    hasLocalBase: false
+  };
+
+  it('sem lista guardada, com contrato e rede: busca a lista do contrato', () => {
+    expect(decideUnitListAction(base)).toEqual({ type: 'fetch', tenant: 'CICOPAL' });
+    expect(decideUnitListAction({ ...base, tenantid: '  cicopal ' }))
+      .toEqual({ type: 'fetch', tenant: 'CICOPAL' });
+  });
+
+  it('lista do MESMO escopo já em memória: não busca outra vez', () => {
+    expect(decideUnitListAction({ ...base, storedScope: base.scope })).toEqual({ type: 'idle' });
+  });
+
+  it('outro utilizador no mesmo aparelho: limpa a lista antiga', () => {
+    const outroUsuario = { ...base, scope: unitListScope('outro@x.com', 'CICOPAL') };
+    expect(decideUnitListAction({ ...outroUsuario, storedScope: base.scope }))
+      .toEqual({ type: 'clear' });
+    // depois de limpa, o mesmo estado passa a buscar a lista do novo escopo
+    expect(decideUnitListAction({ ...outroUsuario, storedScope: null }))
+      .toEqual({ type: 'fetch', tenant: 'CICOPAL' });
+  });
+
+  it('outro contrato no mesmo aparelho: limpa e busca só o novo contrato', () => {
+    const outroContrato = {
+      ...base,
+      scope: unitListScope('auditor@x.com', 'CLIENTETESTE'),
+      tenantid: 'CLIENTETESTE'
+    };
+    expect(decideUnitListAction({ ...outroContrato, storedScope: base.scope }))
+      .toEqual({ type: 'clear' });
+    expect(decideUnitListAction({ ...outroContrato, storedScope: null }))
+      .toEqual({ type: 'fetch', tenant: 'CLIENTETESTE' });
+  });
+
+  it('logout (lista guardada de uma sessão que já saiu): limpa', () => {
+    expect(decideUnitListAction({ ...base, scope: unitListScope(null, null), tenantid: '', storedScope: base.scope }))
+      .toEqual({ type: 'clear' });
+  });
+
+  it('sem contrato, sem rede ou com base local: não busca nada', () => {
+    expect(decideUnitListAction({ ...base, tenantid: '' })).toEqual({ type: 'idle' });
+    expect(decideUnitListAction({ ...base, tenantid: null })).toEqual({ type: 'idle' });
+    expect(decideUnitListAction({ ...base, online: false })).toEqual({ type: 'idle' });
+    expect(decideUnitListAction({ ...base, isLocalDatabase: true })).toEqual({ type: 'idle' });
+    expect(decideUnitListAction({ ...base, hasLocalBase: true })).toEqual({ type: 'idle' });
   });
 });

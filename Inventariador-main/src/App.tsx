@@ -71,7 +71,7 @@ import {
   resolveDeltaMode,
   syncCheckpointKey
 } from './utils/syncCheckpoint';
-import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, unitListScope } from './utils/unitContextUtils';
+import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, unitListScope, decideUnitListAction } from './utils/unitContextUtils';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -6361,21 +6361,23 @@ useEffect(() => {
   const cloudUnitNamesRequestRef = useRef(0);
 
   useEffect(() => {
-    // Sobrou lista de outro escopo (outra conta/contrato no mesmo aparelho):
-    // descartar antes de qualquer uso.
-    if (cloudUnitNames && cloudUnitNames.scope !== cloudUnitNamesScope) {
+    const acao = decideUnitListAction({
+      storedScope: cloudUnitNames?.scope ?? null,
+      scope: cloudUnitNamesScope,
+      tenantid: activeTenant,
+      isLocalDatabase: databaseMode === DatabaseMode.INTERNAL,
+      online: navigator.onLine,
+      hasLocalBase: sqliteOperationalUnits.length > 0 || inventory.assets.length > 0
+    });
+
+    if (acao.type === 'clear') {
       setCloudUnitNames(null);
       return;
     }
-
-    // Muro SRE: sem contrato não se lista nada. E só quando NÃO há base local
-    // (aparelho novo) e ainda não temos a lista.
-    if (!activeTenant || databaseMode === DatabaseMode.INTERNAL || !navigator.onLine) return;
-    if (sqliteOperationalUnits.length > 0 || inventory.assets.length > 0) return;
-    if (cloudUnitNames) return;
+    if (acao.type !== 'fetch') return;
 
     const pedido = ++cloudUnitNamesRequestRef.current;
-    void fetchUnitNamesFromCloud(activeTenant)
+    void fetchUnitNamesFromCloud(acao.tenant)
       .then(nomes => {
         if (cloudUnitNamesRequestRef.current !== pedido) return; // escopo anterior
         if (nomes.length > 0) {

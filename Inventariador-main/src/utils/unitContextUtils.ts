@@ -103,6 +103,47 @@ export function unitListScope(email?: string | null, tenantid?: string | null): 
   return `${String(email || '').trim().toLowerCase()}|${String(tenantid || '').trim().toUpperCase()}`;
 }
 
+/** Ação a tomar sobre a lista de filiais guardada em memória. */
+export type UnitListAction =
+  | { type: 'clear' }
+  | { type: 'idle' }
+  | { type: 'fetch'; tenant: string };
+
+export interface UnitListInput {
+  /** Escopo em que a lista guardada nasceu (`null` = nada guardado). */
+  storedScope: string | null;
+  /** Escopo atual — `unitListScope(email, tenantid)`. */
+  scope: string;
+  tenantid?: string | null;
+  /** Base interna (sqlite): a lista vem dos dados locais, não da nuvem. */
+  isLocalDatabase: boolean;
+  online: boolean;
+  /** Já há base local (SQL ou ativos): a lista da nuvem não faz falta. */
+  hasLocalBase: boolean;
+}
+
+/**
+ * Decide o que fazer com a lista de filiais da nuvem a cada mudança de estado.
+ * Vive fora do `App` para poder ser testada: a troca de utilizador e de
+ * contrato no mesmo aparelho não pode deixar filiais do contrato anterior.
+ */
+export function decideUnitListAction(input: UnitListInput): UnitListAction {
+  // 1. Lista de outra conta/contrato (ou de antes do logout): descartar.
+  if (input.storedScope !== null && input.storedScope !== input.scope) {
+    return { type: 'clear' };
+  }
+
+  const tenant = String(input.tenantid || '').trim().toUpperCase();
+  // 2. Muro SRE: sem contrato resolvido não se lista nada.
+  if (!tenant) return { type: 'idle' };
+  // 3. Sem rede, em base interna ou com base local já carregada: não buscar.
+  if (!input.online || input.isLocalDatabase || input.hasLocalBase) return { type: 'idle' };
+  // 4. A lista deste escopo já está em memória.
+  if (input.storedScope !== null) return { type: 'idle' };
+
+  return { type: 'fetch', tenant };
+}
+
 /** Sentinelas que nunca são filial. */
 const UNIT_SENTINELS = new Set(['', 'TODAS', 'NULL', 'UNDEFINED', '0', 'DEFAULT', 'SEM FILIAL']);
 

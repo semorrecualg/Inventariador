@@ -209,8 +209,9 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
 - **Lista de filiais presa ao escopo (2026-11-13):** a lista guardada em
   memória é `{ scope, names }`, com `scope = unitListScope(email, tenantid)`
   (`email|CONTRATO`). O memo das unidades só a usa quando o `scope` bate com o
-  atual e a lista de outro escopo é descartada; um contador de pedidos descarta
-  respostas atrasadas. Sair e entrar com outro utilizador no mesmo aparelho já
+  atual; a decisão do efeito (limpar / não fazer nada / buscar) vive em
+  `decideUnitListAction` (testada) e um contador de pedidos descarta respostas
+  atrasadas. Sair e entrar com outro utilizador no mesmo aparelho já
   não mostra filiais do contrato anterior.
 
 - **Lista de filiais sem base local (2026-11-13):** com o boot a exigir a
