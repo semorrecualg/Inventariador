@@ -112,6 +112,7 @@ import { saveInventory, loadInventory, clearInventory, clearMultipleInventories,
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
 import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
+import { pushAssetsWithReceipt } from './services/syncSessionService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 import { determineAssetTag } from './services/tagService';
@@ -2488,7 +2489,12 @@ useEffect(() => {
       try {
         // Sincroniza os ativos e recebe os IDs processados com sucesso (Push).
         // A variante AndMark devolve o estado local ao da nuvem (_is_synced = 1).
-        const syncedIds = await syncAssetsToCloudAndMark(dirtyAssets, effectiveTenantid);
+        // F2 — o envio roda dentro de uma sessão com recibo: se a rede cair no
+        // meio, a próxima rodada retoma sem reenviar o que já foi aceito.
+        const { synced: syncedIds } = await pushAssetsWithReceipt(dirtyAssets, effectiveTenantid, {
+          auditor: user?.email,
+          sync: (batch, tenant) => syncAssetsToCloudAndMark(batch, tenant),
+        });
         
         // Sincroniza a config também para garantir que o timestamp suba
         const configToSync = { ...inventoryRef.current };
@@ -5017,7 +5023,11 @@ useEffect(() => {
     if (pending.length === 0) return;
 
     try {
-      const synced = await syncAssetsToCloudAndMark(pending, user?.tenantid);
+      // F2 — mesmo recibo/idempotência do push principal, na fila de nuvem.
+      const { synced } = await pushAssetsWithReceipt(pending, user?.tenantid, {
+        auditor: user?.email,
+        sync: (batch, tenant) => syncAssetsToCloudAndMark(batch, tenant),
+      });
       const syncedSet = new Set(synced.map(String));
       if (syncedSet.size > 0) {
         const mark = (a: Asset) => (syncedSet.has(String(a.id)) ? { ...a, _is_synced: 1 } : a);
@@ -5039,7 +5049,7 @@ useEffect(() => {
       // Recuo: 5 s para não martelar a nuvem em erro persistente.
       if (navigator.onLine) scheduleCloudFlush(5000);
     }
-  }, [databaseMode, user?.tenantid, scheduleCloudFlush]);
+  }, [databaseMode, user?.tenantid, user?.email, scheduleCloudFlush]);
 
   useEffect(() => {
     flushCloudQueueRef.current = flushCloudQueue;

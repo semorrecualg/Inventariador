@@ -314,23 +314,26 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
 
 ---
 
-## 10. Decisões pendentes (dono do produto)
+## 10. Decisões tomadas (dono do produto) — 13/11/2026
 
-1. **Conflito**: decisão humana no painel (mais correto) ou posse do território vence
-   (mais simples)? Proposta: humano no painel, com atalho "aceitar a leitura mais
-   recente" para os casos triviais.
-2. **Prazo da posse**: 12 horas é razoável para um turno? Turno noturno de 12h com
-   virada de dia pede 16h.
-3. **Retenção de eventos**: 90 dias de eventos completos e depois só resumo?
-4. **Posse por pessoa ou por aparelho**: se o auditor troca de celular no meio do
-   turno, a posse acompanha a pessoa (recomendado) ou o aparelho?
-5. **Escopo de release**: entregar F2 (recibo + idempotência) sozinho já resolve a
-   dor mais urgente ("subiu tudo?"), sem esperar o modelo de eventos completo?
+1. **Conflito**: **decisão humana no painel**, com atalho "aceitar a leitura mais
+   recente" para os casos triviais. O app nunca escolhe sozinho entre duas
+   leituras que disputam o mesmo campo.
+2. **Prazo da posse**: **16 horas** — cobre o turno noturno de 12 h com virada de dia.
+3. **Retenção de eventos**: **90 dias** de eventos completos; depois, apenas resumo.
+   As sessões de sincronização seguem a mesma janela (`SYNC_SESSION_RETENTION_MS`).
+4. **Posse por pessoa**: se o auditor troca de celular no meio do turno, a posse (e a
+   sessão de sincronização) **acompanha a pessoa**; o aparelho fica registrado no
+   recibo apenas para rastreabilidade.
+5. **Escopo de release**: **entregar F2 primeiro** (recibo + idempotência), que já
+   resolve a dor mais urgente — "subiu tudo?" — sem esperar o modelo de eventos.
 
----
+### Status
 
-## 11. Próximo passo sugerido
+- **F2 — em implementação** em `src/services/syncSessionService.ts`.
 
-F0 (medir) em paralelo com a decisão das questões do § 10. A medição é barata,
-usa o monitor SRE que acabamos de melhorar (copiar e tela cheia) e evita
-otimizar o que não é gargalo.
+## 11. Próximo passo
+
+F2 em curso (ver § 10). Depois dela: F0 (medir abertura, delta e push no celular
+usando o monitor SRE) e então F1 (projeção por eventos), que é a mudança mais
+profunda e pode entrar por baixo, sem trocar a tela do auditor.
