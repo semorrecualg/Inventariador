@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Layers, Info, X, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft, Flame, ShieldCheck, SlidersHorizontal, ChevronDown, CheckCircle2, WifiOff, Loader2 } from 'lucide-react';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
+import { GPS_ACCURACY, isValidCoordinate } from '../utils/gpsCore';
 
 interface AssetMapProps {
   assets: Asset[];
@@ -23,11 +24,23 @@ const asFiniteCoord = (v: unknown): number => {
   return Number.isFinite(n) ? n : NaN;
 };
 
-/** Guarda Defensiva: so aceita pontos com coordenadas finitas validas (evita NaN/undefined no MapLibre). */
-const hasValidCoords = (lat: unknown, lng: unknown): boolean => {
-  const la = asFiniteCoord(lat);
-  const lo = asFiniteCoord(lng);
-  return !isNaN(la) && !isNaN(lo) && la >= -90 && la <= 90 && lo >= -180 && lo <= 180;
+/** Guarda Defensiva: so aceita pontos com coordenadas validas (evita NaN/undefined no MapLibre). */
+const hasValidCoords = (lat: unknown, lng: unknown): boolean => isValidCoordinate(lat, lng);
+
+/**
+ * Ponto que pode alimentar o Mapa de Calor.
+ *
+ * Além da coordenada válida, exige que a leitura tenha vindo do SENSOR:
+ * pontos de contingência (`_gps_source: 'synthetic'`) e leituras grosseiras
+ * (> GPS_ACCURACY.DISCARD) são descartados para não distorcer densidade,
+ * valores por área e o convex hull de cada local.
+ */
+const hasMapCoords = (asset: Asset): boolean => {
+  if (!isValidCoordinate(asset.latitude, asset.longitude)) return false;
+  if (asset._gps_source === 'synthetic') return false;
+  const acc = Number(asset._gps_accuracy);
+  if (Number.isFinite(acc) && acc > GPS_ACCURACY.DISCARD) return false;
+  return true;
 };
 
 const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenantid, filial }) => {
@@ -133,7 +146,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
 
   const filteredAssets = useMemo(() => {
     // REGRA: O mapa de calor/área deve ler somente os itens INVENTARIADOS (_conferido)
-    let filtered = sourceAssets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
+    let filtered = sourceAssets.filter(a => (!!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM') && hasMapCoords(a));
     
     // Filtragem de andar movida para o motor do mapa via ['get', 'id_andar']
     // Porém para cálculos de BI e grid aqui, ainda filtramos
@@ -152,7 +165,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   const gridData = useMemo(() => {
     if (heatmapMode !== 'GRID' || filteredAssets.length === 0) return [];
 
-    const validAssets = filteredAssets.filter(a => hasValidCoords(a.latitude, a.longitude));
+    const validAssets = filteredAssets.filter(hasMapCoords);
     if (validAssets.length === 0) return [];
 
     // Otimização: Binning por coordenadas em vez de interseção de polígonos Turf (O(N) vs O(N*M))
@@ -200,7 +213,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   const geojsonAssets = useMemo(() => {
     // GBR v25: Delegação para GPU. Enviamos todos os ativos (leves) e deixamos o shader filtrar.
     const features = sourceAssets
-      .filter(a => hasValidCoords(a.latitude, a.longitude))
+      .filter(hasMapCoords)
       .map(a => {
         const val = Number(a.vlraquisic) || 0;
         const lat = asFiniteCoord(a.latitude);
@@ -230,7 +243,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   const geojsonArea = useMemo(() => {
     // Agrupamento Otimizado via Reduce (GBR v25 Pipeline)
     const groups = filteredAssets.reduce((acc, a) => {
-      if (!hasValidCoords(a.latitude, a.longitude)) return acc;
+      if (!hasMapCoords(a)) return acc;
       const loc = a._localMaster || a.endereco || 'SEM LOCAL';
       if (!acc[loc]) acc[loc] = { points: [], totalValue: 0 };
       acc[loc].points.push([asFiniteCoord(a.longitude), asFiniteCoord(a.latitude)]);

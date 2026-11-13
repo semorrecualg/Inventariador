@@ -1,13 +1,20 @@
 import { normalizeKey } from './schema';
+import { isValidCoordinate } from './gpsCore';
 
 /**
- * Guarda Defensiva: só considera âncora real coordenadas finitas e não-zero.
+ * Guarda Defensiva: só considera âncora real coordenadas finitas, dentro das
+ * faixas geográficas e diferentes do par (0,0) — o "null disfarçado" clássico.
  * Usada tanto pelo caminho de estado (`unitConfigs`) quanto pela varredura de
  * armazenamento durável — fonte única de verdade (coberta por testes).
+ *
+ * A validação geográfica vive em `gpsCore.isValidCoordinate` (faixas + rejeição
+ * de `(0,0)`). Além dela, a âncora exige os DOIS componentes diferentes de zero:
+ * neste app um componente zerado significa "ausente" — por exemplo, uma chave
+ * `gps_lng_<unidade>` faltando no sessionStorage é lida como `0` pelo `Number()`.
+ * Aceitar esse zero plantaria uma âncora falsa em cima do meridiano de Greenwich.
  */
 export const hasRealAnchor = (lat: unknown, lng: unknown): boolean =>
-  Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) &&
-  Number(lat) !== 0 && Number(lng) !== 0;
+  isValidCoordinate(lat, lng) && Number(lat) !== 0 && Number(lng) !== 0;
 
 /**
  * Varre o armazenamento durável do navegador e devolve o conjunto de unidades

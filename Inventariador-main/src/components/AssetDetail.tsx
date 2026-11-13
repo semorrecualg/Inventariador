@@ -43,6 +43,8 @@ import { reverseGeocode } from '../services/geocodingService';
 import { determineAssetTag, getTagMetadata, normalizeString } from '../services/tagService';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { logger } from '../utils/logger';
+import { GPS_ACCURACY, distanceMeters, getPreciseFixGuard } from '../utils/gpsCoreBridge';
+import { hasRealAnchor } from '../utils/gpsAnchors';
 
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
@@ -237,58 +239,36 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
           return uId === filialName || uId.replace(/_/g, ' ') === filialName.replace(/_/g, ' ');
         });
 
-        const anchorLat = config?.lat ? Number(config.lat) : -23.5505; // default SP
-        const anchorLng = config?.lng ? Number(config.lng) : -46.6333;
+        // A posição do ativo é do SENSOR, não da âncora. Antes, este trecho
+        // "inventava" um deslocamento com Math.random() quando não havia sinal —
+        // o que jogava pontos falsos no Mapa de Calor. Agora, sem âncora real e
+        // sem leitura precisa, o ativo simplesmente fica sem coordenada.
+        if (!hasRealAnchor(config?.lat, config?.lng)) {
+          logger.warn('>>> [AssetDetail GPS] Unidade sem âncora real — coordenada do ativo não será inventada.');
+          return;
+        }
+        const anchor = { lat: Number(config?.lat), lng: Number(config?.lng) };
 
-        // Obter deslocamento físico do terminal
-        let dispLat = 0;
-        let dispLng = 0;
-
-        const getGPSPosition = () => {
-          return new Promise<{ lat: number; lng: number }>((resolve, reject) => {
-            if (!navigator.geolocation) {
-              reject(new Error('GPS indisponível'));
-              return;
-            }
-            navigator.geolocation.getCurrentPosition(
-              (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-              (err) => reject(err),
-              { enableHighAccuracy: false, timeout: 3000 }
-            );
-          });
-        };
-
-        try {
-          const gps = await getGPSPosition();
-          // Guarda Defensiva: GPS pode vir nulo/incompleto - nunca ler .lng de undefined
-          if (!gps || !Number.isFinite(Number(gps.lat)) || !Number.isFinite(Number(gps.lng))) {
-            throw new Error('GPS invalido retornado pelo hardware');
-          }
-          // Se temos o GPS real, o vetor de deslocamento é a diferença entre o GPS real e a âncora
-          dispLat = gps.lat - anchorLat;
-          dispLng = gps.lng - anchorLng;
-
-          // Se a diferença for muito absurda (fora do limite razoável) ou precisão baixa, limitamos usando amortecimento
-          if (Math.abs(dispLat) > 0.05 || Math.abs(dispLng) > 0.05) {
-            // Fallback matemático (Simulação de sensor de movimento)
-            dispLat = (Math.random() - 0.5) * 0.001;
-            dispLng = (Math.random() - 0.5) * 0.001;
-          }
-        } catch (gpsErr) {
-          logger.warn('>>> [AssetDetail GPS Fallback] Sem sinal real, simulando vetor de odometria de movimento:', gpsErr);
-          // Fallback matemático baseado em sensores de movimento simulados/Capacitor para Modo Avião
-          dispLat = (Math.random() - 0.5) * 0.0005;
-          dispLng = (Math.random() - 0.5) * 0.0005;
+        const fix = await getPreciseFixGuard(GPS_ACCURACY.COLLECT);
+        if (!fix) {
+          logger.info('>>> [AssetDetail GPS] Sem leitura precisa; mantendo a coordenada atual do ativo.');
+          return;
         }
 
-        // Equação: Coordenada da Âncora da Filial + Vetor de Deslocamento Físico
-        const finalLat = Number((anchorLat + dispLat).toFixed(6));
-        const finalLng = Number((anchorLng + dispLng).toFixed(6));
+        // Leitura a quilômetros da âncora é erro de sensor/rede, não auditoria.
+        const dispersion = distanceMeters(anchor, fix);
+        if (dispersion > 5000) {
+          logger.warn(`>>> [AssetDetail GPS] Leitura a ${Math.round(dispersion)}m da âncora — descartada.`);
+          return;
+        }
 
         setWorkingAsset(prev => ({
           ...prev,
-          latitude: String(finalLat),
-          longitude: String(finalLng)
+          latitude: Number(fix.lat.toFixed(6)),
+          longitude: Number(fix.lng.toFixed(6)),
+          _gps_accuracy: Math.round(fix.accuracy * 10) / 10,
+          _gps_source: 'sensor',
+          _gps_at: new Date(fix.at).toISOString()
         }));
       } catch (e) {
         logger.error('>>> [AssetDetail] Erro ao calcular deslocamento dinâmico:', e);

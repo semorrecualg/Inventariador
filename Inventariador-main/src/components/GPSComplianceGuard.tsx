@@ -1,10 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import * as turf from '@turf/turf';
 import { ShieldAlert, Loader2 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { UnitConfig } from '../types';
 import { isAdminEmail } from '../utils/authUtils';
 import { getCurrentDeviceLocation } from '../utils/gpsUtils';
+import {
+  GpsJitterFilter,
+  GPS_ACCURACY,
+  distanceMeters,
+  isValidCoordinate,
+  type GpsFix,
+} from '../utils/gpsCore';
+import { hasRealAnchor } from '../utils/gpsAnchors';
 import { logger } from '../utils/logger';
 import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
 import Marquee from './Marquee';
@@ -103,44 +110,63 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
       return;
     }
 
-    const checkLocation = (lat: number, lng: number) => {
+    // ANTI-JITTER (gpsCore): o sensor oscila alguns metros parado e a rede
+    // celular "salta" centenas de metros. O filtro descarta ruído antes de
+    // recalcular o perímetro — evita a tela piscando entre "liberado" e "fora
+    // do perímetro" e reduz recálculos/re-render (menos bateria).
+    const jitterFilter = new GpsJitterFilter({ maxAccuracyM: GPS_ACCURACY.COLLECT });
+    let outOfRangeStreak = 0;
+
+    const checkLocation = (lat: number, lng: number, accuracyM: number = Number.NaN) => {
+      const candidate: GpsFix = { lat, lng, accuracy: accuracyM, source: 'sensor', at: Date.now() };
+      // Leitura inválida, imprecisa, repetida ou salto impossível: ignora.
+      if (!jitterFilter.accept(candidate)) return;
+      const fix = jitterFilter.lastAccepted as GpsFix;
+
       // Cálculo espacial desacoplado de forma assíncrona da thread principal de UI
       setTimeout(() => {
         if (!isActive) return;
         try {
-          if (lat === null || lat === undefined || isNaN(lat) || lng === null || lng === undefined || isNaN(lng)) {
+          if (!isValidCoordinate(fix.lat, fix.lng)) {
             throw new Error("Coordenadas do dispositivo inválidas ou nulas.");
           }
 
-          if (!unitConfig || !unitConfig.lat || !unitConfig.lng || isNaN(Number(unitConfig.lat)) || isNaN(Number(unitConfig.lng))) {
+          if (!hasRealAnchor(unitConfig?.lat, unitConfig?.lng)) {
             throw new Error("Coordenadas de ancoragem inválidas ou ausentes.");
           }
 
-          const fromPoint = turf.point([lng, lat]);
-          const toPoint = turf.point([Number(unitConfig.lng), Number(unitConfig.lat)]);
-
-          // Distância em metros via Turf.js com isolamento à prova de falhas
-          const distanceM = turf.distance(fromPoint, toPoint, { units: 'kilometers' }) * 1000;
+          // Cálculo único de perímetro (mesmo critério da âncora e do mapa).
+          const distanceM = distanceMeters(
+            { lat: fix.lat, lng: fix.lng },
+            { lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) }
+          );
           setCurrentDistance(distanceM);
-          setUserLocation({ lat, lng });
+          setUserLocation({ lat: fix.lat, lng: fix.lng });
 
           const allowedRadius = Number(unitConfig.radius_meters || 500);
 
-          if (distanceM <= allowedRadius) {
+          // HISTERESE: 5% de tolerância na borda e duas leituras seguidas fora
+          // para bloquear. Uma leitura ruim isolada não tranca o auditor.
+          if (distanceM <= allowedRadius * 1.05) {
+            outOfRangeStreak = 0;
             setStatus('granted');
             onGpsStatusChangeRef.current?.(true);
           } else {
+            outOfRangeStreak += 1;
             if (isAdminUser) {
               setStatus('bypassed');
               onGpsStatusChangeRef.current?.(true);
-
+            } else if (outOfRangeStreak < 2) {
+              logger.warn(`[Geofencing] Leitura fora do perímetro (${Math.round(distanceM)}m). Confirmando antes de bloquear.`);
+              setStatus('granted');
+              onGpsStatusChangeRef.current?.(true);
             } else {
               setStatus('out-of-range');
               onGpsStatusChangeRef.current?.(false);
             }
           }
         } catch (err) {
-          logger.error('[Geofencing] Erro Turf.js ao calcular perímetro em thread desacoplada:', err);
+          logger.error('[Geofencing] Erro ao calcular perímetro em thread desacoplada:', err);
           if (isAdminUser) {
             setStatus('bypassed');
             onGpsStatusChangeRef.current?.(true);
@@ -198,7 +224,7 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
 
           onGpsStatusChangeRef.current?.(true);
         } else {
-          checkLocation(geoResult.latitude, geoResult.longitude);
+          checkLocation(geoResult.latitude, geoResult.longitude, geoResult.accuracy);
         }
       } catch (err: unknown) {
         if (!isActive) return;
@@ -225,16 +251,18 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
     // Registro do monitor contínuo opcionalmente protegido
     try {
       if (!isAdminUser && typeof navigator !== 'undefined' && navigator.geolocation) {
+        // BATERIA: cache de 60s no watch contínuo + o filtro anti-jitter só
+        // reprocessa quando há deslocamento real (≥5 m) ou 30s se moveu.
         watchId = navigator.geolocation.watchPosition(
           (pos) => {
             if (isActive) {
-              checkLocation(pos.coords.latitude, pos.coords.longitude);
+              checkLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
             }
           },
           (err) => {
             logger.warn('[Geofencing/Watch] Erro no monitoramento contínuo (capturado e silenciado na guarda):', err.message);
           },
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
         );
       }
     } catch (watchErr) {

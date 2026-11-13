@@ -1,16 +1,33 @@
 import { Geolocation } from '@capacitor/geolocation';
 import { logger } from './logger';
+import {
+  GPS_ACCURACY,
+  isPreciseFix,
+  toGpsFix,
+  type GpsFix,
+} from './gpsCore';
 
 /**
- * Utilitário para captura de geolocalização (GPS)
+ * Utilitário para captura de geolocalização (GPS).
+ *
+ * Toda leitura real passa por `gpsCore.toGpsFix` (validação + precisão). Quando
+ * o sensor não entrega nada utilizável, a função devolve uma coordenada de
+ * CONTINGÊNCIA marcada com `isSynthetic: true` e `accuracy: NaN` — ela serve
+ * para destravar a navegação, mas nunca deve ser gravada como posição de ativo
+ * nem alimentar o Mapa de Calor.
+ *
+ * @see docs/GPS_ANCORA_E_MAPA_DE_CALOR.md
  */
 
 export interface GeoLocationResult {
   latitude: number;
   longitude: number;
+  /** Precisão em metros; `NaN` quando a coordenada é sintética. */
   accuracy: number;
   isBypassed: boolean;
   source: 'native' | 'admin_bypass';
+  /** `true` = coordenada de contingência, não é leitura do sensor. */
+  isSynthetic?: boolean;
 }
 
 function showFloatingBypassToast(lat: number, lng: number, reason: string) {
@@ -100,8 +117,9 @@ export async function getCurrentDeviceLocation(
     return {
       latitude: finalAnchor.lat,
       longitude: finalAnchor.lng,
-      accuracy: 1.0,
+      accuracy: Number.NaN,
       isBypassed: true,
+      isSynthetic: true,
       source: 'admin_bypass'
     };
   }
@@ -113,48 +131,25 @@ export async function getCurrentDeviceLocation(
     return {
       latitude: finalAnchor.lat,
       longitude: finalAnchor.lng,
-      accuracy: 1.0,
+      accuracy: Number.NaN,
       isBypassed: true,
+      isSynthetic: true,
       source: 'admin_bypass'
     };
   }
 
   try {
-    const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-      // Configura um timeout imperativo interno para a Promise para nunca deixar pendurada
-      const timer = setTimeout(() => {
-        reject(new Error("Timeout síncrono na obtenção do GPS"));
-      }, 6000);
-
-      try {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            clearTimeout(timer);
-            resolve(pos);
-          },
-          (err) => {
-            clearTimeout(timer);
-            reject(err);
-          },
-          {
-            enableHighAccuracy: false, // Menos agressivo em termos de segurança
-            timeout: 5000,
-            maximumAge: 60000,
-          }
-        );
-      } catch (err) {
-        clearTimeout(timer);
-        reject(err);
-      }
-    });
-
-    return {
-      latitude: position.coords.latitude,
-      longitude: position.coords.longitude,
-      accuracy: position.coords.accuracy,
-      isBypassed: false,
-      source: 'native',
-    };
+    const fix = await getPreciseFix();
+    if (fix) {
+      return {
+        latitude: fix.lat,
+        longitude: fix.lng,
+        accuracy: fix.accuracy,
+        isBypassed: false,
+        source: 'native',
+      };
+    }
+    throw new Error('Sensor sem leitura precisa disponível');
   } catch (errorVal: unknown) {
     const errorMsg = errorVal instanceof Error ? errorVal.message : String(errorVal || '');
     logger.warn(">>> [SRE GPS Fallback] Falha de permissão ou política de geolocalização capturada:", errorMsg);
@@ -166,12 +161,63 @@ export async function getCurrentDeviceLocation(
     return {
       latitude: finalAnchor.lat,
       longitude: finalAnchor.lng,
-      accuracy: 1.0,
+      accuracy: Number.NaN,
       isBypassed: true,
+      isSynthetic: true,
       source: 'admin_bypass'
     };
   }
 }
+
+/**
+ * Leitura REAL e utilizável do aparelho, ou `null`.
+ *
+ * Estratégia de bateria e precisão:
+ *  1. tenta alta precisão com cache de 10s (rápido no uso de campo);
+ *  2. se a leitura vier imprecisa (> `GPS_ACCURACY.COLLECT`), tenta uma vez
+ *     com precisão alta e cache zero;
+ *  3. desiste devolvendo `null` — quem chama decide o que mostrar.
+ *
+ * Nunca inventa coordenada: é a porta de entrada para gravar posição de ativo.
+ */
+export const getPreciseFix = async (
+  maxAccuracyM: number = GPS_ACCURACY.COLLECT
+): Promise<GpsFix | null> => {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
+
+  const readOnce = (highAccuracy: boolean, maximumAge: number, timeout: number) =>
+    new Promise<GeolocationPosition>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Timeout na obtenção do GPS')), timeout + 1000);
+      try {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => { clearTimeout(timer); resolve(pos); },
+          (err) => { clearTimeout(timer); reject(err); },
+          { enableHighAccuracy: highAccuracy, timeout, maximumAge }
+        );
+      } catch (err) {
+        clearTimeout(timer);
+        reject(err);
+      }
+    });
+
+  const attempts: Array<[boolean, number, number]> = [
+    [true, 10_000, 12_000],
+    [true, 0, 20_000],
+  ];
+
+  for (const [highAccuracy, maximumAge, timeout] of attempts) {
+    try {
+      const position = await readOnce(highAccuracy, maximumAge, timeout);
+      const fix = toGpsFix(position?.coords);
+      if (fix && isPreciseFix(fix, maxAccuracyM)) return fix;
+      logger.info(`>>> [GPS] Leitura descartada (precisão ${fix ? Math.round(fix.accuracy) : 'invalida'}m > ${maxAccuracyM}m).`);
+    } catch (err) {
+      logger.warn('>>> [GPS] Tentativa de leitura falhou:', err);
+    }
+  }
+
+  return null;
+};
 
 export interface GpsLocation {
   lat: number;

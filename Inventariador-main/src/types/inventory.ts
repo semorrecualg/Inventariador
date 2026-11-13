@@ -67,6 +67,17 @@ export interface Asset {
   _history?: any[];
   gps_lat?: number | null;
   gps_lng?: number | null;
+
+  // --- Posição carimbada no ativo (modelo canônico do mapa de calor) ---
+  // `latitude`/`longitude` são a posição usada pelo mapa (graus decimais).
+  // `_gps_accuracy` = precisão horizontal em metros; `_gps_source` diz se veio
+  // do sensor (`sensor`) ou é contingência (`synthetic`, nunca deve ir ao mapa);
+  // `_gps_at` = instante ISO da leitura.
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  _gps_accuracy?: number | null;
+  _gps_source?: 'sensor' | 'synthetic' | null;
+  _gps_at?: string | null;
   _localMaster?: string;
   _origemTransacao?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
