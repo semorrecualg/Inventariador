@@ -71,7 +71,7 @@ import {
   resolveDeltaMode,
   syncCheckpointKey
 } from './utils/syncCheckpoint';
-import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan } from './utils/unitContextUtils';
+import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, unitListScope } from './utils/unitContextUtils';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -748,10 +748,7 @@ useEffect(() => {
   // FILIAIS DO CONTRATO sem base local: o boot exige a escolha da filial, mas num
   // aparelho novo a lista vinha dos dados locais (vazios) e o usuário ficava
   // preso. Esta consulta traz só os NOMES (coluna `filial`), nunca os ativos.
-  const [cloudUnitNames, setCloudUnitNames] = useState<{ tenantid: string; names: string[] } | null>(null);
-  const cloudUnitNamesFetchRef = useRef(false);
-  // Escopo (utilizador + contrato) a que a lista em memória pertence.
-  const cloudUnitNamesScopeRef = useRef('');
+  const [cloudUnitNames, setCloudUnitNames] = useState<{ scope: string; names: string[] } | null>(null);
   const [isDatabaseEmpty, setIsDatabaseEmpty] = useState<boolean>(false);
   // Etapa 2 da trilha única: "segurança biométrica" é um passo da esteira.
   // Fica true quando o usuário registra a biometria OU a dispensa na tela —
@@ -6355,41 +6352,40 @@ useEffect(() => {
     }
   }, [selectedUnit, filteredAssetsByUnit, user, bulkUpdateAssets, popScreen]);
   
-  const cloudUnitNamesScope = `${(user?.email || '').toLowerCase()}|${String(user?.tenantid || '').trim().toUpperCase()}`;
+  // Escopo da lista = utilizador + contrato. A lista guardada carrega o escopo
+  // em que nasceu, por isso uma lista de outra conta/contrato nunca é usada —
+  // nem chega ao ecrã no render em que o utilizador muda.
+  const cloudUnitNamesScope = unitListScope(user?.email, user?.tenantid);
+  // Só cresce: qualquer resposta de um pedido anterior é descartada.
+  const cloudUnitNamesRequestRef = useRef(0);
 
   useEffect(() => {
-    // Trocar de utilizador (ou de contrato) no MESMO aparelho não pode mostrar
-    // as filiais do contrato anterior: a lista em memória pertence ao escopo.
-    cloudUnitNamesScopeRef.current = cloudUnitNamesScope;
-    setCloudUnitNames(null);
-    cloudUnitNamesFetchRef.current = false;
-  }, [cloudUnitNamesScope]);
+    // Sobrou lista de outro escopo (sair e entrar outra conta no mesmo
+    // aparelho): descartar antes de qualquer uso.
+    if (cloudUnitNames && cloudUnitNames.scope !== cloudUnitNamesScope) {
+      setCloudUnitNames(null);
+      return;
+    }
 
-  useEffect(() => {
     // Só quando NÃO há base local (aparelho novo) e ainda não temos a lista.
     if (databaseMode === DatabaseMode.INTERNAL || !user || !navigator.onLine) return;
     if (sqliteOperationalUnits.length > 0 || inventory.assets.length > 0) return;
-    if (cloudUnitNames || cloudUnitNamesFetchRef.current) return;
+    if (cloudUnitNames) return;
 
-    const scope = cloudUnitNamesScopeRef.current;
     const tenant = String(user.tenantid || '').trim().toUpperCase();
     if (!tenant) return; // muro SRE: sem contrato não se lista nada
 
-    cloudUnitNamesFetchRef.current = true;
+    const pedido = ++cloudUnitNamesRequestRef.current;
     void fetchUnitNamesFromCloud(tenant)
       .then(nomes => {
-        // Resposta de um contrato anterior (o utilizador mudou no meio do pedido).
-        if (cloudUnitNamesScopeRef.current !== scope) return;
+        if (cloudUnitNamesRequestRef.current !== pedido) return; // escopo anterior
         if (nomes.length > 0) {
           logger.info(`>>> [Unidades] Lista de filiais do contrato carregada da nuvem: ${nomes.length} unidade(s).`);
-          setCloudUnitNames({ tenantid: tenant, names: nomes });
+          setCloudUnitNames({ scope: cloudUnitNamesScope, names: nomes });
         }
       })
-      .catch(err => logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', err))
-      .finally(() => {
-        if (cloudUnitNamesScopeRef.current === scope) cloudUnitNamesFetchRef.current = false;
-      });
-  }, [databaseMode, user, sqliteOperationalUnits.length, inventory.assets.length, cloudUnitNames]);
+      .catch(err => logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', err));
+  }, [cloudUnitNamesScope, cloudUnitNames, databaseMode, user, sqliteOperationalUnits.length, inventory.assets.length]);
 
   const fullCompaniesWithStatus = useMemo(() => {
     if (sqliteService.isImportingBatch || isImportingBatchState) {
@@ -6595,10 +6591,10 @@ useEffect(() => {
 
     // 4c. Filiais do CONTRATO vindas da nuvem (aparelho sem base local).
     // Sem elas a seleção de filial abria vazia e o boot travava o usuário.
-    const cloudNamesForTenant = cloudUnitNames && cloudUnitNames.tenantid === userTenant
+    const cloudNamesForScope = cloudUnitNames && cloudUnitNames.scope === cloudUnitNamesScope
       ? cloudUnitNames.names
       : [];
-    cloudNamesForTenant.forEach(nome => {
+    cloudNamesForScope.forEach(nome => {
       const norm = normalizeKey(nome);
       if (!norm || !isUnitAllowed(norm)) return;
       const key = unitContextKey(userTenant, nome);
@@ -6713,7 +6709,7 @@ useEffect(() => {
 
     logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref

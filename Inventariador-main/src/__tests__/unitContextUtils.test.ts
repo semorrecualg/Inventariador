@@ -7,7 +7,8 @@ import {
   resolveUnitFilter,
   resolveBootUnitFilter,
   resolveBootPullPlan,
-  normalizeUnitNames
+  normalizeUnitNames,
+  unitListScope
 } from '../utils/unitContextUtils';
 
 describe('resolveUnitFilter — filtro de filial dos pulls do fluxo inicial (Etapa 2)', () => {
@@ -185,5 +186,19 @@ describe('normalizeUnitNames — lista de filiais vinda da nuvem (sem ativos)', 
 
   it('ordena para a tela de seleção não dançar entre cargas', () => {
     expect(normalizeUnitNames(['B', 'A', 'C'])).toEqual(['A', 'B', 'C']);
+  });
+});
+
+describe('unitListScope — lista de filiais presa ao utilizador e ao contrato', () => {
+  it('outro contrato ou outro utilizador dão escopos diferentes', () => {
+    const base = unitListScope('auditor@x.com', 'CICOPAL');
+    expect(unitListScope('auditor@x.com', 'CLIENTETESTE')).not.toBe(base);
+    expect(unitListScope('outro@x.com', 'CICOPAL')).not.toBe(base);
+    expect(unitListScope(' auditor@X.com ', ' cicopal ')).toBe(base);
+  });
+
+  it('sem sessão nenhum escopo real coincide', () => {
+    expect(unitListScope(null, null)).not.toBe(unitListScope('auditor@x.com', 'CICOPAL'));
+    expect(unitListScope(undefined, 'CICOPAL')).not.toBe(unitListScope('auditor@x.com', 'CICOPAL'));
   });
 });

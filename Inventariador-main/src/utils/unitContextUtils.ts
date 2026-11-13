@@ -92,6 +92,17 @@ export function resolveBootUnitFilter(
   return resolveUnitFilter(lastFilial);
 }
 
+/**
+ * Escopo da lista de filiais em memória: utilizador + contrato.
+ *
+ * A lista carrega o escopo em que nasceu e só é usada quando o escopo atual é
+ * igual — é isto que impede as filiais de um contrato de aparecerem depois de
+ * sair e entrar outra conta no mesmo aparelho.
+ */
+export function unitListScope(email?: string | null, tenantid?: string | null): string {
+  return `${String(email || '').trim().toLowerCase()}|${String(tenantid || '').trim().toUpperCase()}`;
+}
+
 /** Sentinelas que nunca são filial. */
 const UNIT_SENTINELS = new Set(['', 'TODAS', 'NULL', 'UNDEFINED', '0', 'DEFAULT', 'SEM FILIAL']);
 

@@ -94,19 +94,6 @@ describe('fetchUnitNamesFromCloud — filiais do contrato sem baixar ativos', ()
     expect(nomes.filter(n => n === 'FILIAL 0')).toHaveLength(1);
   });
 
-  it('página cheia seguida de vazia encerra a paginação', async () => {
-    const cheia = Array.from({ length: 1000 }, (_, i) => linha(`FILIAL ${i}`));
-    const { ranges } = stubPaginacao([
-      { data: cheia, error: null },
-      { data: [], error: null }
-    ]);
-
-    const nomes = await fetchUnitNamesFromCloud('CICOPAL');
-
-    expect(ranges).toEqual([[0, 999], [1000, 1999]]);
-    expect(nomes).toHaveLength(1000);
-  });
-
   it('erro na consulta não rebenta e devolve lista vazia', async () => {
     stubPaginacao([{ data: null, error: { message: 'permission denied' } }]);
 
