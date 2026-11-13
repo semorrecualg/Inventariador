@@ -110,7 +110,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
+import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isSyncLockStuck } from './services/syncQueueGuards';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
@@ -745,6 +745,11 @@ useEffect(() => {
   const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ filial: string; displayName: string; total: number; checked: number; tenantid: string }>>([]);
+  // FILIAIS DO CONTRATO sem base local: o boot exige a escolha da filial, mas num
+  // aparelho novo a lista vinha dos dados locais (vazios) e o usuário ficava
+  // preso. Esta consulta traz só os NOMES (coluna `filial`), nunca os ativos.
+  const [cloudUnitNames, setCloudUnitNames] = useState<string[]>([]);
+  const cloudUnitNamesFetchRef = useRef(false);
   const [isDatabaseEmpty, setIsDatabaseEmpty] = useState<boolean>(false);
   // Etapa 2 da trilha única: "segurança biométrica" é um passo da esteira.
   // Fica true quando o usuário registra a biometria OU a dispensa na tela —
@@ -6348,6 +6353,24 @@ useEffect(() => {
     }
   }, [selectedUnit, filteredAssetsByUnit, user, bulkUpdateAssets, popScreen]);
   
+  useEffect(() => {
+    // Só quando NÃO há base local (aparelho novo) e ainda não temos a lista.
+    if (databaseMode === DatabaseMode.INTERNAL || !user || !navigator.onLine) return;
+    if (sqliteOperationalUnits.length > 0 || inventory.assets.length > 0) return;
+    if (cloudUnitNames.length > 0 || cloudUnitNamesFetchRef.current) return;
+
+    cloudUnitNamesFetchRef.current = true;
+    void fetchUnitNamesFromCloud(user.tenantid)
+      .then(nomes => {
+        if (nomes.length > 0) {
+          logger.info(`>>> [Unidades] Lista de filiais do contrato carregada da nuvem: ${nomes.length} unidade(s).`);
+          setCloudUnitNames(nomes);
+        }
+      })
+      .catch(err => logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', err))
+      .finally(() => { cloudUnitNamesFetchRef.current = false; });
+  }, [databaseMode, user, sqliteOperationalUnits.length, inventory.assets.length, cloudUnitNames.length]);
+
   const fullCompaniesWithStatus = useMemo(() => {
     if (sqliteService.isImportingBatch || isImportingBatchState) {
       logger.info('>>> [fullCompaniesWithStatus] Importando em lote. Bloqueando leituras pesadas.');
@@ -6550,6 +6573,22 @@ useEffect(() => {
       });
     });
 
+    // 4c. Filiais do CONTRATO vindas da nuvem (aparelho sem base local).
+    // Sem elas a seleção de filial abria vazia e o boot travava o usuário.
+    cloudUnitNames.forEach(nome => {
+      const norm = normalizeKey(nome);
+      if (!norm || !isUnitAllowed(norm)) return;
+      const key = unitContextKey(userTenant, nome);
+      if (mergedCompanies.has(key)) return;
+      mergedCompanies.set(key, {
+        name: nome,
+        tenantid: userTenant,
+        hasData: false,
+        hasActiveAssets: false,
+        hasAssetCampaign: false
+      });
+    });
+
     const sqlCountsMap = new Map<string, number>();
     sqliteOperationalUnits.forEach(u => {
       const key = unitContextKey(u.tenantid || '', u.filial || '');
@@ -6651,7 +6690,7 @@ useEffect(() => {
 
     logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref

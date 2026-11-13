@@ -92,6 +92,26 @@ export function resolveBootUnitFilter(
   return resolveUnitFilter(lastFilial);
 }
 
+/** Sentinelas que nunca são filial. */
+const UNIT_SENTINELS = new Set(['', 'TODAS', 'NULL', 'UNDEFINED', '0', 'DEFAULT', 'SEM FILIAL']);
+
+/**
+ * Normaliza a lista de filiais (vem da nuvem quando o aparelho ainda não tem
+ * base local): trim + UPPER, descarta sentinelas, remove duplicados e ordena.
+ */
+export function normalizeUnitNames(
+  rows: ReadonlyArray<string | { filial?: string | null } | null | undefined>
+): string[] {
+  const nomes = new Set<string>();
+  for (const row of rows) {
+    const bruto = typeof row === 'string' ? row : row?.filial;
+    const nome = String(bruto ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+    if (UNIT_SENTINELS.has(nome)) continue;
+    nomes.add(nome);
+  }
+  return Array.from(nomes).sort((a, b) => a.localeCompare(b));
+}
+
 /**
  * Plano da CARGA INICIAL (Boot Loader): decide se há uma filial para baixar.
  *

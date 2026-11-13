@@ -6,7 +6,8 @@ import {
   findHomonymUnits,
   resolveUnitFilter,
   resolveBootUnitFilter,
-  resolveBootPullPlan
+  resolveBootPullPlan,
+  normalizeUnitNames
 } from '../utils/unitContextUtils';
 
 describe('resolveUnitFilter — filtro de filial dos pulls do fluxo inicial (Etapa 2)', () => {
@@ -152,5 +153,37 @@ describe('resolveBootPullPlan — o boot nunca baixa o contrato inteiro', () => 
       expect(plano.unit).toBeUndefined();
       expect(plano.requiresUnitSelection).toBe(true);
     }
+  });
+});
+
+describe('normalizeUnitNames — lista de filiais vinda da nuvem (sem ativos)', () => {
+  it('normaliza caixa/espaços e remove duplicados', () => {
+    expect(normalizeUnitNames([
+      { filial: '010101 cicopal go' },
+      { filial: '  010101   CICOPAL GO ' },
+      { filial: '010201 snacks pa' }
+    ])).toEqual(['010101 CICOPAL GO', '010201 SNACKS PA']);
+  });
+
+  it('descarta sentinelas e vazios', () => {
+    expect(normalizeUnitNames([
+      { filial: '' }, { filial: null }, { filial: 'TODAS' }, { filial: 'NULL' },
+      { filial: 'UNDEFINED' }, { filial: '0' }, { filial: 'DEFAULT' },
+      { filial: 'SEM FILIAL' }, { filial: 'FILIAL X' }
+    ])).toEqual(['FILIAL X']);
+  });
+
+  it('aceita strings soltas e ignora nulos da lista', () => {
+    expect(normalizeUnitNames(['filial y', null, undefined, 'FILIAL X']))
+      .toEqual(['FILIAL X', 'FILIAL Y']);
+  });
+
+  it('lista vazia permanece vazia', () => {
+    expect(normalizeUnitNames([])).toEqual([]);
+    expect(normalizeUnitNames([{ filial: '   ' }])).toEqual([]);
+  });
+
+  it('ordena para a tela de seleção não dançar entre cargas', () => {
+    expect(normalizeUnitNames(['B', 'A', 'C'])).toEqual(['A', 'B', 'C']);
   });
 });

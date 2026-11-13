@@ -206,6 +206,15 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   08-09T21:46:19; merge upsert preservou os 12.636 totais locais; SYNC_PULL
   incremental registrado. 344/344 testes (16 novos) · TSC limpo.*
 
+- **Lista de filiais sem base local (2026-11-13):** com o boot a exigir a
+  filial, um aparelho novo (base vazia) abria `UNIT_SELECTION` sem nenhuma
+  unidade para escolher, porque a lista vinha dos dados locais. Agora
+  `fetchUnitNamesFromCloud(tenantid)` consulta **só a coluna `filial`**
+  (paginada, `Range`), normaliza (`normalizeUnitNames`: trim/UPPER, sem
+  sentinelas, dedupe, ordenada) e o App mistura o resultado na lista de
+  unidades enquanto não houver base local. Nenhum ativo é baixado; sem
+  tenantid a consulta não corre (muro SRE).
+
 - **Boot nunca baixa o contrato inteiro (2026-11-13):** com perfil sem filial
   (`TODAS`/vazio) e sem última escolha válida, `bootFilial` ficava indefinido e
   `fetchFullInventory` baixava os **12.636** ativos do contrato de uma vez,
