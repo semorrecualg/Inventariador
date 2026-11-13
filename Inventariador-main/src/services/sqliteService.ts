@@ -39,6 +39,10 @@ export interface DexieAsset {
   vlraquisic: number;
   sn1_recno: number | null;
   sn3_recno: number | null;
+  // REGISTRO ADOTADO: rótulo `rad_NNNNNN` do registo criado copiando os dados
+  // de outra unidade. O registo novo fica com `sn1_recno` nulo, sem duplicar a
+  // chave, e o vínculo vive aqui (`rad_` = REGISTRO ADOTADO + sequência).
+  rad_recno?: string | null;
   _is_synced: number; // 0 or 1
   _is_deleted: number; // 0 or 1
   _conferido: number; // 0 or 1

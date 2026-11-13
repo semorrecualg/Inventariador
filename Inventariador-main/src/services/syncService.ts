@@ -7,6 +7,24 @@ import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { matchUnitKeys } from '../utils/schema';
+import { UPSERT_TIMEOUT_MS, withUpsertTimeout } from './syncQueueGuards';
+
+/**
+ * Marca UM registo como sincronizado nos três stores locais, logo depois de o
+ * upsert dele ser confirmado pela nuvem.
+ *
+ * Antes a marcação era um lote único no fim do ciclo: se o ciclo quebrasse a
+ * meio (rede, app em segundo plano, pedido pendurado) o que já tinha subido
+ * continuava `_is_synced = 0` e a etiqueta PENDENTE NUVEM ficava para sempre.
+ * Em 2026-11-12 isso deixou 15 de 45 ativos na nuvem e 45 pendentes no aparelho.
+ */
+const markRecordSynced = async (primaryKey: string): Promise<void> => {
+  await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
+    await db.local_assets.where('primarykey').equals(primaryKey).modify({ _is_synced: 1 });
+    await db.ativos.where('primarykey').equals(primaryKey).modify({ _is_synced: 1 });
+    await db.assets.where('primarykey').equals(primaryKey).modify({ _is_synced: 1 });
+  });
+};
 
 export interface UserSessionData {
   id: string;
@@ -523,6 +541,7 @@ const _syncService = {
         if (contaValue === '131105001') {
           // Marcar como sincronizado para pular a repetição na fila sem enviar ao Supabase (Regra Fiscal)
           syncedPrimaryKeys.push(String(pKey));
+          await markRecordSynced(String(pKey));
           continue;
         }
 
@@ -553,6 +572,12 @@ const _syncService = {
             vlraquisic: record.vlraquisic !== undefined && record.vlraquisic !== null ? Number(record.vlraquisic) : 0,
             sn1_recno: record.sn1_recno !== undefined && record.sn1_recno !== null ? Number(record.sn1_recno) : null,
             sn3_recno: record.sn3_recno !== undefined && record.sn3_recno !== null ? Number(record.sn3_recno) : null,
+            // REGISTRO ADOTADO: rótulo `rad_NNNNNN` do item criado copiando os
+            // dados de outra unidade. O registo novo sobe com `sn1_recno` nulo
+            // (não duplica a chave de ninguém) e o vínculo com a origem fica em
+            // `rad_recno`. Se a coluna ainda não existir na nuvem, o laço de
+            // PGRST204 reenvia sem ela — o ativo não se perde.
+            rad_recno: record.rad_recno !== undefined && record.rad_recno !== null ? String(record.rad_recno).trim() : null,
             DE_PARA: record.DE_PARA !== undefined && record.DE_PARA !== null ? String(record.DE_PARA).trim() : null,
             gps_lat: record.gps_lat !== undefined && record.gps_lat !== null ? Number(record.gps_lat) : null,
             gps_lng: record.gps_lng !== undefined && record.gps_lng !== null ? Number(record.gps_lng) : null,
@@ -572,7 +597,13 @@ const _syncService = {
           // `data_leitura` (scripts/assets-conferencia.sql).
           let supabaseErr: { message?: string; status?: string | number; code?: string | number } | null = null;
           for (let attempt = 0; attempt < 4; attempt += 1) {
-            const { error } = await supabase.from('assets').upsert(payload);
+            // Sem limite de tempo, um pedido pendurado congelava o ciclo
+            // inteiro para sempre (o laço nunca voltava e a trava ficava presa).
+            const pedido = supabase.from('assets').upsert(payload);
+            const { error } = await withUpsertTimeout<Awaited<typeof pedido>>(
+              pedido,
+              UPSERT_TIMEOUT_MS
+            );
             supabaseErr = error;
             if (!error) break;
             const message = String(error.message || '');
@@ -585,6 +616,9 @@ const _syncService = {
 
           if (!supabaseErr) {
             syncedPrimaryKeys.push(String(pKey));
+            // Progresso gravado no instante do sucesso: sobrevive a qualquer
+            // interrupção dos registos seguintes.
+            await markRecordSynced(String(pKey));
           } else {
             failedPrimaryKeys.push(String(pKey));
             const errObj = supabaseErr as { status?: string | number; code?: string | number; message?: string };
@@ -618,21 +652,11 @@ const _syncService = {
         }
       }
 
-      // CORREÇÃO DE AUDITORIA (ACID TRANSACTION ATÔMICO SEQUENCIAL): Aplica atualizações locais sequencialmente via Dexie sem usar SQL
+      // A marcação `_is_synced = 1` já aconteceu registro a registro, no ponto
+      // em que cada upsert foi confirmado (ver `markRecordSynced`). Antes o
+      // lote era aplicado só aqui, no fim: uma quebra a meio perdia o progresso.
       if (syncedPrimaryKeys.length > 0) {
-        logger.info(`>>> [Sync ACID Engine] Processando atualização local sequencial via Dexie para ${syncedPrimaryKeys.length} registros...`);
-
-        await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
-          for (let m = 0; m < syncedPrimaryKeys.length; m++) {
-            const keyToUpdate = syncedPrimaryKeys[m];
-            // Chave composta (v6): marca por primarykey via índice, sem depender do tenant.
-            await db.local_assets.where('primarykey').equals(keyToUpdate).modify({ _is_synced: 1 });
-            await db.ativos.where('primarykey').equals(keyToUpdate).modify({ _is_synced: 1 });
-            await db.assets.where('primarykey').equals(keyToUpdate).modify({ _is_synced: 1 });
-          }
-        });
-        
-        logger.info(`>>> [Sync ACID Engine] Sincronização local consolidada com sucesso via Dexie.`);
+        logger.info(`>>> [Sync ACID Engine] ${syncedPrimaryKeys.length} registro(s) marcados como sincronizados no aparelho.`);
       }
 
       // 4. EXPURGAMENTO DE LOGS (DISK SATURATION GUARD): Limpar histórico antigo via Dexie API para evitar entupimento de disco

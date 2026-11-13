@@ -16,6 +16,7 @@ import { normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
+import { normalizeUnitNames } from '../utils/unitContextUtils';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -1461,6 +1462,56 @@ export const buildConfigCloudPayload = (
   });
 
   return { configId, tenantid: cleanTenant, payload };
+};
+
+/**
+ * LISTA DE FILIAIS DO CONTRATO — sem baixar ativos.
+ *
+ * O Boot Loader deixou de baixar o contrato inteiro quando o perfil não fixa
+ * filial: ele abre a seleção. Mas num aparelho novo a lista vinha dos dados
+ * locais (vazios), e o usuário ficava preso. Esta consulta puxa SÓ a coluna
+ * `filial` (paginada) para montar a lista de unidades do contrato.
+ *
+ * Muro SRE: sem tenantid não consulta nada — jamais lista filiais de outro
+ * contrato.
+ */
+export const fetchUnitNamesFromCloud = async (tenantid?: string | null): Promise<string[]> => {
+  if (!supabase || !navigator.onLine) return [];
+
+  const tenant = String(tenantid || '').trim().toUpperCase();
+  if (!tenant) {
+    logger.warn('>>> [SRE ISOLAMENTO] Lista de filiais sem contrato resolvido: abortando (não lista unidades de outros contratos).');
+    return [];
+  }
+
+  const PAGE = 1000;
+  const nomes = new Set<string>();
+
+  try {
+    for (let start = 0; start < 50000; start += PAGE) {
+      const { data, error } = await supabase
+        .from('assets')
+        .select('filial')
+        .eq('tenantid', tenant)
+        .order('filial', { ascending: true })
+        .range(start, start + PAGE - 1);
+
+      if (error) {
+        logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', error.message);
+        break;
+      }
+
+      const linhas = (data || []) as Array<{ filial?: string | null }>;
+      linhas.forEach(linha => nomes.add(String(linha.filial || '')));
+      if (linhas.length < PAGE) break;
+    }
+  } catch (err) {
+    logger.warn('>>> [Unidades] Erro ao listar filiais do contrato:', err);
+  }
+
+  const filiais = normalizeUnitNames(Array.from(nomes));
+  logger.info(`>>> [Unidades] ${filiais.length} filial(is) listada(s) do contrato ${tenant} (sem baixar ativos).`);
+  return filiais;
 };
 
 export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {

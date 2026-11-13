@@ -65,13 +65,13 @@ import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
 import {
-  readSyncCheckpoint,
+  readCheckpointForDelta,
   clearSyncCheckpoint,
   clearAllSyncCheckpoints,
   resolveDeltaMode,
   syncCheckpointKey
 } from './utils/syncCheckpoint';
-import { resolveUnitFilter, resolveBootUnitFilter } from './utils/unitContextUtils';
+import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, unitListScope, decideUnitListAction } from './utils/unitContextUtils';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -110,8 +110,9 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
+import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
+import { isSyncLockStuck } from './services/syncQueueGuards';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 import { determineAssetTag } from './services/tagService';
@@ -744,6 +745,10 @@ useEffect(() => {
   const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ filial: string; displayName: string; total: number; checked: number; tenantid: string }>>([]);
+  // FILIAIS DO CONTRATO sem base local: o boot exige a escolha da filial, mas num
+  // aparelho novo a lista vinha dos dados locais (vazios) e o usuário ficava
+  // preso. Esta consulta traz só os NOMES (coluna `filial`), nunca os ativos.
+  const [cloudUnitNames, setCloudUnitNames] = useState<{ scope: string; names: string[] } | null>(null);
   const [isDatabaseEmpty, setIsDatabaseEmpty] = useState<boolean>(false);
   // Etapa 2 da trilha única: "segurança biométrica" é um passo da esteira.
   // Fica true quando o usuário registra a biometria OU a dispensa na tela —
@@ -878,6 +883,8 @@ useEffect(() => {
     userRef.current = user;
   }, [user]);
   const isSyncRunningRef = useRef<boolean>(false);
+  // Início do ciclo em andamento: base do watchdog que liberta uma trava presa.
+  const syncCycleStartedAtRef = useRef<number>(0);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
   const inventoryRef = useRef<InventoryState>(inventory);
@@ -1143,12 +1150,23 @@ useEffect(() => {
       if (!user || (!user.tenantid && !user.tenantid) || !sessionStorage.getItem('filial')) {
         return;
       }
+      // Watchdog: se o ciclo anterior passou de 2 minutos, a trava ficou presa
+      // (pedido sem resposta). Liberta e segue, em vez de ficar mudo para sempre.
+      if (isSyncLockStuck(isSyncRunningRef.current, syncCycleStartedAtRef.current)) {
+        logger.warn(
+          `>>> [Background Sync Watchdog] Ciclo anterior preso há mais de 2 min — libertando a trava (iniciado em ${new Date(syncCycleStartedAtRef.current).toISOString()}).`
+        );
+        isSyncRunningRef.current = false;
+        syncCycleStartedAtRef.current = 0;
+      }
+
       // Se o dispositivo estiver offline ou uma sincronização já estiver ativa, aborta o ciclo
       if (!navigator.onLine || isSyncRunningRef.current) {
         return;
       }
 
       isSyncRunningRef.current = true;
+      syncCycleStartedAtRef.current = Date.now();
       logger.info(">>> [Background Sync] Iniciando ciclo automático de atualização...");
 
       try {
@@ -1166,6 +1184,7 @@ useEffect(() => {
       } finally {
         // Libera a trava para o próximo ciclo de 60 segundos ou evento
         isSyncRunningRef.current = false;
+        syncCycleStartedAtRef.current = 0;
       }
     };
 
@@ -1180,10 +1199,38 @@ useEffect(() => {
 
     window.addEventListener('online', handleNetworkReconnection);
 
+    // Gatilho de retomada: o Android suspende os timers da WebView em segundo
+    // plano, então o ciclo de 60 s não corre com o app minimizado — e ao voltar
+    // o operador esperava até um minuto sem nada subir. Com o listener, o ciclo
+    // roda no instante em que o app volta ao primeiro plano.
+    let appStateHandle: { remove: () => Promise<void> } | null = null;
+    let disposed = false;
+    const registerAppStateListener = async () => {
+      try {
+        const { App: CapacitorApp } = await import('@capacitor/app');
+        const handle = await CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+          if (!isActive) return;
+          logger.info('>>> [Background Sync] App voltou ao primeiro plano: disparando ciclo.');
+          triggerBackgroundSync();
+        });
+        if (disposed) {
+          void handle.remove();
+        } else {
+          appStateHandle = handle;
+        }
+      } catch (err) {
+        // PWA/browser sem plugin nativo: o timer e o evento `online` continuam.
+        logger.warn('>>> [Background Sync] appStateChange indisponível nesta plataforma:', err);
+      }
+    };
+    void registerAppStateListener();
+
     // Limpeza de memória ao desmontar o ecossistema do App
     return () => {
+      disposed = true;
       clearInterval(syncIntervalId);
       window.removeEventListener('online', handleNetworkReconnection);
+      if (appStateHandle) void appStateHandle.remove();
     };
   }, [user]);
 
@@ -2654,8 +2701,13 @@ useEffect(() => {
         logger.info(`>>> [Sync] Pull de ${ckKey} já concluído nesta sessão. Pulando sincronização duplicada (anti-loop SYNC_PULL).`);
         return;
       }
+      // O checkpoint do CONTRATO (`TENANT|`) também serve de piso para a filial:
+      // foi o pull do Boot Loader que cobriu todas as filiais dela. Sem esta
+      // tolerância, o boot de contrato gravava `TENANT|`, o sync procurava
+      // `TENANT|FILIAL` e não achava — caía em pull completo e a base inteira
+      // descia outra vez.
       const { since, incremental } = resolveDeltaMode(
-        hasLocalData ? readSyncCheckpoint(ckKey) : null,
+        hasLocalData ? readCheckpointForDelta(firstTenant, explicitUnitId) : null,
         !!explicitForceFull
       );
       if (incremental) {
@@ -3313,10 +3365,19 @@ useEffect(() => {
           // (app_last_work_context, Etapa 4) — a carga inicial baixa só a
           // filial escolhida (ex.: 010201 SNACKS PA = 2.066) em vez do
           // contrato inteiro (12.636). Muro SRE: só vale para o MESMO contrato.
-          const bootFilial = resolveBootUnitFilter(user?.filial, readLastWorkContext(), user?.tenantid);
-          if (bootFilial) {
-            logger.info(`>>> [Boot Loader] Filial definida (${bootFilial}). Baixando somente os ativos desta filial (Etapa 2/5a).`);
+          // NUNCA baixar o contrato inteiro. Sem filial no perfil e sem última
+          // escolha válida, a carga é ABORTADA e o usuário escolhe a filial:
+          // antes, `bootFilial` indefinido fazia o pull trazer os 12.636 ativos
+          // do contrato (e marcar todos como sincronizados).
+          const bootFilial = resolveBootPullPlan(user?.filial, readLastWorkContext(), user?.tenantid).unit;
+          if (!bootFilial) {
+            logger.warn('>>> [Boot Loader] Sem filial no perfil e sem última escolha: contrato inteiro NÃO é baixado. Exigindo a escolha da filial.');
+            setHistoryRef.current(prev => (
+              prev.includes(AppScreen.UNIT_SELECTION) ? prev : [...prev, AppScreen.UNIT_SELECTION]
+            ));
+            return;
           }
+          logger.info(`>>> [Boot Loader] Filial definida (${bootFilial}). Baixando somente os ativos desta filial (Etapa 2/5a).`);
           const cloudData = await fetchFullInventory(
             user?.tenantid, 
             bootFilial, 
@@ -3402,9 +3463,11 @@ useEffect(() => {
           try {
             // Se já inicializamos acima com sucesso, não precisamos buscar de novo, apenas agenda se houver update pendente
             const currentAssetsCount = savedInventory?.assets?.length || 0;
-            if (currentAssetsCount === 0) {
+            // Mesma regra do boot: sem filial resolvida, nada de pull do contrato.
+            const verifyUnit = resolveBootPullPlan(user?.filial, readLastWorkContext(), user?.tenantid).unit;
+            if (currentAssetsCount === 0 && verifyUnit) {
               const cloudData = await Promise.race([
-                fetchFullInventory(user?.tenantid),
+                fetchFullInventory(user?.tenantid, verifyUnit),
                 new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 8000))
               ]).catch(() => null);
 
@@ -5419,6 +5482,13 @@ useEffect(() => {
     
     const assetWithHistory: Asset & Record<string, unknown> = {
       ...assetWithGps,
+      // PONTO ÚNICO: toda a gravação que passa por aqui é alteração DESTE
+      // aparelho, logo pendente de nuvem. Sem este reset, quem edita a ficha,
+      // etiqueta, concilia ou confirma pela leitura deixava o item com
+      // `_is_synced = 1` vindo do pull e o cartão dizia "Sincronizado" antes de
+      // a fila enviar (ou para sempre, offline). A fila só volta a marcar 1
+      // depois do upsert confirmado.
+      _is_synced: 0,
       currentCampaignId: inventory.currentCampaignId || assetWithGps.currentCampaignId,
       _version: nextVersion,
       _history: [...(assetWithGps._history || []), auditEntry],
@@ -5486,6 +5556,9 @@ useEffect(() => {
       ...parentAsset,
       _is_unitized: true,
       _conferido: true,
+      // Unitarizar altera o pai neste aparelho: pendente de nuvem como qualquer
+      // outra conferência (o pai sai do giro e sobe unitarizado).
+      _is_synced: 0,
       _dataLeitura: timestamp,
       _auditor: auditor,
       TAG_INVENTARIO: TagInventario.CONFERIDO,
@@ -5705,6 +5778,14 @@ useEffect(() => {
 
   const bulkUpdateAssets = useCallback(async (ids: string[], manualUpdates?: Partial<Asset>) => {
     const idSet = new Set(ids.map(id => String(id)));
+
+    // O endereço do inventário (o mesmo que a tela tem aberto via
+    // `selectedLocation` → `setInventoryLocation`) é o alvo de `_localMaster`
+    // e da TAG abaixo. Sem ele, `targetLoc` cai no endereço de CADA item e a
+    // TAG vira CONFERIDO no endereço de origem em vez de ADOTADO.
+    if (!inventoryLocation && !history.includes(AppScreen.ACCOUNT_RECONCILIATION)) {
+      logger.warn('>>> [Lote] Endereço do inventário não definido: a TAG será calculada contra o endereço de cada item (risco de CONFERIDO em vez de ADOTADO).');
+    }
     const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
     
     // Identificar a origem da transação (Código Fixo de 4 dígitos)
@@ -5814,6 +5895,12 @@ useEffect(() => {
           }
         }
         updates._localMaster = targetLoc;
+        // Alteração deste aparelho = pendente de nuvem. Sem este reset, um item
+        // que veio do pull (_is_synced = 1) ficava marcado como "Sincronizado"
+        // no cartão assim que fosse conferido — e continuava a mentir enquanto
+        // estivesse offline, mesmo com a alteração ainda na fila. É a mesma
+        // regra que a conferência item a item já aplicava (InventoryCard).
+        updates._is_synced = 0;
         
         const hasChanges = alteredFields.size > 0;
         updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
@@ -5943,6 +6030,9 @@ useEffect(() => {
       res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (normalizeKey(String(a.endereco)) === normalizeKey(String(a._localMaster || a.endereco)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
       res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
+      // REGISTRO ADOTADO: rótulo rad_<UNIDADE>_<DISPOSITIVO>_<SEQUENCIA> do item
+      // criado por cópia de outra unidade (vazio em tudo o que não é adotado).
+      res['AUDITOR_RAD_RECNO'] = (a.rad_recno as string | undefined) || '';
       return res;
     });
     const ws = XLSX.utils.json_to_sheet(wsData);
@@ -6262,6 +6352,42 @@ useEffect(() => {
     }
   }, [selectedUnit, filteredAssetsByUnit, user, bulkUpdateAssets, popScreen]);
   
+  // Escopo da lista = utilizador + contrato. A lista guardada carrega o escopo
+  // em que nasceu, por isso uma lista de outra conta/contrato nunca é usada —
+  // nem chega ao ecrã no render em que o utilizador muda.
+  const activeTenant = String(user?.tenantid || '').trim().toUpperCase();
+  const cloudUnitNamesScope = unitListScope(user?.email, activeTenant);
+  // Só cresce: qualquer resposta de um pedido anterior é descartada.
+  const cloudUnitNamesRequestRef = useRef(0);
+
+  useEffect(() => {
+    const acao = decideUnitListAction({
+      storedScope: cloudUnitNames?.scope ?? null,
+      scope: cloudUnitNamesScope,
+      tenantid: activeTenant,
+      isLocalDatabase: databaseMode === DatabaseMode.INTERNAL,
+      online: navigator.onLine,
+      hasLocalBase: sqliteOperationalUnits.length > 0 || inventory.assets.length > 0
+    });
+
+    if (acao.type === 'clear') {
+      setCloudUnitNames(null);
+      return;
+    }
+    if (acao.type !== 'fetch') return;
+
+    const pedido = ++cloudUnitNamesRequestRef.current;
+    void fetchUnitNamesFromCloud(acao.tenant)
+      .then(nomes => {
+        if (cloudUnitNamesRequestRef.current !== pedido) return; // escopo anterior
+        if (nomes.length > 0) {
+          logger.info(`>>> [Unidades] Lista de filiais do contrato carregada da nuvem: ${nomes.length} unidade(s).`);
+          setCloudUnitNames({ scope: cloudUnitNamesScope, names: nomes });
+        }
+      })
+      .catch(err => logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', err));
+  }, [activeTenant, cloudUnitNamesScope, cloudUnitNames, databaseMode, sqliteOperationalUnits.length, inventory.assets.length]);
+
   const fullCompaniesWithStatus = useMemo(() => {
     if (sqliteService.isImportingBatch || isImportingBatchState) {
       logger.info('>>> [fullCompaniesWithStatus] Importando em lote. Bloqueando leituras pesadas.');
@@ -6464,6 +6590,25 @@ useEffect(() => {
       });
     });
 
+    // 4c. Filiais do CONTRATO vindas da nuvem (aparelho sem base local).
+    // Sem elas a seleção de filial abria vazia e o boot travava o usuário.
+    const cloudNamesForScope = cloudUnitNames && cloudUnitNames.scope === cloudUnitNamesScope
+      ? cloudUnitNames.names
+      : [];
+    cloudNamesForScope.forEach(nome => {
+      const norm = normalizeKey(nome);
+      if (!norm || !isUnitAllowed(norm)) return;
+      const key = unitContextKey(userTenant, nome);
+      if (mergedCompanies.has(key)) return;
+      mergedCompanies.set(key, {
+        name: nome,
+        tenantid: userTenant,
+        hasData: false,
+        hasActiveAssets: false,
+        hasAssetCampaign: false
+      });
+    });
+
     const sqlCountsMap = new Map<string, number>();
     sqliteOperationalUnits.forEach(u => {
       const key = unitContextKey(u.tenantid || '', u.filial || '');
@@ -6565,7 +6710,7 @@ useEffect(() => {
 
     logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref
