@@ -408,9 +408,8 @@ describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
     expect(retomada.failed).toBe(true);
   });
 
-  it('saída antecipada (sem push nem pull) ainda encerra a sessão do ciclo', async () => {
-    // Cobre o caminho do finally: o ciclo é aberto e depois encerrado com a
-    // sessão explícita, mesmo sem nada enviado ou recebido.
+  it('encerrar um ciclo sem push nem pull fecha a sessão com finishedAt', async () => {
+    // Serviço isolado: não exercita o syncFromCloud (ver limitação no relatório).
     const session = await beginSyncCycle({ ...CICLO, store, now: T0 });
     const encerrada = await endSyncCycle(session, store);
 

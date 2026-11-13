@@ -300,15 +300,13 @@ const persistSession = async (session: SyncSession, store?: SyncSessionStore): P
 // Ciclo ativo: push e pull da MESMA rodada gravam no mesmo recibo.
 // ---------------------------------------------------------------------------
 
-export type BeginCycleOptions = OpenSessionOptions;
-
 /**
  * Abre (ou retoma) a sessão do ciclo de sincronização e a devolve.
  * O chamador passa esta sessão explicitamente para `pushAssetsWithReceipt`
  * (`options.session`) e `pullIntoSession`, e a encerra com `endSyncCycle`.
  * Não há estado global: cada ciclo carrega a sua própria sessão.
  */
-export const beginSyncCycle = (options: BeginCycleOptions): Promise<SyncSession> =>
+export const beginSyncCycle = (options: OpenSessionOptions): Promise<SyncSession> =>
   openSyncSession(options);
 
 /**
