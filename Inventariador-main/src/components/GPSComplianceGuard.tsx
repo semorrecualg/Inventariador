@@ -190,6 +190,14 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
 
         if (!isActive) return;
 
+        // Sem leitura válida e sem âncora: não há posição para checar. Nunca inventa ponto.
+        if (!geoResult) {
+          logger.warn('[Geofencing] Sem leitura de GPS válida e precisa.');
+          setStatus('denied');
+          onGpsStatusChangeRef.current?.(false);
+          return;
+        }
+
         if (geoResult.isBypassed || geoResult.source === 'admin_bypass') {
           logger.warn("[GBR v2.6] Utilizando bypass administrativo em tela.");
           setStatus('bypassed');
