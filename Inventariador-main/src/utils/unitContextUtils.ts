@@ -67,7 +67,8 @@ export function resolveUnitFilter(filial?: string | null): string | undefined {
  *    (app_last_work_context, Etapa 4) quando ela pertence ao MESMO contrato
  *    do usuário — a carga inicial baixa SÓ a filial escolhida (ex.: 010201
  *    SNACKS PA = 2.066 em vez dos 12.636 do contrato inteiro).
- * 3. Caso contrário → undefined (contrato inteiro, comportamento atual).
+ * 3. Caso contrário → undefined. NÃO significa "baixar o contrato inteiro":
+ *    o chamador (boot) usa `resolveBootPullPlan` e exige a escolha da filial.
  *
  * Muro SRE preservado: filial de outro contrato jamais é usada; sentinelas
  * (vazia/TODAS/NULL/UNDEFINED) caem no passo 3.
@@ -89,6 +90,30 @@ export function resolveBootUnitFilter(
   if (userTenant && lastTenant !== userTenant) return undefined;
 
   return resolveUnitFilter(lastFilial);
+}
+
+/**
+ * Plano da CARGA INICIAL (Boot Loader): decide se há uma filial para baixar.
+ *
+ * O boot nunca baixa o contrato inteiro — 12.636 ativos num único pull, com
+ * todos marcados como sincronizados. Sem filial no perfil e sem última escolha
+ * válida, o plano manda **parar e pedir a filial** (`requiresUnitSelection`),
+ * e o chamador abre a tela de seleção antes de qualquer download.
+ */
+export interface BootPullPlan {
+  /** Filial a baixar; ausente = não fazer pull nenhum. */
+  unit?: string;
+  /** true = exigir a escolha da filial antes da carga. */
+  requiresUnitSelection: boolean;
+}
+
+export function resolveBootPullPlan(
+  filial?: string | null,
+  lastCtx?: { tenantid?: string; filial?: string } | null,
+  tenantid?: string | null
+): BootPullPlan {
+  const unit = resolveBootUnitFilter(filial, lastCtx, tenantid);
+  return unit ? { unit, requiresUnitSelection: false } : { requiresUnitSelection: true };
 }
 
 /**

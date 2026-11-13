@@ -5,7 +5,8 @@ import {
   matchTenantUnit,
   findHomonymUnits,
   resolveUnitFilter,
-  resolveBootUnitFilter
+  resolveBootUnitFilter,
+  resolveBootPullPlan
 } from '../utils/unitContextUtils';
 
 describe('resolveUnitFilter — filtro de filial dos pulls do fluxo inicial (Etapa 2)', () => {
@@ -107,5 +108,49 @@ describe('unitContextUtils — muro multi-tenant de Unidades Operacionais', () =
       { filial: 'FILIAL X', tenantid: 'CICOPAL' }
     ]);
     expect(homonyms.has('FILIAL X')).toBe(true);
+  });
+});
+
+describe('resolveBootPullPlan — o boot nunca baixa o contrato inteiro', () => {
+  it('filial real no perfil → baixa só essa filial', () => {
+    const plano = resolveBootPullPlan('010201 snacks pa', null, 'CICOPAL');
+    expect(plano).toEqual({ unit: '010201 SNACKS PA', requiresUnitSelection: false });
+  });
+
+  it('perfil TODAS + última escolha do MESMO contrato → baixa só a filial escolhida', () => {
+    const plano = resolveBootPullPlan('TODAS', { tenantid: 'CICOPAL', filial: '010101 CICOPAL GO' }, 'CICOPAL');
+    expect(plano.unit).toBe('010101 CICOPAL GO');
+    expect(plano.requiresUnitSelection).toBe(false);
+  });
+
+  it('sem filial e sem última escolha → NÃO baixa nada e exige a escolha', () => {
+    expect(resolveBootPullPlan('TODAS', null, 'CICOPAL'))
+      .toEqual({ requiresUnitSelection: true });
+    expect(resolveBootPullPlan(null, null, 'CICOPAL').unit).toBeUndefined();
+    expect(resolveBootPullPlan(undefined, null, 'CICOPAL').requiresUnitSelection).toBe(true);
+  });
+
+  it('última escolha de OUTRO contrato não serve (muro multi-tenant)', () => {
+    const plano = resolveBootPullPlan('', { tenantid: 'CLIENTETESTE', filial: '010101 CICOPAL GO' }, 'CICOPAL');
+    expect(plano).toEqual({ requiresUnitSelection: true });
+  });
+
+  it('última escolha com sentinela (TODAS/NULL) não serve', () => {
+    expect(resolveBootPullPlan('TODAS', { tenantid: 'CICOPAL', filial: 'TODAS' }, 'CICOPAL'))
+      .toEqual({ requiresUnitSelection: true });
+    expect(resolveBootPullPlan('', { tenantid: 'CICOPAL', filial: '' }, 'CICOPAL'))
+      .toEqual({ requiresUnitSelection: true });
+  });
+
+  it('nunca devolve plano de pull sem unidade', () => {
+    const casos = [
+      resolveBootPullPlan(null, null, null),
+      resolveBootPullPlan('TODAS', null, 'CICOPAL'),
+      resolveBootPullPlan('', { tenantid: 'OUTRO', filial: '010101 CICOPAL GO' }, 'CICOPAL'),
+    ];
+    for (const plano of casos) {
+      expect(plano.unit).toBeUndefined();
+      expect(plano.requiresUnitSelection).toBe(true);
+    }
   });
 });

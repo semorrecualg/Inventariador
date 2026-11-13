@@ -206,6 +206,17 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   08-09T21:46:19; merge upsert preservou os 12.636 totais locais; SYNC_PULL
   incremental registrado. 344/344 testes (16 novos) · TSC limpo.*
 
+- **Boot nunca baixa o contrato inteiro (2026-11-13):** com perfil sem filial
+  (`TODAS`/vazio) e sem última escolha válida, `bootFilial` ficava indefinido e
+  `fetchFullInventory` baixava os **12.636** ativos do contrato de uma vez,
+  marcando todos como sincronizados. Agora `resolveBootPullPlan(filial,
+  lastCtx, tenant)` devolve `{ unit }` só quando há filial resolvida; caso
+  contrário devolve `{ requiresUnitSelection: true }` e o Boot Loader **aborta a
+  carga** e abre `UNIT_SELECTION`. A verificação secundária pós-boot (que também
+  chamava `fetchFullInventory` sem unidade) passou a exigir a mesma filial.
+  Um pull do contrato só acontece em ação explícita de administrador
+  (backup/espelhamento no gestor de base).
+
 - **Fix do checkpoint do contrato (2026-11-13):** o pull do Boot Loader de
   contrato (perfil sem filial e sem última escolha) grava o checkpoint na chave
   `TENANT|`, enquanto `syncFromCloud` com unidade procurava `TENANT|FILIAL` —

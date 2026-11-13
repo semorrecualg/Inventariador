@@ -71,7 +71,7 @@ import {
   resolveDeltaMode,
   syncCheckpointKey
 } from './utils/syncCheckpoint';
-import { resolveUnitFilter, resolveBootUnitFilter } from './utils/unitContextUtils';
+import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan } from './utils/unitContextUtils';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -3361,10 +3361,19 @@ useEffect(() => {
           // (app_last_work_context, Etapa 4) — a carga inicial baixa só a
           // filial escolhida (ex.: 010201 SNACKS PA = 2.066) em vez do
           // contrato inteiro (12.636). Muro SRE: só vale para o MESMO contrato.
-          const bootFilial = resolveBootUnitFilter(user?.filial, readLastWorkContext(), user?.tenantid);
-          if (bootFilial) {
-            logger.info(`>>> [Boot Loader] Filial definida (${bootFilial}). Baixando somente os ativos desta filial (Etapa 2/5a).`);
+          // NUNCA baixar o contrato inteiro. Sem filial no perfil e sem última
+          // escolha válida, a carga é ABORTADA e o usuário escolhe a filial:
+          // antes, `bootFilial` indefinido fazia o pull trazer os 12.636 ativos
+          // do contrato (e marcar todos como sincronizados).
+          const bootFilial = resolveBootPullPlan(user?.filial, readLastWorkContext(), user?.tenantid).unit;
+          if (!bootFilial) {
+            logger.warn('>>> [Boot Loader] Sem filial no perfil e sem última escolha: contrato inteiro NÃO é baixado. Exigindo a escolha da filial.');
+            setHistoryRef.current(prev => (
+              prev.includes(AppScreen.UNIT_SELECTION) ? prev : [...prev, AppScreen.UNIT_SELECTION]
+            ));
+            return;
           }
+          logger.info(`>>> [Boot Loader] Filial definida (${bootFilial}). Baixando somente os ativos desta filial (Etapa 2/5a).`);
           const cloudData = await fetchFullInventory(
             user?.tenantid, 
             bootFilial, 
@@ -3450,9 +3459,11 @@ useEffect(() => {
           try {
             // Se já inicializamos acima com sucesso, não precisamos buscar de novo, apenas agenda se houver update pendente
             const currentAssetsCount = savedInventory?.assets?.length || 0;
-            if (currentAssetsCount === 0) {
+            // Mesma regra do boot: sem filial resolvida, nada de pull do contrato.
+            const verifyUnit = resolveBootPullPlan(user?.filial, readLastWorkContext(), user?.tenantid).unit;
+            if (currentAssetsCount === 0 && verifyUnit) {
               const cloudData = await Promise.race([
-                fetchFullInventory(user?.tenantid),
+                fetchFullInventory(user?.tenantid, verifyUnit),
                 new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 8000))
               ]).catch(() => null);
 
