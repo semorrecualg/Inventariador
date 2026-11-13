@@ -147,10 +147,18 @@ Regras de cálculo (`determineAssetTag`, na ordem):
      `_auditor`, `_dataLeitura`, `_localMaster`, `TAG_INVENTARIO`, `subreg`,
      `databaixa` e `sn1_recno` — sem isso o registo novo podia nunca subir
      (`_is_synced`) ou apontar para o original (`primarykey`/`sn1_recno`).
-     O `sn1_recno` da origem vira **`rad_recno`** (`rad_` = REGISTRO ADOTADO,
-     `recno` = valor copiado): o vínculo fica numa tag própria e o registo novo
-     sobe com `sn1_recno` nulo, sem duplicidade. O `registro` **não** é copiado
-     (colidiria com o da unidade de origem) e vai em `_copiadoDeRegistro`.
+     O registo novo recebe **identidade própria e sequencial** — não herda
+     `sn1_recno` nem `registro` da origem:
+       - `rad_recno` = `registro` = **`rad_000001`**, **`rad_000002`**, …
+         (`rad_` = REGISTRO ADOTADO + sequência de 6 dígitos); o mesmo rótulo
+         nos dois campos é o que o De/Para e a conferência em lote usam para
+         agrupar os sub-itens;
+       - `subreg` = **`0001`**, `0002`, … — a ordem do sub-item dentro do
+         registro.
+     Assim o registo adotado fica identificado **mesmo quando o utilizador
+     esquece de preencher o `sn1_recno`** na origem, e sobe com `sn1_recno`
+     nulo, sem duplicar a chave de ninguém. O `sn1_recno` e o `registro`
+     originais ficam em `_copiadoDeRecno` / `_copiadoDeRegistro`.
   O registo de outra unidade **nunca** é movido, renumerado ou adoptado — o que
   existia antes ("Vincular a esta Unidade" e a adoção automática no clique) foi
   removido, e com isso a tag `ADOTADO EXTERNO` deixou de ser produzida.

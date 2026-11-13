@@ -826,12 +826,18 @@ const Inventory: React.FC<InventoryProps> = ({
     // `primarykey`, `_is_synced` e `sn1_recno` não — o registo novo tem de ser
     // um registo novo. O recno da origem fica em `rad_recno` (REGISTRO ADOTADO)
     // e o registro original só em `_copiadoDeRegistro`, para não colidir.
-    const copia = buildCopyForNewItem(origem, {
-      unidade: selectedUnit,
-      endereco: selectedLocation,
-      etiqueta: showGlobalSearchResolution || origem.etiqueta,
-      hoje: new Date().toLocaleDateString('pt-BR'),
-    });
+    const copia = buildCopyForNewItem(
+      origem,
+      {
+        unidade: selectedUnit,
+        endereco: selectedLocation,
+        etiqueta: showGlobalSearchResolution || origem.etiqueta,
+        hoje: new Date().toLocaleDateString('pt-BR'),
+      },
+      // Base carregada: a sequência rad_NNNNNN continua a partir dos registos
+      // adotados que já existem, em vez de recomeçar em rad_000001.
+      allAssets,
+    );
 
     setManualAsset({
       ...copia,
@@ -2875,10 +2881,10 @@ const Inventory: React.FC<InventoryProps> = ({
                         {manualAsset._copiadoDeEtiqueta ? `Plaqueta ${manualAsset._copiadoDeEtiqueta}. ` : ''}
                         O registo de origem não foi alterado. Confira descrição, série e quantidade antes de salvar.
                       </p>
-                      {manualAsset._copiadoDeRegistro && (
+                      {manualAsset.rad_recno && (
                         <p className="text-[8px] font-bold text-blue-500 uppercase tracking-wider mt-1">
-                          Registro de origem {manualAsset._copiadoDeRegistro} (não copiado)
-                          {typeof manualAsset.rad_recno === 'number' ? ` · RAD ${manualAsset.rad_recno}` : ''}
+                          Registro adotado {String(manualAsset.rad_recno)} · sub {String(manualAsset.subreg || '0001')}
+                          {manualAsset._copiadoDeRegistro ? ` · origem ${manualAsset._copiadoDeRegistro}` : ''}
                         </p>
                       )}
                     </div>
