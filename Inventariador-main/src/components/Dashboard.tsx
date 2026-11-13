@@ -427,6 +427,9 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
         res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (a.endereco === (a._localMaster || a.endereco) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
         res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
         res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
+        // REGISTRO ADOTADO: rótulo rad_<UNIDADE>_<DISPOSITIVO>_<SEQUENCIA> do item
+        // criado por cópia de outra unidade (vazio em tudo o que não é adotado).
+        res['AUDITOR_RAD_RECNO'] = (a.rad_recno as string | undefined) || '';
         res['AUDITOR_DUPLICIDADE'] = (a.TAG_DUPLICIDADE as string | undefined) || 'NAO ANALISADO';
         return res;
       });

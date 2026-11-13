@@ -3,35 +3,37 @@ import type { Asset } from '../types';
 /**
  * CÓPIA DE DADOS ENTRE REGISTOS — "não localizado" em outra unidade
  * ============================================================================
- * Quando a plaqueta não existe na unidade em inventário, o auditor pode
- * pesquisar as outras unidades, ver a **Ficha do Ativo** e copiar os dados
- * descritivos para um item novo DESTA unidade. O registo de origem nunca é
- * alterado.
+ * Quando a plaqueta não existe na unidade em inventário, o auditor pesquisa as
+ * outras unidades, vê a **Ficha do Ativo** e copia os dados descritivos para um
+ * item novo DESTA unidade. O registo de origem nunca é alterado.
  *
  * A cópia é uma **lista branca**: só viajam campos que descrevem o bem.
- * Antes era uma lista negra (`delete` dos campos de controle), e o que não
- * estava na lista viajava junto — `primarykey`, `_is_synced` e `sn1_recno`
- * iam para o registo novo. Com `_is_synced` verdadeiro o item podia nunca
- * subir (a fila acha que já está na nuvem) e `primarykey`/`sn1_recno`
- * duplicados apontavam para o registo original em vez do novo.
  *
- * IDENTIDADE DO REGISTO ADOTADO
+ * IDENTIDADE DO REGISTRO ADOTADO
  * ----------------------------------------------------------------------------
- * O registo novo não herda `sn1_recno` nem `registro` da origem. Ele recebe
- * uma identidade própria, sequencial e legível:
+ *     rad_<UNIDADE>_<DISPOSITIVO>_<000001>
+ *     ex.: rad_010101_7K3F_000001
  *
- *     rad_000001, rad_000002, ...        ← `rad_recno` e `registro`
- *     subreg = 0001, 0002, ...           ← sub-itens do mesmo registro
+ * - `rad_` = **REGISTRO ADOTADO**;
+ * - `<UNIDADE>` = primeiro token da unidade (até 8 caracteres A-Z0-9);
+ * - `<DISPOSITIVO>` = código curto e estável desta instalação (4 caracteres);
+ * - `<000001>` = sequência crescente **por unidade e por dispositivo**, lida do
+ *   contador persistido e de todos os `rad_` já existentes na base.
  *
- * `rad_` é a abreviação de **REGISTRO ADOTADO**; os 6 dígitos são a sequência
- * crescente. Isso resolve o caso em que o utilizador esquece (ou a base não
- * tem) o `sn1_recno` da origem: o registo adotado nunca fica sem identificação
- * e nunca duplica a chave de ninguém. O valor original, quando existe, fica
- * guardado em `_copiadoDeRecno` para rastreio.
+ * Sem o código da unidade e o do dispositivo, dois aparelhos inventariando a
+ * mesma unidade (ou dois que começam em `000001`) geravam o **mesmo** registro —
+ * a duplicidade que este rótulo existe para evitar. O contador persistido
+ * garante que a série continua mesmo que o item anterior seja apagado ou a
+ * gravação falhe.
  *
- * `registro` e `rad_recno` recebem o **mesmo rótulo** — é por `registro` que o
- * De/Para e a conferência em lote agrupam os sub-itens, e por `subreg` que cada
- * item do grupo se distingue.
+ * `registro` recebe o MESMO rótulo de `rad_recno`: é por `registro` que o
+ * De/Para e a conferência em lote agrupam os sub-itens. Como cada cópia abre um
+ * registro novo, `subreg` é sempre `0001` — não há segundo sub-item no mesmo
+ * registro nesta operação.
+ *
+ * O `sn1_recno` da origem nunca é copiado (sobe nulo, sem duplicar a chave de
+ * ninguém); os valores originais ficam em `_copiadoDeRecno` e
+ * `_copiadoDeRegistro`.
  */
 
 /** Campos que descrevem o bem e podem ser copiados para o item novo. */
@@ -51,20 +53,54 @@ export type CampoDescritivo = (typeof CAMPOS_DESCRITIVOS)[number];
 
 /** Prefixo do REGISTRO ADOTADO. */
 export const RAD_PREFIX = 'rad_';
+/** Sub-item do registro: cada cópia abre um registro novo, logo é sempre o 1º. */
+export const SUBREG_ADOTADO = '0001';
 const RAD_DIGITS = 6;
-const SUBREG_DIGITS = 4;
-const RAD_LABEL_RE = /^rad_(\d+)$/i;
+const UNIT_MAX = 8;
+const DEVICE_MAX = 4;
+const UNIT_FALLBACK = 'UNID';
+const DEVICE_FALLBACK = 'DEV1';
 
-/** Rótulo `rad_NNNNNN` a partir da sequência. */
-export const radLabel = (sequencia: number): string => {
-  const n = Number.isFinite(sequencia) ? Math.max(1, Math.trunc(sequencia)) : 1;
-  return `${RAD_PREFIX}${String(n).padStart(RAD_DIGITS, '0')}`;
+/** Só A-Z0-9, em maiúsculas, truncado — o rótulo vai para planilha e tela. */
+const codigo = (valor: unknown, max: number, fallback: string): string => {
+  const limpo = String(valor ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  return limpo ? limpo.slice(0, max) : fallback;
 };
 
-/** Sequência de um rótulo `rad_NNNNNN` (null quando não é um rótulo RAD). */
+/** Primeiro token da unidade: `"010101 CICOPAL GO"` → `010101`. */
+export const unitCode = (unidade: unknown): string => {
+  const primeiro = String(unidade ?? '').trim().split(/\s+/)[0] ?? '';
+  return codigo(primeiro, UNIT_MAX, UNIT_FALLBACK);
+};
+
+/** Código curto da instalação; sem ele a série não é única entre aparelhos. */
+export const deviceCode = (dispositivo: unknown): string =>
+  codigo(dispositivo, DEVICE_MAX, DEVICE_FALLBACK);
+
+/** Prefixo do rótulo: `rad_010101_7K3F_`. */
+export const radPrefix = (unidade: unknown, dispositivo: unknown): string =>
+  `${RAD_PREFIX}${unitCode(unidade)}_${deviceCode(dispositivo)}_`;
+
+/** Rótulo completo a partir da sequência. */
+export const radLabel = (
+  unidade: unknown,
+  dispositivo: unknown,
+  sequencia: number,
+): string => {
+  const n = Number.isFinite(sequencia) ? Math.max(1, Math.trunc(sequencia)) : 1;
+  return `${radPrefix(unidade, dispositivo)}${String(n).padStart(RAD_DIGITS, '0')}`;
+};
+
+/**
+ * Sequência de um rótulo RAD — aceita o formato novo
+ * (`rad_010101_7K3F_000001`) e o legado (`rad_000001`).
+ */
 export const radSequenceOf = (valor: unknown): number | null => {
-  const texto = String(valor ?? '').trim();
-  const match = RAD_LABEL_RE.exec(texto);
+  const match = /^rad_(?:[A-Z0-9]+_)*(\d+)$/i.exec(String(valor ?? '').trim());
   if (!match) return null;
   const n = Number(match[1]);
   return Number.isFinite(n) ? n : null;
@@ -78,39 +114,29 @@ const valorDe = (item: ItemExistente, chave: string): unknown => {
 };
 
 /**
- * Próximo rótulo RAD livre, olhando `rad_recno` e `registro` já existentes.
- * Função pura: a lista vem da base carregada (sem IndexedDB no teste).
+ * Próximo rótulo livre para esta unidade/dispositivo.
+ * Considera o maior `rad_` do MESMO prefixo já na base e o contador persistido
+ * (que sobrevive a itens apagados e a gravações que falharam).
  */
-export const nextRadLabel = (existentes: readonly ItemExistente[] = []): string => {
-  let maior = 0;
+export const nextRadLabel = (
+  unidade: unknown,
+  dispositivo: unknown,
+  existentes: readonly ItemExistente[] = [],
+  ultimoContador = 0,
+): string => {
+  const prefixo = radPrefix(unidade, dispositivo).toUpperCase();
+  let maior = Number.isFinite(ultimoContador) ? Math.max(0, Math.trunc(ultimoContador)) : 0;
+
   for (const item of existentes) {
     for (const chave of ['rad_recno', 'registro']) {
-      const seq = radSequenceOf(valorDe(item, chave));
+      const bruto = String(valorDe(item, chave) ?? '').trim();
+      if (!bruto.toUpperCase().startsWith(prefixo)) continue;
+      const seq = radSequenceOf(bruto);
       if (seq !== null && seq > maior) maior = seq;
     }
   }
-  return radLabel(maior + 1);
-};
 
-/**
- * Próximo `subreg` do registro indicado. Sem sub-itens ainda → `0001`.
- * Se o mesmo registro for reaproveitado, continua a série (`0002`, ...).
- */
-export const nextSubreg = (
-  registro: string,
-  existentes: readonly ItemExistente[] = [],
-): string => {
-  const alvo = String(registro || '').trim().toUpperCase();
-  if (!alvo) return '0001';
-
-  let maior = 0;
-  for (const item of existentes) {
-    if (String(valorDe(item, 'registro') ?? '').trim().toUpperCase() !== alvo) continue;
-    const digitos = String(valorDe(item, 'subreg') ?? '').replace(/\D/g, '');
-    const n = Number(digitos);
-    if (digitos !== '' && Number.isFinite(n) && n > maior) maior = n;
-  }
-  return String(maior + 1).padStart(SUBREG_DIGITS, '0');
+  return radLabel(unidade, dispositivo, maior + 1);
 };
 
 export interface DestinoDoItemNovo {
@@ -120,6 +146,10 @@ export interface DestinoDoItemNovo {
   endereco: string | null | undefined;
   /** Código lido/digitado que disparou a busca. Sem ele usa a plaqueta de origem. */
   etiqueta?: string | null;
+  /** Código desta instalação (estável): sem ele, dois aparelhos repetem a série. */
+  dispositivo?: string | null;
+  /** Último número emitido nesta unidade, vindo do contador persistido. */
+  ultimoContador?: number;
   /** Data de hoje, no formato do app — injetada para o teste ser determinístico. */
   hoje?: string;
 }
@@ -133,9 +163,6 @@ const naoVazio = (valor: unknown): boolean => {
 /**
  * Monta o `Partial<Asset>` que pré-preenche o formulário de item novo.
  * Função pura: não toca no registo de origem nem em estado de tela.
- *
- * @param existentes base carregada, usada só para achar o próximo `rad_NNNNNN`
- *   e o próximo `subreg`.
  */
 export const buildCopyForNewItem = (
   origem: Asset,
@@ -152,7 +179,12 @@ export const buildCopyForNewItem = (
   }
 
   const etiqueta = String(destino.etiqueta || origem.etiqueta || '').trim().toUpperCase();
-  const registroAdotado = nextRadLabel(existentes);
+  const registroAdotado = nextRadLabel(
+    destino.unidade,
+    destino.dispositivo,
+    existentes,
+    destino.ultimoContador ?? 0,
+  );
   const recnoOrigem = origem.sn1_recno;
 
   return {
@@ -160,10 +192,10 @@ export const buildCopyForNewItem = (
     etiqueta,
     qt: origem.qt && origem.qt > 0 ? origem.qt : 1,
     dataaqusic: origem.dataaqusic || destino.hoje || '',
-    // IDENTIDADE DO REGISTRO ADOTADO: rótulo próprio, sequencial, sem herdar
-    // `sn1_recno` nem `registro` da origem.
+    // IDENTIDADE DO REGISTRO ADOTADO: rótulo próprio, sem herdar `sn1_recno`
+    // nem `registro` da origem.
     registro: registroAdotado,
-    subreg: nextSubreg(registroAdotado, existentes),
+    subreg: SUBREG_ADOTADO,
     rad_recno: registroAdotado,
     filial: destino.unidade || '',
     endereco: destino.endereco || '',
@@ -174,4 +206,93 @@ export const buildCopyForNewItem = (
     _copiadoDeRegistro: origem.registro || '',
     _copiadoDeRecno: typeof recnoOrigem === 'number' ? recnoOrigem : null,
   };
+};
+
+/* ============================================================================
+ * CONTADOR PERSISTIDO + CÓDIGO DO DISPOSITIVO (localStorage)
+ * O rótulo já é único por unidade+dispositivo; o contador evita reaproveitar
+ * um número quando o item anterior é apagado, muda de unidade ou a gravação
+ * falha. Falha de storage nunca impede a cópia.
+ * ========================================================================== */
+
+const DEVICE_KEY = 'gbr_rad_device';
+const COUNTER_KEY = 'gbr_rad_counter';
+
+const storage = (): Storage | null => {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Código desta instalação, criado na primeira cópia e mantido para sempre. */
+export const getDeviceCode = (): string => {
+  const store = storage();
+  const salvo = store?.getItem(DEVICE_KEY) || '';
+  if (salvo) return deviceCode(salvo);
+
+  const alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let novo = '';
+  try {
+    const bytes = new Uint8Array(DEVICE_MAX);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    for (const b of bytes) novo += alfabeto[b % alfabeto.length];
+  } catch {
+    novo = DEVICE_FALLBACK;
+  }
+  novo = deviceCode(novo);
+  try {
+    store?.setItem(DEVICE_KEY, novo);
+  } catch {
+    /* storage indisponível: o código vale só para esta sessão */
+  }
+  return novo;
+};
+
+const lerContadores = (): Record<string, number> => {
+  try {
+    const bruto = storage()?.getItem(COUNTER_KEY);
+    if (!bruto) return {};
+    const parsed = JSON.parse(bruto) as Record<string, unknown>;
+    const saida: Record<string, number> = {};
+    Object.keys(parsed).forEach(chave => {
+      const n = Number(parsed[chave]);
+      if (Number.isFinite(n) && n > 0) saida[chave] = Math.trunc(n);
+    });
+    return saida;
+  } catch {
+    return {};
+  }
+};
+
+/** Chave do contador: unidade + dispositivo (cada aparelho tem a sua série). */
+const counterKey = (unidade: unknown, dispositivo: string): string =>
+  `${unitCode(unidade)}_${deviceCode(dispositivo)}`;
+
+/** Último número emitido para esta unidade nesta instalação. */
+export const readRadCounter = (unidade: unknown, dispositivo: string): number =>
+  lerContadores()[counterKey(unidade, dispositivo)] ?? 0;
+
+/** Grava o último número emitido; nunca lança. */
+export const writeRadCounter = (
+  unidade: unknown,
+  dispositivo: string,
+  sequencia: number,
+): void => {
+  if (!Number.isFinite(sequencia) || sequencia <= 0) return;
+  try {
+    const contadores = lerContadores();
+    const chave = counterKey(unidade, dispositivo);
+    const atual = contadores[chave] ?? 0;
+    if (sequencia <= atual) return;
+    contadores[chave] = Math.trunc(sequencia);
+    storage()?.setItem(COUNTER_KEY, JSON.stringify(contadores));
+  } catch {
+    /* storage indisponível: a base continua a ser a fonte da sequência */
+  }
 };

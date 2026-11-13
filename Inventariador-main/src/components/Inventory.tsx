@@ -29,7 +29,13 @@ import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
 import { findBatchGroup, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
-import { buildCopyForNewItem } from '../utils/copyAssetForNewItem';
+import {
+  buildCopyForNewItem,
+  getDeviceCode,
+  radSequenceOf,
+  readRadCounter,
+  writeRadCounter,
+} from '../utils/copyAssetForNewItem';
 import { AssetListItem } from './AssetListItem';
 import PreferencesPanel from './PreferencesPanel';
 import { resolvePersistedTag } from '../services/tagService';
@@ -826,18 +832,26 @@ const Inventory: React.FC<InventoryProps> = ({
     // `primarykey`, `_is_synced` e `sn1_recno` não — o registo novo tem de ser
     // um registo novo. O recno da origem fica em `rad_recno` (REGISTRO ADOTADO)
     // e o registro original só em `_copiadoDeRegistro`, para não colidir.
+    // Código curto desta instalação: sem ele dois aparelhos na mesma unidade
+    // emitiam o mesmo `rad_..._000001`.
+    const dispositivo = getDeviceCode();
     const copia = buildCopyForNewItem(
       origem,
       {
         unidade: selectedUnit,
         endereco: selectedLocation,
         etiqueta: showGlobalSearchResolution || origem.etiqueta,
+        dispositivo,
+        // Contador persistido: a série continua mesmo que o item anterior
+        // tenha sido apagado ou a gravação falhado.
+        ultimoContador: readRadCounter(selectedUnit, dispositivo),
         hoje: new Date().toLocaleDateString('pt-BR'),
       },
-      // Base carregada: a sequência rad_NNNNNN continua a partir dos registos
-      // adotados que já existem, em vez de recomeçar em rad_000001.
+      // Base carregada: a sequência continua a partir dos rótulos já gravados.
       allAssets,
     );
+    const sequenciaRad = radSequenceOf(copia.rad_recno);
+    if (sequenciaRad !== null) writeRadCounter(selectedUnit, dispositivo, sequenciaRad);
 
     setManualAsset({
       ...copia,

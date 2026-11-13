@@ -147,14 +147,18 @@ Regras de cálculo (`determineAssetTag`, na ordem):
      `_auditor`, `_dataLeitura`, `_localMaster`, `TAG_INVENTARIO`, `subreg`,
      `databaixa` e `sn1_recno` — sem isso o registo novo podia nunca subir
      (`_is_synced`) ou apontar para o original (`primarykey`/`sn1_recno`).
-     O registo novo recebe **identidade própria e sequencial** — não herda
+     O registo novo recebe **identidade própria, única e sequencial** — não herda
      `sn1_recno` nem `registro` da origem:
-       - `rad_recno` = `registro` = **`rad_000001`**, **`rad_000002`**, …
-         (`rad_` = REGISTRO ADOTADO + sequência de 6 dígitos); o mesmo rótulo
-         nos dois campos é o que o De/Para e a conferência em lote usam para
-         agrupar os sub-itens;
-       - `subreg` = **`0001`**, `0002`, … — a ordem do sub-item dentro do
-         registro.
+       - `rad_recno` = `registro` = **`rad_<UNIDADE>_<DISPOSITIVO>_<000001>`**
+         (ex.: `rad_010101_7K3F_000001`): `rad_` = REGISTRO ADOTADO, o primeiro
+         token da unidade, o código curto e estável da instalação e a sequência
+         de 6 dígitos. Unidade + aparelho existem para que **dois aparelhos ou
+         duas unidades nunca emitam o mesmo rótulo**; a sequência sai do
+         contador persistido (`gbr_rad_counter`) e dos rótulos já na base, por
+         isso continua mesmo depois de o item ser apagado;
+       - `subreg` = **`0001`** sempre: cada cópia abre um registro novo, logo é
+         o primeiro sub-item desse registro;
+       - o RAD sai no ficheiro De/Para na coluna **`AUDITOR_RAD_RECNO`**.
      Assim o registo adotado fica identificado **mesmo quando o utilizador
      esquece de preencher o `sn1_recno`** na origem, e sobe com `sn1_recno`
      nulo, sem duplicar a chave de ninguém. O `sn1_recno` e o `registro`

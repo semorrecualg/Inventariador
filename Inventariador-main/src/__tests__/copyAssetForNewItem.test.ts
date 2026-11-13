@@ -5,23 +5,59 @@
 // `primarykey`, `_is_synced` e `sn1_recno` copiados faziam o registo novo
 // apontar para o original e/ou nunca subir para a nuvem.
 //
-// IDENTIDADE: o registo adotado recebe `rad_000001`, `rad_000002`, ... em
-// `rad_recno` e `registro` (mesmo rótulo, para o De/Para agrupar os sub-itens)
-// e `subreg` crescente `0001`, `0002`, ... O `sn1_recno` da origem nunca é
-// copiado — quando o utilizador esquece de o preencher, o registo novo fica
-// identificado na mesma.
+// IDENTIDADE: `rad_<UNIDADE>_<DISPOSITIVO>_<000001>` em `rad_recno` e
+// `registro`. A unidade + o código curto da instalação existem para que dois
+// aparelhos (ou duas unidades) nunca emitam o mesmo rótulo; o contador
+// persistido garante que a série continua mesmo depois de apagar o item.
+// `subreg` é sempre `0001`: cada cópia abre um registro novo.
 // ============================================================================
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import type { Asset } from '../types';
 import {
   buildCopyForNewItem,
   CAMPOS_DESCRITIVOS,
+  deviceCode,
+  getDeviceCode,
   nextRadLabel,
-  nextSubreg,
   radLabel,
+  radPrefix,
   radSequenceOf,
+  readRadCounter,
+  SUBREG_ADOTADO,
+  unitCode,
+  writeRadCounter,
 } from '../utils/copyAssetForNewItem';
 
+/* -------------------------------------------------------------------------- */
+/* localStorage falso (o ambiente dos testes é `node`)                        */
+/* -------------------------------------------------------------------------- */
+const criarStorage = (): Storage => {
+  const dados = new Map<string, string>();
+  return {
+    get length() {
+      return dados.size;
+    },
+    clear: () => dados.clear(),
+    getItem: (chave: string) => (dados.has(chave) ? (dados.get(chave) as string) : null),
+    key: (indice: number) => Array.from(dados.keys())[indice] ?? null,
+    removeItem: (chave: string) => void dados.delete(chave),
+    setItem: (chave: string, valor: string) => void dados.set(chave, String(valor)),
+  };
+};
+
+type ComWindow = { window?: { localStorage: Storage } };
+
+beforeEach(() => {
+  (globalThis as unknown as ComWindow).window = { localStorage: criarStorage() };
+});
+
+afterEach(() => {
+  delete (globalThis as unknown as ComWindow).window;
+});
+
+/* -------------------------------------------------------------------------- */
+/* Fixtures                                                                   */
+/* -------------------------------------------------------------------------- */
 const baseOrigem = (over: Partial<Asset> = {}): Asset => ({
   tenantid: 'TENANT-1',
   filial: '008620 FILIAL SUL',
@@ -57,92 +93,178 @@ const destino = {
   unidade: '010101 CICOPAL GO',
   endereco: 'DEPOSITO CENTRAL',
   etiqueta: '008777',
+  dispositivo: '7K3F',
   hoje: '13/11/2026',
 };
 
-describe('rad_ — identidade do REGISTRO ADOTADO', () => {
-  it('monta o rótulo rad_NNNNNN a partir da sequência', () => {
-    expect(radLabel(1)).toBe('rad_000001');
-    expect(radLabel(42)).toBe('rad_000042');
-    expect(radLabel(1234567)).toBe('rad_1234567');
+/* -------------------------------------------------------------------------- */
+/* Código da unidade e do dispositivo                                          */
+/* -------------------------------------------------------------------------- */
+describe('unitCode / deviceCode — componentes do rótulo', () => {
+  it('usa o primeiro token da unidade, sem acentos nem símbolos', () => {
+    expect(unitCode('010101 CICOPAL GO')).toBe('010101');
+    expect(unitCode('filial são josé')).toBe('FILIAL');
+    expect(unitCode('0007-A / CENTRO')).toBe('0007A');
   });
 
-  it('lê a sequência de um rótulo RAD e ignora registro normal da base', () => {
-    expect(radSequenceOf('rad_000007')).toBe(7);
-    expect(radSequenceOf(' RAD_000010 ')).toBe(10);
+  it('trunca a unidade em 8 caracteres e cai em UNID quando vazia', () => {
+    expect(unitCode('ABCDEFGHIJKLO')).toBe('ABCDEFGH');
+    expect(unitCode('')).toBe('UNID');
+    expect(unitCode(null)).toBe('UNID');
+  });
+
+  it('normaliza o código do dispositivo em 4 caracteres', () => {
+    expect(deviceCode('7k3f')).toBe('7K3F');
+    expect(deviceCode('a-b!c-d')).toBe('ABCD');
+    expect(deviceCode('')).toBe('DEV1');
+    expect(deviceCode(undefined)).toBe('DEV1');
+  });
+
+  it('monta o prefixo e o rótulo completo', () => {
+    expect(radPrefix('010101 CICOPAL GO', '7K3F')).toBe('rad_010101_7K3F_');
+    expect(radLabel('010101 CICOPAL GO', '7K3F', 1)).toBe('rad_010101_7K3F_000001');
+    expect(radLabel('010101 CICOPAL GO', '7K3F', 42)).toBe('rad_010101_7K3F_000042');
+  });
+
+  it('lê a sequência do formato novo e do legado', () => {
+    expect(radSequenceOf('rad_010101_7K3F_000007')).toBe(7);
+    expect(radSequenceOf('rad_000010')).toBe(10);
     expect(radSequenceOf('NFE2013010001')).toBeNull();
     expect(radSequenceOf(null)).toBeNull();
   });
+});
 
-  it('a sequência continua depois do maior rad_ da base', () => {
+/* -------------------------------------------------------------------------- */
+/* Unicidade                                                                   */
+/* -------------------------------------------------------------------------- */
+describe('unicidade do rótulo RAD', () => {
+  it('aparelhos diferentes na mesma unidade não geram o mesmo rótulo', () => {
+    const a = radLabel('010101 CICOPAL GO', '7K3F', 1);
+    const b = radLabel('010101 CICOPAL GO', 'M9Q2', 1);
+
+    expect(a).not.toBe(b);
+    expect(a).toBe('rad_010101_7K3F_000001');
+    expect(b).toBe('rad_010101_M9Q2_000001');
+  });
+
+  it('unidades diferentes no mesmo aparelho não geram o mesmo rótulo', () => {
+    const a = radLabel('010101 CICOPAL GO', '7K3F', 1);
+    const b = radLabel('008620 FILIAL SUL', '7K3F', 1);
+
+    expect(a).not.toBe(b);
+  });
+
+  it('cada cópia do mesmo original recebe um rótulo novo', () => {
+    const primeira = buildCopyForNewItem(baseOrigem(), destino, []);
+    const segunda = buildCopyForNewItem(baseOrigem(), destino, [
+      { registro: primeira.registro, rad_recno: primeira.rad_recno },
+    ] as Partial<Asset>[]);
+
+    expect(primeira.registro).toBe('rad_010101_7K3F_000001');
+    expect(segunda.registro).toBe('rad_010101_7K3F_000002');
+    expect(segunda.registro).not.toBe(primeira.registro);
+  });
+
+  it('a sequência ignora rótulos de outra unidade/aparelho na base', () => {
     const existentes = [
-      { rad_recno: 'rad_000001' },
-      { registro: 'rad_000007' },
+      { registro: 'rad_010101_M9Q2_000090' },
+      { registro: 'rad_008620_7K3F_000900' },
+      { registro: 'rad_010101_7K3F_000004' },
       { registro: 'NFE2013010001' },
       null,
     ] as Partial<Asset>[];
 
-    expect(nextRadLabel(existentes)).toBe('rad_000008');
+    expect(nextRadLabel('010101 CICOPAL GO', '7K3F', existentes)).toBe('rad_010101_7K3F_000005');
   });
 
-  it('base vazia começa em rad_000001', () => {
-    expect(nextRadLabel([])).toBe('rad_000001');
+  it('o contador persistido continua a série mesmo com a base vazia', () => {
+    expect(nextRadLabel('010101 CICOPAL GO', '7K3F', [], 17)).toBe('rad_010101_7K3F_000018');
   });
 
-  it('subreg começa em 0001 e continua dentro do mesmo registro', () => {
-    expect(nextSubreg('rad_000001', [])).toBe('0001');
-    expect(
-      nextSubreg('rad_000001', [
-        { registro: 'rad_000001', subreg: '0001' },
-        { registro: 'rad_000001', subreg: '0002' },
-        { registro: 'rad_000002', subreg: '0007' },
-      ] as Partial<Asset>[]),
-    ).toBe('0003');
+  it('o contador nunca anda para trás', () => {
+    writeRadCounter('010101 CICOPAL GO', '7K3F', 5);
+    expect(readRadCounter('010101 CICOPAL GO', '7K3F')).toBe(5);
+
+    writeRadCounter('010101 CICOPAL GO', '7K3F', 3);
+    expect(readRadCounter('010101 CICOPAL GO', '7K3F')).toBe(5);
+  });
+
+  it('o contador é separado por unidade e por aparelho', () => {
+    writeRadCounter('010101 CICOPAL GO', '7K3F', 9);
+    writeRadCounter('008620 FILIAL SUL', '7K3F', 2);
+    writeRadCounter('010101 CICOPAL GO', 'M9Q2', 4);
+
+    expect(readRadCounter('010101 CICOPAL GO', '7K3F')).toBe(9);
+    expect(readRadCounter('008620 FILIAL SUL', '7K3F')).toBe(2);
+    expect(readRadCounter('010101 CICOPAL GO', 'M9Q2')).toBe(4);
+    expect(readRadCounter('008620 FILIAL SUL', 'M9Q2')).toBe(0);
   });
 });
 
-describe('buildCopyForNewItem — identidade rad_ no item novo', () => {
-  it('registro e rad_recno recebem o mesmo rótulo RAD; subreg é 0001', () => {
+/* -------------------------------------------------------------------------- */
+/* Código do dispositivo                                                       */
+/* -------------------------------------------------------------------------- */
+describe('getDeviceCode — identidade estável da instalação', () => {
+  it('cria um código de 4 caracteres e devolve o mesmo nas chamadas seguintes', () => {
+    const primeiro = getDeviceCode();
+    const segundo = getDeviceCode();
+
+    expect(primeiro).toHaveLength(4);
+    expect(primeiro).toMatch(/^[A-Z0-9]{4}$/);
+    expect(segundo).toBe(primeiro);
+  });
+
+  it('sem storage devolve um código válido em vez de lançar', () => {
+    delete (globalThis as unknown as ComWindow).window;
+
+    const codigo = getDeviceCode();
+    expect(codigo).toMatch(/^[A-Z0-9]{4}$/);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Item novo                                                                   */
+/* -------------------------------------------------------------------------- */
+describe('buildCopyForNewItem — identidade do registro adotado', () => {
+  it('registro e rad_recno recebem o mesmo rótulo; subreg é 0001', () => {
     const copia = buildCopyForNewItem(baseOrigem(), destino);
 
-    expect(copia.registro).toBe('rad_000001');
-    expect(copia.rad_recno).toBe('rad_000001');
+    expect(copia.rad_recno).toBe('rad_010101_7K3F_000001');
+    expect(copia.registro).toBe(copia.rad_recno);
+    expect(copia.subreg).toBe(SUBREG_ADOTADO);
     expect(copia.subreg).toBe('0001');
   });
 
   it('funciona mesmo quando o utilizador esqueceu sn1_recno na origem', () => {
     const copia = buildCopyForNewItem(baseOrigem({ sn1_recno: null }), destino);
 
-    expect(copia.registro).toBe('rad_000001');
-    expect(copia.rad_recno).toBe('rad_000001');
+    expect(copia.rad_recno).toBe('rad_010101_7K3F_000001');
     expect(copia._copiadoDeRecno).toBeNull();
   });
 
   it('não herda registro nem subreg da origem', () => {
-    const copia = buildCopyForNewItem(baseOrigem({ registro: 'NFE2013010001', subreg: '0003' }), destino);
+    const copia = buildCopyForNewItem(
+      baseOrigem({ registro: 'NFE2013010001', subreg: '0003' }),
+      destino,
+    );
 
     expect(copia.registro).not.toBe('NFE2013010001');
-    expect(copia.subreg).not.toBe('0003');
+    expect(copia.subreg).toBe('0001');
     expect(copia._copiadoDeRegistro).toBe('NFE2013010001');
-  });
-
-  it('duas cópias seguidas não repetem o registro adotado', () => {
-    const primeira = buildCopyForNewItem(baseOrigem(), destino);
-    const segunda = buildCopyForNewItem(baseOrigem(), destino, [
-      { rad_recno: primeira.rad_recno, registro: primeira.registro, subreg: primeira.subreg },
-    ] as Partial<Asset>[]);
-
-    expect(primeira.registro).toBe('rad_000001');
-    expect(segunda.registro).toBe('rad_000002');
-    expect(segunda.rad_recno).toBe('rad_000002');
-    expect(segunda.subreg).toBe('0001');
   });
 
   it('nunca copia sn1_recno nem sn3_recno da origem', () => {
     const copia = buildCopyForNewItem(baseOrigem(), destino);
+
     expect(copia.sn1_recno).toBeUndefined();
     expect(copia.sn3_recno).toBeUndefined();
     expect(copia._copiadoDeRecno).toBe(778899);
+  });
+
+  it('usa o contador persistido quando a base já não tem o último rótulo', () => {
+    const copia = buildCopyForNewItem(baseOrigem(), { ...destino, ultimoContador: 12 });
+
+    expect(copia.rad_recno).toBe('rad_010101_7K3F_000013');
   });
 });
 
@@ -194,7 +316,11 @@ describe('buildCopyForNewItem — lista branca de campos descritivos', () => {
   });
 
   it('status do item novo é ATIVO e não herda databaixa', () => {
-    const copia = buildCopyForNewItem(baseOrigem({ status: 'BAIXADO', databaixa: '01/01/2020' }), destino);
+    const copia = buildCopyForNewItem(
+      baseOrigem({ status: 'BAIXADO', databaixa: '01/01/2020' }),
+      destino,
+    );
+
     expect(copia.status).toBe('ATIVO');
     expect(copia.databaixa).toBeUndefined();
   });
