@@ -572,6 +572,11 @@ const _syncService = {
             vlraquisic: record.vlraquisic !== undefined && record.vlraquisic !== null ? Number(record.vlraquisic) : 0,
             sn1_recno: record.sn1_recno !== undefined && record.sn1_recno !== null ? Number(record.sn1_recno) : null,
             sn3_recno: record.sn3_recno !== undefined && record.sn3_recno !== null ? Number(record.sn3_recno) : null,
+            // REGISTRO ADOTADO: item criado copiando os dados de outra unidade.
+            // Guarda o `sn1_recno` da ORIGEM sem repetir a chave do registo novo
+            // (que sobe com `sn1_recno` nulo). Se a coluna ainda não existir na
+            // nuvem, o laço de PGRST204 reenvia sem ela — o ativo não se perde.
+            rad_recno: record.rad_recno !== undefined && record.rad_recno !== null ? Number(record.rad_recno) : null,
             DE_PARA: record.DE_PARA !== undefined && record.DE_PARA !== null ? String(record.DE_PARA).trim() : null,
             gps_lat: record.gps_lat !== undefined && record.gps_lat !== null ? Number(record.gps_lat) : null,
             gps_lng: record.gps_lng !== undefined && record.gps_lng !== null ? Number(record.gps_lng) : null,

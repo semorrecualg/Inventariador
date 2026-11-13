@@ -138,10 +138,19 @@ Regras de cálculo (`determineAssetTag`, na ordem):
   1. **Incluir manualmente** — cria um `NOVO ITEM` nesta unidade/endereço;
   2. **Pesquisar em outras Unidades** — `findAllByEtiqueta` lista os registos de
      outra unidade e abre a **Ficha do Ativo em modo leitura** (`renderFichaPreview`),
-     com **"Copiar dados para novo item"** (os dados descritivos são copiados
-     para o formulário; `id`, `TAG_INVENTARIO`, `_conferido`, `_auditor`,
-     `_localMaster` e `endereco` **não**) ou **"Voltar"**, que retorna ao
+     com **"Copiar dados para novo item"** ou **"Voltar"**, que retorna ao
      formulário de origem sem alterar nada.
+     A cópia usa **lista branca** (`utils/copyAssetForNewItem.ts`): só viajam
+     `descricaodoativo`, `serial`, `qt`, `dataaqusic`, `nomefornecedor`,
+     `notafiscal`, `vlraquisic`, `contacontabil` e `centrodecusto`. Ficam de
+     fora `id`, `primarykey`, `tenantid`, `_is_synced`, `_isNew`, `_conferido`,
+     `_auditor`, `_dataLeitura`, `_localMaster`, `TAG_INVENTARIO`, `subreg`,
+     `databaixa` e `sn1_recno` — sem isso o registo novo podia nunca subir
+     (`_is_synced`) ou apontar para o original (`primarykey`/`sn1_recno`).
+     O `sn1_recno` da origem vira **`rad_recno`** (`rad_` = REGISTRO ADOTADO,
+     `recno` = valor copiado): o vínculo fica numa tag própria e o registo novo
+     sobe com `sn1_recno` nulo, sem duplicidade. O `registro` **não** é copiado
+     (colidiria com o da unidade de origem) e vai em `_copiadoDeRegistro`.
   O registo de outra unidade **nunca** é movido, renumerado ou adoptado — o que
   existia antes ("Vincular a esta Unidade" e a adoção automática no clique) foi
   removido, e com isso a tag `ADOTADO EXTERNO` deixou de ser produzida.

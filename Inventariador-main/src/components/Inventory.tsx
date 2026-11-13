@@ -29,6 +29,7 @@ import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
 import { findBatchGroup, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
+import { buildCopyForNewItem } from '../utils/copyAssetForNewItem';
 import { AssetListItem } from './AssetListItem';
 import PreferencesPanel from './PreferencesPanel';
 import { resolvePersistedTag } from '../services/tagService';
@@ -821,31 +822,20 @@ const Inventory: React.FC<InventoryProps> = ({
    * o que este bem tem de identidade e de auditoria fica de fora da cópia.
    */
   const handleCopyToNewItem = (origem: Asset) => {
-    const etiqueta = (showGlobalSearchResolution || origem.etiqueta || '').toUpperCase();
-    const copia: Partial<Asset> = { ...origem };
-    // Identidade, controle e auditoria pertencem ao registo novo, não à cópia.
-    delete copia.id;
-    delete copia._conferido;
-    delete copia._dataLeitura;
-    delete copia._auditor;
-    delete copia._localMaster;
-    delete copia.TAG_INVENTARIO;
-    delete copia._origemTransacao;
-    delete copia._history;
-    delete copia._isNew;
+    // LISTA BRANCA (utils/copyAssetForNewItem): só campos descritivos viajam.
+    // `primarykey`, `_is_synced` e `sn1_recno` não — o registo novo tem de ser
+    // um registo novo. O recno da origem fica em `rad_recno` (REGISTRO ADOTADO)
+    // e o registro original só em `_copiadoDeRegistro`, para não colidir.
+    const copia = buildCopyForNewItem(origem, {
+      unidade: selectedUnit,
+      endereco: selectedLocation,
+      etiqueta: showGlobalSearchResolution || origem.etiqueta,
+      hoje: new Date().toLocaleDateString('pt-BR'),
+    });
 
     setManualAsset({
       ...copia,
-      etiqueta,
-      filial: selectedUnit || '',
-      endereco: selectedLocation || '',
-      AUDITOR_LOCAL_AUDITADO: selectedLocation || '',
-      status: 'ATIVO',
-      dataaqusic: origem.dataaqusic || new Date().toLocaleDateString('pt-BR'),
       TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-      qt: origem.qt || 1,
-      _copiadoDe: origem.filial || origem._unitid || '',
-      _copiadoDeEtiqueta: origem.etiqueta || '',
     });
     setIsManualEntryOpen(true);
     setFichaPreview(null);
@@ -2885,6 +2875,12 @@ const Inventory: React.FC<InventoryProps> = ({
                         {manualAsset._copiadoDeEtiqueta ? `Plaqueta ${manualAsset._copiadoDeEtiqueta}. ` : ''}
                         O registo de origem não foi alterado. Confira descrição, série e quantidade antes de salvar.
                       </p>
+                      {manualAsset._copiadoDeRegistro && (
+                        <p className="text-[8px] font-bold text-blue-500 uppercase tracking-wider mt-1">
+                          Registro de origem {manualAsset._copiadoDeRegistro} (não copiado)
+                          {typeof manualAsset.rad_recno === 'number' ? ` · RAD ${manualAsset.rad_recno}` : ''}
+                        </p>
+                      )}
                     </div>
                   )}
                </div>
