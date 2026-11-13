@@ -112,7 +112,7 @@ import { saveInventory, loadInventory, clearInventory, clearMultipleInventories,
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
 import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
-import { beginSyncCycle, endSyncCycle, pullIntoSession, pushAssetsWithReceipt } from './services/syncSessionService';
+import { beginSyncCycle, endSyncCycle, pullIntoSession, pushAssetsWithReceipt, type SyncSession } from './services/syncSessionService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 import { determineAssetTag } from './services/tagService';
@@ -2464,7 +2464,7 @@ useEffect(() => {
     return inventory.unitConfigs.find(c => normalizeKey(c.unit_id || c.filial || '') === target) || null;
   }, [inventory.unitConfigs, selectedUnit]);
 
-  const pushLocalChanges = useCallback(async (skipLoadingState = false) => {
+  const pushLocalChanges = useCallback(async (skipLoadingState = false, cycleSession?: SyncSession) => {
     if (!skipLoadingState && isSyncing) return;
     if (databaseMode === DatabaseMode.INTERNAL) return;
     
@@ -2493,6 +2493,7 @@ useEffect(() => {
         // meio, a próxima rodada retoma sem reenviar o que já foi aceito.
         const { synced: syncedIds } = await pushAssetsWithReceipt(dirtyAssets, effectiveTenantid, {
           auditor: user?.email,
+          session: cycleSession,
           sync: (batch, tenant) => syncAssetsToCloudAndMark(batch, tenant),
         });
         
@@ -2615,22 +2616,23 @@ useEffect(() => {
     
     logger.info(`>>> [Sync] Iniciando pull da nuvem. isGlobalAdmin: ${isGlobalAdmin}, rawTenantid: ${JSON.stringify(rawTenantid)}, effectiveTenantid: ${tenantid || 'Global'}`);
 
-    // F2 — abre a sessão do CICLO: o push local abaixo e o pull logo depois
-    // gravam no MESMO recibo. Chave: [contrato|filial|auditor], janela de 16 h.
-    const cycleSession = await beginSyncCycle({
-      tenantid: (Array.isArray(tenantid) ? tenantid[0] : tenantid) ?? '',
-      filial: explicitUnitId,
-      auditor: user?.email,
-    });
-    
     setIsSyncing(true);
     setIsCloudUpdatePending(false); // Reset pending flag immediately
+    // F2 — sessão do CICLO, passada explicitamente ao push e ao pull. Chave:
+    // [contrato|filial|auditor], janela de 16 h. Aberta dentro do try e
+    // encerrada UMA vez no finally, em qualquer saída (inclusive returns).
+    let cycleSession: SyncSession | null = null;
     try {
+      cycleSession = await beginSyncCycle({
+        tenantid: (Array.isArray(tenantid) ? tenantid[0] : tenantid) ?? '',
+        filial: explicitUnitId,
+        auditor: user?.email,
+      });
       // 1. REGRA DE OURO: SINCRONISMO DE SAÍDA PRIMEIRO (AUDITOR -> SERVIDOR)
       // Tentamos enviar as alterações locais, mas não bloqueamos o pull se falhar
       // Isso resolve casos de RLS ou conflitos que impedem o push mas permitem o pull
       try {
-        await pushLocalChanges(true); 
+        await pushLocalChanges(true, cycleSession);
         await processSyncQueue();
       } catch (pushErr) {
         logger.warn('[Sync] Falha ao enviar alterações locais antes do pull. Continuando pull para restaurar integridade...', pushErr);
@@ -2826,7 +2828,6 @@ useEffect(() => {
         // F2 — registra o que REALMENTE entrou neste pull: as chaves dos ativos
         // que a nuvem devolveu alimentam o recibo (`received`). Sem estimativa.
         await pullIntoSession(cycleSession, { since, assets: cloudData.assets || [] });
-        await endSyncCycle();
 
         // Grava o SYNC_PULL UMA única vez (fora do updater) e marca o dedup para
         // os próximos callers da sessão pularem — fecha o ciclo do anti-loop.
@@ -2847,8 +2848,6 @@ useEffect(() => {
           setTimeout(() => setShowRecoveryToast(false), 5000);
         }
       } else {
-        // F2 — ciclo sem pull: encerra a sessão (recibo do push, se houve).
-        await endSyncCycle();
         // Mesmo se não houver dados, atualizamos o lastSyncTime para evitar loops de auto-sync
         const syncTimestamp = new Date().toISOString();
         setInventory(prev => ({ ...prev, lastUpdated: syncTimestamp }));
@@ -2866,9 +2865,6 @@ useEffect(() => {
     } catch (error) {
       const err = error as Record<string, unknown>;
       logger.error('>>> [Sync] Erro ao sincronizar da nuvem:', error);
-      // F2 — encerra o ciclo com o que já se sabe. Havendo faltantes, a sessão
-      // permanece ABERTA para a próxima rodada retomar sem reenviar aceitos.
-      try { await endSyncCycle(); } catch (reciboErr) { logger.warn('>>> [Sync Recibo] Falha ao encerrar a sessão:', reciboErr); }
       const errMsg = String(err?.message || error || '').toLowerCase();
       const isSuspendedNetwork = errMsg.includes('suspended') || 
                                 errMsg.includes('io') || 
@@ -2912,6 +2908,11 @@ useEffect(() => {
 
       setSyncError('Erro de tráfego em rede WebView. Chaveado para contingência local.');
     } finally {
+      // F2 — encerra o ciclo em QUALQUER saída. Havendo faltantes, a sessão
+      // permanece ABERTA/PARCIAL para a próxima rodada retomar sem reenviar aceitos.
+      if (cycleSession) {
+        try { await endSyncCycle(cycleSession); } catch (reciboErr) { logger.warn('>>> [Sync Recibo] Falha ao encerrar a sessão:', reciboErr); }
+      }
       isSyncingRef.current = false;
       setIsSyncing(false);
     }

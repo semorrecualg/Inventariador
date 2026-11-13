@@ -15,7 +15,6 @@ import {
   registerPull,
   beginSyncCycle,
   endSyncCycle,
-  getActiveCycle,
   pullIntoSession,
   type SyncSession,
   type SyncSessionStore,
@@ -65,12 +64,6 @@ const asset = (primarykey: string, tenantid = 'CICOPAL'): Asset => ({
 });
 
 const T0 = Date.parse('2026-11-13T08:00:00.000Z');
-
-const awaitPromiseSession = () => {
-  const active = getActiveCycle();
-  if (!active) throw new Error('nenhum ciclo ativo');
-  return active;
-};
 
 const listSessionsFresh = async (store: SyncSessionStore) => {
   const list = await store.getItem<SyncSession[]>('gbr_sync_sessions');
@@ -305,6 +298,7 @@ describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
       auditor: CICLO.auditor,
       store,
       now: T0,
+      session,
       sync: async batch => batch.map(a => String(a.id)),
     });
 
@@ -317,7 +311,7 @@ describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
       { since: '2026-11-13T07:00:00.000Z', assets: [asset('C'), asset('D')] },
       store
     );
-    const closed = await endSyncCycle(store);
+    const closed = await endSyncCycle(session, store);
 
     expect(closed?.receipt).toMatchObject({
       sent: 2,
@@ -330,7 +324,6 @@ describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
     expect(closed?.receipt?.pullChecksum).toBe(checksumOf(['CICOPAL|C', 'CICOPAL|D']));
     expect(closed?.status).toBe('COMPLETED');
     expect(closed?.finishedAt).toBeTruthy();
-    expect(getActiveCycle()).toBeNull();
     expect(formatReceipt(closed as SyncSession)).toContain('recebi 2');
   });
 
@@ -343,6 +336,7 @@ describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
       auditor: CICLO.auditor,
       store,
       now: T0,
+      session,
       sync: async batch => batch.map(a => String(a.id)),
     });
 
@@ -352,15 +346,16 @@ describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
   });
 
   it('não fecha com faltantes e retoma sem reenviar o que já foi aceito', async () => {
-    await beginSyncCycle({ ...CICLO, store, now: T0 });
+    const session = await beginSyncCycle({ ...CICLO, store, now: T0 });
     await pushAssetsWithReceipt([asset('A'), asset('B')], 'CICOPAL', {
       auditor: CICLO.auditor,
       store,
       now: T0,
+      session,
       sync: async () => ['A'], // B não voltou como aceito
     });
-    await pullIntoSession(awaitPromiseSession(), { assets: [] }, store).catch(() => undefined);
-    const parcial = await endSyncCycle(store);
+    await pullIntoSession(session, { assets: [] }, store);
+    const parcial = await endSyncCycle(session, store);
 
     expect(parcial?.receipt).toMatchObject({ accepted: 1, rejected: 1, missing: 1 });
     expect(parcial?.status).toBe('PARTIAL');
@@ -375,13 +370,14 @@ describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
       auditor: CICLO.auditor,
       store,
       now: T0 + 60_000,
+      session: retomada,
       sync: async batch => {
         sent.push(batch.map(a => a.primarykey));
         return batch.map(a => String(a.id));
       },
     });
     await pullIntoSession(retomada, { assets: [asset('C')] }, store);
-    const final = await endSyncCycle(store);
+    const final = await endSyncCycle(retomada, store);
 
     expect(sent).toEqual([['B']]);
     expect(final?.status).toBe('COMPLETED');
@@ -395,13 +391,14 @@ describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
         auditor: CICLO.auditor,
         store,
         now: T0,
+        session,
         sync: async () => {
           throw new Error('rede caiu');
         },
       })
     ).rejects.toThrow('rede caiu');
 
-    const encerrada = await endSyncCycle(store);
+    const encerrada = await endSyncCycle(session, store);
     expect(encerrada?.status).toBe('OPEN');
     expect(encerrada?.finishedAt).toBeUndefined();
     expect(encerrada?.id).toBe(session.id);
@@ -409,5 +406,17 @@ describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
     const retomada = await beginSyncCycle({ ...CICLO, store, now: T0 + 120_000 });
     expect(retomada.id).toBe(session.id);
     expect(retomada.failed).toBe(true);
+  });
+
+  it('saída antecipada (sem push nem pull) ainda encerra a sessão do ciclo', async () => {
+    // Cobre o caminho do finally: o ciclo é aberto e depois encerrado com a
+    // sessão explícita, mesmo sem nada enviado ou recebido.
+    const session = await beginSyncCycle({ ...CICLO, store, now: T0 });
+    const encerrada = await endSyncCycle(session, store);
+
+    expect(encerrada.id).toBe(session.id);
+    // Sem nada aceito/recebido o ciclo fecha como ABORTED, mas com finishedAt.
+    expect(encerrada.status).toBe('ABORTED');
+    expect(encerrada.finishedAt).toBeTruthy();
   });
 });

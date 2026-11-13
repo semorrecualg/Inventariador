@@ -300,30 +300,23 @@ const persistSession = async (session: SyncSession, store?: SyncSessionStore): P
 // Ciclo ativo: push e pull da MESMA rodada gravam no mesmo recibo.
 // ---------------------------------------------------------------------------
 
-let activeCycle: SyncSession | null = null;
-
 export type BeginCycleOptions = OpenSessionOptions;
 
 /**
- * Abre (ou retoma) a sessão do ciclo de sincronização.
- * `pushAssetsWithReceipt` e `pullIntoSession` passam a gravar nela até
- * `endSyncCycle` — é o que faz o recibo cobrir upload e download juntos.
+ * Abre (ou retoma) a sessão do ciclo de sincronização e a devolve.
+ * O chamador passa esta sessão explicitamente para `pushAssetsWithReceipt`
+ * (`options.session`) e `pullIntoSession`, e a encerra com `endSyncCycle`.
+ * Não há estado global: cada ciclo carrega a sua própria sessão.
  */
-export const beginSyncCycle = async (options: BeginCycleOptions): Promise<SyncSession> => {
-  activeCycle = await openSyncSession(options);
-  return activeCycle;
-};
+export const beginSyncCycle = (options: BeginCycleOptions): Promise<SyncSession> =>
+  openSyncSession(options);
 
-/** Sessão do ciclo em andamento (ou `null`). */
-export const getActiveCycle = (): SyncSession | null => activeCycle;
-
-/** Encerra o ciclo ativo. Fecha a sessão SÓ se não houver faltantes. */
-export const endSyncCycle = async (store?: SyncSessionStore): Promise<SyncSession | null> => {
-  const session = activeCycle;
-  activeCycle = null;
-  if (!session) return null;
-  return finalizeSyncSession(session, store);
-};
+/**
+ * Encerra a sessão do ciclo. Fecha a sessão SÓ se não houver faltantes;
+ * caso contrário ela fica aberta/parcial para a próxima rodada retomar.
+ */
+export const endSyncCycle = (session: SyncSession, store?: SyncSessionStore): Promise<SyncSession> =>
+  finalizeSyncSession(session, store);
 
 /** Registra as chaves aceitas pela nuvem nesta tentativa. */
 export const registerAccepted = async (
@@ -536,7 +529,7 @@ export const pushAssetsWithReceipt = async (
     assets[0]?.filial ||
     'GERAL';
 
-  const cycle = options.session ?? activeCycle;
+  const cycle = options.session;
   const inCycle = Boolean(cycle && cycle.tenantid === tenant);
   const session =
     (inCycle ? cycle : null) ??
