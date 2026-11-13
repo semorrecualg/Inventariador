@@ -1456,6 +1456,8 @@ const Inventory: React.FC<InventoryProps> = ({
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
         _conferido: true,
         _isNew: true,
+        // Item criado no aparelho: tem de subir, então nasce pendente.
+        _is_synced: 0,
         currentCampaignId: currentCampaignId,
         _localMaster: selectedLocation || ""
     } as Asset;

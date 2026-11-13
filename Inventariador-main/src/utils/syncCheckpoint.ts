@@ -84,8 +84,8 @@ export function readCheckpointForDelta(
   unitId?: string | null,
 ): SyncCheckpoint | null {
   const exato = readSyncCheckpoint(syncCheckpointKey(tenantid, unitId));
-  if (exato) return exato;
-  if (!String(unitId || '').trim()) return null;
+  // Sem unidade, `syncCheckpointKey` JÁ é a chave do contrato — o exato basta.
+  if (exato || !String(unitId || '').trim()) return exato;
   return readSyncCheckpoint(syncCheckpointKey(tenantid, null));
 }
 

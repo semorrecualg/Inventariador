@@ -5467,6 +5467,13 @@ useEffect(() => {
     
     const assetWithHistory: Asset & Record<string, unknown> = {
       ...assetWithGps,
+      // PONTO ÚNICO: toda a gravação que passa por aqui é alteração DESTE
+      // aparelho, logo pendente de nuvem. Sem este reset, quem edita a ficha,
+      // etiqueta, concilia ou confirma pela leitura deixava o item com
+      // `_is_synced = 1` vindo do pull e o cartão dizia "Sincronizado" antes de
+      // a fila enviar (ou para sempre, offline). A fila só volta a marcar 1
+      // depois do upsert confirmado.
+      _is_synced: 0,
       currentCampaignId: inventory.currentCampaignId || assetWithGps.currentCampaignId,
       _version: nextVersion,
       _history: [...(assetWithGps._history || []), auditEntry],
@@ -5534,6 +5541,9 @@ useEffect(() => {
       ...parentAsset,
       _is_unitized: true,
       _conferido: true,
+      // Unitarizar altera o pai neste aparelho: pendente de nuvem como qualquer
+      // outra conferência (o pai sai do giro e sobe unitarizado).
+      _is_synced: 0,
       _dataLeitura: timestamp,
       _auditor: auditor,
       TAG_INVENTARIO: TagInventario.CONFERIDO,

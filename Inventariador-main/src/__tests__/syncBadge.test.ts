@@ -10,12 +10,12 @@ import { describe, it, expect } from 'vitest';
 import type { Asset } from '../types';
 import { syncBadgeState } from '../utils/syncBadge';
 
-const ativo = (over: Partial<Asset> = {}): Partial<Asset> => ({
+const ativo = (over: Partial<Asset> = {}): Asset => ({
   etiqueta: '008491',
   _conferido: false,
   _is_synced: 1,
   ...over,
-});
+} as Asset);
 
 describe('syncBadgeState', () => {
   it('ativo da base vindo da nuvem, nunca conferido, não tem selo', () => {
@@ -40,8 +40,4 @@ describe('syncBadgeState', () => {
     expect(syncBadgeState(ativo({ _conferido: 0 as unknown as boolean, _is_synced: 1 }))).toBeNull();
   });
 
-  it('sem ativo não há selo', () => {
-    expect(syncBadgeState(null)).toBeNull();
-    expect(syncBadgeState(undefined)).toBeNull();
-  });
 });

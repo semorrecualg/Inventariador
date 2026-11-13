@@ -19,9 +19,7 @@ import type { Asset } from '../types';
  */
 export type SyncBadgeState = 'sincronizado' | 'pendente' | null;
 
-export const syncBadgeState = (asset: Partial<Asset> | null | undefined): SyncBadgeState => {
-  if (!asset) return null;
-
+export const syncBadgeState = (asset: Asset): SyncBadgeState => {
   const conferido = asset._conferido === true || Number(asset._conferido) === 1;
   const naNuvem = Number(asset._is_synced) === 1;
 
