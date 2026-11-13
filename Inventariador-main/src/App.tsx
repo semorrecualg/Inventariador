@@ -5865,6 +5865,12 @@ useEffect(() => {
           }
         }
         updates._localMaster = targetLoc;
+        // Alteração deste aparelho = pendente de nuvem. Sem este reset, um item
+        // que veio do pull (_is_synced = 1) ficava marcado como "Sincronizado"
+        // no cartão assim que fosse conferido — e continuava a mentir enquanto
+        // estivesse offline, mesmo com a alteração ainda na fila. É a mesma
+        // regra que a conferência item a item já aplicava (InventoryCard).
+        updates._is_synced = 0;
         
         const hasChanges = alteredFields.size > 0;
         updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
