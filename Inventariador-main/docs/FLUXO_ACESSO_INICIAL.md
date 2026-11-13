@@ -206,6 +206,15 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   08-09T21:46:19; merge upsert preservou os 12.636 totais locais; SYNC_PULL
   incremental registrado. 344/344 testes (16 novos) · TSC limpo.*
 
+- **Fix do checkpoint do contrato (2026-11-13):** o pull do Boot Loader de
+  contrato (perfil sem filial e sem última escolha) grava o checkpoint na chave
+  `TENANT|`, enquanto `syncFromCloud` com unidade procurava `TENANT|FILIAL` —
+  não achava e caía em pull **completo**, baixando os 12.636 outra vez. Agora
+  `readCheckpointForDelta(tenant, unidade)` usa o checkpoint exato quando existe
+  e, na falta dele, aceita o do **contrato** como piso (mesma regra de cobertura
+  do dedup: contrato cobre as filiais; filial NUNCA cobre contrato nem outra
+  filial). Sem checkpoint nenhum, o pull continua completo por desenho.
+
 - **Fix do timing do delta no boot (2026-08-14):** o auto-aplicar (Etapa 4)
   disparava o sync ANTES de o boot terminar o `loadInventory` — com
   `inventoryRef` ainda vazio, `hasLocalData=false` e o pull virava COMPLETO em

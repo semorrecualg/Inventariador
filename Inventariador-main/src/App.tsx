@@ -65,7 +65,7 @@ import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
 import {
-  readSyncCheckpoint,
+  readCheckpointForDelta,
   clearSyncCheckpoint,
   clearAllSyncCheckpoints,
   resolveDeltaMode,
@@ -2697,8 +2697,13 @@ useEffect(() => {
         logger.info(`>>> [Sync] Pull de ${ckKey} já concluído nesta sessão. Pulando sincronização duplicada (anti-loop SYNC_PULL).`);
         return;
       }
+      // O checkpoint do CONTRATO (`TENANT|`) também serve de piso para a filial:
+      // foi o pull do Boot Loader que cobriu todas as filiais dela. Sem esta
+      // tolerância, o boot de contrato gravava `TENANT|`, o sync procurava
+      // `TENANT|FILIAL` e não achava — caía em pull completo e a base inteira
+      // descia outra vez.
       const { since, incremental } = resolveDeltaMode(
-        hasLocalData ? readSyncCheckpoint(ckKey) : null,
+        hasLocalData ? readCheckpointForDelta(firstTenant, explicitUnitId) : null,
         !!explicitForceFull
       );
       if (incremental) {
