@@ -6355,28 +6355,27 @@ useEffect(() => {
   // Escopo da lista = utilizador + contrato. A lista guardada carrega o escopo
   // em que nasceu, por isso uma lista de outra conta/contrato nunca é usada —
   // nem chega ao ecrã no render em que o utilizador muda.
-  const cloudUnitNamesScope = unitListScope(user?.email, user?.tenantid);
+  const activeTenant = String(user?.tenantid || '').trim().toUpperCase();
+  const cloudUnitNamesScope = unitListScope(user?.email, activeTenant);
   // Só cresce: qualquer resposta de um pedido anterior é descartada.
   const cloudUnitNamesRequestRef = useRef(0);
 
   useEffect(() => {
-    // Sobrou lista de outro escopo (sair e entrar outra conta no mesmo
-    // aparelho): descartar antes de qualquer uso.
+    // Sobrou lista de outro escopo (outra conta/contrato no mesmo aparelho):
+    // descartar antes de qualquer uso.
     if (cloudUnitNames && cloudUnitNames.scope !== cloudUnitNamesScope) {
       setCloudUnitNames(null);
       return;
     }
 
-    // Só quando NÃO há base local (aparelho novo) e ainda não temos a lista.
-    if (databaseMode === DatabaseMode.INTERNAL || !user || !navigator.onLine) return;
+    // Muro SRE: sem contrato não se lista nada. E só quando NÃO há base local
+    // (aparelho novo) e ainda não temos a lista.
+    if (!activeTenant || databaseMode === DatabaseMode.INTERNAL || !navigator.onLine) return;
     if (sqliteOperationalUnits.length > 0 || inventory.assets.length > 0) return;
     if (cloudUnitNames) return;
 
-    const tenant = String(user.tenantid || '').trim().toUpperCase();
-    if (!tenant) return; // muro SRE: sem contrato não se lista nada
-
     const pedido = ++cloudUnitNamesRequestRef.current;
-    void fetchUnitNamesFromCloud(tenant)
+    void fetchUnitNamesFromCloud(activeTenant)
       .then(nomes => {
         if (cloudUnitNamesRequestRef.current !== pedido) return; // escopo anterior
         if (nomes.length > 0) {
@@ -6385,7 +6384,7 @@ useEffect(() => {
         }
       })
       .catch(err => logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', err));
-  }, [cloudUnitNamesScope, cloudUnitNames, databaseMode, user, sqliteOperationalUnits.length, inventory.assets.length]);
+  }, [activeTenant, cloudUnitNamesScope, cloudUnitNames, databaseMode, sqliteOperationalUnits.length, inventory.assets.length]);
 
   const fullCompaniesWithStatus = useMemo(() => {
     if (sqliteService.isImportingBatch || isImportingBatchState) {

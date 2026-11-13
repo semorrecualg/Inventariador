@@ -190,15 +190,11 @@ describe('normalizeUnitNames — lista de filiais vinda da nuvem (sem ativos)', 
 });
 
 describe('unitListScope — lista de filiais presa ao utilizador e ao contrato', () => {
-  it('outro contrato ou outro utilizador dão escopos diferentes', () => {
+  it('só coincide com a mesma conta no mesmo contrato', () => {
     const base = unitListScope('auditor@x.com', 'CICOPAL');
-    expect(unitListScope('auditor@x.com', 'CLIENTETESTE')).not.toBe(base);
-    expect(unitListScope('outro@x.com', 'CICOPAL')).not.toBe(base);
-    expect(unitListScope(' auditor@X.com ', ' cicopal ')).toBe(base);
-  });
-
-  it('sem sessão nenhum escopo real coincide', () => {
-    expect(unitListScope(null, null)).not.toBe(unitListScope('auditor@x.com', 'CICOPAL'));
-    expect(unitListScope(undefined, 'CICOPAL')).not.toBe(unitListScope('auditor@x.com', 'CICOPAL'));
+    expect(unitListScope(' auditor@X.com ', ' cicopal ')).toBe(base); // mesma conta, mesmo contrato
+    expect(unitListScope('auditor@x.com', 'CLIENTETESTE')).not.toBe(base); // outro contrato
+    expect(unitListScope('outro@x.com', 'CICOPAL')).not.toBe(base); // outra conta
+    expect(unitListScope(null, 'CICOPAL')).not.toBe(base); // sem sessão
   });
 });

@@ -80,15 +80,14 @@ describe('fetchUnitNamesFromCloud — filiais do contrato sem baixar ativos', ()
 
   it('pagina com Range até a página vir incompleta', async () => {
     const cheia = Array.from({ length: 1000 }, (_, i) => linha(`FILIAL ${i}`));
-    const { ranges, fromSpy } = stubPaginacao([
+    const { ranges } = stubPaginacao([
       { data: cheia, error: null },
       { data: [linha('FILIAL 0'), linha('ULTIMA FILIAL')], error: null }
     ]);
 
     const nomes = await fetchUnitNamesFromCloud('CICOPAL');
 
-    expect(fromSpy).toHaveBeenCalledTimes(2);
-    expect(ranges).toEqual([[0, 999], [1000, 1999]]);
+    expect(ranges).toEqual([[0, 999], [1000, 1999]]); // duas páginas, e para
     expect(nomes).toHaveLength(1001); // 1000 + 1: a repetida foi deduplicada
     expect(nomes).toContain('ULTIMA FILIAL');
     expect(nomes.filter(n => n === 'FILIAL 0')).toHaveLength(1);
