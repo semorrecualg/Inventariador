@@ -4,7 +4,7 @@ Documento de referência do subsistema de posição do app. Cobre **onde cada pe
 vive**, **como elas se ligam hoje**, **o que foi corrigido** e **qual é o modelo
 canônico** de coordenada que as rotinas internas devem consumir.
 
-Complementa `docs/ARCHITECTURE.md` e `docs/VISAO_MALHA_AUDITORIA_CAMPO.md`.
+Complementa `docs/ARCHITECTURE.md`.
 
 ---
 
