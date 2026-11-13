@@ -204,7 +204,8 @@ ausente/vazio. O `tenantid` vem **sempre da planilha** — nunca valor fixo em c
   modal**, com checkbox por item. `splitByAddress` marca quem está fora do endereço do
   inventário; ao confirmar, o App grava a conferência em `_localMaster` (endereço do
   inventário) e resolve a TAG — mesmo endereço → `CONFERIDO`, outro endereço → `ADOTADO`,
-  outra unidade → `ADOTADO EXTERNO`. O endereço de origem **não** é sobrescrito (senão o
+  outra unidade → `ADOTADO EXTERNO` (apenas dado legado: o ecrã não produz mais
+  este caso). O endereço de origem **não** é sobrescrito (senão o
   ADOTADO se perde na regra de `tagService.determineAssetTag`).
 - Regras SRE do projeto: manipular dados **só via API Dexie** (proibido SQL raw); isolar por
   tenant (`[tenantid+filial]`); gravação bloqueada com bateria < 5% (`checkHardwareSafety`).

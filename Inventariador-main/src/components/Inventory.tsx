@@ -12,7 +12,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, TransactionOrigin, AppScreen } from '../types';
+import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, AppScreen } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
 import { generateUUID } from '../services/supabaseService';
@@ -469,6 +469,11 @@ const Inventory: React.FC<InventoryProps> = ({
   const [isListening, setIsListening] = useState<string | null>(null);
 
   const [manualAsset, setManualAsset] = useState<Partial<Asset>>({});
+  // FICHA DO ATIVO em modo LEITURA, aberta a partir de "não localizado" ou da
+  // busca em outras unidades. Nada aqui altera o registo de origem: só existe
+  // para o auditor ver o bem e, se quiser, copiar os dados para o item novo
+  // desta unidade/endereço. ADOTADO EXTERNO deixa de ser criado por padrão.
+  const [fichaPreview, setFichaPreview] = useState<Asset | null>(null);
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
   const [isLocationSearchVisible, setIsLocationSearchVisible] = useState(false);
@@ -810,33 +815,44 @@ const Inventory: React.FC<InventoryProps> = ({
     setIsManualEntryOpen(true);
   };
 
-  const handleLinkToUnit = async (asset: Asset) => {
-    try {
-      setIsHierarchyLoading(true);
-      const rawUpdatedAsset = {
-        ...asset,
-        filial: selectedUnit || asset.filial,
-        _conferido: true,
-        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-        _localMaster: selectedLocation || asset.endereco,
-        _dataLeitura: new Date().toISOString(),
-        _origemTransacao: TransactionOrigin.INVENTORY
-      };
-      
-      const cleanAsset = cleanAndCapitalizeAsset(rawUpdatedAsset);
-      await onUpdateAssetRef.current(cleanAsset);
-      
-      // Limpa estados
-      setShowGlobalSearchResolution(null);
-      setGlobalSearchResults([]);
-      setCommittedSearch('');
-      setDisplayValue('');
-    } catch (err) {
-      logger.error(">>> [Inventory] Erro ao vincular ativo:", err);
-      alert(`Falha técnica ao vincular/adotar ativo de outra unidade operacional: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsHierarchyLoading(false);
-    }
+  /**
+   * COPIA os dados de um bem de outra unidade para o formulário do item novo.
+   * O registo de origem NÃO é alterado (nada de mudar filial/endereço dele):
+   * o que este bem tem de identidade e de auditoria fica de fora da cópia.
+   */
+  const handleCopyToNewItem = (origem: Asset) => {
+    const etiqueta = (showGlobalSearchResolution || origem.etiqueta || '').toUpperCase();
+    const copia: Partial<Asset> = { ...origem };
+    // Identidade, controle e auditoria pertencem ao registo novo, não à cópia.
+    delete copia.id;
+    delete copia._conferido;
+    delete copia._dataLeitura;
+    delete copia._auditor;
+    delete copia._localMaster;
+    delete copia.TAG_INVENTARIO;
+    delete copia._origemTransacao;
+    delete copia._history;
+    delete copia._isNew;
+
+    setManualAsset({
+      ...copia,
+      etiqueta,
+      filial: selectedUnit || '',
+      endereco: selectedLocation || '',
+      AUDITOR_LOCAL_AUDITADO: selectedLocation || '',
+      status: 'ATIVO',
+      dataaqusic: origem.dataaqusic || new Date().toLocaleDateString('pt-BR'),
+      TAG_INVENTARIO: TagInventario.NOVO_ITEM,
+      qt: origem.qt || 1,
+      _copiadoDe: origem.filial || origem._unitid || '',
+      _copiadoDeEtiqueta: origem.etiqueta || '',
+    });
+    setIsManualEntryOpen(true);
+    setFichaPreview(null);
+    setShowGlobalSearchResolution(null);
+    setGlobalSearchResults([]);
+    setCommittedSearch('');
+    setDisplayValue('');
   };
 
   const renderHierarchyResolutionModals = () => {
@@ -852,7 +868,7 @@ const Inventory: React.FC<InventoryProps> = ({
              </div>
              <h3 className="text-xl font-black uppercase italic tracking-tighter leading-none">Bem não localizado</h3>
              <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest mt-2 px-4 italic leading-relaxed">
-               A etiqueta <span className="text-amber-400">{showGlobalSearchResolution}</span> não pertence à unidade atual.
+               A etiqueta <span className="text-amber-400">{showGlobalSearchResolution}</span> não foi localizada nesta unidade. Nada é movido de outra unidade: você só copia os dados se confirmar.
              </p>
           </div>
 
@@ -910,10 +926,10 @@ const Inventory: React.FC<InventoryProps> = ({
                       
                       <div className="flex space-x-2 pt-1">
                         <button 
-                          onClick={() => handleLinkToUnit(asset)}
+                          onClick={() => setFichaPreview(asset)}
                           className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all shadow-md"
                         >
-                          Vincular a esta Unidade
+                          Ver Ficha do Ativo
                         </button>
                       </div>
                     </div>
@@ -926,7 +942,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     className="w-full py-4 bg-emerald-600/10 text-emerald-600 border border-emerald-600/20 rounded-2xl flex items-center justify-center space-x-2 active:scale-95 transition-all font-black uppercase text-[9px] tracking-widest"
                   >
                     <Plus size={14} />
-                    <span>Ignorar e Criar Novo</span>
+                    <span>Incluir Manualmente</span>
                   </button>
                   <button 
                     onClick={() => { setGlobalSearchResults([]); setShowGlobalSearchResolution(null); }}
@@ -937,6 +953,77 @@ const Inventory: React.FC<InventoryProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  };
+
+  /**
+   * FICHA DO ATIVO em modo LEITURA para um bem que não está nesta unidade.
+   * Fecha o ciclo do "não localizado": o auditor vê os dados completos e
+   * escolhe copiar para um item novo desta unidade/endereço ou voltar ao
+   * formulário de origem. O registo consultado nunca é alterado.
+   */
+  const renderFichaPreview = () => {
+    if (!fichaPreview) return null;
+    const a = fichaPreview;
+    const campos: Array<[string, string]> = [
+      ['Registro', String(a.registro || '—')],
+      ['Descrição', String(a.descricaodoativo || '—')],
+      ['Série', String(a.serial || '—')],
+      ['Quantidade', String(a.qt ?? 1)],
+      ['Endereço (origem)', String(a.endereco || a._localMaster || '—')],
+      ['Fornecedor', String(a.nomefornecedor || '—')],
+      ['Nota fiscal', String(a.notafiscal || '—')],
+      ['Data de aquisição', String(a.dataaqusic || '—')],
+      ['Valor de aquisição', a.vlraquisic != null ? String(a.vlraquisic) : '—'],
+    ];
+
+    return createPortal(
+      <div className="fixed inset-0 z-[12000] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fadeIn">
+        <div className="bg-white w-full max-w-md rounded-[2rem] border border-border shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-slate-900 p-5 text-white shrink-0">
+            <div className="flex items-center gap-2">
+              <Database size={16} />
+              <span className="text-[9px] font-black uppercase tracking-widest text-white/60">Ficha do Ativo · somente leitura</span>
+            </div>
+            <h3 className="text-lg font-black uppercase italic tracking-tighter leading-none mt-1 font-mono">
+              {a.etiqueta || 'SEM PLAQUETA'}
+            </h3>
+            <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">
+              Unidade de origem: {a.filial || a._unitid || 'NÃO INFORMADA'}
+            </p>
+          </div>
+
+          <div className="p-4 overflow-y-auto space-y-1.5">
+            {campos.map(([rotulo, valor]) => (
+              <div key={rotulo} className="flex items-start justify-between gap-3 px-3 py-2 rounded-xl bg-bg-main border border-border">
+                <span className="text-[8px] font-black uppercase tracking-wider text-ink-muted shrink-0 pt-0.5">{rotulo}</span>
+                <span className="text-[11px] font-bold text-ink text-right break-words min-w-0">{valor}</span>
+              </div>
+            ))}
+            <p className="text-[9px] font-bold text-ink-muted uppercase tracking-wide leading-relaxed px-1 pt-2">
+              Copiar cria um item NOVO em {selectedUnit || 'esta unidade'} / {selectedLocation || 'este endereço'}. O registo de {a.filial || 'origem'} não é alterado nem movido.
+            </p>
+          </div>
+
+          <div className="p-4 pt-2 space-y-2 shrink-0">
+            <button
+              onClick={() => handleCopyToNewItem(a)}
+              className="w-full py-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
+            >
+              <FilePlus2 size={16} />
+              <span>Copiar dados para novo item</span>
+            </button>
+            <button
+              onClick={() => setFichaPreview(null)}
+              className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              <ArrowLeft size={16} />
+              <span>Voltar</span>
+            </button>
           </div>
         </div>
       </div>,
@@ -1208,20 +1295,16 @@ const Inventory: React.FC<InventoryProps> = ({
       return;
     }
 
-    // Regra C: Se for de outra empresa, adotar automaticamente (fluidez sênior)
+    // Regra C: bem de outra unidade NÃO é adotado automaticamente (ADOTADO
+    // EXTERNO deixa de existir por padrão). Só se mostra a ficha em leitura,
+    // de onde o auditor pode copiar os dados para um item novo desta unidade.
     if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-      await handleUpdateAssetWithBackup({ 
-        ...asset, 
-        filial: selectedUnit || asset.filial || asset._unitid || '',
-        _conferido: true,
-        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-        _localMaster: selectedLocation || asset.endereco
-      });
+      setFichaPreview(asset);
       return;
     }
 
     onSelectAsset(asset);
-  }, [allAssets, onSelectAsset, handleUpdateAssetWithBackup, selectedUnit, selectedLocation, activeFilialKey]);
+  }, [allAssets, onSelectAsset, selectedUnit, activeFilialKey]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -2258,16 +2341,16 @@ const Inventory: React.FC<InventoryProps> = ({
                     <FilePlus2 size={14} />
                     Incluir novo registro
                   </button>
-                  {/* ADOTADO EXTERNO (5.1/5.2): a busca global só é oferecida a partir
-                      da etiqueta digitada manualmente, trazendo o registro de outra
-                      empresa para análise e confirmação do auditor. */}
+                  {/* NÃO LOCALIZADO: nada é adotado de outra unidade. A busca só
+                      abre a Ficha do Ativo em leitura, de onde o auditor copia os
+                      dados para um item novo DESTA unidade — ou volta ao formulário. */}
                   <button
                     type="button"
                     onClick={() => setShowGlobalSearchResolution(committedSearch)}
                     className="w-full py-3.5 rounded-xl bg-slate-950 text-amber-300 border border-amber-400 font-black uppercase text-[10px] tracking-widest active:scale-[0.98] transition-all flex items-center justify-center gap-2"
                   >
                     <Database size={14} />
-                    Buscar em outras empresas
+                    Pesquisar em outras Unidades
                   </button>
                 </div>
               )}
@@ -2396,6 +2479,7 @@ const Inventory: React.FC<InventoryProps> = ({
       {renderConfirmationModals()}
 
       {renderHierarchyResolutionModals()}
+      {renderFichaPreview()}
 
       {/* Outros Modais do Sistema */}
       {isNewLocationModalOpen && (
@@ -2642,6 +2726,19 @@ const Inventory: React.FC<InventoryProps> = ({
                   <FilePlus2 size={16} />
                   <span>Incluir Manual</span>
                 </button>
+                <button
+                  onClick={() => {
+                    const codigo = scannedResult;
+                    setScannedResult(null);
+                    setCommittedSearch('');
+                    setDisplayValue('');
+                    if (codigo) setShowGlobalSearchResolution(codigo);
+                  }}
+                  className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-2 shadow-lg shadow-blue-600/20"
+                >
+                  <Search size={16} />
+                  <span>Pesquisar em outras Unidades</span>
+                </button>
                 <button 
                   onClick={() => setScannedResult(null)} 
                   className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
@@ -2779,6 +2876,17 @@ const Inventory: React.FC<InventoryProps> = ({
                       <span className="text-[8px] font-black text-accent uppercase text-right leading-tight">NOVO ITEM (MANUAL)</span>
                     </div>
                   </div>
+                  {manualAsset._copiadoDe && (
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl">
+                      <p className="text-[9px] font-black text-blue-700 uppercase tracking-widest">
+                        Dados copiados de {manualAsset._copiadoDe}
+                      </p>
+                      <p className="text-[9px] font-bold text-blue-600 leading-snug mt-1">
+                        {manualAsset._copiadoDeEtiqueta ? `Plaqueta ${manualAsset._copiadoDeEtiqueta}. ` : ''}
+                        O registo de origem não foi alterado. Confira descrição, série e quantidade antes de salvar.
+                      </p>
+                    </div>
+                  )}
                </div>
             </div>
 

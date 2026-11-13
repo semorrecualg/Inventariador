@@ -100,7 +100,7 @@ tela ficava vazia em todos os endereços).
 | **ADOTADO** | localizado em endereço diferente do original, mas da mesma empresa | **Indigo/azul** (`indigo-600`) |
 | **RE-ADOTADO** | já conferido em um endereço e reencontrado em outro durante o inventário | **Violeta/fúcsia** (`fuchsia-600`) |
 | **NOVO ITEM** | inclusão manual, fora da malha original | **Laranja** (`orange-600`) |
-| **ADOTADO EXTERNO** | etiqueta de outra empresa, trazida pela busca global | **Preto + âmbar** (`slate-950` / `amber-300`, com anel) |
+| **ADOTADO EXTERNO** | **legado**: dado antigo trazido por adoção entre unidades. O app **não cria mais** esta tag | **Preto + âmbar** (`slate-950` / `amber-300`, com anel) |
 | **DIVERGÊNCIA** | etiqueta física ≠ `_plaquetaMaster`, ou `STATUS` ATIVO com `databaixa` (regra de ouro) | **Rose/vermelho** (`rose-600`) |
 | **FALTA ETIQUETAR** | plaqueta mestre (ou etiqueta física) com a instrução `ETIQUETAR` e emplaquetamento **não confirmado** | **Âmbar/amarelo** (`amber-400`) |
 | **ETIQUETADO** | era FALTA ETIQUETAR e o auditor confirmou a etiquetagem (`_plaquetado` / `TAG_INVENTARIO = ETIQUETADO`) | **Violeta** (`violet-600`) |
@@ -113,7 +113,8 @@ Regras de cálculo (`determineAssetTag`, na ordem):
    ETIQUETAR**; só vira **ETIQUETADO** com confirmação explícita do
    emplaquetamento (`_plaquetado`). Conferir a presença do bem **não** conclui
    a etiquetagem.
-4. `filial` diferente da unidade em auditoria → **ADOTADO EXTERNO**.
+4. `filial` diferente da unidade em auditoria → **ADOTADO EXTERNO** (só para
+   dado legado; a UI não produz mais este caso — ver "não localizado" abaixo).
 5. `_isNew` / `TAG_INVENTARIO = NOVO ITEM` → **NOVO ITEM**.
 6. Etiqueta atual ≠ plaqueta mestre → **DIVERGÊNCIA**.
 7. Não conferido → **PENDENTE**.
@@ -131,10 +132,19 @@ Regras de cálculo (`determineAssetTag`, na ordem):
   (`App.tsx` e `Dashboard.tsx`) — lê exatamente `TAG_INVENTARIO`; o PDF do BOOK
   (`reportGenerator.ts`), o termo (`Signature.tsx`) e a impressão
   (`AssetPrintView.tsx`) também exibem a coluna.
-- **ADOTADO EXTERNO (5.1/5.2):** só é oferecido a partir da etiqueta **digitada
-  manualmente** que não existe na unidade → botão "Buscar em outras empresas" no
-  estado vazio → `findAllByEtiqueta` → modal lista empresas/status (ATIVO ou
-  BAIXADO) → "Vincular a esta Unidade".
+- **NÃO LOCALIZADO (regra de unidade):** o inventário acontece **sempre** dentro
+  da unidade selecionada e autorizada. Quando a plaqueta lida/digitada não existe
+  nela, a tela diz que o bem não foi localizado e oferece duas saídas:
+  1. **Incluir manualmente** — cria um `NOVO ITEM` nesta unidade/endereço;
+  2. **Pesquisar em outras Unidades** — `findAllByEtiqueta` lista os registos de
+     outra unidade e abre a **Ficha do Ativo em modo leitura** (`renderFichaPreview`),
+     com **"Copiar dados para novo item"** (os dados descritivos são copiados
+     para o formulário; `id`, `TAG_INVENTARIO`, `_conferido`, `_auditor`,
+     `_localMaster` e `endereco` **não**) ou **"Voltar"**, que retorna ao
+     formulário de origem sem alterar nada.
+  O registo de outra unidade **nunca** é movido, renumerado ou adoptado — o que
+  existia antes ("Vincular a esta Unidade" e a adoção automática no clique) foi
+  removido, e com isso a tag `ADOTADO EXTERNO` deixou de ser produzida.
 
 ### 2.4 Fase A (seleção de localidade)
 
