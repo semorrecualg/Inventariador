@@ -206,6 +206,13 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   08-09T21:46:19; merge upsert preservou os 12.636 totais locais; SYNC_PULL
   incremental registrado. 344/344 testes (16 novos) · TSC limpo.*
 
+- **Lista de filiais presa ao escopo (2026-11-13):** a lista guardada em
+  memória passou a ser `{ tenantid, names }` e é **limpa** sempre que muda o
+  utilizador ou o contrato (chave `email|tenantid`), e o memo das unidades só a
+  usa quando o `tenantid` bate com o do perfil. Uma resposta que chegue atrasada
+  de outro contrato é descartada — sair e entrar com outro utilizador no mesmo
+  aparelho já não mostra filiais do contrato anterior.
+
 - **Lista de filiais sem base local (2026-11-13):** com o boot a exigir a
   filial, um aparelho novo (base vazia) abria `UNIT_SELECTION` sem nenhuma
   unidade para escolher, porque a lista vinha dos dados locais. Agora

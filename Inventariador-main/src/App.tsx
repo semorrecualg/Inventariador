@@ -748,8 +748,10 @@ useEffect(() => {
   // FILIAIS DO CONTRATO sem base local: o boot exige a escolha da filial, mas num
   // aparelho novo a lista vinha dos dados locais (vazios) e o usuário ficava
   // preso. Esta consulta traz só os NOMES (coluna `filial`), nunca os ativos.
-  const [cloudUnitNames, setCloudUnitNames] = useState<string[]>([]);
+  const [cloudUnitNames, setCloudUnitNames] = useState<{ tenantid: string; names: string[] } | null>(null);
   const cloudUnitNamesFetchRef = useRef(false);
+  // Escopo (utilizador + contrato) a que a lista em memória pertence.
+  const cloudUnitNamesScopeRef = useRef('');
   const [isDatabaseEmpty, setIsDatabaseEmpty] = useState<boolean>(false);
   // Etapa 2 da trilha única: "segurança biométrica" é um passo da esteira.
   // Fica true quando o usuário registra a biometria OU a dispensa na tela —
@@ -6353,23 +6355,41 @@ useEffect(() => {
     }
   }, [selectedUnit, filteredAssetsByUnit, user, bulkUpdateAssets, popScreen]);
   
+  const cloudUnitNamesScope = `${(user?.email || '').toLowerCase()}|${String(user?.tenantid || '').trim().toUpperCase()}`;
+
+  useEffect(() => {
+    // Trocar de utilizador (ou de contrato) no MESMO aparelho não pode mostrar
+    // as filiais do contrato anterior: a lista em memória pertence ao escopo.
+    cloudUnitNamesScopeRef.current = cloudUnitNamesScope;
+    setCloudUnitNames(null);
+    cloudUnitNamesFetchRef.current = false;
+  }, [cloudUnitNamesScope]);
+
   useEffect(() => {
     // Só quando NÃO há base local (aparelho novo) e ainda não temos a lista.
     if (databaseMode === DatabaseMode.INTERNAL || !user || !navigator.onLine) return;
     if (sqliteOperationalUnits.length > 0 || inventory.assets.length > 0) return;
-    if (cloudUnitNames.length > 0 || cloudUnitNamesFetchRef.current) return;
+    if (cloudUnitNames || cloudUnitNamesFetchRef.current) return;
+
+    const scope = cloudUnitNamesScopeRef.current;
+    const tenant = String(user.tenantid || '').trim().toUpperCase();
+    if (!tenant) return; // muro SRE: sem contrato não se lista nada
 
     cloudUnitNamesFetchRef.current = true;
-    void fetchUnitNamesFromCloud(user.tenantid)
+    void fetchUnitNamesFromCloud(tenant)
       .then(nomes => {
+        // Resposta de um contrato anterior (o utilizador mudou no meio do pedido).
+        if (cloudUnitNamesScopeRef.current !== scope) return;
         if (nomes.length > 0) {
           logger.info(`>>> [Unidades] Lista de filiais do contrato carregada da nuvem: ${nomes.length} unidade(s).`);
-          setCloudUnitNames(nomes);
+          setCloudUnitNames({ tenantid: tenant, names: nomes });
         }
       })
       .catch(err => logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', err))
-      .finally(() => { cloudUnitNamesFetchRef.current = false; });
-  }, [databaseMode, user, sqliteOperationalUnits.length, inventory.assets.length, cloudUnitNames.length]);
+      .finally(() => {
+        if (cloudUnitNamesScopeRef.current === scope) cloudUnitNamesFetchRef.current = false;
+      });
+  }, [databaseMode, user, sqliteOperationalUnits.length, inventory.assets.length, cloudUnitNames]);
 
   const fullCompaniesWithStatus = useMemo(() => {
     if (sqliteService.isImportingBatch || isImportingBatchState) {
@@ -6575,7 +6595,10 @@ useEffect(() => {
 
     // 4c. Filiais do CONTRATO vindas da nuvem (aparelho sem base local).
     // Sem elas a seleção de filial abria vazia e o boot travava o usuário.
-    cloudUnitNames.forEach(nome => {
+    const cloudNamesForTenant = cloudUnitNames && cloudUnitNames.tenantid === userTenant
+      ? cloudUnitNames.names
+      : [];
+    cloudNamesForTenant.forEach(nome => {
       const norm = normalizeKey(nome);
       if (!norm || !isUnitAllowed(norm)) return;
       const key = unitContextKey(userTenant, nome);
