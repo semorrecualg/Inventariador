@@ -7,7 +7,7 @@ import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clea
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
 import { logger } from '../utils/logger';
-import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen } from 'lucide-react';
+import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Copy, Check, Maximize2, Minimize2 } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const data = await DatabaseLoaderService.extrairDadosDaPlanilha(file);
@@ -57,6 +57,18 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const [virtualCount, setVirtualCount] = useState<number>(0);
   const [logCount, setLogCount] = useState<number>(0);
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
+  const [isLogExpanded, setIsLogExpanded] = useState<boolean>(false);
+  const [logCopied, setLogCopied] = useState<boolean>(false);
+
+  const copyConsoleLogs = async () => {
+    try {
+      await navigator.clipboard.writeText(consoleLogs.join('\n'));
+      setLogCopied(true);
+      setTimeout(() => setLogCopied(false), 2000);
+    } catch (err) {
+      logger.warn('[SRE] Falha ao copiar o log do monitor:', err);
+    }
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
@@ -734,7 +746,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       </div>
 
       {/* 5. Terminal de Diagnóstico SRE */}
-      <div className="bg-slate-950 border border-slate-900 rounded-xl overflow-hidden shadow-xl mt-auto">
+      <div className={`bg-slate-950 border border-slate-900 overflow-hidden shadow-xl ${isLogExpanded ? 'fixed inset-0 z-[9998] flex flex-col' : 'rounded-xl mt-auto'}`}>
         <div className="bg-slate-900/80 px-4 py-2 flex items-center justify-between border-b border-slate-900">
           <div className="flex items-center space-x-2">
             <Terminal size={12} className="text-slate-400" />
@@ -742,14 +754,22 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
               SRE Diagnostics Monitor
             </span>
           </div>
-          <div className="flex space-x-1">
-            <span className="w-2 h-2 rounded-full bg-slate-800 block"></span>
-            <span className="w-2 h-2 rounded-full bg-slate-800 block"></span>
-            <span className="w-2 h-2 rounded-full bg-slate-800 block"></span>
+          <div className="flex items-center space-x-3">
+            <button type="button" onClick={copyConsoleLogs} className="text-slate-400 hover:text-slate-200 active:scale-95" aria-label="Copiar log">
+              {logCopied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+            </button>
+            <button type="button" onClick={() => setIsLogExpanded(v => !v)} className="text-slate-400 hover:text-slate-200 active:scale-95" aria-label={isLogExpanded ? 'Fechar tela cheia' : 'Abrir em tela cheia'}>
+              {isLogExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+            <div className="flex space-x-1">
+              <span className="w-2 h-2 rounded-full bg-slate-800 block"></span>
+              <span className="w-2 h-2 rounded-full bg-slate-800 block"></span>
+              <span className="w-2 h-2 rounded-full bg-slate-800 block"></span>
+            </div>
           </div>
         </div>
         
-        <div className="p-4 font-mono text-[9px] leading-relaxed text-emerald-400 bg-slate-950/90 h-[120px] overflow-y-auto space-y-1">
+        <div className={`p-4 font-mono text-[9px] leading-relaxed text-emerald-400 bg-slate-950/90 overflow-y-auto space-y-1 ${isLogExpanded ? 'flex-1 text-xs' : 'h-[120px]'}`}>
           {consoleLogs.map((log, index) => (
             <div key={index} className="whitespace-pre-wrap">{log}</div>
           ))}
