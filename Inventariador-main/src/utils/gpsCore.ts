@@ -36,8 +36,6 @@ export interface GpsFix {
 export const GPS_ACCURACY = {
   /** Precisão exigida para carimbar a posição de um ativo no mapa de calor. */
   COLLECT: 50,
-  /** Acima disto a leitura é ruído de rede/ célula e é descartada. */
-  DISCARD: 150,
   /** Distância a partir da qual uma leitura é considerada salto impossível. */
   MAX_JUMP_METERS: 300,
 } as const
@@ -47,6 +45,9 @@ const GPS_MIN_INTERVAL_MS = 30_000;
 
 /** Deslocamento mínimo (m) para considerar que o aparelho realmente se moveu. */
 const GPS_MIN_MOVE_METERS = 5;
+
+/** Velocidade máxima plausível (m/s, ~54 km/h) para auditor a pé ou em veículo interno. */
+const GPS_MAX_SPEED_MPS = 15;
 
 /**
  * Coordenada geograficamente válida e utilizável.
@@ -91,11 +92,11 @@ export const distanceMeters = (a: { lat: number; lng: number }, b: { lat: number
 interface JitterOptions {
   /** Precisão máxima aceita (m). Default: `GPS_ACCURACY.COLLECT`. */
   maxAccuracyM?: number;
-  /** Salto máximo aceito entre duas leituras (m). Default: `MAX_JUMP_METERS`. */
+  /** Salto máximo aceito entre duas leituras (m). Default: `GPS_ACCURACY.MAX_JUMP_METERS`. */
   maxJumpMeters?: number;
   /** Intervalo mínimo entre leituras aceitas (ms). Default: `GPS_MIN_INTERVAL_MS`. */
   minIntervalMs?: number;
-  /** Deslocamento mínimo para valer como nova leitura (m). Default: `MIN_MOVE_METERS`. */
+  /** Deslocamento mínimo para valer como nova leitura (m). Default: `GPS_MIN_MOVE_METERS`. */
   minMoveMeters?: number;
 }
 
@@ -156,10 +157,9 @@ export class GpsJitterFilter {
     }
 
     // Salto grande em pouco tempo = ruído de célula, não deslocamento real.
-    const maxSpeedMps = 15; // ~54 km/h — teto generoso para auditor a pé/veículo interno
     const allowed = Math.min(
       this.opts.maxJumpMeters,
-      maxSpeedMps * Math.max(elapsed / 1000, 1)
+      GPS_MAX_SPEED_MPS * Math.max(elapsed / 1000, 1)
     );
     if (moved > allowed) return false;
 
