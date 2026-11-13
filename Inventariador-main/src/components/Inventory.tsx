@@ -1327,6 +1327,14 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const handleBatchConfirm = async () => {
     if (selectedIds.size === 0) return;
+
+    // Mesma regra do lote por plaqueta: sem endereço do inventário o App calcula
+    // a TAG contra o endereço de cada item e o lote cairia como CONFERIDO no
+    // endereço de origem, em vez de ADOTADO no endereço aberto.
+    if (!selectedLocation) {
+      alert('Selecione o endereço do inventário antes de conferir a seleção.');
+      return;
+    }
     
     // Filtra apenas os que ainda não foram conferidos para preservar integridade De/Para
     const ids = Array.from(selectedIds).filter(id => {
@@ -2230,7 +2238,8 @@ const Inventory: React.FC<InventoryProps> = ({
                 if (!next) setSelectedIds(new Set());
               }}
               className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${isBatchMode ? 'bg-accent text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}
-              title={isBatchMode ? 'Sair do modo lote' : 'Modo lote'}
+              title={isBatchMode ? 'Sair da seleção manual' : 'Seleção manual (marcar vários ativos)'}
+              aria-label={isBatchMode ? 'Sair da seleção manual' : 'Seleção manual' }
             >
               <CheckSquare size={18} />
             </button>
@@ -2394,7 +2403,7 @@ const Inventory: React.FC<InventoryProps> = ({
       ) : (
         <div className="bg-slate-900 px-4 py-3 flex items-center gap-3 shrink-0">
           <div className="flex-1 min-w-0">
-            <p className="text-[8px] font-black uppercase tracking-widest text-white/40">Modo lote</p>
+            <p className="text-[8px] font-black uppercase tracking-widest text-white/40">Seleção manual</p>
             <p className="text-sm font-black text-white leading-tight">
               {selectedIds.size} <span className="text-white/40">selecionado(s)</span>
             </p>

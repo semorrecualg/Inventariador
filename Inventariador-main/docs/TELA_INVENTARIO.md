@@ -215,7 +215,7 @@ Regras de cálculo (`determineAssetTag`, na ordem):
 | 17 | **Não localizado** | grava `DIVERGENCIA` em `audit_logs` e oferece busca global / inclusão manual |
 | 18 | **Busca por descrição** | termo não numérico procura em `descricaodoativo` (não só etiqueta) |
 | 19 | **Resultado em lote** | vários registros com a mesma etiqueta → botão "Conferir os N registros do resultado" |
-| 20 | **Modo lote** | seleção múltipla; `handleBatchConfirm` confirma **apenas** os não conferidos |
+| 20 | **Seleção manual** | marcar vários ativos à mão (não confundir com a conferência em lote por plaqueta, que abre sozinha); `handleBatchConfirm` confirma **apenas** os não conferidos e **exige o endereço do inventário** |
 | 21 | **Persistência espelhada** | grava cópia em `localStorage` (`gbr_backup_<tenant>_<filial>`) antes de atualizar; recovery boot reinjeta órfãos |
 
 ### 3.4 Checks de gravação
@@ -254,7 +254,7 @@ apenas para calar o ESLint:
 | Teclado numérico | componente morto | removido (não servia para busca por descrição) |
 | Busca por foto (OCR) | botão chamava `ocrInputRef.click()` sem `<input type="file">` na árvore → inerte | **removida**: apontava para `/assets/ocr/*` inexistente e falhava em silêncio; a leitura fica com o leitor de câmera (código de barras/QR) |
 | Progresso da localidade | só na fase A | barra + `conferidos/total/%` no cabeçalho e na barra de ação |
-| Modo lote | estado inalcançável | botão no cabeçalho + barra "selecionados / Conferir / Cancelar" |
+| Seleção manual | estado inalcançável | botão no cabeçalho + barra "selecionados / Conferir / Cancelar" |
 | Finalizar lote | `onOpenSignature` sem botão | "Finalizar lote" na barra de ação |
 | Conferir resultado da busca | `handleConfirmSearchBatch` sem botão | botão quando há vários registros da mesma etiqueta |
 | Incluir novo registro | `handleCreateNew` sem botão | botão no estado vazio com termo buscado |
