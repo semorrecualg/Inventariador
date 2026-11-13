@@ -1264,6 +1264,14 @@ const Inventory: React.FC<InventoryProps> = ({
   };
 
   const handleConfirmBatchGroup = async () => {
+    // Sem endereço de inventário o App calcula a TAG contra o endereço de cada
+    // item e o lote cairia como CONFERIDO no endereço de origem, em vez de
+    // ADOTADO no endereço aberto. Melhor recusar do que gravar errado.
+    if (!selectedLocation) {
+      alert('Selecione o endereço do inventário antes de confirmar em lote.');
+      return;
+    }
+
     const selecionados = batchGroup.filter(a => batchCheckedIds.has(String(a.id)));
     if (selecionados.length === 0) {
       setBatchGroup([]);

@@ -5748,6 +5748,14 @@ useEffect(() => {
 
   const bulkUpdateAssets = useCallback(async (ids: string[], manualUpdates?: Partial<Asset>) => {
     const idSet = new Set(ids.map(id => String(id)));
+
+    // O endereço do inventário (o mesmo que a tela tem aberto via
+    // `selectedLocation` → `setInventoryLocation`) é o alvo de `_localMaster`
+    // e da TAG abaixo. Sem ele, `targetLoc` cai no endereço de CADA item e a
+    // TAG vira CONFERIDO no endereço de origem em vez de ADOTADO.
+    if (!inventoryLocation && !history.includes(AppScreen.ACCOUNT_RECONCILIATION)) {
+      logger.warn('>>> [Lote] Endereço do inventário não definido: a TAG será calculada contra o endereço de cada item (risco de CONFERIDO em vez de ADOTADO).');
+    }
     const isReconciliationWorkflow = history.includes(AppScreen.ACCOUNT_RECONCILIATION);
     
     // Identificar a origem da transação (Código Fixo de 4 dígitos)
