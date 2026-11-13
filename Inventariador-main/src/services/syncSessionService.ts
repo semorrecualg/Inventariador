@@ -10,28 +10,50 @@ import { logger } from '../utils/logger';
  * "subiu tudo". O upsert do Postgres é idempotente (não duplica), mas o app não
  * guarda prova nem retoma de onde parou.
  *
- * Aqui cada rodada de envio vira uma SESSÃO persistida:
+ * Aqui cada rodada de sincronização vira uma SESSÃO persistida que cobre os
+ * DOIS sentidos do ciclo:
  *
- *   abrir → filtrar o que esta sessão já aceitou → enviar → registrar aceitos →
- *   fechar com recibo (enviados / aceitos / recusados / recebidos / faltantes)
+ *   beginSyncCycle → push (aceitos) → pull (recebidos) → endSyncCycle (recibo)
  *
- * Propriedades:
+ * Regras:
  *  - **Idempotente**: chave = `tenantid|primarykey`; o que a sessão já aceitou
  *    não é reenviado na retomada.
  *  - **Retomável**: a sessão fica persistida enquanto aberta (janela de 16 h,
  *    um turno noturno com virada de dia). Se o app cair, a próxima rodada
  *    continua de onde parou.
- *  - **Conferível**: o recibo é um registro local com contagem e checksum.
+ *  - **Sem contagem inventada**: o pull registra as CHAVES dos ativos que a
+ *    nuvem devolveu. `received` é o tamanho dessa lista — nunca estimativa.
+ *  - **Fecha só sem faltantes**: se sobrou ativo não aceito, a sessão continua
+ *    aberta para a próxima rodada retomar.
+ *  - **Sem sobrescrita entre sentidos**: cada gravação relê a versão persistida
+ *    e faz merge (chaves em união, pull preservado) em vez de substituir.
  *
- * Decisões de produto que valem aqui (ver docs/VISAO_MALHA_AUDITORIA_CAMPO.md § 10):
- *  - posse/identidade acompanha a PESSOA (o auditor), não o aparelho;
+ * Decisões de produto (docs/VISAO_MALHA_AUDITORIA_CAMPO.md § 10):
+ *  - posse/identidade acompanha a PESSOA (auditor), não o aparelho;
  *  - retenção de sessões fechadas: 90 dias.
  *
- * Este módulo é o lado "recibo". Ele NÃO substitui o transporte: recebe a função
- * de envio (`sync`) por parâmetro, o que também o torna testável sem rede.
+ * Este módulo é o lado "recibo". Ele NÃO substitui o transporte: recebe as
+ * funções de envio/baixa por parâmetro, o que também o torna testável sem rede.
  */
 
 export type SyncSessionStatus = 'OPEN' | 'COMPLETED' | 'PARTIAL' | 'ABORTED';
+
+export interface SyncSessionPull {
+  /** Checkpoint usado no delta (`updated_at > since`), quando houve. */
+  since?: string;
+  /**
+   * Contagem explícita de recebidos. Preferir `receivedKeys`: quando as chaves
+   * são conhecidas, a contagem sai delas.
+   */
+  received?: number;
+  /**
+   * Chaves dos ativos que a nuvem devolveu. É a fonte de `received` e do
+   * checksum do pull — preenchida pelo ciclo real (`pullIntoSession`).
+   */
+  receivedKeys?: string[];
+  /** Quantos desses ativos foram efetivamente gravados no estado local. */
+  applied: number;
+}
 
 export interface SyncSessionReceipt {
   /** Ativos que esta sessão se propôs a enviar. */
@@ -44,10 +66,12 @@ export interface SyncSessionReceipt {
   received: number;
   /** Ativos baixados que foram aplicados localmente. */
   applied: number;
-  /** Diferença entre enviados e aceitos — o que ainda falta. */
+  /** Diferença entre enviados e aceitos — o que ainda falta subir. */
   missing: number;
   /** Impressão determinística das chaves aceitas (conferência, não criptografia). */
   checksum: string;
+  /** Impressão determinística das chaves recebidas no pull. */
+  pullChecksum: string;
   durationMs: number;
 }
 
@@ -65,8 +89,10 @@ export interface SyncSession {
   attempts: number;
   acceptedKeys: string[];
   rejectedKeys: string[];
-  pull?: { since?: string; received: number; applied: number };
+  pull?: SyncSessionPull;
   receipt?: SyncSessionReceipt;
+  /** A rodada falhou no meio (rede/erro): a sessão NÃO deve fechar como concluída. */
+  failed?: boolean;
 }
 
 /** Armazenamento mínimo — permite injetar memória nos testes. */
@@ -142,7 +168,7 @@ export const assetSyncKey = (asset: Pick<Asset, 'tenantid' | 'primarykey' | 'id'
   return `${tenant}|${key}`;
 };
 
-/** Impressão determinística (FNV-1a 32 bits) das chaves aceitas. */
+/** Impressão determinística (FNV-1a 32 bits) das chaves. */
 export const checksumOf = (keys: string[]): string => {
   const sorted = [...keys].sort();
   let hash = 0x811c9dc5;
@@ -189,9 +215,13 @@ export const openSyncSession = async (options: OpenSessionOptions): Promise<Sync
 
   const sessions = pruneSessions(await readSessions(store), now);
 
+  // 'PARTIAL' sem finishedAt = rodada anterior com faltantes: também retoma.
+  const isResumable = (s: SyncSession) =>
+    !s.finishedAt && (s.status === 'OPEN' || s.status === 'PARTIAL');
+
   const resumable = sessions.find(
     s =>
-      s.status === 'OPEN' &&
+      isResumable(s) &&
       s.tenantid === tenantid &&
       s.filial === filial &&
       s.auditor === auditor &&
@@ -238,14 +268,61 @@ export const filterNotAccepted = <T extends Pick<Asset, 'tenantid' | 'primarykey
   return assets.filter(a => !accepted.has(assetSyncKey(a)));
 };
 
+/**
+ * Grava a sessão fazendo MERGE com o que está persistido.
+ *
+ * Sem isto, push e pull do mesmo ciclo se sobrescreveriam: quem gravasse por
+ * último apagaria as chaves/pull do outro (objetos em memória diferentes).
+ */
 const persistSession = async (session: SyncSession, store?: SyncSessionStore): Promise<void> => {
   const s = resolveStore(store);
   const sessions = await readSessions(s);
   const index = sessions.findIndex(item => item.id === session.id);
-  session.updatedAt = new Date().toISOString();
-  if (index >= 0) sessions[index] = session;
-  else sessions.unshift(session);
+  const stored = index >= 0 ? sessions[index] : undefined;
+
+  const merged: SyncSession = {
+    ...session,
+    acceptedKeys: [...new Set([...(stored?.acceptedKeys ?? []), ...session.acceptedKeys])],
+    // Não é união: um ativo rejeitado numa rodada e aceito na seguinte precisa
+    // sair da lista de faltantes (quem chama manda o estado atual).
+    rejectedKeys: [...new Set(session.rejectedKeys)],
+    pull: session.pull ?? stored?.pull,
+    updatedAt: new Date().toISOString(),
+  };
+
+  Object.assign(session, merged);
+  if (index >= 0) sessions[index] = merged;
+  else sessions.unshift(merged);
   await writeSessions(s, sessions);
+};
+
+// ---------------------------------------------------------------------------
+// Ciclo ativo: push e pull da MESMA rodada gravam no mesmo recibo.
+// ---------------------------------------------------------------------------
+
+let activeCycle: SyncSession | null = null;
+
+export type BeginCycleOptions = OpenSessionOptions;
+
+/**
+ * Abre (ou retoma) a sessão do ciclo de sincronização.
+ * `pushAssetsWithReceipt` e `pullIntoSession` passam a gravar nela até
+ * `endSyncCycle` — é o que faz o recibo cobrir upload e download juntos.
+ */
+export const beginSyncCycle = async (options: BeginCycleOptions): Promise<SyncSession> => {
+  activeCycle = await openSyncSession(options);
+  return activeCycle;
+};
+
+/** Sessão do ciclo em andamento (ou `null`). */
+export const getActiveCycle = (): SyncSession | null => activeCycle;
+
+/** Encerra o ciclo ativo. Fecha a sessão SÓ se não houver faltantes. */
+export const endSyncCycle = async (store?: SyncSessionStore): Promise<SyncSession | null> => {
+  const session = activeCycle;
+  activeCycle = null;
+  if (!session) return null;
+  return finalizeSyncSession(session, store);
 };
 
 /** Registra as chaves aceitas pela nuvem nesta tentativa. */
@@ -254,9 +331,10 @@ export const registerAccepted = async (
   keys: string[],
   store?: SyncSessionStore
 ): Promise<SyncSession> => {
-  const merged = new Set(session.acceptedKeys);
-  keys.forEach(k => merged.add(k));
+  const merged = new Set([...session.acceptedKeys, ...keys]);
   session.acceptedKeys = [...merged];
+  // Aceito agora deixa de ser faltante.
+  session.rejectedKeys = session.rejectedKeys.filter(k => !merged.has(k));
   await persistSession(session, store);
   return session;
 };
@@ -267,62 +345,127 @@ export const registerRejected = async (
   keys: string[],
   store?: SyncSessionStore
 ): Promise<SyncSession> => {
-  const merged = new Set(session.rejectedKeys);
-  keys.forEach(k => merged.add(k));
+  const merged = new Set([...session.rejectedKeys, ...keys]);
   session.rejectedKeys = [...merged];
   await persistSession(session, store);
   return session;
 };
 
-/** Registra o que veio da nuvem no ciclo (o recibo cobre os dois sentidos). */
+/**
+ * Registra o pull do ciclo.
+ *
+ * `received` sai das CHAVES realmente devolvidas pela nuvem (`receivedKeys`).
+ * Quando o chamador só tem a contagem, `received` explícito é aceito — mas
+ * nunca é estimado nem derivado de outra coisa.
+ */
 export const registerPull = async (
   session: SyncSession,
-  pull: { since?: string; received: number; applied: number },
+  pull: SyncSessionPull,
   store?: SyncSessionStore
 ): Promise<SyncSession> => {
-  session.pull = pull;
+  session.pull = {
+    ...pull,
+    received: pull.receivedKeys ? pull.receivedKeys.length : pull.received ?? 0,
+  };
   await persistSession(session, store);
   return session;
 };
+
+/** Registra, a partir dos ativos baixados, as chaves efetivamente recebidas. */
+export const pullIntoSession = async (
+  session: SyncSession,
+  params: { since?: string; assets: Asset[]; applied?: number },
+  store?: SyncSessionStore
+): Promise<SyncSession> =>
+  registerPull(
+    session,
+    {
+      since: params.since,
+      receivedKeys: params.assets.map(assetSyncKey),
+      // Aplicado = o que foi efetivamente gravado no estado local. O chamador
+      // passa a contagem real; sem ela, assume os mesmos ativos devolvidos
+      // (o merge do pull grava todos os que a nuvem trouxe).
+      applied: params.applied ?? params.assets.length,
+    },
+    store
+  );
 
 export const buildReceipt = (session: SyncSession, now: number = Date.now()): SyncSessionReceipt => {
   const accepted = session.acceptedKeys.length;
   const rejected = session.rejectedKeys.length;
   const started = Date.parse(session.startedAt);
+  const receivedKeys = session.pull?.receivedKeys;
+  const received = receivedKeys ? receivedKeys.length : session.pull?.received ?? 0;
   return {
     sent: accepted + rejected,
     accepted,
     rejected,
-    received: session.pull?.received ?? 0,
+    received,
     applied: session.pull?.applied ?? 0,
     missing: rejected,
     checksum: checksumOf(session.acceptedKeys),
+    pullChecksum: checksumOf(receivedKeys ?? []),
     durationMs: Number.isFinite(started) ? Math.max(0, now - started) : 0,
   };
 };
 
 /**
- * Fecha a sessão, grava o recibo e libera a lista de chaves aceitas (o recibo já
- * tem contagem e checksum; não faz sentido carregar milhares de chaves fechadas).
+ * Fecha a sessão, grava o recibo e libera as listas de chaves (o recibo já tem
+ * contagem e checksum; não faz sentido carregar milhares de chaves fechadas).
+ *
+ * Se houver ativo não aceito, a sessão NÃO fecha: continua aberta para a próxima
+ * rodada retomar e o recibo parcial fica registrado em `receipt`.
  */
+export const finalizeSyncSession = async (
+  session: SyncSession,
+  store?: SyncSessionStore
+): Promise<SyncSession> => {
+  const now = Date.now();
+  const receipt = buildReceipt(session, now);
+  session.receipt = receipt;
+
+  // Rodada que falhou sem aceitar nada não pode "concluir": fica aberta para a
+  // próxima tentativa retomar (falha de rede não é fim de sessão).
+  if (session.failed) {
+    session.status = 'OPEN';
+    session.finishedAt = undefined;
+    await persistSession(session, store);
+    logger.info(formatReceipt(session));
+    return session;
+  }
+
+  if (receipt.missing > 0) {
+    session.status = 'PARTIAL';
+    // Sem `finishedAt`: a sessão segue viva para a retomada.
+    session.finishedAt = undefined;
+    await persistSession(session, store);
+    logger.info(formatReceipt(session));
+    return session;
+  }
+
+  session.status = receipt.accepted > 0 || receipt.received > 0 ? 'COMPLETED' : 'ABORTED';
+  session.finishedAt = new Date(now).toISOString();
+  session.acceptedKeys = [];
+  session.rejectedKeys = [];
+  if (session.pull?.receivedKeys) session.pull.receivedKeys = [];
+
+  await persistSession(session, store);
+  logger.info(formatReceipt(session));
+  return session;
+};
+
+/** Mantido para chamadas que encerram a sessão explicitamente. */
 export const closeSyncSession = async (
   session: SyncSession,
   status: Exclude<SyncSessionStatus, 'OPEN'> = 'COMPLETED',
   store?: SyncSessionStore
 ): Promise<SyncSession> => {
-  const now = Date.now();
   session.status = status;
-  session.finishedAt = new Date(now).toISOString();
-  session.receipt = buildReceipt(session, now);
+  session.finishedAt = new Date().toISOString();
+  session.receipt = buildReceipt(session);
   session.acceptedKeys = [];
   session.rejectedKeys = [];
-
-  const s = resolveStore(store);
-  const sessions = pruneSessions(await readSessions(s), now);
-  const index = sessions.findIndex(item => item.id === session.id);
-  if (index >= 0) sessions[index] = session;
-  else sessions.unshift(session);
-  await writeSessions(s, sessions);
+  await persistSession(session, store);
   return session;
 };
 
@@ -360,6 +503,8 @@ export interface PushWithReceiptOptions {
   /** Transporte: por padrão o envio real; os testes injetam um dublê. */
   sync?: (assets: Asset[], tenantid?: string) => Promise<string[]>;
   now?: number;
+  /** Sessão explícita (usada quando já existe um ciclo aberto). */
+  session?: SyncSession;
 }
 
 export interface PushWithReceiptResult {
@@ -373,6 +518,9 @@ export interface PushWithReceiptResult {
  *
  * Substitui `syncAssetsToCloudAndMark` nos pontos de envio: mesma saída (`synced`),
  * mas com idempotência entre tentativas e recibo registrado ao final.
+ *
+ * Dentro de um ciclo (`beginSyncCycle`), grava na sessão do ciclo e NÃO fecha —
+ * quem fecha é `endSyncCycle`, depois do pull.
  */
 export const pushAssetsWithReceipt = async (
   assets: Asset[],
@@ -388,24 +536,23 @@ export const pushAssetsWithReceipt = async (
     assets[0]?.filial ||
     'GERAL';
 
-  const session = await openSyncSession({
-    tenantid: tenant,
-    filial,
-    auditor: options.auditor,
-    store,
-    now: options.now,
-  });
-
-  if (assets.length === 0 && session.acceptedKeys.length === 0) {
-    await closeSyncSession(session, 'COMPLETED', store);
-    return { synced: [], session };
-  }
+  const cycle = options.session ?? activeCycle;
+  const inCycle = Boolean(cycle && cycle.tenantid === tenant);
+  const session =
+    (inCycle ? cycle : null) ??
+    (await openSyncSession({
+      tenantid: tenant,
+      filial,
+      auditor: options.auditor,
+      store,
+      now: options.now,
+    }));
 
   // IDEMPOTÊNCIA: não reenviar o que ESTA sessão já teve aceito.
   const pending = filterNotAccepted(session, assets);
   if (pending.length === 0) {
     logger.info('>>> [Sync Session] Nada novo a enviar: todos os ativos já foram aceitos nesta sessão.');
-    await closeSyncSession(session, 'COMPLETED', store);
+    if (!inCycle) await finalizeSyncSession(session, store);
     return { synced: [], session };
   }
 
@@ -419,11 +566,12 @@ export const pushAssetsWithReceipt = async (
     acceptedLocalIds = await sync(pending, tenantid);
   } catch (err) {
     // Sessão fica ABERTA de propósito: a próxima rodada retoma e não reenvia
-    // o que já foi aceito antes da falha. Relê a versão persistida para não
-    // apagar as chaves que outra tentativa registrou no meio do caminho.
+    // o que já foi aceito antes da falha. Relê o persistido para não apagar
+    // chaves registradas por outra etapa do ciclo.
     const sessions = await readSessions(store);
     const stored = sessions.find(item => item.id === session.id) ?? session;
     stored.status = 'OPEN';
+    stored.failed = true;
     await persistSession(stored, store);
     logger.warn('>>> [Sync Session] Envio interrompido; sessão mantida aberta para retomada:', err);
     throw err;
@@ -440,14 +588,11 @@ export const pushAssetsWithReceipt = async (
     .map(assetSyncKey)
     .filter(k => !acceptedSet.has(k));
 
+  session.failed = false;
   await registerAccepted(session, acceptedKeys, store);
   await registerRejected(session, rejectedKeys, store);
 
-  const status: Exclude<SyncSessionStatus, 'OPEN'> =
-    rejectedKeys.length === 0 ? 'COMPLETED' : acceptedKeys.length === 0 ? 'ABORTED' : 'PARTIAL';
-
-  await closeSyncSession(session, status, store);
-  logger.info(formatReceipt(session));
+  if (!inCycle) await finalizeSyncSession(session, store);
 
   return { synced: acceptedLocalIds, session };
 };

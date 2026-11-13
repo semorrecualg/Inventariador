@@ -13,6 +13,10 @@ import {
   pushAssetsWithReceipt,
   registerAccepted,
   registerPull,
+  beginSyncCycle,
+  endSyncCycle,
+  getActiveCycle,
+  pullIntoSession,
   type SyncSession,
   type SyncSessionStore,
 } from '../services/syncSessionService';
@@ -61,6 +65,17 @@ const asset = (primarykey: string, tenantid = 'CICOPAL'): Asset => ({
 });
 
 const T0 = Date.parse('2026-11-13T08:00:00.000Z');
+
+const awaitPromiseSession = () => {
+  const active = getActiveCycle();
+  if (!active) throw new Error('nenhum ciclo ativo');
+  return active;
+};
+
+const listSessionsFresh = async (store: SyncSessionStore) => {
+  const list = await store.getItem<SyncSession[]>('gbr_sync_sessions');
+  return Array.isArray(list) ? list : [];
+};
 
 describe('syncSession — identidade e checksum', () => {
   it('monta a chave estável do ativo com contrato + chave primária', () => {
@@ -239,6 +254,7 @@ describe('syncSession — recibo e retenção', () => {
         applied: 0,
         missing: 1,
         checksum: 'abc12345',
+        pullChecksum: '00000000',
         durationMs: 10,
       },
     };
@@ -266,5 +282,132 @@ describe('syncSession — recibo e retenção', () => {
     const open: SyncSession = { ...old, id: 'open', status: 'OPEN', finishedAt: undefined };
     const kept = pruneSessions([old, open], T0 + SYNC_SESSION_RETENTION_MS + 1000);
     expect(kept.map(s => s.id)).toEqual(['open']);
+  });
+});
+
+
+describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
+  let store: ReturnType<typeof makeStore>;
+  const CICLO = {
+    tenantid: 'CICOPAL',
+    filial: '010101 CICOPAL GO',
+    auditor: 'auditor@empresa.com',
+  };
+
+  beforeEach(() => {
+    store = makeStore();
+  });
+
+  it('o pull alimenta o recibo com os recebidos e o push não fecha a sessão', async () => {
+    const session = await beginSyncCycle({ ...CICLO, store, now: T0 });
+
+    const push = await pushAssetsWithReceipt([asset('A'), asset('B')], 'CICOPAL', {
+      auditor: CICLO.auditor,
+      store,
+      now: T0,
+      sync: async batch => batch.map(a => String(a.id)),
+    });
+
+    // Dentro do ciclo, push e pull compartilham a sessão e ela segue aberta.
+    expect(push.session.id).toBe(session.id);
+    expect(push.session.status).toBe('OPEN');
+
+    await pullIntoSession(
+      session,
+      { since: '2026-11-13T07:00:00.000Z', assets: [asset('C'), asset('D')] },
+      store
+    );
+    const closed = await endSyncCycle(store);
+
+    expect(closed?.receipt).toMatchObject({
+      sent: 2,
+      accepted: 2,
+      received: 2,
+      applied: 2,
+      missing: 0,
+    });
+    // Se pullIntoSession deixar de registrar as chaves reais, isto quebra.
+    expect(closed?.receipt?.pullChecksum).toBe(checksumOf(['CICOPAL|C', 'CICOPAL|D']));
+    expect(closed?.status).toBe('COMPLETED');
+    expect(closed?.finishedAt).toBeTruthy();
+    expect(getActiveCycle()).toBeNull();
+    expect(formatReceipt(closed as SyncSession)).toContain('recebi 2');
+  });
+
+  it('pull e upload não se sobrescrevem na mesma sessão', async () => {
+    const session = await beginSyncCycle({ ...CICLO, store, now: T0 });
+    await pullIntoSession(session, { assets: [asset('X')] }, store);
+
+    // Depois do pull, um push grava aceitos sem apagar o pull.
+    await pushAssetsWithReceipt([asset('A')], 'CICOPAL', {
+      auditor: CICLO.auditor,
+      store,
+      now: T0,
+      sync: async batch => batch.map(a => String(a.id)),
+    });
+
+    const [persisted] = await listSessionsFresh(store);
+    expect(persisted.pull?.receivedKeys).toEqual(['CICOPAL|X']);
+    expect(persisted.acceptedKeys).toEqual(['CICOPAL|A']);
+  });
+
+  it('não fecha com faltantes e retoma sem reenviar o que já foi aceito', async () => {
+    await beginSyncCycle({ ...CICLO, store, now: T0 });
+    await pushAssetsWithReceipt([asset('A'), asset('B')], 'CICOPAL', {
+      auditor: CICLO.auditor,
+      store,
+      now: T0,
+      sync: async () => ['A'], // B não voltou como aceito
+    });
+    await pullIntoSession(awaitPromiseSession(), { assets: [] }, store).catch(() => undefined);
+    const parcial = await endSyncCycle(store);
+
+    expect(parcial?.receipt).toMatchObject({ accepted: 1, rejected: 1, missing: 1 });
+    expect(parcial?.status).toBe('PARTIAL');
+    expect(parcial?.finishedAt).toBeUndefined();
+
+    // Próxima rodada retoma a MESMA sessão e envia só o que falta.
+    const retomada = await beginSyncCycle({ ...CICLO, store, now: T0 + 60_000 });
+    expect(retomada.id).toBe(parcial?.id);
+
+    const sent: string[][] = [];
+    await pushAssetsWithReceipt([asset('A'), asset('B')], 'CICOPAL', {
+      auditor: CICLO.auditor,
+      store,
+      now: T0 + 60_000,
+      sync: async batch => {
+        sent.push(batch.map(a => a.primarykey));
+        return batch.map(a => String(a.id));
+      },
+    });
+    await pullIntoSession(retomada, { assets: [asset('C')] }, store);
+    const final = await endSyncCycle(store);
+
+    expect(sent).toEqual([['B']]);
+    expect(final?.status).toBe('COMPLETED');
+    expect(final?.receipt).toMatchObject({ accepted: 2, received: 1, missing: 0 });
+  });
+
+  it('falha de rede no meio da rodada mantém a sessão aberta para retomar', async () => {
+    const session = await beginSyncCycle({ ...CICLO, store, now: T0 });
+    await expect(
+      pushAssetsWithReceipt([asset('A')], 'CICOPAL', {
+        auditor: CICLO.auditor,
+        store,
+        now: T0,
+        sync: async () => {
+          throw new Error('rede caiu');
+        },
+      })
+    ).rejects.toThrow('rede caiu');
+
+    const encerrada = await endSyncCycle(store);
+    expect(encerrada?.status).toBe('OPEN');
+    expect(encerrada?.finishedAt).toBeUndefined();
+    expect(encerrada?.id).toBe(session.id);
+
+    const retomada = await beginSyncCycle({ ...CICLO, store, now: T0 + 120_000 });
+    expect(retomada.id).toBe(session.id);
+    expect(retomada.failed).toBe(true);
   });
 });

@@ -112,7 +112,7 @@ import { saveInventory, loadInventory, clearInventory, clearMultipleInventories,
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
 import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
-import { pushAssetsWithReceipt } from './services/syncSessionService';
+import { beginSyncCycle, endSyncCycle, pullIntoSession, pushAssetsWithReceipt } from './services/syncSessionService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 import { determineAssetTag } from './services/tagService';
@@ -2614,6 +2614,14 @@ useEffect(() => {
     }
     
     logger.info(`>>> [Sync] Iniciando pull da nuvem. isGlobalAdmin: ${isGlobalAdmin}, rawTenantid: ${JSON.stringify(rawTenantid)}, effectiveTenantid: ${tenantid || 'Global'}`);
+
+    // F2 — abre a sessão do CICLO: o push local abaixo e o pull logo depois
+    // gravam no MESMO recibo. Chave: [contrato|filial|auditor], janela de 16 h.
+    const cycleSession = await beginSyncCycle({
+      tenantid: (Array.isArray(tenantid) ? tenantid[0] : tenantid) ?? '',
+      filial: explicitUnitId,
+      auditor: user?.email,
+    });
     
     setIsSyncing(true);
     setIsCloudUpdatePending(false); // Reset pending flag immediately
@@ -2815,6 +2823,11 @@ useEffect(() => {
 
           return newState;
         });
+        // F2 — registra o que REALMENTE entrou neste pull: as chaves dos ativos
+        // que a nuvem devolveu alimentam o recibo (`received`). Sem estimativa.
+        await pullIntoSession(cycleSession, { since, assets: cloudData.assets || [] });
+        await endSyncCycle();
+
         // Grava o SYNC_PULL UMA única vez (fora do updater) e marca o dedup para
         // os próximos callers da sessão pularem — fecha o ciclo do anti-loop.
         if (syncAuditDetails && mode === DatabaseMode.SUPABASE) {
@@ -2834,6 +2847,8 @@ useEffect(() => {
           setTimeout(() => setShowRecoveryToast(false), 5000);
         }
       } else {
+        // F2 — ciclo sem pull: encerra a sessão (recibo do push, se houve).
+        await endSyncCycle();
         // Mesmo se não houver dados, atualizamos o lastSyncTime para evitar loops de auto-sync
         const syncTimestamp = new Date().toISOString();
         setInventory(prev => ({ ...prev, lastUpdated: syncTimestamp }));
@@ -2851,6 +2866,9 @@ useEffect(() => {
     } catch (error) {
       const err = error as Record<string, unknown>;
       logger.error('>>> [Sync] Erro ao sincronizar da nuvem:', error);
+      // F2 — encerra o ciclo com o que já se sabe. Havendo faltantes, a sessão
+      // permanece ABERTA para a próxima rodada retomar sem reenviar aceitos.
+      try { await endSyncCycle(); } catch (reciboErr) { logger.warn('>>> [Sync Recibo] Falha ao encerrar a sessão:', reciboErr); }
       const errMsg = String(err?.message || error || '').toLowerCase();
       const isSuspendedNetwork = errMsg.includes('suspended') || 
                                 errMsg.includes('io') || 
