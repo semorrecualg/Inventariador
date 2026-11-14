@@ -1,6 +1,6 @@
 import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
-import { DatabaseStatus } from '../types';
+import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { unitContextKey, splitUnitContextKey } from '../utils/unitContextUtils';
@@ -102,6 +102,8 @@ export interface DexieUnitConfig {
   allowNewAssets: number;
   allowWriteOffs: number;
   requirePlaqueta: number;
+  /** Proveniência da âncora: `manual` = pino no mapa, não é leitura de sensor. */
+  source?: AnchorSource | null;
 }
 
 export interface DexieCampaignSnapshot {
@@ -433,7 +435,7 @@ export class SqliteService {
   }
 
   public async saveUnitConfigs(configs: Record<string, unknown>[]): Promise<void> {
-    const mapped = configs.map(cfg => ({
+    const mapped: DexieUnitConfig[] = configs.map(cfg => ({
       id: String(cfg.id || cfg.filial || ''),
       filial: String(cfg.filial || ''),
       nome: String(cfg.nome || cfg.filial || ''),
@@ -449,7 +451,7 @@ export class SqliteService {
       radius_meters: cfg.radius_meters !== undefined && cfg.radius_meters !== null ? Number(cfg.radius_meters) : undefined,
       is_active: cfg.is_active !== false ? 1 : 0,
       // Proveniência da âncora (sensor | manual) preservada no espelho físico.
-      source: typeof cfg.source === 'string' ? cfg.source : undefined,
+      source: cfg.source === 'sensor' ? 'sensor' : cfg.source === 'manual' ? 'manual' : undefined,
       updated_at: String(cfg.updated_at || '')
     }));
     await db.unit_configs.bulkPut(mapped);

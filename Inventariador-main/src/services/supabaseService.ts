@@ -3785,7 +3785,19 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
           const unit = key.slice('gps_lat_'.length);
           const lat = Number(sessionStorage.getItem(key));
           const lng = Number(sessionStorage.getItem('gps_lng_' + unit));
-          if (unit && hasRealAnchor(lat, lng)) {
+          // Nunca sobrescreve uma config mais rica (local/nuvem): era isso que
+          // apagava a proveniência `source` da âncora a cada leitura de sessão.
+          if (unit && hasRealAnchor(lat, lng) && !configs[unit]) {
+            // Proveniência vem do config gravado no salvamento; rascunho sem
+            // config salva é posicionamento manual (não é leitura de sensor).
+            const savedRaw = sessionStorage.getItem(`unit_gps_config_${unit}`);
+            let source: UnitConfig['source'];
+            try {
+              const saved = savedRaw ? (JSON.parse(savedRaw) as { source?: UnitConfig['source'] }) : null;
+              source = saved ? saved.source : 'manual';
+            } catch {
+              source = 'manual';
+            }
             configs[unit] = {
               filial: unit,
               unit_id: unit,
@@ -3794,6 +3806,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
               lng,
               radius_meters: Number(sessionStorage.getItem('unit_gps_radius_' + unit)) || 500,
               is_active: true,
+              source,
               updated_at: new Date().toISOString()
             } as UnitConfig;
           }
