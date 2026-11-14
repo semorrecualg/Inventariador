@@ -52,10 +52,20 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Testes unitários
+      # Duas passagens: a predefinição (INTERNAL) e os caminhos SUPABASE_PLUS.
+      # As credenciais da segunda são fictícias e vivem no vitest.config.ts —
+      # nenhum segredo real é usado para testar o modo nuvem.
+      - name: Testes unitários (INTERNAL)
         run: npm test
         env:
           VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
+          TEST_DB_MODE: internal
+
+      - name: Testes unitários (SUPABASE_PLUS, credenciais fictícias)
+        run: npm test
+        env:
+          VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
+          TEST_DB_MODE: supabase
 
       # Sem as duas credenciais o build continua "verde", mas o bundle nasce em
       # modo INTERNAL (100% offline). Falha aqui para não publicar artefato offline.

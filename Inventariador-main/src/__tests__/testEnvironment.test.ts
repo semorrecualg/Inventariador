@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { isInternalMode } from '../services/supabaseService';
+import { getDatabaseMode, isInternalMode } from '../services/supabaseService';
+
+/** O CI corre a suíte duas vezes; a variante chega por TEST_DB_MODE. */
+const MODO_NUVEM = process.env.TEST_DB_MODE === 'supabase';
 
 describe('ambiente de testes', () => {
   it('fornece localStorage em memória', () => {
@@ -20,7 +23,8 @@ describe('ambiente de testes', () => {
     expect(sessionStorage.length).toBe(0);
   });
 
-  it('ignora credenciais Supabase vindas do shell', () => {
-    expect(isInternalMode).toBe(true);
+  it('configura o modo de base de dados pedido, ignorando o shell', () => {
+    expect(isInternalMode).toBe(!MODO_NUVEM);
+    expect(getDatabaseMode()).toBe(MODO_NUVEM ? 'SUPABASE' : 'INTERNAL');
   });
 });
