@@ -10,7 +10,7 @@ import { validateAndPushRoute, registerToastCallback } from './services/Navigati
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
-import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
+import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord, isRealAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
@@ -6562,13 +6562,15 @@ useEffect(() => {
       typeof localStorage !== 'undefined' ? localStorage : null
     );
 
-    // Pré-cálculo das unidades com âncora contável como leitura de sensor.
-    // Pino posicionado manualmente no mapa (source: 'manual') NÃO conta aqui —
-    // e é daqui que saem a liberação da unidade e o chip de GPS.
+    // Pré-cálculo das unidades com âncora CONFIGURADA — é daqui que saem a
+    // liberação da unidade e o chip de GPS. O pino fixado à mão no mapa
+    // (`source: 'manual'`) conta: FIXAR ÂNCORA GPS é o ato administrativo que
+    // configura a filial. Só o mapa de calor/reparo de ativos exige leitura de
+    // sensor (`isRealAnchorRecord`).
     const unitsWithGps = new Set<string>();
     unitConfigs.forEach(c => {
       const uId = c.filial || c._unitid || c.unit_id;
-      if (uId && isRealAnchorRecord(c)) {
+      if (uId && isConfiguredAnchorRecord(c)) {
         const norm = normalizeKey(uId);
         unitsWithGps.add(norm);
       }
