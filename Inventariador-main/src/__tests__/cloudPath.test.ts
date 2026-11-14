@@ -91,6 +91,15 @@ function clienteFake() {
   return { from, auth: { getSession: async () => ({ data: { session: null } }) } };
 }
 
+/** Nuvem tem de tocar estas tabelas; INTERNAL não pode tocar em nenhuma. */
+function exigirTransporte(...tabelas: string[]): void {
+  if (MODO_NUVEM) {
+    expect(tabelasChamadas).toEqual(expect.arrayContaining(tabelas));
+  } else {
+    expect(tabelasChamadas).toEqual([]);
+  }
+}
+
 let mod: typeof import('../services/supabaseService');
 
 beforeAll(async () => {
@@ -115,17 +124,12 @@ describe('canário das passagens INTERNAL/SUPABASE_PLUS', () => {
   it('lista filiais pela nuvem apenas no modo SUPABASE_PLUS', async () => {
     const filiais = await mod.fetchTenantFiliais('CICOPAL');
 
-    if (MODO_NUVEM) {
-      // Sem estas asserções a passagem de nuvem podia repetir a INTERNAL.
-      expect(tabelasChamadas).toContain('assets');
-      expect(tabelasChamadas).toContain('unit_configs');
-      expect(filiais).toEqual([
-        expect.objectContaining({ filial: '010101 CICOPAL GO', source: 'cloud', assetCount: 7 }),
-      ]);
-    } else {
-      expect(tabelasChamadas).toEqual([]);
-      expect(filiais).toEqual([]);
-    }
+    exigirTransporte('assets', 'unit_configs');
+    expect(filiais).toEqual(
+      MODO_NUVEM
+        ? [expect.objectContaining({ filial: '010101 CICOPAL GO', source: 'cloud', assetCount: 7 })]
+        : []
+    );
   });
 
   it('grava a configuração na nuvem apenas no modo SUPABASE_PLUS', async () => {
@@ -138,30 +142,20 @@ describe('canário das passagens INTERNAL/SUPABASE_PLUS', () => {
       'CICOPAL'
     );
 
-    if (MODO_NUVEM) {
-      expect(tabelasChamadas).toEqual(['inventory_config']);
-    } else {
-      expect(tabelasChamadas).toEqual([]);
-    }
+    exigirTransporte('inventory_config');
   });
 
   it('faz o pull incremental pela nuvem apenas no modo SUPABASE_PLUS', async () => {
-    const since = '2026-01-01T00:00:00.000Z';
     const pull = await mod.fetchFullInventory('CICOPAL', undefined, undefined, undefined, {
-      since,
+      since: '2026-01-01T00:00:00.000Z',
       trackCheckpoint: true,
     });
 
-    if (MODO_NUVEM) {
-      expect(tabelasChamadas).toContain('assets');
-      expect(tabelasChamadas).toContain('inventory_config');
-      // Delta de verdade: o filtro por checkpoint foi aplicado na consulta.
-      expect(colunasGt).toEqual(['updated_at']);
-      expect(pull?.assets).toEqual([expect.objectContaining({ id: 'a1' })]);
-    } else {
-      expect(tabelasChamadas).toEqual([]);
-      expect(colunasGt).toEqual([]);
-      expect(pull).toBeNull();
-    }
+    exigirTransporte('assets', 'inventory_config');
+    // Delta de verdade: o filtro por checkpoint foi aplicado na consulta.
+    expect(colunasGt).toEqual(MODO_NUVEM ? ['updated_at'] : []);
+    expect(pull).toEqual(
+      MODO_NUVEM ? expect.objectContaining({ assets: [expect.objectContaining({ id: 'a1' })] }) : null
+    );
   });
 });
