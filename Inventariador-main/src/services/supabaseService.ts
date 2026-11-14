@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot } from '../types';
+import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot, DatabaseMode } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 import { sanitizeForSupabase } from './utils';
 import { localDb } from './localDbService';
@@ -15,6 +15,8 @@ import { pullDedupKey } from '../utils/syncDedup';
 import { normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
+import { sanitizeAssetKey } from '../utils/assetKey';
+import { normalizeUnitNames } from '../utils/unitContextUtils';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -118,6 +120,23 @@ export const getDatabaseMode = () => {
   if (isInternalMode) return 'INTERNAL';
   return localStorage.getItem('app_database_mode') || 'SUPABASE';
 };
+
+/**
+ * Sessão com nuvem? `INTERNAL` e `INTERNAL_PLUS` são base local; `SUPABASE` e
+ * `SUPABASE_PLUS` falam com o Supabase. Uma comparação a `'SUPABASE'` exacto
+ * tratava `SUPABASE_PLUS` como offline.
+ */
+export const isOnlineDatabaseMode = (mode?: string | null): boolean =>
+  !String(mode ?? getDatabaseMode()).startsWith('INTERNAL');
+
+/**
+ * Modo inicial do app (App e uiStore). Regra única:
+ * - `INTERNAL` quando o build não tem credenciais ou o modo INTERNAL está gravado;
+ * - `SUPABASE_PLUS` em memória quando há credenciais (é o valor que o App já usava
+ *   e que `databaseMode.startsWith('SUPABASE')` aceita).
+ */
+export const getInitialDatabaseMode = (): DatabaseMode =>
+  (getDatabaseMode() === 'INTERNAL' ? DatabaseMode.INTERNAL : DatabaseMode.SUPABASE_PLUS);
 
 // Teste de conexão expandido (REST e AUTH) - Removido auto-run para evitar loops em modo offline
 export const testSupabaseConnection = async () => {
@@ -487,7 +506,10 @@ export const logAuditEvent = async (entry: {
     // Ignora silenciosamente durante a carga em lote para isolar o SQLite local
     return;
   }
-  const isInternal = localStorage.getItem('app_database_mode') === 'INTERNAL';
+  // `getDatabaseMode()`: sem a chave gravada e sem credenciais no build isto é
+  // INTERNAL. Antes a leitura crua dava `false` e o log tentava o Supabase num
+  // build offline, perdendo o registo de auditoria.
+  const isInternal = getDatabaseMode() === 'INTERNAL';
 
   // Se for modo interno, salva no Dexie
   if (isInternal) {
@@ -1007,7 +1029,9 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         throw new Error("Sessão Expirada: Contrato ausente para sincronização.");
       }
 
-      const assetPrimaryKey = String(cleanAsset.primarykey !== undefined && cleanAsset.primarykey !== null ? cleanAsset.primarykey : '').trim() || String(cleanAsset.id || '');
+      // Chave canônica única (utils/assetKey): a carga, o pull e o envio usam a
+      // MESMA grafia — sem isso o upsert criava uma linha por variante da chave.
+      const assetPrimaryKey = sanitizeAssetKey(cleanAsset.primarykey) || sanitizeAssetKey(cleanAsset.id);
 
       // Projeção estrita de colunas GBR v2.6 sem campos fantasmas, usando tenantid e _unitid direto, preenchendo id com a propriedade primarykey
       const row: Record<string, unknown> = {
@@ -1438,6 +1462,56 @@ export const buildConfigCloudPayload = (
   });
 
   return { configId, tenantid: cleanTenant, payload };
+};
+
+/**
+ * LISTA DE FILIAIS DO CONTRATO — sem baixar ativos.
+ *
+ * O Boot Loader deixou de baixar o contrato inteiro quando o perfil não fixa
+ * filial: ele abre a seleção. Mas num aparelho novo a lista vinha dos dados
+ * locais (vazios), e o usuário ficava preso. Esta consulta puxa SÓ a coluna
+ * `filial` (paginada) para montar a lista de unidades do contrato.
+ *
+ * Muro SRE: sem tenantid não consulta nada — jamais lista filiais de outro
+ * contrato.
+ */
+export const fetchUnitNamesFromCloud = async (tenantid?: string | null): Promise<string[]> => {
+  if (!supabase || !navigator.onLine) return [];
+
+  const tenant = String(tenantid || '').trim().toUpperCase();
+  if (!tenant) {
+    logger.warn('>>> [SRE ISOLAMENTO] Lista de filiais sem contrato resolvido: abortando (não lista unidades de outros contratos).');
+    return [];
+  }
+
+  const PAGE = 1000;
+  const nomes = new Set<string>();
+
+  try {
+    for (let start = 0; start < 50000; start += PAGE) {
+      const { data, error } = await supabase
+        .from('assets')
+        .select('filial')
+        .eq('tenantid', tenant)
+        .order('filial', { ascending: true })
+        .range(start, start + PAGE - 1);
+
+      if (error) {
+        logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', error.message);
+        break;
+      }
+
+      const linhas = (data || []) as Array<{ filial?: string | null }>;
+      linhas.forEach(linha => nomes.add(String(linha.filial || '')));
+      if (linhas.length < PAGE) break;
+    }
+  } catch (err) {
+    logger.warn('>>> [Unidades] Erro ao listar filiais do contrato:', err);
+  }
+
+  const filiais = normalizeUnitNames(Array.from(nomes));
+  logger.info(`>>> [Unidades] ${filiais.length} filial(is) listada(s) do contrato ${tenant} (sem baixar ativos).`);
+  return filiais;
 };
 
 export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
@@ -2736,8 +2810,10 @@ export const findAssetGlobally = async (etiqueta: string, tenantid: string): Pro
  * Exclui uma campanha
  */
 export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
+  // Mesma regra do fetchCampaigns: um `app_database_mode: INTERNAL` herdado de
+  // uma sessão anterior não pode transformar a exclusão em local-only — a
+  // campanha continuava na nuvem e voltava na leitura seguinte (merge).
+  const isInternal = getDatabaseMode() === 'INTERNAL';
 
   // Always perform local SQLite deletion first (Soberania Offline-First)
   logger.info('>>> [SQLite] Excluindo campanha do banco físico:', campaignId);
@@ -2760,7 +2836,11 @@ export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
   }
   
   try {
-    const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
+    const { error } = await supabase
+      .from('campaigns')
+      .delete()
+      .eq('id', campaignId)
+      .select('id');
     if (error) {
       logger.warn('>>> [Supabase] Erro ao excluir campanha na nuvem. Empilhando na fila delta:', error);
       if (campaignSyncQueueDelegate) {
@@ -2998,8 +3078,9 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
  * Outlines/Atualiza o status de uma campanha com suporte offline-first hibrido
  */
 export const updateCampaignStatus = async (campaignId: string, status: CampaignStatus, closedBy?: string): Promise<boolean> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
+  // Mesma regra do fetchCampaigns/deleteCampaign: um `app_database_mode: INTERNAL`
+  // herdado de sessão anterior não pode impedir o UPDATE na nuvem.
+  const isInternal = getDatabaseMode() === 'INTERNAL';
 
   // Always perform local SQLite update first (Soberania Offline-First)
   logger.info('>>> [SQLite] Atualizando status da campanha:', campaignId, 'para', status);
@@ -3102,12 +3183,57 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
 };
 
 /**
+ * Grava o laudo no Dexie do aparelho. Existe separado porque a cópia local é
+ * obrigatória nos DOIS modos: se a nuvem recusar (RLS/rede), o fecho da campanha
+ * não pode ficar sem histórico.
+ */
+const persistSnapshotLocally = async (snapshot: CampaignSnapshot): Promise<void> => {
+  await db.campaign_snapshots.put({
+    id: snapshot.id,
+    campaign_id: snapshot.campaign_id,
+    assets_data: JSON.stringify(snapshot.assets_data),
+    metadata: JSON.stringify(snapshot.metadata),
+    closed_at: snapshot.snapshot_date,
+    closed_by: snapshot.closed_by || '',
+    tenantid: snapshot.tenantid
+  });
+};
+
+/**
+ * Lê o laudo mais recente gravado no aparelho (Dexie).
+ */
+const readLocalSnapshot = async (campaignId: string): Promise<CampaignSnapshot | null> => {
+  try {
+    const snapshots = await db.campaign_snapshots.where('campaign_id').equals(campaignId).toArray();
+    if (snapshots.length === 0) return null;
+
+    // Sort by closed_at descending (latest first)
+    snapshots.sort((a, b) => b.closed_at.localeCompare(a.closed_at));
+
+    const row = snapshots[0];
+    return {
+      id: row.id,
+      campaign_id: row.campaign_id,
+      assets_data: JSON.parse(row.assets_data),
+      metadata: JSON.parse(row.metadata),
+      snapshot_date: row.closed_at,
+      closed_by: row.closed_by,
+      tenantid: row.tenantid || readLocalTenantId() || readSessionTenantId() || ''
+    } as CampaignSnapshot;
+  } catch (err) {
+    logger.error('>>> [SQLite] Erro ao recuperar snapshot:', err);
+    return null;
+  }
+};
+
+/**
  * Cria um Snapshot (Congelamento) de todos os ativos de uma campanha.
  * Isso garante que o Laudo Final seja imutável conforme CPC 27.
  */
 export const createCampaignSnapshot = async (campaignId: string, closedBy: string): Promise<boolean> => {
-    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-    const isInternal = mode === 'INTERNAL';
+    // Mesma regra do fetchCampaigns/deleteCampaign/updateCampaignStatus: sem a
+    // chave gravada o snapshot ia só para o SQLite e a nuvem ficava sem o laudo.
+    const isInternal = getDatabaseMode() === 'INTERNAL';
 
     if (isInternal) {
       logger.info('>>> [SQLite] Criando Snapshot de Campanha (Encerramento)...');
@@ -3165,15 +3291,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
           tenantid: tenantid
         };
 
-        await db.campaign_snapshots.put({
-          id: snapshot.id,
-          campaign_id: snapshot.campaign_id,
-          assets_data: JSON.stringify(snapshot.assets_data),
-          metadata: JSON.stringify(snapshot.metadata),
-          closed_at: snapshot.snapshot_date,
-          closed_by: snapshot.closed_by || '',
-          tenantid: snapshot.tenantid
-        });
+        await persistSnapshotLocally(snapshot);
 
         logger.info('>>> [SQLite] Snapshot criado com sucesso.');
         return true;
@@ -3220,6 +3338,23 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             cpc_compliance: 'CPC 27 / NBC TG 27'
         };
 
+        // 3.1 Cópia local do laudo ANTES da nuvem: se o insert falhar (RLS, quota,
+        // rede), o fecho da campanha continua com histórico no aparelho.
+        try {
+            await persistSnapshotLocally({
+                id: `snap_${campaignId}_${Date.now()}`,
+                campaign_id: campaignId,
+                assets_data: assets as unknown as Asset[],
+                metadata: stats,
+                snapshot_date: new Date().toISOString(),
+                closed_by: closedBy,
+                tenantid,
+            } as CampaignSnapshot);
+            logger.info('>>> [Snapshot] Cópia local do laudo gravada (fallback offline).');
+        } catch (localErr) {
+            logger.warn('>>> [Snapshot] Falha ao gravar a cópia local do laudo:', localErr);
+        }
+
         // 4. Salva o Snapshot em JSONB (Alta eficiência de armazenamento v24.50)
         // Isso evita criar 12k linhas extras no banco, preservando o limite free de 500MB
         const { error: snapshotError } = await supabase
@@ -3259,36 +3394,15 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
  * Busca o Snapshot histórico de uma campanha encerrada.
  */
 export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignSnapshot | null> => {
-    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-    const isInternal = mode === 'INTERNAL';
+    const isInternal = getDatabaseMode() === 'INTERNAL';
 
     if (isInternal) {
       logger.info('>>> [SQLite] Recuperando Snapshot da campanha:', campaignId);
-      try {
-        const snapshots = await db.campaign_snapshots.where('campaign_id').equals(campaignId).toArray();
-        if (snapshots.length === 0) return null;
-        
-        // Sort by closed_at descending (latest first)
-        snapshots.sort((a, b) => b.closed_at.localeCompare(a.closed_at));
-        
-        const row = snapshots[0];
-        return {
-          id: row.id,
-          campaign_id: row.campaign_id,
-          assets_data: JSON.parse(row.assets_data),
-          metadata: JSON.parse(row.metadata),
-          snapshot_date: row.closed_at,
-          closed_by: row.closed_by,
-          tenantid: row.tenantid || readLocalTenantId() || readSessionTenantId() || ''
-        } as CampaignSnapshot;
-      } catch (err) {
-        logger.error('>>> [SQLite] Erro ao recuperar snapshot:', err);
-        return null;
-      }
+      return await readLocalSnapshot(campaignId);
     }
 
-    if (!supabase) return null;
-    
+    if (!supabase) return await readLocalSnapshot(campaignId);
+
     try {
         const { data, error } = await supabase
             .from('campaign_snapshots')
@@ -3297,9 +3411,23 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
             .maybeSingle();
 
         if (error) throw error;
-        return data as CampaignSnapshot;
+        if (data) return data as CampaignSnapshot;
+
+        // Campanha encerrada sem rede (ou antes do insert na nuvem): o laudo do
+        // aparelho continua a valer em vez de aparecer "sem snapshot".
+        const local = await readLocalSnapshot(campaignId);
+        if (local) {
+          logger.info('>>> [Snapshot] Nuvem sem laudo — usando o snapshot gravado no aparelho.');
+          return local;
+        }
+        return null;
     } catch (err) {
         logger.error('Erro ao buscar snapshot:', err);
+        const local = await readLocalSnapshot(campaignId);
+        if (local) {
+          logger.info('>>> [Snapshot] Nuvem indisponível — usando o snapshot gravado no aparelho.');
+          return local;
+        }
         return null;
     }
 };
@@ -3551,8 +3679,9 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
  * Busca as configurações de geofencing combinando Local e Nuvem
  */
 export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
+  // Mesma regra do resto do módulo: sem a chave gravada, decide pelas credenciais
+  // do build — antes o GPS ficava só local enquanto o app já usava a nuvem.
+  const isInternal = getDatabaseMode() === 'INTERNAL';
   
   try {
     const configs: Record<string, UnitConfig> = {};

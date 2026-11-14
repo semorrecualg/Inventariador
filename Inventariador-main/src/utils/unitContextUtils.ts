@@ -67,7 +67,8 @@ export function resolveUnitFilter(filial?: string | null): string | undefined {
  *    (app_last_work_context, Etapa 4) quando ela pertence ao MESMO contrato
  *    do usuário — a carga inicial baixa SÓ a filial escolhida (ex.: 010201
  *    SNACKS PA = 2.066 em vez dos 12.636 do contrato inteiro).
- * 3. Caso contrário → undefined (contrato inteiro, comportamento atual).
+ * 3. Caso contrário → undefined. NÃO significa "baixar o contrato inteiro":
+ *    o chamador (boot) usa `resolveBootPullPlan` e exige a escolha da filial.
  *
  * Muro SRE preservado: filial de outro contrato jamais é usada; sentinelas
  * (vazia/TODAS/NULL/UNDEFINED) caem no passo 3.
@@ -89,6 +90,102 @@ export function resolveBootUnitFilter(
   if (userTenant && lastTenant !== userTenant) return undefined;
 
   return resolveUnitFilter(lastFilial);
+}
+
+/**
+ * Escopo da lista de filiais em memória: utilizador + contrato.
+ *
+ * A lista carrega o escopo em que nasceu e só é usada quando o escopo atual é
+ * igual — é isto que impede as filiais de um contrato de aparecerem depois de
+ * sair e entrar outra conta no mesmo aparelho.
+ */
+export function unitListScope(email?: string | null, tenantid?: string | null): string {
+  return `${String(email || '').trim().toLowerCase()}|${String(tenantid || '').trim().toUpperCase()}`;
+}
+
+/** Ação a tomar sobre a lista de filiais guardada em memória. */
+export type UnitListAction =
+  | { type: 'clear' }
+  | { type: 'idle' }
+  | { type: 'fetch'; tenant: string };
+
+export interface UnitListInput {
+  /** Escopo em que a lista guardada nasceu (`null` = nada guardado). */
+  storedScope: string | null;
+  /** Escopo atual — `unitListScope(email, tenantid)`. */
+  scope: string;
+  tenantid?: string | null;
+  /** Base interna (sqlite): a lista vem dos dados locais, não da nuvem. */
+  isLocalDatabase: boolean;
+  online: boolean;
+  /** Já há base local (SQL ou ativos): a lista da nuvem não faz falta. */
+  hasLocalBase: boolean;
+}
+
+/**
+ * Decide o que fazer com a lista de filiais da nuvem a cada mudança de estado.
+ * Vive fora do `App` para poder ser testada: a troca de utilizador e de
+ * contrato no mesmo aparelho não pode deixar filiais do contrato anterior.
+ */
+export function decideUnitListAction(input: UnitListInput): UnitListAction {
+  // 1. Lista de outra conta/contrato (ou de antes do logout): descartar.
+  if (input.storedScope !== null && input.storedScope !== input.scope) {
+    return { type: 'clear' };
+  }
+
+  const tenant = String(input.tenantid || '').trim().toUpperCase();
+  // 2. Muro SRE: sem contrato resolvido não se lista nada.
+  if (!tenant) return { type: 'idle' };
+  // 3. Sem rede, em base interna ou com base local já carregada: não buscar.
+  if (!input.online || input.isLocalDatabase || input.hasLocalBase) return { type: 'idle' };
+  // 4. A lista deste escopo já está em memória.
+  if (input.storedScope !== null) return { type: 'idle' };
+
+  return { type: 'fetch', tenant };
+}
+
+/** Sentinelas que nunca são filial. */
+const UNIT_SENTINELS = new Set(['', 'TODAS', 'NULL', 'UNDEFINED', '0', 'DEFAULT', 'SEM FILIAL']);
+
+/**
+ * Normaliza a lista de filiais (vem da nuvem quando o aparelho ainda não tem
+ * base local): trim + UPPER, descarta sentinelas, remove duplicados e ordena.
+ */
+export function normalizeUnitNames(
+  rows: ReadonlyArray<string | { filial?: string | null } | null | undefined>
+): string[] {
+  const nomes = new Set<string>();
+  for (const row of rows) {
+    const bruto = typeof row === 'string' ? row : row?.filial;
+    const nome = String(bruto ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+    if (UNIT_SENTINELS.has(nome)) continue;
+    nomes.add(nome);
+  }
+  return Array.from(nomes).sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Plano da CARGA INICIAL (Boot Loader): decide se há uma filial para baixar.
+ *
+ * O boot nunca baixa o contrato inteiro — 12.636 ativos num único pull, com
+ * todos marcados como sincronizados. Sem filial no perfil e sem última escolha
+ * válida, o plano manda **parar e pedir a filial** (`requiresUnitSelection`),
+ * e o chamador abre a tela de seleção antes de qualquer download.
+ */
+export interface BootPullPlan {
+  /** Filial a baixar; ausente = não fazer pull nenhum. */
+  unit?: string;
+  /** true = exigir a escolha da filial antes da carga. */
+  requiresUnitSelection: boolean;
+}
+
+export function resolveBootPullPlan(
+  filial?: string | null,
+  lastCtx?: { tenantid?: string; filial?: string } | null,
+  tenantid?: string | null
+): BootPullPlan {
+  const unit = resolveBootUnitFilter(filial, lastCtx, tenantid);
+  return unit ? { unit, requiresUnitSelection: false } : { requiresUnitSelection: true };
 }
 
 /**

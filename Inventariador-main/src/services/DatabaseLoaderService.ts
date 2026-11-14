@@ -6,6 +6,8 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
 import { normalizeFieldValue, normalizeDateISO, normalizeNumeric } from '../utils/normalize';
+import { contentFingerprint, createFallbackKeyAllocator, resolveAssetKey, sanitizeAssetKey } from '../utils/assetKey';
+import { reportRecnoCollisions } from './recnoGuardService';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -153,6 +155,21 @@ export class DatabaseLoaderService {
   private BATCH_SIZE = 200;
   private static CHUNK_SIZE = 200; // Política SRE imperativa
 
+
+  /**
+   * Guardião suave de duplicidade por `tenantid + filial + sn1_recno`: roda no
+   * fim da carga, compara etiqueta/descrição/valor e registra em `audit_logs` o
+   * que divergir. Falha aqui NUNCA derruba a carga.
+   */
+  private static async reportRecnoAfterLoad(): Promise<void> {
+    try {
+      await reportRecnoCollisions('CARGA_PLANILHA');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn('[RECNO] Falha ao verificar duplicidade por recno após a carga:', message);
+    }
+  }
+
   static async extrairDadosDaPlanilha(file: Blob): Promise<unknown[]> {
     const reader = new FileReader();
     const dataBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
@@ -179,21 +196,29 @@ export class DatabaseLoaderService {
 
   static async injetarDadosEmLotes(dadosBrutos: unknown[], onProgresso?: (porcentagem: number) => void): Promise<number> {
     let registrosProcessados = 0;
+    // Chaves derivadas (linhas sem identidade) contam por carga inteira, não por lote.
+    const allocateFallbackKey = createFallbackKeyAllocator();
 
     for (let i = 0; i < dadosBrutos.length; i += this.CHUNK_SIZE) {
       const loteBruto = dadosBrutos.slice(i, i + this.CHUNK_SIZE) as Record<string, unknown>[];
       
       const loteHigienizado: DexieAsset[] = loteBruto.map((row) => {
-        const pk = row.primarykey ? String(row.primarykey).trim().toUpperCase() : `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
         // REGRA DE CONTRATO (planilha): o tenantid NUNCA tem valor fixo/fallback.
         // Ele vem EXCLUSIVAMENTE da coluna 'tenantid' (Índice 0) da planilha.
         const tenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
+        const rawFilial = mirrorFilial(row.filial);
+        // Chave canônica única (utils/assetKey): primarykey → etiqueta → tag →
+        // derivada do conteúdo. Antes esta carga olhava só `primarykey` e caía num
+        // `ALT-<aleatório>`: cada importação criava linhas novas para o mesmo ativo.
+        const pk = resolveAssetKey(
+          { primarykey: row.primarykey, etiqueta: row.etiqueta, tag: row.tag },
+          () => allocateFallbackKey(tenantid, rawFilial, contentFingerprint(row))
+        );
         // Coluna canônica da planilha: 'endereco' (posição 11 do contrato). O nome 'codigo_endereco'
         // era lido antes e NÃO existe no contrato → gravava endereco: null para todos os ativos,
         // deixando o AddressSelector vazio. Fallbacks aceitos para tolerância de nomes de coluna.
         const codEnd = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição', 'codigo_endereco'));
-        const tagVal = row.tag || row.etiqueta || pk;
-        const rawFilial = mirrorFilial(row.filial);
+        const tagSanitizada = sanitizeAssetKey(row.tag) || sanitizeAssetKey(row.etiqueta) || pk;
         
         return {
           id: pk,
@@ -204,8 +229,8 @@ export class DatabaseLoaderService {
           filial: rawFilial.toUpperCase(),
           filial_raw: rawFilial,
           status: normalizeFieldValue('status', getRowValue(row, 'status')) ?? 'Pendente',
-          etiqueta: String(tagVal),
-          tag: String(tagVal),
+          etiqueta: tagSanitizada,
+          tag: tagSanitizada,
           qt: isNaN(Number(row.qt)) ? 1 : Number(row.qt),
           descricaodoativo: normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${pk}`,
           serial: normalizeFieldValue('serial', row.serial),
@@ -251,6 +276,7 @@ export class DatabaseLoaderService {
       }
       logger.info(`[SRE_LOADER] Lote injetado. Progresso: ${registrosProcessados}/${dadosBrutos.length}`);
     }
+    await DatabaseLoaderService.reportRecnoAfterLoad();
     return registrosProcessados;
   }
 
@@ -336,6 +362,7 @@ export class DatabaseLoaderService {
     try {
       // Processamento em lotes de 1000 (Chunking)
       const totalRows = rawRows.length;
+      const allocateFallbackKey = createFallbackKeyAllocator();
       for (let i = 0; i < totalRows; i += this.BATCH_SIZE) {
         batchIndex++;
         const chunk = rawRows.slice(i, Math.min(i + this.BATCH_SIZE, totalRows));
@@ -343,19 +370,19 @@ export class DatabaseLoaderService {
         const correctionsToLog: { id: string; originalValue: unknown }[] = [];
 
         for (const row of chunk) {
-          // Normalização de chaves flexíveis para garantir suporte a padrões distintos
-          const tagVal = String(getRowValue(row, 'etiqueta', 'tag') || '')?.trim();
-          const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-
-          const finalId = tagSanitizada;
           const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
           const finalFilial = finalFilialRaw.toUpperCase();
           const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
+          // Chave canônica única (utils/assetKey) — a mesma de todos os caminhos.
+          const primarykeyVal = sanitizeAssetKey(getRowValue(row, 'primarykey'));
+          const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
+          const finalId = primarykeyVal || tagSanitizada
+            || allocateFallbackKey(finalTenantid, finalFilial, contentFingerprint(row as Record<string, unknown>));
           const itemDesc = normalizeFieldValue(
             'descricaodoativo',
             getRowValue(row, 'descricaodoativo', 'descricao', 'item')
           ) ?? `Ativo N-${finalId}`;
-          const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${tagSanitizada}`);
+          const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${finalId}`);
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
           const contaContabil = normalizeFieldValue('contacontabil', getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA');
           const statusVal = normalizeFieldValue('status', getRowValue(row, 'status') || 'Pendente') ?? 'Pendente';
@@ -368,7 +395,6 @@ export class DatabaseLoaderService {
           const finalEndereco = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
           const subregVal = normalizeFieldValue('subreg', getRowValue(row, 'subreg'));
           const databaixaVal = normalizeDateISO(getRowValue(row, 'databaixa'));
-          const primarykeyVal = String(getRowValue(row, 'primarykey') || '')?.trim();
           const centrodecustoVal = normalizeFieldValue('centrodecusto', getRowValue(row, 'centrodecusto', 'centro_custo'));
           const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
           const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
@@ -406,7 +432,7 @@ export class DatabaseLoaderService {
           }
 
           if (precisaLogarErro) {
-            correctionsToLog.push({ id: tagSanitizada, originalValue: valorOriginalRaw });
+            correctionsToLog.push({ id: finalId, originalValue: valorOriginalRaw });
           }
 
           const assetObj: DexieAsset = {
@@ -429,7 +455,7 @@ export class DatabaseLoaderService {
             subreg: subregVal || null,
             databaixa: databaixaVal || null,
             contacontabil: contaContabil || null,
-            primarykey: primarykeyVal || finalId,
+            primarykey: finalId,
             centrodecusto: centrodecustoVal || null,
             vlraquisic: vlrAquisicSanitizado,
             sn1_recno: sn1RecnoVal,
@@ -508,6 +534,7 @@ export class DatabaseLoaderService {
       // Isolamento restabelecido sem dependência de sqliteService
     }
 
+    await DatabaseLoaderService.reportRecnoAfterLoad();
     return totalInseridos;
   }
 
@@ -610,20 +637,23 @@ export class DatabaseLoaderService {
 
     try {
       const BATCH_SIZE = 200;
+      const allocateFallbackKey = createFallbackKeyAllocator();
       for (let i = 0; i < totalRows; i += BATCH_SIZE) {
         const chunk = rawExcelData.slice(i, Math.min(i + BATCH_SIZE, totalRows));
         const assetsToInsert: DexieAsset[] = [];
         const correctionsToLog: { id: string; originalValue: unknown }[] = [];
 
         for (const row of chunk) {
-          const tagVal = String(getRowValue(row, 'etiqueta', 'tag') || '')?.trim();
-          const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-          const finalId = tagSanitizada;
           const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
           const finalFilial = finalFilialRaw.toUpperCase();
           const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
+          // Chave canônica única (utils/assetKey) — a mesma de todos os caminhos.
+          const primarykeyVal = sanitizeAssetKey(getRowValue(row, 'primarykey'));
+          const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
+          const finalId = primarykeyVal || tagSanitizada
+            || allocateFallbackKey(finalTenantid, finalFilial, contentFingerprint(row as Record<string, unknown>));
           const itemDesc = normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${finalId}`;
-          const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${tagSanitizada}`);
+          const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${finalId}`);
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
           const contaContabil = normalizeFieldValue('contacontabil', getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA');
           const statusVal = normalizeFieldValue('status', getRowValue(row, 'status') || 'Pendente') ?? 'Pendente';
@@ -636,7 +666,6 @@ export class DatabaseLoaderService {
           const finalEndereco = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
           const subregVal = normalizeFieldValue('subreg', getRowValue(row, 'subreg'));
           const databaixaVal = normalizeDateISO(getRowValue(row, 'databaixa'));
-          const primarykeyVal = String(getRowValue(row, 'primarykey') || '')?.trim();
           const centrodecustoVal = normalizeFieldValue('centrodecusto', getRowValue(row, 'centrodecusto', 'centro_custo'));
 
           const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
@@ -670,7 +699,7 @@ export class DatabaseLoaderService {
           }
 
           if (precisaLogarErro) {
-            correctionsToLog.push({ id: tagSanitizada, originalValue: valorOriginalRaw });
+            correctionsToLog.push({ id: finalId, originalValue: valorOriginalRaw });
           }
 
           const assetObj: DexieAsset = {
@@ -693,7 +722,7 @@ export class DatabaseLoaderService {
             subreg: subregVal || null,
             databaixa: databaixaVal || null,
             contacontabil: contaContabil || null,
-            primarykey: primarykeyVal || finalId,
+            primarykey: finalId,
             centrodecusto: centrodecustoVal || null,
             vlraquisic: vlrAquisicSanitizado,
             sn1_recno: sn1RecnoVal,
@@ -765,6 +794,7 @@ export class DatabaseLoaderService {
       rawExcelData = null;
     }
 
+    await DatabaseLoaderService.reportRecnoAfterLoad();
     return totalInserted;
   }
 

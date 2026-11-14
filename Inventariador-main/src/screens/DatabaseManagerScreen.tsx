@@ -6,8 +6,10 @@ import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
+import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
+import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
-import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen } from 'lucide-react';
+import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const data = await DatabaseLoaderService.extrairDadosDaPlanilha(file);
@@ -274,6 +276,87 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   useEffect(() => {
     loadStats();
   }, [loadStats]);
+
+  // ── Limpeza de cópias repetidas (mesmo tenantid + filial + etiqueta) ──
+  // O mesmo conjunto pode ser gravado várias vezes com `primarykey` diferente,
+  // então o bulkPut não substitui e a Unidade Operacional soma 4× os ativos.
+  const [dedupRunning, setDedupRunning] = useState<boolean>(false);
+  const [dedupLines, setDedupLines] = useState<string[]>([]);
+
+  // ── Guardião suave de duplicidade por recno (tenantid + filial + sn1_recno) ──
+  const [recnoRunning, setRecnoRunning] = useState<boolean>(false);
+  const [recnoLines, setRecnoLines] = useState<string[]>([]);
+  const [recnoReport, setRecnoReport] = useState<RecnoReport | null>(null);
+
+  const recnoCounts = (() => {
+    if (!recnoReport) return null;
+    const linha = recnoReport.collisions.filter((c) => c.kind === 'LINHA_SEGUINTE');
+    const origens = recnoReport.collisions.filter((c) => c.kind === 'ORIGENS_DIFERENTES');
+    const rows = (list: typeof linha) => list.reduce((total, c) => total + c.rows.length, 0);
+    return { linha: linha.length, linhaRows: rows(linha), origens: origens.length, origensRows: rows(origens) };
+  })();
+
+  const handleRecnoCheck = async () => {
+    if (recnoRunning) return;
+    setRecnoRunning(true);
+    addLog('[SRE_RECNO] Verificando duplicidade por tenantid + filial + sn1_recno (nada é bloqueado)...');
+    try {
+      const report = await reportRecnoCollisions('GESTOR_BASE');
+      const lines = formatRecnoReport(report);
+      lines.forEach(addLog);
+      setRecnoLines(lines);
+      setRecnoReport(report.collisions.length > 0 ? report : null);
+      showRecoveryToast(
+        report.collisions.length === 0
+          ? 'Nenhuma duplicidade por recno na base local.'
+          : `${report.collisions.length} possível(is) duplicidade(s) por recno — verifique o relatório.`,
+        'blue'
+      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      addLog(`[SRE_RECNO ERROR] ${errMsg}`);
+      setRecnoReport(null);
+      showRecoveryToast('Falha na verificação por recno — nada foi alterado.', 'red');
+    } finally {
+      setRecnoRunning(false);
+    }
+  };
+
+  const handleDedupClick = async (apply: boolean) => {
+    if (dedupRunning) return;
+    if (apply) {
+      const confirmed = window.confirm(
+        'LIMPAR CÓPIAS REPETIDAS?\n\n' +
+        'Só são removidas linhas com a MESMA tenantid + filial + etiqueta.\n' +
+        'A cópia conferida é sempre a que fica, com autor e data de leitura.\n' +
+        'Ativos sem etiqueta não são tocados.\n\n' +
+        'Recomendado: primeiro DIAGNOSTICAR e conferir os números.'
+      );
+      if (!confirmed) return;
+    }
+    setDedupRunning(true);
+    addLog(apply
+      ? '[SRE_DEDUP] Aplicando limpeza de cópias (tenantid + filial + etiqueta)...'
+      : '[SRE_DEDUP] Diagnosticando cópias (nada é alterado)...');
+    try {
+      const report = apply ? await applyAssetDuplicateCleanup() : await previewAssetDuplicateCleanup();
+      const lines = formatDedupReport(report);
+      lines.forEach(addLog);
+      setDedupLines(lines);
+      if (apply) {
+        await loadStats();
+        showRecoveryToast(`Limpeza concluída: ${report.removed} cópia(s) removida(s).`, 'blue');
+      } else {
+        showRecoveryToast(`Diagnóstico: ${report.removed} cópia(s) encontrada(s).`, 'blue');
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      addLog(`[SRE_DEDUP ERROR] ${errMsg}`);
+      showRecoveryToast('Falha na limpeza de cópias — nada foi alterado.', 'red');
+    } finally {
+      setDedupRunning(false);
+    }
+  };
 
   useEffect(() => {
     addLog("[SRE BOOT] Inicializando painel de gestão de base de dados...");
@@ -591,6 +674,109 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <UploadCloud size={14} />
             <span>{isUploading ? `CARREGANDO: ${progress}%` : "SELECIONAR E CARREGAR PLANILHA"}</span>
           </button>
+        </div>
+
+        {/* Guardião suave de duplicidade por recno (Protheus sn1_recno) */}
+        <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col space-y-3">
+          <div className="flex items-center space-x-3">
+            <div className="p-3 bg-cyan-950/40 text-cyan-400 rounded-full border border-cyan-900/30">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Duplicidade por Recno</h3>
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
+                Mesmo contrato + filial + sn1_recno com etiqueta, descrição ou valor diferentes. Só avisa.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={recnoRunning}
+            onClick={handleRecnoCheck}
+            className="flex items-center justify-center space-x-2 px-4 py-3 bg-cyan-700 hover:bg-cyan-600 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-cyan-600/20"
+          >
+            <AlertTriangle size={14} />
+            <span>{recnoRunning ? '...' : 'VERIFICAR RECNO'}</span>
+          </button>
+          {recnoCounts && (
+            <div className="grid grid-cols-2 gap-2">
+              <div className="px-2 py-2 bg-amber-950/30 border border-amber-900/30 rounded-lg">
+                <p className="text-[8px] font-black uppercase tracking-wider text-amber-400">Linha seguinte</p>
+                <p className="text-[10px] font-mono text-amber-100 mt-0.5">
+                  {recnoCounts.linha} caso(s) · {recnoCounts.linhaRows} linha(s)
+                </p>
+              </div>
+              <div className="px-2 py-2 bg-rose-950/30 border border-rose-900/30 rounded-lg">
+                <p className="text-[8px] font-black uppercase tracking-wider text-rose-400">Origens diferentes</p>
+                <p className="text-[10px] font-mono text-rose-100 mt-0.5">
+                  {recnoCounts.origens} caso(s) · {recnoCounts.origensRows} linha(s)
+                </p>
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            disabled={!recnoReport}
+            onClick={() => {
+              if (!recnoReport) return;
+              const fileName = downloadRecnoReportCsv(recnoReport);
+              addLog(`[SRE_RECNO] CSV exportado: ${fileName}`);
+              showRecoveryToast(`Relatório exportado: ${fileName}`, 'blue');
+            }}
+            className="flex items-center justify-center space-x-2 px-4 py-3 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 text-slate-100 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-slate-700/50"
+          >
+            <Download size={14} />
+            <span>EXPORTAR CSV</span>
+          </button>
+          {recnoLines.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">
+              {recnoLines.map((line, index) => (
+                <p key={`recno-${index}`} className="text-[9px] font-mono text-slate-300 break-words">{line}</p>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Limpeza de cópias repetidas: mesmo tenantid + filial + etiqueta */}
+        <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col space-y-3">
+          <div className="flex items-center space-x-3">
+            <div className="p-3 bg-amber-950/40 text-amber-400 rounded-full border border-amber-900/30">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Cópias Repetidas</h3>
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
+                Mesmo contrato + filial + etiqueta gravados mais de uma vez. A conferência é preservada.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              disabled={dedupRunning}
+              onClick={() => handleDedupClick(false)}
+              className="flex items-center justify-center space-x-2 px-4 py-3 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-slate-600/30"
+            >
+              <Database size={14} />
+              <span>{dedupRunning ? '...' : 'DIAGNOSTICAR'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={dedupRunning}
+              onClick={() => handleDedupClick(true)}
+              className="flex items-center justify-center space-x-2 px-4 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-amber-500/20"
+            >
+              <Trash2 size={14} />
+              <span>{dedupRunning ? '...' : 'LIMPAR CÓPIAS'}</span>
+            </button>
+          </div>
+          {dedupLines.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">
+              {dedupLines.map((line, index) => (
+                <p key={`dedup-${index}`} className="text-[9px] font-mono text-slate-300 break-words">{line}</p>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Planilhas da Pasta Vinculada: lista os .xls/.xlsx/.csv existentes */}
