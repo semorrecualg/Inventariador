@@ -22,17 +22,16 @@ export const hasRealAnchor = (lat: unknown, lng: unknown): boolean =>
 /**
  * Âncora que pode ser contada como LEITURA DE SENSOR.
  *
- * Exige coordenadas válidas e proveniência diferente de `manual`. O pino
- * posicionado por clique/arraste no mapa (`source: 'manual'`) continua sendo
- * âncora para a geocerca, mas NÃO libera unidade, não entra em `unitsWithGps`
- * nem alimenta o mapa de calor.
+ * Usada só onde a proveniência importa: o reparo automático de coordenadas de
+ * ativos conferidos, que não pode transformar pino manual em ponto de campo.
+ * Para configurar/liberar a unidade vale `isConfiguredAnchorRecord`.
  *
  * `source` ausente é registro legado (anterior à proveniência): continua
  * contando como sensor para não travar unidades já configuradas. Só um
  * `manual` explícito é excluído.
  */
 export const isRealAnchorRecord = (record: AnchorRecordFields | null | undefined): boolean =>
-  !!record && record.source !== 'manual' && hasRealAnchor(record.lat, record.lng);
+  record?.source !== 'manual' && isConfiguredAnchorRecord(record);
 
 /**
  * Âncora CONFIGURADA para a unidade — qualquer proveniência.
@@ -45,7 +44,7 @@ export const isRealAnchorRecord = (record: AnchorRecordFields | null | undefined
  */
 export const isConfiguredAnchorRecord = (
   record: AnchorRecordFields | null | undefined
-): boolean => !!record && hasRealAnchor(record.lat, record.lng);
+): boolean => hasRealAnchor(record?.lat, record?.lng);
 
 /** JSON de storage sem derrubar a varredura quando o valor é inválido. */
 const readJson = (

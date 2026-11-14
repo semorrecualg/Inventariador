@@ -6565,8 +6565,8 @@ useEffect(() => {
     // Pré-cálculo das unidades com âncora CONFIGURADA — é daqui que saem a
     // liberação da unidade e o chip de GPS. O pino fixado à mão no mapa
     // (`source: 'manual'`) conta: FIXAR ÂNCORA GPS é o ato administrativo que
-    // configura a filial. Só o mapa de calor/reparo de ativos exige leitura de
-    // sensor (`isRealAnchorRecord`).
+    // configura a filial. Só o reparo automático de coordenadas dos ativos
+    // exige leitura de sensor (`isRealAnchorRecord`).
     const unitsWithGps = new Set<string>();
     unitConfigs.forEach(c => {
       const uId = c.filial || c._unitid || c.unit_id;
