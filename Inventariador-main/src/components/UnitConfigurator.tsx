@@ -226,21 +226,6 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     currentConfigRef.current = currentConfig;
   }, [currentConfig]);
 
-  useEffect(() => {
-    mapClickRef.current = (lat: number, lng: number) => {
-      const activeUnit = selectedUnitRef.current;
-      if (!activeUnit) {
-        setMessage({ text: 'SELECIONE UMA OPERACIONAL NO PAINEL INFERIOR ANTES DE MARCAR O MAPA.', type: 'error' });
-        return;
-      }
-      setCurrentConfig(prev => ({ ...prev, lat, lng }));
-
-      // Gravação preventiva de rascunho na sessão
-      sessionStorage.setItem(`kardek_temp_gps_lat_${activeUnit}`, String(lat));
-      sessionStorage.setItem(`kardek_temp_gps_lng_${activeUnit}`, String(lng));
-    };
-  }, []);
-
   // ==========================================================================
   // MOTOR MAPLIBRE OFFLINE-FIRST
   // ==========================================================================
@@ -250,6 +235,20 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     // Guarda Defensiva: nunca alimenta o motor com coordenadas indefinidas/NaN
     const [safeLng, safeLat] = safeLngLat({ lat, lng });
     map.flyTo({ center: [safeLng, safeLat], zoom, essential: true, duration: 900 });
+  }, []);
+
+  useEffect(() => {
+    // Handler de clique no mapa: atualiza coordenadas; marcador/círculo reagem via estado
+    mapClickRef.current = (lat: number, lng: number) => {
+      const activeUnit = selectedUnitRef.current;
+      if (!activeUnit) {
+        setMessage({ text: 'SELECIONE UMA OPERACIONAL NO PAINEL INFERIOR ANTES DE MARCAR O MAPA.', type: 'error' });
+        return;
+      }
+      setCurrentConfig(prev => ({ ...prev, lat, lng }));
+      sessionStorage.setItem(`kardek_temp_gps_lat_${activeUnit}`, String(lat));
+      sessionStorage.setItem(`kardek_temp_gps_lng_${activeUnit}`, String(lng));
+    };
   }, []);
 
   const initMap = () => {
@@ -304,6 +303,12 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
           }
 
           mapInstance.current = map;
+
+          // Clique/toque no mapa move o pino e o círculo para a coordenada clicada
+          map.on('click', (e) => {
+            mapClickRef.current(e.lngLat.lat, e.lngLat.lng);
+          });
+
           setMapReady(true);
           setMapFailed(false);
           logger.info('>>> [MAP] MapLibre GL iniciado em modo OFFLINE (estilo inline, zero requisições de rede).');
@@ -364,9 +369,19 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     // o motor estoura 'Cannot read properties of undefined (reading lng)' -> ErrorBoundary.
     try {
       if (!markerRef.current) {
-        markerRef.current = new maplibregl.Marker({ color: '#ef4444' })
+        const marker = new maplibregl.Marker({ color: '#ef4444', draggable: true })
           .setLngLat([safeLng, safeLat])
           .addTo(map);
+        marker.on('dragend', () => {
+          const { lat, lng } = marker.getLngLat();
+          setCurrentConfig(prev => ({ ...prev, lat, lng }));
+          const activeUnit = selectedUnitRef.current;
+          if (activeUnit) {
+            sessionStorage.setItem(`kardek_temp_gps_lat_${activeUnit}`, String(lat));
+            sessionStorage.setItem(`kardek_temp_gps_lng_${activeUnit}`, String(lng));
+          }
+        });
+        markerRef.current = marker;
       } else {
         markerRef.current.setLngLat([safeLng, safeLat]);
       }
@@ -1283,13 +1298,13 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
           <div className="flex flex-col items-center">
             <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Latitude</span>
             <span className="text-[11px] font-mono font-bold text-slate-200 tracking-tight leading-none">
-              {currentConfig.lat !== undefined ? currentConfig.lat.toFixed(6) : 'AGUARDANDO GPS'}
+              {currentConfig.lat !== undefined ? Number(currentConfig.lat).toFixed(6) : 'AGUARDANDO GPS'}
             </span>
           </div>
           <div className="flex flex-col items-center border-l border-slate-800/80">
             <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Longitude</span>
             <span className="text-[11px] font-mono font-bold text-slate-200 tracking-tight leading-none">
-              {currentConfig.lng !== undefined ? currentConfig.lng.toFixed(6) : 'AGUARDANDO GPS'}
+              {currentConfig.lng !== undefined ? Number(currentConfig.lng).toFixed(6) : 'AGUARDANDO GPS'}
             </span>
           </div>
         </div>
