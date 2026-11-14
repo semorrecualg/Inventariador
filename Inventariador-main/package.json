@@ -2,7 +2,7 @@
   "name": "inventario-ativo-imobilizado",
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=22 <25"
   },
   "version": "2.7.4",
   "type": "module",
