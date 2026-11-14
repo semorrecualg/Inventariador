@@ -12,6 +12,7 @@ import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type 
 import { logger } from '../utils/logger';
 import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
 import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download } from 'lucide-react';
+import { RestoreWarningToast } from '../components/RestoreWarningToast';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const data = await DatabaseLoaderService.extrairDadosDaPlanilha(file);
@@ -66,6 +67,10 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     if (window.self !== window.top) return; // PROIBIDO DISPARAR MODAL DE ERRO DE BACKUP FÍSICO NO IFRAME
     originalShowRecoveryToast(message, type);
   };
+  // Aviso de contrato reposto: toast próprio no painel (vermelho, auto-dismiss).
+  // Não passa pelo canal global de mensagens, que abre um modal e descarta o tipo.
+  const [avisoContrato, setAvisoContrato] = useState<string | null>(null);
+  const fecharAvisoContrato = useCallback(() => setAvisoContrato(null), []);
   const [assetCount, setAssetCount] = useState<number>(0);
   // Contra-prova física: cada espelho é contado em separado, para o painel poder
   // explicar uma diferença em vez de a esconder num único número.
@@ -123,12 +128,10 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
         // Aviso no painel: restaurar uma base de outro contrato não é bloqueado
         // (é recuperação), mas quem restaurou tem de saber que a tela vai ficar vazia.
-        // O aviso fica guardado para ser a ÚLTIMA mensagem: o toast de sucesso no fim
-        // do handler substituía-o no mesmo canal e o operador nunca o via.
         let avisoRestauro: string | null = null;
         if (contratoAtivo && resumo.tenants[contratoAtivo] === undefined) {
           addLog(`[SRE_BACKUP] AVISO: o backup não contém o contrato activo (${contratoAtivo}). Repostos ${resumo.total} ativo(s) — ${detalheContratos}.`);
-          avisoRestauro = `⚠️ BASE REPOSTA SEM O CONTRATO ACTIVO (${contratoAtivo}): ${detalheContratos}`;
+          avisoRestauro = `BASE REPOSTA SEM O CONTRATO ACTIVO (${contratoAtivo}): ${detalheContratos}`;
         } else if (contratosRepostos.length > 1) {
           addLog(`[SRE_BACKUP] AVISO: backup com ${contratosRepostos.length} contratos — ${detalheContratos}.`);
         }
@@ -152,8 +155,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         setProgress(100);
         setIsUploading(false);
         if (avisoRestauro) {
-          addLog("[SRE_BACKUP] Restauração concluída COM AVISO — ver a mensagem do contrato reposto.");
-          showRecoveryToast(avisoRestauro, "red");
+          addLog("[SRE_BACKUP] Restauração concluída COM AVISO — ver o toast do contrato reposto.");
+          setAvisoContrato(avisoRestauro);
         } else {
           addLog("[SRE_BACKUP] Restauração e sincronização do backup concluídas com sucesso.");
           showRecoveryToast("✓ BACKUP FISICO RECONECTADO COM SUCESSO.", "blue");
@@ -666,6 +669,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col p-6 font-sans">
+      <RestoreWarningToast message={avisoContrato} onDismiss={fecharAvisoContrato} />
       {/* 1. Header do Gestor */}
       <div className="flex items-center justify-between mb-8 pb-4 border-b border-slate-800">
         <div className="flex items-center space-x-3">
