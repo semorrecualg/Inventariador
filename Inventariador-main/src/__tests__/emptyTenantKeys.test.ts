@@ -136,7 +136,7 @@ describe('restauro manual de backup — linha sem tenantid', () => {
       { id: 'MINUSCULO', primarykey: 'MINUSCULO', tenantid: 'cicopal', filial: 'MATRIZ' } as DexieAsset
     ];
 
-    expect(await restoreBackupSnapshot(linhas)).toBe(2);
+    expect((await restoreBackupSnapshot(linhas)).total).toBe(2);
 
     expect(await emTodosOsEspelhos()).toBe(3);
     expect(await chaveVazia()).toBe(false);
@@ -149,7 +149,7 @@ describe('restauro manual de backup — linha sem tenantid', () => {
   it('backup vazio não limpa a base nem conta como restauro', async () => {
     await db.local_assets.put({ id: 'X', primarykey: 'X', tenantid: TENANT } as DexieAsset);
 
-    expect(await restoreBackupSnapshot([])).toBe(0);
+    expect((await restoreBackupSnapshot([])).total).toBe(0);
     expect(await db.local_assets.get([TENANT, 'X'])).toBeDefined();
   });
 });

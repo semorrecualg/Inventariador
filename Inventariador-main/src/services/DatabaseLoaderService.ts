@@ -1,7 +1,7 @@
 import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
 import * as XLSX from 'xlsx';
-import { db, DexieAsset, invalidateTenantCaseMarker } from './sqliteService';
+import { db, DexieAsset, invalidateTenantCaseMarker, sqliteService } from './sqliteService';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
@@ -868,20 +868,98 @@ export class DatabaseLoaderService {
 
 export const databaseLoaderService = new DatabaseLoaderService();
 
+/** Resumo de um restauro: o que foi reposto e sob que contratos. */
+export interface RestoreSummary {
+  /** Linhas repostas nos três espelhos (0 quando o snapshot estava vazio). */
+  total: number;
+  /** Contrato canónico -> linhas repostas. */
+  tenants: Record<string, number>;
+  /** `primarykey` das linhas que vieram sem `tenantid` e adoptaram o da sessão. */
+  adopted: string[];
+}
+
+const LIMITE_AUDITORIA = 50;
+
+/** Lista curta para detalhes de auditoria (um backup de 12k linhas não cabe num campo). */
+function resumirLista(itens: string[]): string {
+  return itens.length <= LIMITE_AUDITORIA
+    ? itens.join(', ')
+    : `${itens.slice(0, LIMITE_AUDITORIA).join(', ')} … e mais ${itens.length - LIMITE_AUDITORIA}`;
+}
+
+/**
+ * Regista em `audit_logs` os restauros que merecem revisão: snapshot com mais de
+ * um contrato (ou sem o contrato activo) e linhas que chegaram sem `tenantid` e
+ * foram adoptadas pela sessão. Falha de auditoria nunca derruba o restauro.
+ */
+async function auditarRestauro(
+  origem: 'BACKUP_FISICO' | 'BACKUP_MANUAL',
+  resumo: RestoreSummary
+): Promise<void> {
+  const contratos = Object.keys(resumo.tenants);
+  const ativo = getCurrentTenantid().trim().toUpperCase();
+  const detalheContratos = contratos.map(c => `${c}: ${resumo.tenants[c]}`).join(' · ');
+
+  try {
+    const cruzado = contratos.length > 1 || (ativo !== '' && resumo.tenants[ativo] === undefined);
+    if (cruzado) {
+      await sqliteService.logAuditEvent(
+        'SISTEMA',
+        'RESTORE_CROSS_TENANT',
+        'local_assets',
+        origem,
+        `Restauro ${origem}: ${resumo.total} ativo(s) de ${contratos.length} contrato(s) — ${detalheContratos}` +
+        (ativo
+          ? ` · contrato activo ${ativo}${resumo.tenants[ativo] === undefined ? ' AUSENTE do backup' : ''}`
+          : ' · sem contrato activo na sessão'),
+        JSON.stringify({ origem, total: resumo.total, tenants: resumo.tenants, contrato_ativo: ativo || null })
+      );
+    }
+
+    if (resumo.adopted.length > 0) {
+      await sqliteService.logAuditEvent(
+        'SISTEMA',
+        'RESTORE_TENANT_ADOPTED',
+        'local_assets',
+        origem,
+        `${resumo.adopted.length} linha(s) sem tenantid adoptaram o contrato da sessão (${ativo || 'sem sessão'}): ` +
+        resumirLista(resumo.adopted),
+        JSON.stringify({ origem, contrato_adotado: ativo || null, primarykeys: resumo.adopted })
+      );
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn('[SRE_RESTORE] Falha ao registar a auditoria do restauro:', message);
+  }
+}
+
 /**
  * Repõe os três espelhos com o snapshot dado, na mesma transação.
  *
  * Canoniza o `tenantid` de cada linha (UPPER + contrato da sessão quando vazio):
  * caminho único dos dois restauros, para que nem variantes de case nem chaves
  * `['', primarykey]` cheguem à base. Invalida o marcador de case porque o
- * snapshot pode trazer `tenantid` não canónico. Devolve as linhas repostas.
+ * snapshot pode trazer `tenantid` não canónico. Devolve o resumo do que repôs.
  */
-async function replaceAssetMirrors(rows: unknown[]): Promise<number> {
-  const snapshot = (rows as DexieAsset[]).map(asset => ({
-    ...asset,
-    tenantid: resolveTenantKey(asset.tenantid)
-  }));
-  if (snapshot.length === 0) return 0;
+async function replaceAssetMirrors(
+  rows: unknown[],
+  origem: 'BACKUP_FISICO' | 'BACKUP_MANUAL'
+): Promise<RestoreSummary> {
+  const tenants: Record<string, number> = {};
+  const adopted: string[] = [];
+
+  const snapshot = (rows as DexieAsset[]).map(asset => {
+    const bruto = String(asset.tenantid ?? '').trim();
+    const tenantid = resolveTenantKey(asset.tenantid);
+    // Sem tenantid na linha, o dono é o contrato da sessão — e isso fica registado.
+    if (bruto === '') adopted.push(String(asset.primarykey ?? asset.id ?? '(sem pk)'));
+    tenants[tenantid] = (tenants[tenantid] ?? 0) + 1;
+    return { ...asset, tenantid };
+  });
+
+  const resumo: RestoreSummary = { total: snapshot.length, tenants: {}, adopted };
+  if (snapshot.length === 0) return resumo;
+  resumo.tenants = tenants;
 
   await invalidateTenantCaseMarker();
   await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
@@ -896,7 +974,8 @@ async function replaceAssetMirrors(rows: unknown[]): Promise<number> {
     await db.assets.bulkPut(snapshot);
   });
 
-  return snapshot.length;
+  await auditarRestauro(origem, resumo);
+  return resumo;
 }
 
 export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
@@ -910,7 +989,8 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
     if (fileContent.data) {
       const backup = JSON.parse(fileContent.data as string);
       if (!Array.isArray(backup) || backup.length === 0) return false;
-      return (await replaceAssetMirrors(backup)) > 0;
+      const resumo = await replaceAssetMirrors(backup, 'BACKUP_FISICO');
+      return resumo.total > 0;
     }
   } catch {
     // Arquivo ainda não criado no primeiro boot limpo (Comportamento Esperado)
@@ -922,10 +1002,10 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
  * Restauro manual do backup em JSON escolhido no painel do gestor.
  *
  * O ficheiro pode trazer `tenantid` em qualquer casing — ou vazio; a canonização
- * fica em `replaceAssetMirrors`. Devolve o número de linhas repostas.
+ * fica em `replaceAssetMirrors`, que também audita os restauros cruzados.
  */
-export async function restoreBackupSnapshot(rows: unknown[]): Promise<number> {
-  return replaceAssetMirrors(rows);
+export async function restoreBackupSnapshot(rows: unknown[]): Promise<RestoreSummary> {
+  return replaceAssetMirrors(rows, 'BACKUP_MANUAL');
 }
 
 /**

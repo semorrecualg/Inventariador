@@ -4,6 +4,7 @@ import { showRecoveryToast as originalShowRecoveryToast } from '../services/Navi
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService, restoreBackupSnapshot } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
+import { getCurrentTenantid } from '../utils/tenantSession';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
@@ -97,10 +98,6 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const handleBackupFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const restoreTenants = (rows: unknown[]) => [...new Set(rows
-      .map((r) => String((r as { tenantid?: unknown })?.tenantid ?? '').trim().toUpperCase())
-      .filter(Boolean))];
-
     addLog(`[SRE_BACKUP] Arquivo de backup selecionado: ${file.name}`);
     setIsUploading(true);
     setProgress(10);
@@ -119,7 +116,24 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
         // Canoniza o tenantid antes de gravar (evita variantes de case e chaves
         // ['', primarykey]) e repõe os três espelhos na mesma transação.
-        await restoreBackupSnapshot(parsed);
+        const resumo = await restoreBackupSnapshot(parsed);
+        const contratoAtivo = getCurrentTenantid().trim().toUpperCase();
+        const contratosRepostos = Object.keys(resumo.tenants);
+
+        // Aviso no painel: restaurar uma base de outro contrato não é bloqueado
+        // (é recuperação), mas quem restaurou tem de saber que a tela vai ficar vazia.
+        if (contratoAtivo && resumo.tenants[contratoAtivo] === undefined) {
+          const detalhe = contratosRepostos.map(c => `${c}: ${resumo.tenants[c]}`).join(' · ');
+          addLog(`[SRE_BACKUP] AVISO: o backup não contém o contrato activo (${contratoAtivo}). Repostos ${resumo.total} ativo(s) — ${detalhe}.`);
+          showRecoveryToast(`⚠️ BASE REPOSTA SEM O CONTRATO ACTIVO (${contratoAtivo}): ${detalhe}`, "red");
+        } else if (contratosRepostos.length > 1) {
+          const detalhe = contratosRepostos.map(c => `${c}: ${resumo.tenants[c]}`).join(' · ');
+          addLog(`[SRE_BACKUP] AVISO: backup com ${contratosRepostos.length} contratos — ${detalhe}.`);
+        }
+
+        if (resumo.adopted.length > 0) {
+          addLog(`[SRE_BACKUP] ${resumo.adopted.length} linha(s) sem tenantid adoptaram o contrato da sessão e ficaram registadas na auditoria.`);
+        }
 
         sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
         localStorage.setItem('gbr_physical_link_active', 'true');
@@ -139,7 +153,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         showRecoveryToast("✓ BACKUP FISICO RECONECTADO COM SUCESSO.", "blue");
         loadStats();
         // O backup restaurou a BASE LOCAL: o App precisa operar nela.
-        onLocalBaseLoaded?.({ count: parsed.length, tenantids: restoreTenants(parsed) });
+        onLocalBaseLoaded?.({ count: resumo.total, tenantids: contratosRepostos });
       } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
         setIsUploading(false);
         addLog(`[SRE_BACKUP ERROR] Falha ao reconectar backup: ${err.message || String(err)}`);
