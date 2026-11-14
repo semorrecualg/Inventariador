@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Layers, Info, X, Activity, Database, Map as MapIcon, Box, Cloud, ArrowLeft, Flame, ShieldCheck, SlidersHorizontal, ChevronDown, CheckCircle2, WifiOff, Loader2 } from 'lucide-react';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
+import { isValidCoordinate } from '../utils/gpsCore';
 
 interface AssetMapProps {
   assets: Asset[];
@@ -24,11 +25,7 @@ const asFiniteCoord = (v: unknown): number => {
 };
 
 /** Guarda Defensiva: so aceita pontos com coordenadas finitas validas (evita NaN/undefined no MapLibre). */
-const hasValidCoords = (lat: unknown, lng: unknown): boolean => {
-  const la = asFiniteCoord(lat);
-  const lo = asFiniteCoord(lng);
-  return !isNaN(la) && !isNaN(lo) && la >= -90 && la <= 90 && lo >= -180 && lo <= 180;
-};
+const hasValidCoords = (lat: unknown, lng: unknown): boolean => isValidCoordinate(lat, lng);
 
 const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenantid, filial }) => {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -798,7 +795,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
                 <div className="bg-slate-800/40 border border-slate-700 p-3 rounded-xl flex-1 flex flex-col">
                   <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-1">Ativos</span>
                   <span className="text-xl font-bold text-white">
-                    {filteredAssets.filter(a => a.latitude && a.longitude).length}
+                    {filteredAssets.filter(a => hasValidCoords(a.latitude, a.longitude)).length}
                   </span>
                 </div>
                 <div className="bg-slate-800/40 border border-slate-700 p-3 rounded-xl flex-[1.5] flex flex-col">

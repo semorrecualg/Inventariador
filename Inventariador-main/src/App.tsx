@@ -5449,7 +5449,8 @@ useEffect(() => {
       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
       const isGpsBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
 
-      let loc: import('./utils/gpsUtils').GpsLocation = { lat: 0, lng: 0, altitude: 0 };
+      // null = sem leitura válida e precisa; nunca gravamos 0,0 inventado.
+      let loc: import('./utils/gpsUtils').GpsLocation | null = null;
       if (isAdmin || isGpsBypassed) {
         if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
           loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
@@ -5457,13 +5458,13 @@ useEffect(() => {
       } else if (metrics.battery > 5) {
         loc = await Promise.race([
           getCurrentLocation(),
-          new Promise<import('./utils/gpsUtils').GpsLocation>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
+          new Promise<null>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
         ]).catch(e => {
           logger.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
           if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
             return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
           }
-          return { lat: 0, lng: 0, altitude: 0 };
+          return null;
         });
       } else {
         logger.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de', metrics.battery, '% ou inferior!');
@@ -5473,6 +5474,10 @@ useEffect(() => {
       }
 
       const { convertAltitudeToFloor } = await import('./utils/gpsUtils');
+      if (!loc) {
+        queueCloudSync([baseAsset]);
+        return;
+      }
       const andar = convertAltitudeToFloor(loc.altitude);
       const history: AuditLogEntry[] = [...(baseAsset._history || [])];
       const lastIndex = history.length - 1;
@@ -5877,7 +5882,11 @@ useEffect(() => {
       const metrics = await telemetryService.getDeviceMetrics();
       if (metrics.battery > 5) {
         const loc = await getCurrentLocation();
-        gpsCoords = { lat: loc.lat, lng: loc.lng };
+        if (loc) {
+          gpsCoords = { lat: loc.lat, lng: loc.lng };
+        } else if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
+          gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
+        }
       } else {
         logger.warn('>>> [GPS Lote] Bloqueio crítico de GPS por bateria de', metrics.battery, '% ou inferior!');
         if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
