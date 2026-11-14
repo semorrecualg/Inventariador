@@ -8,10 +8,19 @@
 // `audit_logs` para revisão; nada disso pode impedir o restauro.
 // ============================================================================
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { db } from '../services/sqliteService';
 import type { DexieAsset } from '../services/sqliteService';
-import { restoreBackupSnapshot } from '../services/DatabaseLoaderService';
+import { restoreBackupSnapshot, verifyAndRestorePhysicalBackup } from '../services/DatabaseLoaderService';
+
+// O ficheiro físico do restauro de boot: o teste troca o conteúdo entre chamadas.
+const { arquivoFisico } = vi.hoisted(() => ({ arquivoFisico: { conteudo: '[]' } }));
+
+vi.mock('@capacitor/filesystem', () => ({
+  Filesystem: { readFile: async () => ({ data: arquivoFisico.conteudo }) },
+  Directory: { Documents: 'DOCUMENTS' },
+  Encoding: { UTF8: 'utf8' }
+}));
 
 const TENANT = 'CICOPAL';
 const ESPELHOS = ['local_assets', 'ativos', 'assets'] as const;
@@ -28,6 +37,8 @@ beforeEach(async () => {
   sessionStorage.setItem('app_current_user', JSON.stringify({ tenantid: TENANT }));
   for (const table of ESPELHOS) await db[table].clear();
   await db.audit_logs.clear();
+  await db.SYSTEM_CONTEXT.clear();
+  arquivoFisico.conteudo = '[]';
 });
 
 describe('resumo do restauro', () => {
@@ -100,6 +111,55 @@ describe('auditoria de restauro', () => {
     expect(adocao.details).toContain('3 linha(s) sem tenantid adoptaram o contrato da sessão (CICOPAL)');
     expect(adocao.details).toContain('SEM-TENANT-0, SEM-TENANT-1, SEM-TENANT-2');
     expect(JSON.parse(adocao.delta ?? '{}').primarykeys).toEqual(['SEM-TENANT-0', 'SEM-TENANT-1', 'SEM-TENANT-2']);
+  });
+
+  it('não repete a auditoria quando o mesmo resumo é restaurado outra vez', async () => {
+    const snapshot = [linha('OUTRO_CLIENTE', 'X'), linha('', 'Y')];
+
+    await restoreBackupSnapshot(snapshot);
+    const primeiro = await db.audit_logs.count();
+    expect(primeiro).toBe(2);
+
+    await restoreBackupSnapshot(snapshot);
+    expect(await db.audit_logs.count()).toBe(primeiro);
+
+    // Resumo diferente (outra linha) volta a registar.
+    await restoreBackupSnapshot([linha('OUTRO_CLIENTE', 'X')]);
+    expect(await db.audit_logs.count()).toBeGreaterThan(primeiro);
+  });
+
+  it('boot com o mesmo ficheiro físico audita uma só vez', async () => {
+    arquivoFisico.conteudo = JSON.stringify([
+      linha('OUTRO_CLIENTE', 'X'),
+      linha('', 'Y'),
+      linha(TENANT, 'Z')
+    ]);
+
+    await expect(verifyAndRestorePhysicalBackup()).resolves.toBe(true);
+    const depoisDoPrimeiroBoot = await db.audit_logs.count();
+    expect(depoisDoPrimeiroBoot).toBe(2);
+
+    // Segundo e terceiro arranques com o MESMO ficheiro: nada de repetições.
+    await expect(verifyAndRestorePhysicalBackup()).resolves.toBe(true);
+    await expect(verifyAndRestorePhysicalBackup()).resolves.toBe(true);
+    expect(await db.audit_logs.count()).toBe(depoisDoPrimeiroBoot);
+
+    const [cross] = await logsDe('RESTORE_CROSS_TENANT');
+    expect(cross.registro_id).toBe('BACKUP_FISICO');
+  });
+
+  it('boot audita outra vez quando o ficheiro físico muda', async () => {
+    arquivoFisico.conteudo = JSON.stringify([linha('OUTRO_CLIENTE', 'X')]);
+    await verifyAndRestorePhysicalBackup();
+    const primeiro = await db.audit_logs.count();
+
+    // Outro cliente no .dat: resumo diferente, novo registo.
+    arquivoFisico.conteudo = JSON.stringify([linha('TERCEIRO_CLIENTE', 'X')]);
+    await verifyAndRestorePhysicalBackup();
+
+    const logs = await logsDe('RESTORE_CROSS_TENANT');
+    expect(await db.audit_logs.count()).toBeGreaterThan(primeiro);
+    expect(logs.map(l => l.details).some(d => d.includes('TERCEIRO_CLIENTE'))).toBe(true);
   });
 
   it('não audita restauro de um só contrato sem adopções', async () => {

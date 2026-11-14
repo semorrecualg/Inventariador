@@ -119,16 +119,18 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         const resumo = await restoreBackupSnapshot(parsed);
         const contratoAtivo = getCurrentTenantid().trim().toUpperCase();
         const contratosRepostos = Object.keys(resumo.tenants);
+        const detalheContratos = contratosRepostos.map(c => `${c}: ${resumo.tenants[c]}`).join(' · ');
 
         // Aviso no painel: restaurar uma base de outro contrato não é bloqueado
         // (é recuperação), mas quem restaurou tem de saber que a tela vai ficar vazia.
+        // O aviso fica guardado para ser a ÚLTIMA mensagem: o toast de sucesso no fim
+        // do handler substituía-o no mesmo canal e o operador nunca o via.
+        let avisoRestauro: string | null = null;
         if (contratoAtivo && resumo.tenants[contratoAtivo] === undefined) {
-          const detalhe = contratosRepostos.map(c => `${c}: ${resumo.tenants[c]}`).join(' · ');
-          addLog(`[SRE_BACKUP] AVISO: o backup não contém o contrato activo (${contratoAtivo}). Repostos ${resumo.total} ativo(s) — ${detalhe}.`);
-          showRecoveryToast(`⚠️ BASE REPOSTA SEM O CONTRATO ACTIVO (${contratoAtivo}): ${detalhe}`, "red");
+          addLog(`[SRE_BACKUP] AVISO: o backup não contém o contrato activo (${contratoAtivo}). Repostos ${resumo.total} ativo(s) — ${detalheContratos}.`);
+          avisoRestauro = `⚠️ BASE REPOSTA SEM O CONTRATO ACTIVO (${contratoAtivo}): ${detalheContratos}`;
         } else if (contratosRepostos.length > 1) {
-          const detalhe = contratosRepostos.map(c => `${c}: ${resumo.tenants[c]}`).join(' · ');
-          addLog(`[SRE_BACKUP] AVISO: backup com ${contratosRepostos.length} contratos — ${detalhe}.`);
+          addLog(`[SRE_BACKUP] AVISO: backup com ${contratosRepostos.length} contratos — ${detalheContratos}.`);
         }
 
         if (resumo.adopted.length > 0) {
@@ -149,8 +151,13 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
         setProgress(100);
         setIsUploading(false);
-        addLog("[SRE_BACKUP] Restauração e sincronização do backup concluídas com sucesso.");
-        showRecoveryToast("✓ BACKUP FISICO RECONECTADO COM SUCESSO.", "blue");
+        if (avisoRestauro) {
+          addLog("[SRE_BACKUP] Restauração concluída COM AVISO — ver a mensagem do contrato reposto.");
+          showRecoveryToast(avisoRestauro, "red");
+        } else {
+          addLog("[SRE_BACKUP] Restauração e sincronização do backup concluídas com sucesso.");
+          showRecoveryToast("✓ BACKUP FISICO RECONECTADO COM SUCESSO.", "blue");
+        }
         loadStats();
         // O backup restaurou a BASE LOCAL: o App precisa operar nela.
         onLocalBaseLoaded?.({ count: resumo.total, tenantids: contratosRepostos });

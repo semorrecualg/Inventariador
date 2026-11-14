@@ -879,6 +879,8 @@ export interface RestoreSummary {
 }
 
 const LIMITE_AUDITORIA = 50;
+/** Chave de `SYSTEM_CONTEXT` com a impressão digital do último restauro auditado. */
+const AUDIT_FINGERPRINT_PREFIX = 'SRE_RESTORE_AUDIT_';
 
 /** Lista curta para detalhes de auditoria (um backup de 12k linhas não cabe num campo). */
 function resumirLista(itens: string[]): string {
@@ -896,12 +898,28 @@ async function auditarRestauro(
   origem: 'BACKUP_FISICO' | 'BACKUP_MANUAL',
   resumo: RestoreSummary
 ): Promise<void> {
-  const contratos = Object.keys(resumo.tenants);
+  const contratos = Object.keys(resumo.tenants).sort();
   const ativo = getCurrentTenantid().trim().toUpperCase();
   const detalheContratos = contratos.map(c => `${c}: ${resumo.tenants[c]}`).join(' · ');
+  const cruzado = contratos.length > 1 || (ativo !== '' && resumo.tenants[ativo] === undefined);
+
+  // Nada a registar: restauro de um só contrato, o activo, sem adopções.
+  if (!cruzado && resumo.adopted.length === 0) return;
+
+  // O restauro físico corre em cada boot sobre o MESMO ficheiro: sem esta
+  // impressão digital, cada arranque repetia os mesmos registos até encher a
+  // auditoria. Só um resumo diferente (linhas, contratos ou adoptadas) volta a
+  // escrever; a chave vive em SYSTEM_CONTEXT para a comparação ser O(1).
+  const digital = JSON.stringify({
+    total: resumo.total,
+    tenants: contratos.map(c => [c, resumo.tenants[c]]),
+    adopted: [...resumo.adopted].sort()
+  });
+  const chaveDigital = `${AUDIT_FINGERPRINT_PREFIX}${origem}`;
 
   try {
-    const cruzado = contratos.length > 1 || (ativo !== '' && resumo.tenants[ativo] === undefined);
+    if ((await db.SYSTEM_CONTEXT.get(chaveDigital))?.value === digital) return;
+
     if (cruzado) {
       await sqliteService.logAuditEvent(
         'SISTEMA',
@@ -927,6 +945,12 @@ async function auditarRestauro(
         JSON.stringify({ origem, contrato_adotado: ativo || null, primarykeys: resumo.adopted })
       );
     }
+
+    await db.SYSTEM_CONTEXT.put({
+      key: chaveDigital,
+      value: digital,
+      updated_at: new Date().toISOString()
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn('[SRE_RESTORE] Falha ao registar a auditoria do restauro:', message);
