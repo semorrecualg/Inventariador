@@ -238,8 +238,8 @@ export const localDb = {
           mappedChunk.push(toDexieAsset(a));
         }
 
-        // SRE ISOLAMENTO (local): preserva registros de outro contrato com chaves
-        // coincidentes (mesma proteção do bulkInsertAssetsOfflineFirst).
+        // SRE ISOLAMENTO (local): outro contrato é outra linha (chave composta),
+        // logo a carga nunca o sobrescreve (mesma regra do bulkInsertAssetsOfflineFirst).
         const canonicalChunk = sqliteService.canonicalizeTenantidChunk(mappedChunk);
         await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
           await db.ativos.bulkPut(canonicalChunk);

@@ -118,7 +118,7 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
 | `campaign_snapshots` | `id, campaign_id` | Snapshots |
 
 **Convenções:** isolamento multi-tenant por `tenantid` + `filial` — chave composta
-`[tenantid+primarykey]` (colisão entre contratos estruturalmente impossível) + guard
+`[tenantid+primarykey]` (colisão entre contratos estruturalmente impossível);
 `canonicalizeTenantidChunk` canoniza o `tenantid` das escritas; manipulação de dados **somente via API
 Dexie** (proibido SQL raw no browser); alteração de schema = nova `version(n)` no Dexie.
 
