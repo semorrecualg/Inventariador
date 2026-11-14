@@ -1,6 +1,7 @@
 
 // Inventariador GBR v2.6 - Force Update to MPULMON Project
 logger.info(">>> [System] Iniciando Inventariador GBR v2.6 - Modo de Isolamento Ativo...");
+import { resolveTenantKey } from './utils/tenantSession';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { PermissionGate } from './components/PermissionGate';
@@ -621,7 +622,7 @@ useEffect(() => {
                   if (asset.primarykey) {
                     // Chave composta [tenantid+primarykey] (v6).
                     await db.ativos.update(
-                      [String(asset.tenantid || '').trim().toUpperCase(), String(asset.primarykey || '')],
+                      [resolveTenantKey(asset.tenantid), String(asset.primarykey || '')],
                       { _conferido: 1, _is_synced: 0 }
                     );
                   }

@@ -1,3 +1,4 @@
+import { getSessionTenantid, resolveTenantKey } from '../utils/tenantSession';
 import { db, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
@@ -54,28 +55,10 @@ export const matchesAddressSearch = (address: unknown, term: unknown): boolean =
   return normalizeAddressSearch(address).includes(needle);
 };
 
-/**
- * Tenant canónico para uma chave composta `[tenantid+primarykey]`.
- *
- * Com `tenantid` vazio a chave vira `['', primarykey]`, que nunca coincide com
- * a linha gravada e faz o `get`/`update` falhar em silêncio. Nestes casos usa o
- * tenant da sessão (o contrato activo).
- */
-export const resolveTenantKey = (tenantid?: unknown): string => {
-  const own = String(tenantid ?? '').trim().toUpperCase();
-  return own || getCurrentTenantid().trim().toUpperCase();
-};
+export const getCurrentTenantid = (): string => getSessionTenantid();
 
-export const getCurrentTenantid = (): string => {
-  try {
-    const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      return user.tenantid || '';
-    }
-  } catch { /* ignore */ }
-  return '';
-};
+/** Mesma regra do `utils/tenantSession`, reexportada para quem já a usa daqui. */
+export { resolveTenantKey };
 
 const handleDemoAuditIncrement = () => {
   try {
@@ -280,7 +263,7 @@ export const localDb = {
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
         // Chave composta [tenantid+primarykey] (v6): resolve o tenant pelo próprio
         // objeto de alteração quando presente, senão pelo tenant da sessão.
-        const tenantKey = String((changes as Record<string, unknown>).tenantid || getCurrentTenantid() || '').trim().toUpperCase();
+        const tenantKey = resolveTenantKey((changes as Record<string, unknown>).tenantid);
         const existing = tenantKey
           ? await db.ativos.get([tenantKey, cleanId])
           : await db.ativos.where('primarykey').equals(cleanId).first();

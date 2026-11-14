@@ -1,3 +1,4 @@
+import { resolveTenantKey } from '../utils/tenantSession';
 import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
 import { AnchorSource, DatabaseStatus } from '../types';
@@ -700,12 +701,14 @@ export class SqliteService {
   public async filterCrossTenantWrites(mappedChunk: DexieAsset[]): Promise<DexieAsset[]> {
     // Normaliza o tenantid para UPPER (canônico) — garante chaves compostas
     // consistentes [tenantid+primarykey] independentemente do case da fonte.
+    // Tenant vazio adoptaria o contrato da sessão: a chave ['', primarykey] nunca
+    // coincide com a linha gravada (o guard e o upsert ficavam inoperantes).
     const normalizedChunk = mappedChunk.map(m => ({
       ...m,
-      tenantid: String(m.tenantid || '').trim().toUpperCase(),
+      tenantid: resolveTenantKey(m.tenantid),
     }));
     const existingRows = await db.local_assets.bulkGet(
-      normalizedChunk.map(m => [String(m.tenantid || '').trim().toUpperCase(), String(m.primarykey || '')] as [string, string])
+      normalizedChunk.map(m => [m.tenantid, String(m.primarykey || '')] as [string, string])
     );
     const safeChunk: DexieAsset[] = [];
     let skipped = 0;
@@ -1272,7 +1275,7 @@ export class SqliteService {
     primarykey: string,
     changes: Record<string, unknown>
   ): Promise<void> {
-    const tenantKey = String(tenantid || '').trim().toUpperCase();
+    const tenantKey = resolveTenantKey(tenantid);
     const key = String(primarykey || '').trim();
     if (!tenantKey || !key) return;
     await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
@@ -1403,14 +1406,16 @@ export class SqliteService {
       const asset = change.asset;
       const primaryKeyVal = String(asset.primarykey || asset.id || '');
       if (primaryKeyVal) {
-        const tenantKey = String(asset.tenantid || '').trim().toUpperCase();
+        // Sem tenantid no ativo a chave virava ['', primarykey], o `get` devolvia
+        // undefined e o ativo era ignorado em silêncio. Cai para a sessão.
+        const tenantKey = resolveTenantKey(asset.tenantid);
         const existing = tenantKey
           ? await db.ativos.get([tenantKey, primaryKeyVal])
           : undefined;
         const updatedItem = {
           ...existing,
           ...asset,
-          tenantid: String(asset.tenantid || existing?.tenantid || '').trim().toUpperCase(),
+          tenantid: String(asset.tenantid || existing?.tenantid || tenantKey).trim().toUpperCase(),
           primarykey: primaryKeyVal,
           id: primaryKeyVal,
           _is_synced: 0
