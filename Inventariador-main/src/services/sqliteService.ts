@@ -312,6 +312,9 @@ export const runMigrationV5DryRun = (): Promise<V5DryRunReport> =>
 
 export const db = new InventoryDexieDatabase();
 
+/** Marcador da migração única de `tenantid` para UPPER (ver migrateLegacyTenantids). */
+const TENANT_CASE_MARKER = 'f0_tenant_case_canonical_v1';
+
 export class SQLitePersistenceException extends Error {
   constructor(message: string) {
     super(`[SQLitePersistenceException] ${message}`);
@@ -1023,6 +1026,56 @@ export class SqliteService {
   }
 
   /**
+   * F0: resíduos anteriores à v7 podem ter `tenantid` fora do UPPER canónico e,
+   * como o índice `[tenantid+primarykey]` é sensível a maiúsculas, ficariam
+   * fora da contagem pelo índice. Esta normalização é uma migração explícita:
+   * roda em transação única, uma vez por base (marcador em SYSTEM_CONTEXT), e
+   * NUNCA dentro de `countAssetMirrors`.
+   *
+   * Colisão com a linha canónica: a canónica é preservada intacta e a variante
+   * legada fica onde está (não é apagada nem sobrescreve). Como as duas têm a
+   * mesma `primarykey`, contam como um único ativo.
+   */
+  public async migrateLegacyTenantids(): Promise<{ repaired: number; skipped: number }> {
+    try {
+      if (await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)) return { repaired: 0, skipped: 0 };
+    } catch {
+      return { repaired: 0, skipped: 0 };
+    }
+    let repaired = 0;
+    let skipped = 0;
+    await db.transaction('rw', db.local_assets, db.ativos, db.assets, db.SYSTEM_CONTEXT, async () => {
+      const tables: Array<'local_assets' | 'ativos' | 'assets'> = ['local_assets', 'ativos', 'assets'];
+      for (const table of tables) {
+        const rows = (await db[table].toArray()) as Array<{ tenantid?: unknown; primarykey?: unknown; id?: unknown }>;
+        for (const row of rows) {
+          const raw = String(row.tenantid ?? '');
+          const canonical = raw.trim().toUpperCase();
+          if (canonical === '' || raw === canonical) continue;
+          const primarykey = String(row.primarykey ?? row.id ?? '');
+          const target: [string, string] = [canonical, primarykey];
+          if (await db[table].get(target)) {
+            skipped++;
+            continue;
+          }
+          await db[table].delete([raw, primarykey]);
+          await db[table].put({ ...row, tenantid: canonical } as DexieAsset);
+          repaired++;
+        }
+      }
+      await db.SYSTEM_CONTEXT.put({
+        key: TENANT_CASE_MARKER,
+        value: '1',
+        updated_at: new Date().toISOString()
+      });
+    });
+    if (repaired > 0 || skipped > 0) {
+      logger.warn(`[SRE] tenantid legado: ${repaired} normalizada(s) em transação; ${skipped} ignorada(s) por já existir a linha canónica.`);
+    }
+    return { repaired, skipped };
+  }
+
+  /**
    * Contra-prova por espelho físico: conta `local_assets`, `ativos` e `assets`
    * separadamente e devolve o total canónico (maior espelho) — a MESMA regra de
    * `getAssetCount`/`countAtivosByTenant`. O Gestor de Base contava só
@@ -1030,80 +1083,32 @@ export class SqliteService {
    * escreviam apenas um), anunciava 0 ativos enquanto a Unidade Operacional
    * mostrava milhares. Devolver cada espelho permite explicar a diferença em
    * vez de escondê-la.
+   *
+   * Leitura pura: usa o índice `[tenantid+primarykey]` quando a migração de
+   * casing já correu; até lá — e sem nunca escrever — cai na varredura para não
+   * perder resíduo legado.
    */
-  /**
-   * F0: resíduos anteriores à v7 podem ter `tenantid` fora do UPPER canónico e,
-   * como o índice `[tenantid+primarykey]` é sensível a maiúsculas, ficariam
-   * fora da contagem. Esta normalização corre UMA vez por base (marcador em
-   * SYSTEM_CONTEXT) em vez de varrer as tabelas a cada contagem: depois dela, o
-   * índice é exato para qualquer tenant.
-   */
-  private canonicalizeInFlight: Promise<void> | null = null;
-
-  private canonicalizeLegacyTenantids(): Promise<void> {
-    // As três tabelas são contadas em paralelo: sem partilhar a promessa, cada
-    // uma varreria a base ao mesmo tempo (e repetiria a normalização).
-    if (!this.canonicalizeInFlight) {
-      this.canonicalizeInFlight = this.runCanonicalizeLegacyTenantids().finally(() => {
-        this.canonicalizeInFlight = null;
-      });
-    }
-    return this.canonicalizeInFlight;
-  }
-
-  private async runCanonicalizeLegacyTenantids(): Promise<void> {
-    const MARKER = 'f0_tenant_case_canonical_v1';
-    if (await db.SYSTEM_CONTEXT.get(MARKER)) return;
-    const tables: Array<'local_assets' | 'ativos' | 'assets'> = ['local_assets', 'ativos', 'assets'];
-    for (const table of tables) {
-      const rows = (await db[table].toArray()) as Array<{ tenantid?: unknown; primarykey?: unknown; id?: unknown }>;
-      const legacy = rows.filter(row => {
-        const raw = String(row.tenantid ?? '');
-        const canonical = raw.trim().toUpperCase();
-        return canonical !== '' && raw !== canonical;
-      });
-      if (legacy.length === 0) continue;
-      // Muda a chave composta: apaga a chave antiga antes de gravar a canónica.
-      await db[table].bulkDelete(legacy.map(row => [
-        String(row.tenantid ?? ''),
-        String(row.primarykey ?? row.id ?? '')
-      ] as [string, string]));
-      await db[table].bulkPut(legacy.map(row => ({
-        ...row,
-        tenantid: String(row.tenantid ?? '').trim().toUpperCase()
-      })) as never[]);
-      logger.warn(`[SRE] ${legacy.length} linha(s) de ${table} com tenantid fora do formato canónico foram normalizadas.`);
-    }
-    await db.SYSTEM_CONTEXT.put({
-      key: MARKER,
-      value: '1',
-      updated_at: new Date().toISOString()
-    });
-  }
-
   public async countAssetMirrors(
     tenantid?: string | null
   ): Promise<{ local_assets: number; ativos: number; assets: number; total: number }> {
     const t = String(tenantid || '').trim().toUpperCase();
+    // Uma leitura só para as três tabelas; falha no marcador = varredura segura.
+    const canonicalized = await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)
+      .then(Boolean)
+      .catch(() => false);
     const countTable = async (table: 'local_assets' | 'ativos' | 'assets'): Promise<number> => {
       try {
         if (!t) return await db[table].count();
-        // O resíduo de casing é normalizado uma única vez por base (ver
-        // canonicalizeLegacyTenantids), então o índice passa a ser exato para o
-        // tenant — sem toArray/filter aqui.
-        await this.canonicalizeLegacyTenantids();
-        return await db[table]
-          .where('[tenantid+primarykey]')
-          .between([t, Dexie.minKey], [t, Dexie.maxKey])
-          .count();
-      } catch {
-        // Normalização indisponível: mantém o contrato com a varredura antiga.
-        try {
-          const rows = (await db[table].toArray()) as { tenantid?: unknown }[];
-          return rows.filter(a => String(a.tenantid || '').trim().toUpperCase() === t).length;
-        } catch {
-          return 0;
+        if (canonicalized) {
+          return await db[table]
+            .where('[tenantid+primarykey]')
+            .between([t, Dexie.minKey], [t, Dexie.maxKey])
+            .count();
         }
+        const rows = (await db[table].toArray()) as { tenantid?: unknown }[];
+        return rows.filter(a => String(a.tenantid || '').trim().toUpperCase() === t).length;
+      } catch {
+        return 0;
       }
     };
     const [local_assets, ativos, assets] = await Promise.all([

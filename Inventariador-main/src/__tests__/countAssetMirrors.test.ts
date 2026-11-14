@@ -4,16 +4,15 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { db, sqliteService, type DexieAsset } from '../services/sqliteService';
 
 /** Linha mínima: a contagem só lê `tenantid`; o resto não influencia. */
-const row = (tenantid: string, primarykey: string): DexieAsset =>
-  ({ id: primarykey, primarykey, tenantid } as unknown as DexieAsset);
+const row = (tenantid: string, primarykey: string, etiqueta = primarykey): DexieAsset =>
+  ({ id: primarykey, primarykey, tenantid, etiqueta } as unknown as DexieAsset);
 
 describe('countAssetMirrors (F0)', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
     await db.assets.clear();
-    // O marcador de normalização é por base: sem o limpar, o 2.º teste não
-    // voltaria a reparar as linhas legadas que ele próprio inseriu.
+    // Sem o marcador, a contagem usa a varredura e a migração volta a correr.
     await db.SYSTEM_CONTEXT.clear();
   });
 
@@ -29,6 +28,8 @@ describe('countAssetMirrors (F0)', () => {
       row('CICOPAL', 'b'),
       row('OUTRO', 'd')
     ]);
+    // A migração não tem resíduo para tratar e só deixa o marcador.
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
 
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
       local_assets: 2,
@@ -38,40 +39,51 @@ describe('countAssetMirrors (F0)', () => {
     });
   });
 
-  it('normaliza linha legada em minúsculas e conta pelo índice', async () => {
-    // A v7 grava `tenantid` em UPPER; esta linha representa resíduo anterior.
-    await db.local_assets.bulkPut([row('cicopal', 'legacy-1')]);
+  it('antes da migração conta o legado por varredura, sem o alterar', async () => {
+    await db.local_assets.bulkPut([row('CICOPAL', 'a'), row('cicopal', 'b')]);
 
+    // Leitura pura: o resíduo entra na contagem e continua na chave antiga.
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
+      local_assets: 2,
+      ativos: 0,
+      assets: 0,
+      total: 2
+    });
+    await expect(db.local_assets.get(['cicopal', 'b'])).resolves.not.toBeUndefined();
+  });
+
+  it('migra o legado em transação e depois conta pelo índice', async () => {
+    await db.local_assets.bulkPut([row('CICOPAL', 'a'), row('cicopal', 'b')]);
+
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 1, skipped: 0 });
+
+    expect((await db.local_assets.get(['CICOPAL', 'b']))?.tenantid).toBe('CICOPAL');
+    await expect(db.local_assets.get(['cicopal', 'b'])).resolves.toBeUndefined();
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
+      local_assets: 2,
+      ativos: 0,
+      assets: 0,
+      total: 2
+    });
+  });
+
+  it('não sobrescreve a linha canónica quando as duas variantes existem', async () => {
+    await db.local_assets.bulkPut([
+      row('CICOPAL', 'b', 'CANONICA'),
+      row('cicopal', 'b', 'LEGADA')
+    ]);
+
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 1 });
+
+    // Canónica intacta; legada preservada (não apagada) na chave antiga.
+    expect((await db.local_assets.get(['CICOPAL', 'b']))?.etiqueta).toBe('CANONICA');
+    expect((await db.local_assets.get(['cicopal', 'b']))?.etiqueta).toBe('LEGADA');
+    // O ativo conta uma só vez: a legada é duplicado da mesma primarykey.
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
       local_assets: 1,
       ativos: 0,
       assets: 0,
       total: 1
-    });
-  });
-
-  it('soma linha legada em minúsculas mesmo com linhas canónicas do mesmo tenant', async () => {
-    await db.local_assets.bulkPut([
-      row('CICOPAL', 'a'),
-      row('cicopal', 'b')
-    ]);
-    await db.assets.bulkPut([row('CICOPAL', 'a')]);
-
-    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
-      local_assets: 2,
-      ativos: 0,
-      assets: 1,
-      total: 2
-    });
-    // A linha foi canonicada (chave composta migrada), não apenas contada.
-    expect((await db.local_assets.get(['CICOPAL', 'b']))?.tenantid).toBe('CICOPAL');
-    await expect(db.local_assets.get(['cicopal', 'b'])).resolves.toBeUndefined();
-    // Segunda contagem usa o marcador e continua exata.
-    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
-      local_assets: 2,
-      ativos: 0,
-      assets: 1,
-      total: 2
     });
   });
 

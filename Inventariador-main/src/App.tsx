@@ -153,6 +153,8 @@ const autoRegisterPerfBaseline = (
 ): void => {
   scheduleIdle(async () => {
     try {
+      // Migração de casing uma vez por base, fora da contagem (transação própria).
+      await sqliteService.migrateLegacyTenantids();
       const mirrors = await sqliteService.countAssetMirrors(tenantid || null);
       // Base vazia (boot sem dados/login) não é linha de base: preserva o último
       // retrato útil em vez de o sobrescrever com zeros.

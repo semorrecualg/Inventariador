@@ -292,6 +292,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   /** F0: grava no aparelho o retrato da linha de base (espelhos + p50/p95). */
   const registrarLinhaDeBase = useCallback(async () => {
     try {
+      // Garante a contagem exata mesmo antes do boot ter migrado o casing.
+      await sqliteService.migrateLegacyTenantids();
       const counts = await sqliteService.countAssetMirrors(activeTenantid || null);
       const saved = savePerfBaseline({ tenantid: activeTenantid || null, mirrors: counts });
       setBaseline(saved);
