@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, sqliteService, type DexieAsset } from '../services/sqliteService';
+import { db, sqliteService, invalidateTenantCaseMarker, type DexieAsset } from '../services/sqliteService';
+import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 
 /** Linha mínima: a contagem só lê `tenantid`; o resto não influencia. */
 const row = (tenantid: string, primarykey: string, etiqueta = primarykey): DexieAsset =>
@@ -85,6 +86,33 @@ describe('countAssetMirrors (F0)', () => {
       assets: 0,
       total: 1
     });
+  });
+
+  it('invalida o marcador após restore e volta a contar o legado', async () => {
+    // Base já migrada: o marcador existe e a contagem usa o índice.
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
+    // Restore/importação grava direto nas tabelas, com tenantid em minúsculas.
+    await db.local_assets.bulkPut([row('CICOPAL', 'a'), row('cicopal', 'b')]);
+
+    // Sem invalidar, o índice não vê a linha restaurada (o bug).
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
+
+    await invalidateTenantCaseMarker();
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 2 });
+
+    // A migração volta a correr e o índice fica exato outra vez.
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 1, skipped: 0 });
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 2 });
+  });
+
+  it('a importação invalida o marcador antes de gravar', async () => {
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
+    // Importação vazia: só interessa o efeito de invalidação do entrypoint.
+    await DatabaseLoaderService.injetarDadosEmLotes([]);
+    await db.local_assets.bulkPut([row('cicopal', 'b')]);
+
+    // Com o marcador invalidado a contagem varre e vê a linha em minúsculas.
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
   });
 
   it('sem tenant conta a tabela inteira', async () => {

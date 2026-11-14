@@ -314,7 +314,10 @@ usa o índice `[tenantid+primarykey]` (prefixo), sem varrer a tabela. Resíduos 
 (marcador em `SYSTEM_CONTEXT`) por uma migração explícita em transação, no boot
 e nunca dentro da contagem. Em colisão, a linha canónica é preservada intacta e
 a variante legada não é apagada nem contada em duplicado. Até a migração correr,
-a contagem lê por varredura, sem escrever. Também há o botão Registrar. Boot com base vazia **não** grava retrato: preserva
+a contagem lê por varredura, sem escrever. Restore de backup e importação de
+planilha **invalidam** o marcador antes de gravar, porque podem trazer `tenantid`
+fora do padrão; a migração volta a correr no boot seguinte. Também há o botão
+Registrar. Boot com base vazia **não** grava retrato: preserva
 o último útil em vez de o sobrescrever com zeros. Snapshots antigos sem
 `trigger` são lidos como `manual`, com métricas ausentes preenchidas como "sem
 amostra".

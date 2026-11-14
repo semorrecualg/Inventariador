@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { db, sqliteService } from '../services/sqliteService';
+import { db, sqliteService, invalidateTenantCaseMarker } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
@@ -117,6 +117,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         setProgress(40);
         addLog(`[SRE_BACKUP] ${parsed.length} ativos lidos do backup. Gravando no banco físico do dispositivo...`);
 
+        // Backup pode trazer tenantid em qualquer casing: invalida a migração.
+        await invalidateTenantCaseMarker();
         await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
           await db.ativos.clear();
           await db.assets.clear();

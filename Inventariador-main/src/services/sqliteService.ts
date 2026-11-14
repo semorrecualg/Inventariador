@@ -315,6 +315,19 @@ export const db = new InventoryDexieDatabase();
 /** Marcador da migração única de `tenantid` para UPPER (ver migrateLegacyTenantids). */
 const TENANT_CASE_MARKER = 'f0_tenant_case_canonical_v1';
 
+/**
+ * Restore/importação podem trazer `tenantid` fora do UPPER: o marcador deixa de
+ * valer e a contagem volta à varredura até a próxima migração. Chamar antes de
+ * escrever os ativos (o pior caso é uma varredura, nunca uma contagem errada).
+ */
+export const invalidateTenantCaseMarker = async (): Promise<void> => {
+  try {
+    await db.SYSTEM_CONTEXT.delete(TENANT_CASE_MARKER);
+  } catch (err) {
+    logger.warn('[SRE] Não foi possível invalidar o marcador de casing; a contagem usa varredura.', err);
+  }
+};
+
 export class SQLitePersistenceException extends Error {
   constructor(message: string) {
     super(`[SQLitePersistenceException] ${message}`);
