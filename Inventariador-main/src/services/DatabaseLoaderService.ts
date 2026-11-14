@@ -206,9 +206,11 @@ export class DatabaseLoaderService {
       const loteBruto = dadosBrutos.slice(i, i + this.CHUNK_SIZE) as Record<string, unknown>[];
       
       const loteHigienizado: DexieAsset[] = loteBruto.map((row) => {
-        // REGRA DE CONTRATO (planilha): o tenantid NUNCA tem valor fixo/fallback.
-        // Ele vem EXCLUSIVAMENTE da coluna 'tenantid' (Índice 0) da planilha.
-        const tenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
+        // REGRA DE CONTRATO (planilha): o tenantid NUNCA recebe valor fixo. Vem da
+        // coluna 'tenantid' (Índice 0); quando a linha não o traz, adopta o
+        // contrato da sessão — gravar ['', primarykey] deixaria a linha órfã,
+        // invisível para a contagem e fora do alcance da migração de case.
+        const tenantid = resolveTenantKey(getRowValue(row, 'tenantid'));
         const rawFilial = mirrorFilial(row.filial);
         // Chave canônica única (utils/assetKey): primarykey → etiqueta → tag →
         // derivada do conteúdo. Antes esta carga olhava só `primarykey` e caía num
@@ -375,7 +377,7 @@ export class DatabaseLoaderService {
         for (const row of chunk) {
           const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
           const finalFilial = finalFilialRaw.toUpperCase();
-          const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
+          const finalTenantid = resolveTenantKey(getRowValue(row, 'tenantid'));
           // Chave canônica única (utils/assetKey) — a mesma de todos os caminhos.
           const primarykeyVal = sanitizeAssetKey(getRowValue(row, 'primarykey'));
           const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
@@ -650,7 +652,7 @@ export class DatabaseLoaderService {
         for (const row of chunk) {
           const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
           const finalFilial = finalFilialRaw.toUpperCase();
-          const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
+          const finalTenantid = resolveTenantKey(getRowValue(row, 'tenantid'));
           // Chave canônica única (utils/assetKey) — a mesma de todos os caminhos.
           const primarykeyVal = sanitizeAssetKey(getRowValue(row, 'primarykey'));
           const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
@@ -865,6 +867,36 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
     // Arquivo ainda não criado no primeiro boot limpo (Comportamento Esperado)
   }
   return false;
+}
+
+/**
+ * Restauro manual do backup em JSON escolhido no painel do gestor.
+ *
+ * O ficheiro pode trazer `tenantid` em qualquer casing — ou vazio. Gravar como
+ * vem criava variantes de case e chaves `['', primarykey]`; aqui aplica-se a
+ * mesma canonização da carga antes de repor os três espelhos. Devolve o número
+ * de linhas repostas (0 para backup vazio).
+ */
+export async function restoreBackupSnapshot(rows: unknown[]): Promise<number> {
+  const snapshot = (rows as DexieAsset[]).map(asset => ({
+    ...asset,
+    tenantid: resolveTenantKey(asset.tenantid)
+  }));
+  if (snapshot.length === 0) return 0;
+
+  // Backup pode trazer tenantid não canónico: a migração volta a correr no boot.
+  await invalidateTenantCaseMarker();
+  await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+    await db.ativos.clear();
+    await db.assets.clear();
+    await db.local_assets.clear();
+
+    await db.ativos.bulkPut(snapshot);
+    await db.assets.bulkPut(snapshot);
+    await db.local_assets.bulkPut(snapshot);
+  });
+
+  return snapshot.length;
 }
 
 /**

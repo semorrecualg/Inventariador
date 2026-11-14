@@ -75,6 +75,10 @@ const handleDemoAuditIncrement = () => {
 // Map React UI Asset models (with Booleans) to Database persistable models (with 0/1 Numbers)
 function toDexieAsset(asset: Asset): DexieAsset {
   const obj: Record<string, unknown> = { ...asset } as unknown as unknown as Record<string, unknown>;
+  // Chave composta [tenantid+primarykey]: sem tenant canónico a linha entra numa
+  // chave que não casa com o contrato activo (ou em ['', primarykey], que nenhuma
+  // migração repara). Mesma regra da carga e dos restauros.
+  obj.tenantid = resolveTenantKey(obj.tenantid);
   const boolKeys = [
     '_conferido', '_is_deleted', '_is_synced', '_plaquetado', 
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'

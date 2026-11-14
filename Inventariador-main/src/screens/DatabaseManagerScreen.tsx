@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { db, sqliteService, invalidateTenantCaseMarker } from '../services/sqliteService';
+import { db, sqliteService } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen, Asset } from '../types';
-import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
+import { DatabaseLoaderService, restoreBackupSnapshot } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
@@ -117,17 +117,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         setProgress(40);
         addLog(`[SRE_BACKUP] ${parsed.length} ativos lidos do backup. Gravando no banco físico do dispositivo...`);
 
-        // Backup pode trazer tenantid em qualquer casing: invalida a migração.
-        await invalidateTenantCaseMarker();
-        await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
-          await db.ativos.clear();
-          await db.assets.clear();
-          await db.local_assets.clear();
-          
-          await db.ativos.bulkPut(parsed);
-          await db.assets.bulkPut(parsed);
-          await db.local_assets.bulkPut(parsed);
-        });
+        // Canoniza o tenantid antes de gravar (evita variantes de case e chaves
+        // ['', primarykey]) e repõe os três espelhos na mesma transação.
+        await restoreBackupSnapshot(parsed);
 
         sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
         localStorage.setItem('gbr_physical_link_active', 'true');
