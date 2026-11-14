@@ -42,7 +42,7 @@ O modo de banco é definido pelas credenciais de ambiente:
 | `npm test` | Vitest — 366 testes / 36 arquivos |
 | `npx tsc --noEmit` | Typecheck (deve estar zerado) |
 | `npm run lint` | ESLint (zero warnings) |
-| `npm run verify:governanca` | Audita dev ↔ GitHub ↔ Supabase (ver `docs/GOVERNANCA.md` § 8) |
+| `npm run verify:governanca` | Audita dev ↔ GitHub ↔ Supabase (ver `docs/GOVERNANCA.md` § 9) |
 
 ## Documentação
 
