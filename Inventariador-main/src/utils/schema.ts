@@ -135,11 +135,15 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   const originalAsset = asset as Record<string, unknown>;
   
   // UNIFIED SIGNATURE ASSIGNMENTS:
+  // `tenantid` canónico vem PRIMEIRO: `GRUPO_EMPRESARIAL` (ex.: EMPRESA_DEMO)
+  // é um rótulo de grupo, não o contrato. Preferi-lo re-gravava o ativo noutro
+  // tenant a cada ciclo carregar→gravar (o seed do demo duplicava 52→104).
   const tenantid = (
+    originalAsset.tenantid ||
     originalAsset.tenantId ||
     originalAsset._tenantid ||
-    originalAsset.GRUPO_EMPRESARIAL ||
     originalAsset.tenant_id ||
+    originalAsset.GRUPO_EMPRESARIAL ||
     originalAsset.group_id ||
     ''
   ).toString().trim();
