@@ -11,7 +11,7 @@ import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagI
 import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
-import { recordPerf, savePerfBaseline, startPerf } from './utils/perfMetrics';
+import { recordPerf, savePerfBaseline, scheduleIdle, startPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -142,17 +142,22 @@ let bootPerfRecorded = false;
 /**
  * F0: grava o retrato da linha de base sem bloquear o fluxo medido.
  * Chamado no fim do boot e no fim de um pull completo (persistência concluída).
+ *
+ * A contagem dos três espelhos percorre a base inteira: fica para um momento
+ * ocioso (`scheduleIdle`) para não pesar no boot nem competir com a gravação.
  */
-const autoRegisterPerfBaseline = async (
+const autoRegisterPerfBaseline = (
   trigger: 'boot' | 'pull.full',
   tenantid?: string | null
-): Promise<void> => {
-  try {
-    const mirrors = await sqliteService.countAssetMirrors(tenantid || null);
-    savePerfBaseline({ tenantid: tenantid || null, mirrors, trigger });
-  } catch (err) {
-    logger.warn('>>> [PERF] Falha ao registrar linha de base automática:', err);
-  }
+): void => {
+  scheduleIdle(async () => {
+    try {
+      const mirrors = await sqliteService.countAssetMirrors(tenantid || null);
+      savePerfBaseline({ tenantid: tenantid || null, mirrors, trigger });
+    } catch (err) {
+      logger.warn('>>> [PERF] Falha ao registrar linha de base automática:', err);
+    }
+  });
 };
 const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
 
@@ -2904,7 +2909,7 @@ useEffect(() => {
           saveInventory(newState)
             .then(() => {
               if (!incremental) {
-                void autoRegisterPerfBaseline('pull.full', Array.isArray(firstTenant) ? firstTenant[0] : firstTenant);
+                autoRegisterPerfBaseline('pull.full', Array.isArray(firstTenant) ? firstTenant[0] : firstTenant);
               }
             })
             .catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
@@ -3501,7 +3506,7 @@ useEffect(() => {
         if (!bootPerfRecorded) {
           bootPerfRecorded = true;
           recordPerf('boot', APP_BOOT_STARTED_AT, { count: checkCount });
-          void autoRegisterPerfBaseline('boot', user?.tenantid || null);
+          autoRegisterPerfBaseline('boot', user?.tenantid || null);
         }
         if (checkCount > 0) {
           sessionStorage.setItem('isDatabaseLoaded', 'true');

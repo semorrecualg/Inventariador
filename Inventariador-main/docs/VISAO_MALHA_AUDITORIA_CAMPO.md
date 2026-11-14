@@ -306,7 +306,10 @@ ganhou o cartão **Linha de Base (F0)**, com p50/p95 por métrica e os botões
 **Registrar**, **Copiar** e **Exportar** (JSON). O retrato
 (`gbr_perf_baseline_v1`) é gravado **automaticamente no fim do boot e de cada
 pull completo** — depois da persistência, para a contagem por espelho já
-refletir a base nova — e também sob demanda pelo botão Registrar.
+refletir a base nova. A contagem dos três espelhos roda em **momento ocioso**
+(`requestIdleCallback`, com `setTimeout` de fallback) para não pesar no boot, e
+também há o botão Registrar. Snapshots antigos sem `trigger` são lidos como
+`manual`.
 
 **Falta para fechar F0:** medir em aparelho real (abertura a frio, delta de 1
 filial, push de 500 eventos) e preencher a tabela abaixo. Este ambiente não tem

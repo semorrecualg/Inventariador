@@ -67,6 +67,20 @@ const safeStorage = (): Storage | null => {
 /** Marca o início de um intervalo (boot, delta, push). */
 export const startPerf = (): number => now();
 
+/**
+ * Executa uma tarefa quando a thread estiver ociosa — usada para a contagem
+ * dos espelhos do auto-registro F0 não competir com o boot/persistência.
+ * `requestIdleCallback` quando existe; `setTimeout(0)` como fallback.
+ */
+export const scheduleIdle = (task: () => void | Promise<void>, timeoutMs = 2000): void => {
+  const run = (): void => { void task(); };
+  const idle = (globalThis as {
+    requestIdleCallback?: (cb: () => void, options?: { timeout?: number }) => number;
+  }).requestIdleCallback;
+  if (typeof idle === 'function') idle(run, { timeout: timeoutMs });
+  else setTimeout(run, 0);
+};
+
 /** Amostras válidas, da mais antiga para a mais recente. */
 export const getPerfSamples = (): PerfSample[] => {
   const storage = safeStorage();
@@ -192,15 +206,38 @@ export const savePerfBaseline = (input: {
 export const formatPerfBaseline = (baseline: PerfBaseline): string =>
   JSON.stringify(baseline, null, 2);
 
+/**
+ * Aceita snapshots antigos (gravados antes de existir `trigger`): sem gatilho
+ * válido, assume `manual`. Campos em falta são normalizados, nunca rejeitados.
+ */
+export const normalizePerfBaseline = (raw: unknown): PerfBaseline | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const candidate = raw as Partial<PerfBaseline> & { metrics?: unknown };
+  if (typeof candidate.at !== 'string' || !candidate.metrics || typeof candidate.metrics !== 'object') {
+    return null;
+  }
+  const TRIGGERS: PerfBaseline['trigger'][] = ['boot', 'pull.full', 'manual'];
+  const trigger = TRIGGERS.includes(candidate.trigger as PerfBaseline['trigger'])
+    ? (candidate.trigger as PerfBaseline['trigger'])
+    : 'manual';
+  return {
+    at: candidate.at,
+    trigger,
+    tenantid: typeof candidate.tenantid === 'string' ? candidate.tenantid : null,
+    mirrors: candidate.mirrors && typeof candidate.mirrors === 'object'
+      ? (candidate.mirrors as MirrorCounts)
+      : null,
+    metrics: candidate.metrics as Record<PerfMetricName, PerfSummary>
+  };
+};
+
 export const readPerfBaseline = (): PerfBaseline | null => {
   const storage = safeStorage();
   if (!storage) return null;
   try {
     const raw = storage.getItem(BASELINE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<PerfBaseline>;
-    if (!parsed || typeof parsed.at !== 'string' || typeof parsed.metrics !== 'object') return null;
-    return parsed as PerfBaseline;
+    return normalizePerfBaseline(JSON.parse(raw) as unknown);
   } catch {
     return null;
   }
