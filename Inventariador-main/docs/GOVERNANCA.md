@@ -6,7 +6,7 @@
 >
 > **Última verificação:** 2026-11-02 · **App:** v2.6.0 · **Baseline local:** Dexie v7
 > Complementa (não substitui) `SPEC.md`, `ARCHITECTURE.md`, `RBAC_GOVERNANCA.md` e
-> `SCHEMA_BASELINE.md` — ver § 12.
+> `SCHEMA_BASELINE.md` — ver o mapa de documentos (§ 12).
 
 ---
 

@@ -2,41 +2,58 @@
 /**
  * GBR KARDEK · verificação das referências «§N» entre documentos
  *
- * O `check-docs.cjs` valida caminhos de ficheiro e links; não valida que a
- * secção citada exista. Foi assim que o ARCHITECTURE mandou os segredos para a
- * «§5 da governança» (que existe, mas é o fluxo de git) sem nada falhar.
+ * O `check-docs.cjs` valida caminhos e links; não valida que a secção citada
+ * exista. Foi assim que o ARCHITECTURE mandou os segredos para a «§5 da
+ * governança» sem nada falhar.
  *
- * Regras:
- *  - Cabecalho numerado (`## 4. …`, `### 7.6 …`) define os ids de cada documento.
- *  - Uma referência `§N` resolve-se no próprio documento **ou** num documento
- *    nomeado na mesma linha (nome de ficheiro `.md` ou apelido: governança,
- *    architecture, spec, rbac). Assim «ver § 12» dentro de GOVERNANCA resolve-se
- *    na própria governança mesmo citando `SCHEMA_BASELINE.md` ao lado.
- *  - Ids repetidos no mesmo documento também são erro: a renumeração deixa
- *    duas secções com o mesmo número e a referência passa a ser ambígua.
+ * Resolução de cada «§ N»:
+ *  1. Documento ligado por adjacência: `X.md` § N · § N de X.md · § N da governança.
+ *  2. O primeiro documento ligado nessa linha (vale para § N seguintes:
+ *     "`ARCHITECTURE.md` §7.6 / § 12" → ambos em ARCHITECTURE).
+ *  3. Sem ligação, o próprio documento.
+ * Um documento nomeado sem secções numeradas não pode validar nada: nesse caso
+ * a referência resolve-se no próprio documento.
+ *
+ * Limite conhecido: o gate garante que a secção existe, não que trate do
+ * assunto. «§ 5 da governança» existe mesmo — esse erro é de revisão humana.
  *
  * Uso: node scripts/check-section-refs.cjs [raiz]
  */
 'use strict';
 
 const { readdirSync, readFileSync, statSync } = require('node:fs');
-const { join, relative, resolve, basename } = require('node:path');
+const { basename, join, relative, resolve } = require('node:path');
 
 const IGNORAR_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', 'artifacts']);
+const CERCA = /^\s*(```|~~~)/;
 const HEADING = /^#{1,6}\s+(?:\*\*)?(\d+(?:\.\d+)*)[.)]?\s/;
 const REFERENCIA = /§\s?(\d+(?:\.\d+)*)/g;
-const FICHEIRO_MD = /([A-Za-z0-9_-]+\.md)/g;
-/** Cercas de código: `# 1. …` dentro de um bloco bash não é um cabeçalho. */
-const CERCA = /^\s*(```|~~~)/;
+const FICHEIRO_MD = /((?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_-]+\.md)/;
+const DOC_POR_APELIDO = {
+  governança: 'docs/GOVERNANCA.md',
+  governanca: 'docs/GOVERNANCA.md',
+  architecture: 'docs/ARCHITECTURE.md',
+  rbac: 'docs/RBAC_GOVERNANCA.md',
+  spec: 'docs/SPEC.md'
+};
+/** Apelidos de texto corrido (`\b` evita que «especificação» case com «spec»). */
+const APELIDOS = new RegExp(`\\b(${Object.keys(DOC_POR_APELIDO).join('|')})\\b`, 'i');
+/** O que pode separar dois § da mesma linha para herdarem o documento ligado. */
+const SEPARADOR = /^[\s/,;·&—–-]*(?:e\s+)?$/;
 
-/** Apelidos usados no texto corrido para documentos do repo. */
-const APELIDOS = [
-  ['governança', 'docs/GOVERNANCA.md'],
-  ['governanca', 'docs/GOVERNANCA.md'],
-  ['architecture', 'docs/ARCHITECTURE.md'],
-  ['rbac', 'docs/RBAC_GOVERNANCA.md'],
-  ['spec', 'docs/SPEC.md']
-];
+/** Linhas fora de blocos de código, com o número original. */
+function linhasUteis(texto) {
+  const saida = [];
+  let emCodigo = false;
+  for (const [i, linha] of texto.split('\n').entries()) {
+    if (CERCA.test(linha)) {
+      emCodigo = !emCodigo;
+    } else if (!emCodigo) {
+      saida.push({ numero: i + 1, linha });
+    }
+  }
+  return saida;
+}
 
 function listarMd(raiz) {
   const saida = [];
@@ -54,99 +71,78 @@ function listarMd(raiz) {
   return saida;
 }
 
+/** Índice de secções por documento + secções repetidas (numeração ambígua). */
 function indexar(raiz, docs) {
   const ids = new Map();
-  const duplicados = [];
+  const duplicadas = [];
   for (const doc of docs) {
-    const vistos = new Map();
-    let emCodigo = false;
-    for (const [i, linha] of readFileSync(join(raiz, doc), 'utf8').split('\n').entries()) {
-      if (CERCA.test(linha)) {
-        emCodigo = !emCodigo;
-        continue;
-      }
-      if (emCodigo) continue;
-      const m = linha.match(HEADING);
-      if (!m) continue;
-      const id = m[1];
-      if (vistos.has(id)) duplicados.push({ doc, numero: i + 1, id, primeiro: vistos.get(id) });
-      else vistos.set(id, i + 1);
+    const vistas = new Map();
+    for (const { numero, linha } of linhasUteis(readFileSync(join(raiz, doc), 'utf8'))) {
+      const id = linha.match(HEADING)?.[1];
+      if (!id) continue;
+      if (vistas.has(id)) duplicadas.push({ doc, numero, id, primeira: vistas.get(id) });
+      else vistas.set(id, numero);
     }
-    ids.set(doc, new Set(vistos.keys()));
+    ids.set(doc, new Set(vistas.keys()));
   }
-  return { ids, duplicados };
+  return { ids, duplicadas };
 }
 
-/** Documentos nomeados na linha, resolvidos por nome de ficheiro ou apelido. */
-function nomeados(linha, porNome) {
-  const alvos = [];
-  const minuscula = linha.toLowerCase();
-  for (const [apelido, doc] of APELIDOS) {
-    if (minuscula.includes(apelido)) alvos.push(doc);
-  }
-  for (const ficheiro of linha.match(FICHEIRO_MD) || []) {
-    const doc = porNome.get(basename(ficheiro).toLowerCase());
-    if (doc) alvos.push(doc);
-  }
-  return alvos;
+/** Documento citado imediatamente antes ou depois da referência, se houver. */
+function documentoLigado(antes, depois, porNome) {
+  const atras = antes.slice(-30).match(new RegExp(`${FICHEIRO_MD.source}\`?[\\s()[\\],;:—–-]*(?:ver\\s+)?$`));
+  if (atras) return porNome.get(basename(atras[1]).toLowerCase());
+
+  const adiante = depois.match(new RegExp(`^\\s*(?:de|do|da|em)\\s+\`?${FICHEIRO_MD.source}`));
+  if (adiante) return porNome.get(basename(adiante[1]).toLowerCase());
+
+  const apelido = depois.match(new RegExp(`^\\s*(?:de|do|da)\\s+(?:a\\s+|o\\s+)?${APELIDOS.source}`, 'i'));
+  return apelido ? DOC_POR_APELIDO[apelido[1].toLowerCase()] : undefined;
 }
 
 function verificar(raiz) {
   const docs = listarMd(raiz);
   const porNome = new Map(docs.map(doc => [basename(doc).toLowerCase(), doc]));
-  const { ids, duplicados } = indexar(raiz, docs);
+  const { ids, duplicadas } = indexar(raiz, docs);
+  const temSecoes = doc => (ids.get(doc) || new Set()).size > 0;
 
-  const problemas = [];
+  const invalidas = [];
   let referencias = 0;
 
   for (const doc of docs) {
-    const linhas = readFileSync(join(raiz, doc), 'utf8').split('\n');
-    let emCodigo = false;
-    for (const [i, linha] of linhas.entries()) {
-      if (CERCA.test(linha)) {
-        emCodigo = !emCodigo;
-        continue;
-      }
-      if (emCodigo) continue;
-      const alvos = nomeados(linha, porNome);
-      // Um documento nomeado sem secções numeradas não pode validar nada:
-      // nesse caso a referência resolve-se no próprio documento.
-      const candidatos = [doc, ...alvos].filter(d => (ids.get(d) || new Set()).size > 0);
+    for (const { numero, linha } of linhasUteis(readFileSync(join(raiz, doc), 'utf8'))) {
+      let contexto;
+      let fimAnterior = 0;
       for (const m of linha.matchAll(REFERENCIA)) {
         referencias += 1;
-        const id = m[1];
-        const existe = candidatos.some(d => ids.get(d).has(id));
-        if (!existe) {
-          problemas.push({
-            doc,
-            numero: i + 1,
-            id,
-            alvos: candidatos.length > 0 ? candidatos.join(', ') : '(nenhum documento com secções numeradas)'
-          });
+        const separador = linha.slice(fimAnterior, m.index);
+        if (!SEPARADOR.test(separador)) contexto = undefined;
+        fimAnterior = m.index + m[0].length;
+        const ligado = documentoLigado(linha.slice(0, m.index), linha.slice(m.index + m[0].length), porNome);
+        if (ligado && temSecoes(ligado)) contexto = ligado;
+        const alvo = contexto && temSecoes(contexto) ? contexto : doc;
+        if (!ids.get(alvo).has(m[1])) {
+          invalidas.push({ doc, numero, id: m[1], alvo });
         }
       }
     }
   }
 
-  return { docs, referencias, problemas, duplicados };
+  return { total: docs.length, referencias, invalidas, duplicadas };
 }
 
 function main() {
   const raiz = process.argv[2] ? resolve(process.argv[2]) : resolve(__dirname, '..');
-  const { docs, referencias, problemas, duplicados } = verificar(raiz);
+  const { total, referencias, invalidas, duplicadas } = verificar(raiz);
 
-  if (problemas.length > 0 || duplicados.length > 0) {
-    console.error(`[ FALHA ] referências «§N» inválidas em ${docs.length} documento(s):`);
-    for (const p of problemas) {
-      console.error(`  ${p.doc}:${p.numero} — § ${p.id} não existe em: ${p.alvos}`);
-    }
-    for (const d of duplicados) {
-      console.error(`  ${d.doc}:${d.numero} — secção § ${d.id} repetida (já em ${d.primeiro})`);
-    }
+  if (invalidas.length > 0 || duplicadas.length > 0) {
+    console.error(`[ FALHA ] referências «§N» inválidas em ${total} documento(s):`);
+    for (const p of invalidas) console.error(`  ${p.doc}:${p.numero} — § ${p.id} não existe em ${p.alvo}`);
+    for (const d of duplicadas) console.error(`  ${d.doc}:${d.numero} — secção § ${d.id} repetida (já em ${d.primeira})`);
     process.exit(1);
   }
 
-  console.log(`[ OK ] ${referencias} referência(s) «§N» resolvidas em ${docs.length} documento(s).`);
+  console.log(`[ OK ] ${referencias} referência(s) «§N» resolvidas em ${total} documento(s).`);
 }
 
 main();

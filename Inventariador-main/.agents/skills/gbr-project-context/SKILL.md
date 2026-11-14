@@ -79,7 +79,7 @@ Antes de propor, gerar ou alterar qualquer código, **leia integralmente**:
 
 ## 4. Pendências conhecidas
 
-Ver issue #6 (`semorrecualg/Inventariador`) e §14 "Pendências conhecidas" do `ARCHITECTURE.md`:
+Ver issue #6 (`semorrecualg/Inventariador`) e a § 14 de `ARCHITECTURE.md` («Pendências conhecidas»):
 `public/logo.png` placeholder (gerar ícones PWA reais) · fluxo "base vazia" no Gestor de Base ·
 exibição de filiais homônimas entre contratos (separadas no banco pela chave composta;
 a exibição por nome de filial ainda mistura contratos — próximo passo).
