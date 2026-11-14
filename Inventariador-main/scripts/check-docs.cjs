@@ -107,27 +107,25 @@ if (!existsSync(repoRoot)) {
   process.exit(1);
 }
 
-// Raízes a indexar: a varrida e a de cada extra que viva fora dela. Sem isto,
-// um `ci.yml` citado no AGENTS.md não resolve quando a raiz é a pasta do app —
-// a resolução e o índice de nomes soltos só conheceriam o que foi varrido.
+// Raízes a varrer: a pedida e a de cada extra (um `ci.yml` citado no AGENTS.md
+// tem de resolver contra a raiz do repositório mesmo quando a raiz pedida é a
+// pasta do app). Raízes contidas noutra não se varrem duas vezes; o `--extra`
+// dedupe-se por caminho absoluto.
 const raizes = [repoRoot];
 const extraFiles = [];
 for (const extra of extras) {
   const full = resolve(appRoot, extra);
   if (!existsSync(full)) continue;
   extraFiles.push(full);
-  if (relative(repoRoot, full).startsWith('..')) {
-    const raiz = findRepoRoot(dirname(full));
-    if (!raizes.includes(raiz)) raizes.push(raiz);
-  }
+  const raiz = findRepoRoot(dirname(full));
+  if (!raizes.includes(raiz)) raizes.push(raiz);
 }
 
-const allFiles = [...new Set(raizes.flatMap(raiz => walk(raiz)))];
-const mdFiles = allFiles.filter(file => file.toLowerCase().endsWith('.md'));
+const contida = (filho, pai) => filho !== pai && !relative(pai, filho).startsWith('..');
+const varridas = raizes.filter(raiz => !raizes.some(outra => contida(raiz, outra)));
 
-for (const full of extraFiles) {
-  if (!mdFiles.includes(full)) mdFiles.push(full);
-}
+const allFiles = [...new Set(varridas.flatMap(raiz => walk(raiz)))];
+const mdFiles = [...new Set([...allFiles.filter(file => file.toLowerCase().endsWith('.md')), ...extraFiles])];
 const basenames = new Set(allFiles.map(file => basename(file)));
 const rel = file => relative(repoRoot, file).split('\\').join('/');
 
@@ -136,7 +134,7 @@ let linkCount = 0;
 let refCount = 0;
 
 const resolves = (file, ref) =>
-  [dirname(file), repoRoot, appRoot, ...raizes].some(base => existsSync(resolve(base, ref)));
+  [dirname(file), repoRoot, appRoot, ...varridas].some(base => existsSync(resolve(base, ref)));
 
 for (const file of mdFiles) {
   const text = readFileSync(file, 'utf8');
