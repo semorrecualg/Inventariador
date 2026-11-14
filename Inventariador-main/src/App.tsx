@@ -612,8 +612,7 @@ useEffect(() => {
             const dadosFisicos = await FileSystemStorageService.carregarDeDiretorioLocal();
             const restaurados = await restoreLegacyPhysicalInventory(dadosFisicos || []);
             if (restaurados > 0) {
-              logger.info(`[SRE_BOOT] Recuperação física legada ativada. Restaurados ${restaurados} registros.`);
-              logger.info("[SRE_BOOT] Restauração e conciliação lógica legada concluídas com sucesso.");
+              logger.info(`[SRE_BOOT] Recuperação física legada concluída: ${restaurados} registros restaurados e conciliados.`);
             } else {
               logger.info("[SRE_BOOT] Nenhum backup físico encontrado ou arquivo vazio.");
             }

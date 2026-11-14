@@ -30,9 +30,9 @@ beforeEach(async () => {
   localStorage.clear();
   sessionStorage.clear();
   sessionStorage.setItem('app_current_user', JSON.stringify({ tenantid: TENANT }));
-  for (const t of ['ativos', 'assets', 'local_assets'] as const) {
-    await db[t].clear();
-  }
+  // O restauro só toca nestes dois espelhos.
+  await db.ativos.clear();
+  await db.local_assets.clear();
 });
 
 describe('restoreLegacyPhysicalInventory — backup físico legado', () => {

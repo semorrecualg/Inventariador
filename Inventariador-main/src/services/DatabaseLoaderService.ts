@@ -859,7 +859,7 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
 export async function restoreLegacyPhysicalInventory(rows: unknown[]): Promise<number> {
   // Tenant vazio adopta o contrato da sessão: `['', primarykey]` nunca coincide
   // com a linha operacional e o restauro ficaria órfão.
-  const data = ((rows || []) as DexieAsset[]).map(asset => ({
+  const data = (rows as DexieAsset[]).map(asset => ({
     ...asset,
     tenantid: resolveTenantKey(asset.tenantid)
   }));
@@ -869,10 +869,11 @@ export async function restoreLegacyPhysicalInventory(rows: unknown[]): Promise<n
     // Restaura estritamente o inventário coletado pelo usuário (coletas locais).
     await db.local_assets.bulkPut(data);
 
+    // `data` já tem o tenant canónico: a chave composta usa-o directamente.
     for (const asset of data) {
       if (!asset.primarykey) continue;
       await db.ativos.update(
-        [resolveTenantKey(asset.tenantid), String(asset.primarykey)],
+        [asset.tenantid, String(asset.primarykey)],
         { _conferido: 1, _is_synced: 0 }
       );
     }
