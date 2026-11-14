@@ -28,7 +28,7 @@ qualquer release, changelog ou análise:
   `docs/RBAC_GOVERNANCA.md`. **Provisionamento:** `LicenseProvisioning` +
   `tenantProvisioningService` + `passwordPolicy` (MASTER com senha forte).
 - **Validação obrigatória antes de release:** `npx tsc -b --noEmit` (zero erros) +
-  `npx vitest run` (**860 testes / 96 arquivos**) + `npm run build`.
+  `npx vitest run` (**862 testes / 96 arquivos**) + `npm run build`.
 - **Documentos de referência:** `docs/SPEC.md`, `docs/ARCHITECTURE.md`,
   `docs/RBAC_GOVERNANCA.md`, `docs/SCHEMA_BASELINE.md`, `SYSTEM_INSTRUCTIONS.md`
   (governança SRE), `docs/MIGRACAO_HIBRIDA.md` (plano de dados fases 0–5).

@@ -17,11 +17,11 @@
  * Limite conhecido: o gate garante que a secção existe, não que trate do
  * assunto. «§ 5 da governança» existe mesmo — esse erro é de revisão humana.
  *
- * Uso: node scripts/check-section-refs.cjs [raiz]
+ * Uso: node scripts/check-section-refs.cjs [raiz] [--extra ../AGENTS.md]
  */
 'use strict';
 
-const { readdirSync, readFileSync, statSync } = require('node:fs');
+const { existsSync, readdirSync, readFileSync, statSync } = require('node:fs');
 const { basename, join, relative, resolve } = require('node:path');
 
 const IGNORAR_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', 'artifacts']);
@@ -97,11 +97,19 @@ function documentoLigado(antes, depois, porNome) {
   if (adiante) return porNome.get(basename(adiante[1]).toLowerCase());
 
   const apelido = depois.match(new RegExp(`^\\s*(?:de|do|da)\\s+(?:a\\s+|o\\s+)?${APELIDOS.source}`, 'i'));
-  return apelido ? DOC_POR_APELIDO[apelido[1].toLowerCase()] : undefined;
+  if (apelido) return DOC_POR_APELIDO[apelido[1].toLowerCase()];
+
+  const apelidoAtras = antes.slice(-30).match(new RegExp(`${APELIDOS.source}[\\s—–:,-]*$`, 'i'));
+  return apelidoAtras ? DOC_POR_APELIDO[apelidoAtras[1].toLowerCase()] : undefined;
 }
 
-function verificar(raiz) {
+function verificar(raiz, extras = []) {
   const docs = listarMd(raiz);
+  for (const extra of extras) {
+    const caminho = resolve(raiz, extra);
+    const relativo = relative(raiz, caminho).split('\\').join('/');
+    if (existsSync(caminho) && !docs.includes(relativo)) docs.push(relativo);
+  }
   const porNome = new Map(docs.map(doc => [basename(doc).toLowerCase(), doc]));
   const { ids, duplicadas } = indexar(raiz, docs);
   const temSecoes = doc => (ids.get(doc) || new Set()).size > 0;
@@ -132,8 +140,16 @@ function verificar(raiz) {
 }
 
 function main() {
-  const raiz = process.argv[2] ? resolve(process.argv[2]) : resolve(__dirname, '..');
-  const { total, referencias, invalidas, duplicadas } = verificar(raiz);
+  const argv = process.argv.slice(2);
+  const extras = [];
+  let raiz;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--extra') extras.push(argv[++i]);
+    else raiz = resolve(argv[i]);
+  }
+  raiz = raiz || resolve(__dirname, '..');
+
+  const { total, referencias, invalidas, duplicadas } = verificar(raiz, extras);
 
   if (invalidas.length > 0 || duplicadas.length > 0) {
     console.error(`[ FALHA ] referências «§N» inválidas em ${total} documento(s):`);

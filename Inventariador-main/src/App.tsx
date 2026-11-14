@@ -102,7 +102,6 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import X from 'lucide-react/dist/esm/icons/x';
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert';
-import Sparkles from 'lucide-react/dist/esm/icons/sparkles';
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
 import Activity from 'lucide-react/dist/esm/icons/activity';
 import HardDrive from 'lucide-react/dist/esm/icons/hard-drive';
@@ -7154,12 +7153,6 @@ useEffect(() => {
                     <ShieldCheck size={10} />
                     <span className="text-[7px] font-black uppercase tracking-widest">{permissionsGranted ? 'OPERACIONAL' : 'BLOQUEADO'}</span>
                   </div>
-                  {import.meta.env.VITE_GEMINI_API_KEY && (
-                    <div className="px-2 py-0.5 bg-purple-50 border border-purple-100 rounded-lg flex items-center space-x-1 text-purple-600">
-                      <Sparkles size={8} />
-                      <span className="text-[7px] font-black uppercase tracking-widest">AI</span>
-                    </div>
-                  )}
                </div>
                </div>
             </div>
