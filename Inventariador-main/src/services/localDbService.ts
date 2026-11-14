@@ -54,6 +54,18 @@ export const matchesAddressSearch = (address: unknown, term: unknown): boolean =
   return normalizeAddressSearch(address).includes(needle);
 };
 
+/**
+ * Tenant canónico para uma chave composta `[tenantid+primarykey]`.
+ *
+ * Com `tenantid` vazio a chave vira `['', primarykey]`, que nunca coincide com
+ * a linha gravada e faz o `get`/`update` falhar em silêncio. Nestes casos usa o
+ * tenant da sessão (o contrato activo).
+ */
+export const resolveTenantKey = (tenantid?: unknown): string => {
+  const own = String(tenantid ?? '').trim().toUpperCase();
+  return own || getCurrentTenantid().trim().toUpperCase();
+};
+
 export const getCurrentTenantid = (): string => {
   try {
     const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');

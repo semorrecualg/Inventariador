@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db, DexieAsset } from '../services/sqliteService';
-import { getCurrentTenantid } from '../services/localDbService';
+import { getCurrentTenantid, resolveTenantKey } from '../services/localDbService';
 import { Asset } from '../types';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
 import { assetRepository } from '../services/assetRepository';
@@ -331,9 +331,11 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       await db.local_assets.put(updatedItem);
 
       // Também replicar nas outras tabelas de compatibilidade se existirem registros correspondentes
-      // Chave composta [tenantid+primarykey] (v6).
+      // Chave composta [tenantid+primarykey] (v6). Sem tenantid no objeto a
+      // chave virava ['', primarykey] e os `get` abaixo devolviam undefined,
+      // deixando os espelhos `ativos`/`assets` por actualizar.
       const detalhadoKey: [string, string] = [
-        String(ativoDetalhado.tenantid || '').trim().toUpperCase(),
+        resolveTenantKey(ativoDetalhado.tenantid),
         String(ativoDetalhado.primarykey || '')
       ];
       const existsAtivos = await db.ativos.get(detalhadoKey);

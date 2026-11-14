@@ -3,7 +3,7 @@ import localforage from 'localforage';
 import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
 import { syncAssetsToCloudAndMark, syncConfigToCloud } from './supabaseService';
 import { encryption } from './securityService';
-import { localDb, backupDatabaseToPhysicalStorage } from './localDbService';
+import { localDb, backupDatabaseToPhysicalStorage, resolveTenantKey } from './localDbService';
 import { sqliteService, db, DexieAsset, invalidateTenantCaseMarker } from './sqliteService';
 import { generateChecksum } from './utils';
 import { normalizeAssetContract } from '../utils/schema';
@@ -240,7 +240,10 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
   // Bloqueia e sequencia as tabelas envolvidas em modo Read-Write
   await db.transaction('rw', [db.local_assets, db.ativos], async () => {
     // Chave composta [tenantid+primarykey] — o tenantid é o muro entre contratos.
-    const tenantKey = String(assetData.tenantid || '').trim().toUpperCase();
+    // Sem tenantid no objeto a chave virava ['', primarykey] e o `get` abaixo
+    // falhava em silêncio (o merge perdia o registo existente); cai para o
+    // tenant da sessão.
+    const tenantKey = resolveTenantKey(assetData.tenantid);
     const assetKey: [string, string] = [tenantKey, String(assetData.primarykey || '')];
     const existingActive = await db.ativos.get(assetKey);
     const existingLocal = await db.local_assets.get(assetKey);
@@ -249,7 +252,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
       ...(existingActive || {}),
       ...(existingLocal || {}),
       ...assetData,
-      tenantid: String(assetData.tenantid || existingLocal?.tenantid || existingActive?.tenantid || '').trim().toUpperCase(),
+      tenantid: String(assetData.tenantid || existingLocal?.tenantid || existingActive?.tenantid || tenantKey).trim().toUpperCase(),
       _conferido: 1,
       _is_synced: 0,
       updated_at: new Date().toISOString()
