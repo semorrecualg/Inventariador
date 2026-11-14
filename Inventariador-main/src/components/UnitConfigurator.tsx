@@ -23,6 +23,7 @@ import { UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { logger } from '../utils/logger';
 import { mergeUnitConfigIntoList } from '../utils/gpsAnchors';
+import { GPS_ACCURACY, isPreciseFix, isValidCoordinate } from '../utils/gpsCore';
 
 interface UnitConfiguratorProps {
   user: User;
@@ -836,6 +837,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     let currentPhysicalLat = l_lat;
     let currentPhysicalLng = l_lng;
     let hasPhysicalGPS = false;
+    // Precisão informada pelo hardware — só existe quando houve leitura real.
+    let hardwareAccuracy: number | null = null;
 
     try {
       const pos = await Geolocation.getCurrentPosition({
@@ -846,6 +849,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       if (pos && pos.coords) {
         currentPhysicalLat = pos.coords.latitude;
         currentPhysicalLng = pos.coords.longitude;
+        hardwareAccuracy = Number(pos.coords.accuracy);
         hasPhysicalGPS = true;
       }
     } catch (e) {
@@ -884,12 +888,31 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     // Guarda Defensiva: coordenadas canônicas finitas antes da persistência (SQLite + Dexie)
     const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: Number(l_lat), lng: Number(l_lng) });
 
+    if (!isValidCoordinate(safeLat, safeLng)) {
+      setMessage({ text: 'COORDENADAS INVÁLIDAS: MARQUE UM PONTO VÁLIDO NO MAPA.', type: 'error' });
+      setSaving(false);
+      return;
+    }
+    // Guarda de precisão: bloqueia quando há leitura real do hardware com
+    // accuracy ruim (acima de GPS_ACCURACY.COLLECT), exceto para
+    // Admin/Master/Gestor ou quando a âncora é explicitamente sintética
+    // (bypass/mapa manual). Configs legadas sem source continuam protegidas.
+    if (hardwareAccuracy !== null && currentConfig.source !== 'synthetic' && !isPreciseFix({ accuracy: hardwareAccuracy }, GPS_ACCURACY.COLLECT) && !isAdminUser) {
+      setMessage({
+        text: `GPS IMPRECISO (${Math.round(hardwareAccuracy)}m acima do limite de ${GPS_ACCURACY.COLLECT}m). APROXIME-SE DO LOCAL OU SOLICITE BYPASS AO ADMINISTRADOR.`,
+        type: 'error'
+      });
+      setSaving(false);
+      return;
+    }
+
     const configData: UnitConfig = {
       tenantid: user?.tenantid || '',
       filial: unitToSave,
       unit_id: unitToSave,
       lat: safeLat,
       lng: safeLng,
+      source: 'sensor',
       radius_meters: Number(l_radius),
       is_active: true,
       updated_by: user?.email || 'auditor',
@@ -960,6 +983,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       unit_id: unit,
       lat: safeLat,
       lng: safeLng,
+      source: 'synthetic',
       radius_meters: currentConfig.radius_meters || 500,
       is_active: true,
       updated_by: user?.email || 'auditor',
@@ -983,9 +1007,6 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       localStorage.setItem(`kardek_gps_ancora_${unit}`, JSON.stringify(bypassRecord));
       sessionStorage.setItem(`unit_gps_config_${unit}`, JSON.stringify(bypassRecord));
       sessionStorage.setItem('last_configured_gps_unit', unit);
-      // Estrutura canônica explícita para as telas subsequentes relerem sem quebrar
-      sessionStorage.setItem(`gps_lat_${unit}`, String(safeLat));
-      sessionStorage.setItem(`gps_lng_${unit}`, String(safeLng));
       const campaignFlag = `BYPASS_${unit}_${Date.now()}`;
       setBypassCampaignId(campaignFlag);
       sessionStorage.setItem(`kardek_campaign_open_${unit}`, campaignFlag);

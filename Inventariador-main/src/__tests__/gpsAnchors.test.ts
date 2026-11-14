@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   hasRealAnchor,
+  isRealAnchorRecord,
   collectGpsAnchorsFromStorage,
   mergeUnitConfigIntoList
 } from '../utils/gpsAnchors';
@@ -33,6 +34,22 @@ describe('hasRealAnchor', () => {
     expect(hasRealAnchor(undefined, undefined)).toBe(false);
     expect(hasRealAnchor(NaN, NaN)).toBe(false);
     expect(hasRealAnchor('abc', '-49.1')).toBe(false);
+  });
+});
+
+describe('isRealAnchorRecord', () => {
+  it('aceita registro real e legado sem source', () => {
+    expect(isRealAnchorRecord({ lat: -16.7, lng: -49.1 })).toBe(true);
+    expect(isRealAnchorRecord({ lat: -16.7, lng: -49.1, source: 'sensor' })).toBe(true);
+  });
+
+  it('rejeita âncora sintética do BYPASS OFFLINE', () => {
+    expect(isRealAnchorRecord({ lat: -15.7942, lng: -47.8825, source: 'synthetic' })).toBe(false);
+  });
+
+  it('rejeita registro nulo ou sem coordenada utilizável', () => {
+    expect(isRealAnchorRecord(null)).toBe(false);
+    expect(isRealAnchorRecord({ lat: 0, lng: 0 })).toBe(false);
   });
 });
 
@@ -72,6 +89,35 @@ describe('collectGpsAnchorsFromStorage', () => {
     expect(anchors.has('ZERO')).toBe(false);
     expect(anchors.has('NULL')).toBe(false);
     expect(anchors.has('OK')).toBe(true);
+  });
+
+  it('não conta âncora sintética (bypass) como unidade com GPS', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_UNIDADE_BYPASS': JSON.stringify({
+        filial: 'BYPASS',
+        lat: -15.7942,
+        lng: -47.8825,
+        source: 'synthetic'
+      })
+    });
+    expect(collectGpsAnchorsFromStorage(local, makeStorage()).has('BYPASS')).toBe(false);
+  });
+
+  it('ignora par gps_lat_/gps_lng_ se a âncora local for sintética', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_UNIDADE_BYPASS': JSON.stringify({
+        filial: 'UNIDADE_BYPASS',
+        lat: -15.7942,
+        lng: -47.8825,
+        source: 'synthetic'
+      })
+    });
+    const session = makeStorage({
+      'gps_lat_UNIDADE_BYPASS': '-15.7942',
+      'gps_lng_UNIDADE_BYPASS': '-47.8825'
+    });
+    const anchors = collectGpsAnchorsFromStorage(local, session);
+    expect(anchors.has('UNIDADE BYPASS')).toBe(false);
   });
 
   it('não quebra com JSON malformado (ignora o registro)', () => {

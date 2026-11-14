@@ -371,6 +371,13 @@ export interface UnitConfig {
   lng: number;
   radius_meters: number;
   is_active: boolean;
+  /**
+   * Procedência da coordenada da unidade.
+   * `sensor`    → âncora medida/marcada no mapa (vira geocerca).
+   * `synthetic` → contingência (BYPASS OFFLINE, Brasília-DF). Não é âncora real:
+   * não deve contar como unidade com GPS nem alimentar geocerca/mapa.
+   */
+  source?: 'sensor' | 'synthetic';
   /** Flags de política da unidade — sincronizadas em `unit_configs.flags`. */
   hasGps?: boolean;
   requireNf?: boolean;

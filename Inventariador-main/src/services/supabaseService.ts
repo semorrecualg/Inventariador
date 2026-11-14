@@ -8,7 +8,7 @@ import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
-import { hasRealAnchor } from '../utils/gpsAnchors';
+import { hasRealAnchor, isRealAnchorRecord } from '../utils/gpsAnchors';
 import { buildUnitFlags, mergeUnitFlags, pickUnitFlags } from '../utils/unitConfigFlags';
 import { isAdminEmail } from '../utils/authUtils';
 import { pullDedupKey } from '../utils/syncDedup';
@@ -3503,7 +3503,7 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
     .toString().trim();
   if (!tenantid || !filial) return false;
 
-  const flags = buildUnitFlags(config, hasRealAnchor(config.lat, config.lng));
+  const flags = buildUnitFlags(config, isRealAnchorRecord(config));
 
   try {
     // 1. Flags já gravadas (outro dispositivo pode saber mais do que este)
@@ -3596,11 +3596,12 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       lng: Number(config.lng),
       radius_meters: Number(config.radius_meters),
       is_active: Boolean(config.is_active),
+      source: config.source,
       updated_by: String(config.updated_by || 'system'),
       updated_at: new Date().toISOString(),
       // Flags de política viajam no cache local (e no data do inventory_config):
       // é isso que faz o chip/regras resolverem offline.
-      flags: buildUnitFlags(config, hasRealAnchor(config.lat, config.lng))
+      flags: buildUnitFlags(config, isRealAnchorRecord(config))
     };
 
     logger.info('>>> [Persistence] Salvando GPS Local-First (Cache):', unitKey);
@@ -3761,7 +3762,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
         if (key && key.startsWith('kardek_gps_ancora_')) {
           const rec = JSON.parse(localStorage.getItem(key) || 'null') as Record<string, unknown> | null;
           const uId = String(rec?.filial || rec?.unit_id || rec?._unitid || '').trim();
-          if (uId && hasRealAnchor(rec?.lat, rec?.lng)) {
+          if (uId && isRealAnchorRecord(rec)) {
             configs[uId] = {
               ...(rec as unknown as UnitConfig),
               filial: uId,
@@ -3782,18 +3783,21 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
           const unit = key.slice('gps_lat_'.length);
           const lat = Number(sessionStorage.getItem(key));
           const lng = Number(sessionStorage.getItem('gps_lng_' + unit));
-          if (unit && hasRealAnchor(lat, lng)) {
-            configs[unit] = {
-              filial: unit,
-              unit_id: unit,
-              tenantid: tenantid || '',
-              lat,
-              lng,
-              radius_meters: Number(sessionStorage.getItem('unit_gps_radius_' + unit)) || 500,
-              is_active: true,
-              updated_at: new Date().toISOString()
-            } as UnitConfig;
-          }
+          if (!unit || !hasRealAnchor(lat, lng)) continue;
+          try {
+            const localRec = JSON.parse(localStorage.getItem(`kardek_gps_ancora_${unit}`) || 'null') as Record<string, unknown> | null;
+            if (localRec?.source === 'synthetic') continue;
+          } catch { /* ignora */ }
+          configs[unit] = {
+            filial: unit,
+            unit_id: unit,
+            tenantid: tenantid || '',
+            lat,
+            lng,
+            radius_meters: Number(sessionStorage.getItem('unit_gps_radius_' + unit)) || 500,
+            is_active: true,
+            updated_at: new Date().toISOString()
+          } as UnitConfig;
         }
       }
     } catch (err) {

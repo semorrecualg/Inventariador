@@ -10,7 +10,7 @@ import { validateAndPushRoute, registerToastCallback } from './services/Navigati
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
-import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors';
+import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -6495,7 +6495,7 @@ useEffect(() => {
     const unitsWithGps = new Set<string>();
     unitConfigs.forEach(c => {
       const uId = c.filial || c._unitid || c.unit_id;
-      if (uId && hasRealAnchor(c.lat, c.lng)) {
+      if (uId && isRealAnchorRecord(c)) {
         const norm = normalizeKey(uId);
         unitsWithGps.add(norm);
       }

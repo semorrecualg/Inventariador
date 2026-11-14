@@ -10,6 +10,22 @@ export const hasRealAnchor = (lat: unknown, lng: unknown): boolean =>
   Number(lat) !== 0 && Number(lng) !== 0;
 
 /**
+ * Um REGISTRO de âncora só vale como real se as coordenadas passarem em
+ * `hasRealAnchor` e ele não estiver marcado como sintético.
+ *
+ * O BYPASS OFFLINE do UnitConfigurator grava Brasília-DF com lat/lng numéricos
+ * (não-zero) para liberar a esteira operacional. Sem esta marca, essa
+ * contingência passaria por âncora medida e alimentaria geocerca e mapa.
+ * Registros legados sem `source` continuam valendo como reais.
+ */
+export const isRealAnchorRecord = (rec: unknown): boolean => {
+  const r = rec as Record<string, unknown> | null | undefined;
+  if (!r) return false;
+  if (r.source === 'synthetic') return false;
+  return hasRealAnchor(r.lat, r.lng);
+};
+
+/**
  * Varre o armazenamento durável do navegador e devolve o conjunto de unidades
  * (chaves normalizadas) que possuem âncora GPS real.
  *
@@ -32,7 +48,7 @@ export const collectGpsAnchorsFromStorage = (
       if (key && key.startsWith('kardek_gps_ancora_')) {
         const rec = JSON.parse(local.getItem(key) || 'null') as Record<string, unknown> | null;
         const uId = rec?.filial || rec?.unit_id || rec?._unitid;
-        if (uId && hasRealAnchor(rec?.lat, rec?.lng)) {
+        if (uId && isRealAnchorRecord(rec)) {
           anchors.add(normalizeKey(String(uId)));
         }
       }
@@ -46,9 +62,12 @@ export const collectGpsAnchorsFromStorage = (
         const unit = key.slice('gps_lat_'.length);
         const lat = Number(session.getItem(key));
         const lng = Number(session.getItem(`gps_lng_${unit}`));
-        if (unit && hasRealAnchor(lat, lng)) {
-          anchors.add(normalizeKey(unit));
-        }
+        if (!unit || !hasRealAnchor(lat, lng)) continue;
+        try {
+          const localRec = JSON.parse(local.getItem(`kardek_gps_ancora_${unit}`) || 'null') as Record<string, unknown> | null;
+          if (localRec?.source === 'synthetic') continue;
+        } catch { /* ignora leitura */ }
+        anchors.add(normalizeKey(unit));
       }
     }
   } catch { /* storage indisponível — ignora */ }
