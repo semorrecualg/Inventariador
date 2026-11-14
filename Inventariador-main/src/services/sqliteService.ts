@@ -1408,14 +1408,11 @@ export class SqliteService {
       if (primaryKeyVal) {
         // Sem tenantid no ativo a chave virava ['', primarykey], o `get` devolvia
         // undefined e o ativo era ignorado em silêncio. Cai para a sessão.
-        const tenantKey = resolveTenantKey(asset.tenantid);
-        const existing = tenantKey
-          ? await db.ativos.get([tenantKey, primaryKeyVal])
-          : undefined;
+        const existing = await db.ativos.get([resolveTenantKey(asset.tenantid), primaryKeyVal]);
         const updatedItem = {
           ...existing,
           ...asset,
-          tenantid: String(asset.tenantid || existing?.tenantid || tenantKey).trim().toUpperCase(),
+          tenantid: resolveTenantKey(asset.tenantid || existing?.tenantid),
           primarykey: primaryKeyVal,
           id: primaryKeyVal,
           _is_synced: 0

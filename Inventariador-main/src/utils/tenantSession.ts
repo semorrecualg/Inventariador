@@ -4,7 +4,7 @@
  * Vive em `utils` (sem importar serviços) para que o `sqliteService`, o
  * `localDbService` e a UI possam partilhar a MESMA regra sem ciclo de imports.
  */
-export const getSessionTenantid = (): string => {
+export const getCurrentTenantid = (): string => {
   try {
     const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
     if (userStr) {
@@ -24,5 +24,5 @@ export const getSessionTenantid = (): string => {
  */
 export const resolveTenantKey = (tenantid?: unknown): string => {
   const own = String(tenantid ?? '').trim().toUpperCase();
-  return own || getSessionTenantid().trim().toUpperCase();
+  return own || getCurrentTenantid().trim().toUpperCase();
 };

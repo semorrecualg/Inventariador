@@ -252,7 +252,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
       ...(existingActive || {}),
       ...(existingLocal || {}),
       ...assetData,
-      tenantid: String(assetData.tenantid || existingLocal?.tenantid || existingActive?.tenantid || tenantKey).trim().toUpperCase(),
+      tenantid: resolveTenantKey(assetData.tenantid || existingLocal?.tenantid || existingActive?.tenantid),
       _conferido: 1,
       _is_synced: 0,
       updated_at: new Date().toISOString()

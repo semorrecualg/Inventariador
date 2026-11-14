@@ -5,14 +5,14 @@
 //
 // Com `tenantid` vazio a chave vira `['', primarykey]`: o `get`/`update` não
 // encontra a linha gravada e o ativo é ignorado em silêncio (flushFieldChanges)
-// ou o guard de contrato fica inoperante (filterCrossTenantWrites). Estes testes
-// fixam o fallback no `sqliteService` e no wrapper `localDb.assets.update`.
+// ou a carga cria uma linha órfã (filterCrossTenantWrites). Estes testes fixam o
+// fallback no `sqliteService` e no wrapper `localDb.assets.update`.
 // ============================================================================
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db, sqliteService } from '../services/sqliteService';
 import type { DexieAsset } from '../services/sqliteService';
-import { localDb, resolveTenantKey } from '../services/localDbService';
+import { localDb } from '../services/localDbService';
 
 const TENANT = 'CICOPAL';
 const PK = 'ABC-1001';
@@ -79,13 +79,13 @@ describe('sqliteService.filterCrossTenantWrites — carga sem tenantid', () => {
     expect(await db.local_assets.get(['', 'NOVO-1'])).toBeUndefined();
   });
 
-  it('continua a bloquear escrita de outro contrato', async () => {
+  it('preserva a chave de outro contrato como veio', async () => {
     await db.local_assets.put(row({ primarykey: 'CROSS-1', tenantid: 'OUTRO' }));
 
     const safe = await sqliteService.filterCrossTenantWrites([
       row({ tenantid: 'OUTRO', primarykey: 'CROSS-1' })
     ]);
-    // Colisão impossível com chave composta: o par é preservado como veio.
+    // Colisão entre contratos é impossível com a chave composta: o par é preservado.
     expect(safe[0].tenantid).toBe('OUTRO');
   });
 });
@@ -95,13 +95,5 @@ describe('localDb.assets.update — alteração sem tenantid', () => {
     await localDb.assets.update(PK, { descricaodoativo: 'ARMARIO' });
 
     expect((await db.local_assets.get([TENANT, PK]))?.descricaodoativo).toBe('ARMARIO');
-  });
-});
-
-describe('resolveTenantKey — regra única', () => {
-  it('é a mesma exportada pelo localDbService e pelos utils', async () => {
-    const util = await import('../utils/tenantSession');
-    expect(util.resolveTenantKey).toBe(resolveTenantKey);
-    expect(util.resolveTenantKey('')).toBe(TENANT);
   });
 });

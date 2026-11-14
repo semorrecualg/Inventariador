@@ -1,4 +1,4 @@
-import { getSessionTenantid, resolveTenantKey } from '../utils/tenantSession';
+import { getCurrentTenantid, resolveTenantKey } from '../utils/tenantSession';
 import { db, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
@@ -55,10 +55,8 @@ export const matchesAddressSearch = (address: unknown, term: unknown): boolean =
   return normalizeAddressSearch(address).includes(needle);
 };
 
-export const getCurrentTenantid = (): string => getSessionTenantid();
-
-/** Mesma regra do `utils/tenantSession`, reexportada para quem já a usa daqui. */
-export { resolveTenantKey };
+/* Tenant do contrato activo e chave composta: regra única em utils/tenantSession. */
+export { getCurrentTenantid, resolveTenantKey };
 
 const handleDemoAuditIncrement = () => {
   try {

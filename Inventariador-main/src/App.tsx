@@ -1,7 +1,6 @@
 
 // Inventariador GBR v2.6 - Force Update to MPULMON Project
 logger.info(">>> [System] Iniciando Inventariador GBR v2.6 - Modo de Isolamento Ativo...");
-import { resolveTenantKey } from './utils/tenantSession';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { PermissionGate } from './components/PermissionGate';
@@ -16,6 +15,7 @@ import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './uti
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
+import { resolveTenantKey } from './utils/tenantSession';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, isAuditorUser, userHasPermission } from './services/rbacService';
 
