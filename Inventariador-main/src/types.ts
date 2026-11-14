@@ -360,6 +360,12 @@ export interface NavigationParams {
   openAddUser?: boolean;
 }
 
+/**
+ * Proveniência da âncora da unidade: `sensor` = leitura do GPS do aparelho;
+ * `manual` = pino posicionado no mapa (clique/arraste/busca) sem leitura real.
+ */
+export type AnchorSource = 'sensor' | 'manual';
+
 export interface UnitConfig {
   id?: string;
   tenantid: string;
@@ -371,6 +377,8 @@ export interface UnitConfig {
   lng: number;
   radius_meters: number;
   is_active: boolean;
+  /** Como a âncora foi obtida — ausente em registros legados (tratados como manual). */
+  source?: AnchorSource;
   /** Flags de política da unidade — sincronizadas em `unit_configs.flags`. */
   hasGps?: boolean;
   requireNf?: boolean;

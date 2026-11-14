@@ -3596,6 +3596,9 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       lng: Number(config.lng),
       radius_meters: Number(config.radius_meters),
       is_active: Boolean(config.is_active),
+      // Proveniência da âncora (sensor | manual): viaja no JSONB `inventory_config.data`,
+      // sem depender de coluna nova na tabela da nuvem.
+      source: config.source,
       updated_by: String(config.updated_by || 'system'),
       updated_at: new Date().toISOString(),
       // Flags de política viajam no cache local (e no data do inventory_config):

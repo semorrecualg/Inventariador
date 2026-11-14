@@ -448,6 +448,8 @@ export class SqliteService {
       lng: cfg.lng !== undefined && cfg.lng !== null ? Number(cfg.lng) : undefined,
       radius_meters: cfg.radius_meters !== undefined && cfg.radius_meters !== null ? Number(cfg.radius_meters) : undefined,
       is_active: cfg.is_active !== false ? 1 : 0,
+      // Proveniência da âncora (sensor | manual) preservada no espelho físico.
+      source: typeof cfg.source === 'string' ? cfg.source : undefined,
       updated_at: String(cfg.updated_at || '')
     }));
     await db.unit_configs.bulkPut(mapped);
