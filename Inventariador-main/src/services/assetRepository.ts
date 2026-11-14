@@ -1,5 +1,6 @@
 
 import { localDb } from './localDbService';
+import { db, DexieAsset } from './sqliteService';
 import { Asset, TagInventario } from '../types';
 
 /**
@@ -31,6 +32,25 @@ export const assetRepository = {
     }
     
     return asset || undefined;
+  },
+
+  /**
+   * Linha Dexie crua (sem conversão) por etiqueta, com escopo de tenant.
+   *
+   * `etiqueta` NÃO é índice no schema Dexie v7 (`[tenantid+primarykey],
+   * primarykey, filial, _is_synced, [tenantid+filial]`): `where('etiqueta')`
+   * lança SchemaError. O filtro em memória é a única forma correta aqui — como
+   * já acontece no wrapper `localDb.assets.where()`.
+   */
+  async findRawByEtiqueta(etiqueta: string, tenantid: string): Promise<DexieAsset | undefined> {
+    const target = String(etiqueta || '').trim().toUpperCase();
+    const tenant = String(tenantid || '').trim().toUpperCase();
+    if (!target) return undefined;
+
+    return await db.ativos
+      .filter(a => String(a.etiqueta || '').trim().toUpperCase() === target
+        && (!tenant || String(a.tenantid || '').trim().toUpperCase() === tenant))
+      .first();
   },
 
   /**

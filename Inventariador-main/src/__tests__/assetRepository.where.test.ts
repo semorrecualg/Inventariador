@@ -139,3 +139,28 @@ describe('assetRepository.findByEtiquetaInUnit — ramo composto do where() (ach
     expect(found).toBeUndefined();
   });
 });
+
+describe('assetRepository.findRawByEtiqueta — coluna sem índice (InventoryCard)', () => {
+  it('encontra a linha crua por etiqueta sem lançar SchemaError', async () => {
+    await db.ativos.put(seedAsset({ primarykey: 'PK-900', etiqueta: 'PAT-900', filial: 'FILIAL-X' }));
+
+    // A leitura por primarykey falha quando o código lido é a etiqueta; o
+    // atalho antigo (`db.ativos.where('etiqueta')`) lançava SchemaError.
+    const row = await assetRepository.findRawByEtiqueta('pat-900', TENANT);
+    expect(row?.primarykey).toBe('PK-900');
+    expect(row?.etiqueta).toBe('PAT-900');
+  });
+
+  it('não cruza o muro do tenant', async () => {
+    await db.ativos.put(seedAsset({ primarykey: 'PK-901', etiqueta: 'PAT-901', tenantid: 'OUTRO_TENANT' }));
+
+    const row = await assetRepository.findRawByEtiqueta('PAT-901', TENANT);
+    expect(row).toBeUndefined();
+  });
+
+  it('devolve undefined para termo vazio', async () => {
+    await db.ativos.put(seedAsset({ primarykey: 'PK-902', etiqueta: 'PAT-902' }));
+
+    expect(await assetRepository.findRawByEtiqueta('   ', TENANT)).toBeUndefined();
+  });
+});

@@ -3,6 +3,7 @@ import { db, DexieAsset } from '../services/sqliteService';
 import { getCurrentTenantid } from '../services/localDbService';
 import { Asset } from '../types';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
+import { assetRepository } from '../services/assetRepository';
 import { showRecoveryToast } from '../services/NavigationGuardService';
 import { 
   ArrowLeft, 
@@ -413,9 +414,10 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         ? await db.ativos.get([scanTenant, normalizedBarcode])
         : await db.ativos.where('primarykey').equals(normalizedBarcode).first();
       if (!asset) {
-        asset = await db.ativos.where('etiqueta').equals(normalizedBarcode)
-          .filter(a => !scanTenant || String(a.tenantid || '').trim().toUpperCase() === scanTenant)
-          .first();
+        // `etiqueta` não é índice do schema Dexie: `where('etiqueta')` lança
+        // SchemaError e abortava a leitura sempre que o código lido não era a
+        // própria primarykey.
+        asset = await assetRepository.findRawByEtiqueta(normalizedBarcode, scanTenant);
       }
 
       if (asset) {
