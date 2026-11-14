@@ -13,11 +13,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 
-const { deleteCampaignMock, localDeleteMock, removeCampaignFromAssetsMock, fetchCampaignsMock, adminFlag, manageCampaignsFlag } = vi.hoisted(() => ({
+const { deleteCampaignMock, localDeleteMock, removeCampaignFromAssetsMock, fetchCampaignsMock, getContextValueMock, setContextValueMock, adminFlag, manageCampaignsFlag } = vi.hoisted(() => ({
   deleteCampaignMock: vi.fn().mockResolvedValue(true),
   localDeleteMock: vi.fn().mockResolvedValue(undefined),
   removeCampaignFromAssetsMock: vi.fn().mockResolvedValue(undefined),
   fetchCampaignsMock: vi.fn(),
+  getContextValueMock: vi.fn(),
+  setContextValueMock: vi.fn().mockResolvedValue(undefined),
   // Controlam o gate de exclusão: isAdminUser (RBAC) e manage_campaigns.
   adminFlag: { value: true },
   manageCampaignsFlag: { value: true }
@@ -65,7 +67,12 @@ vi.mock('../services/rbacService', () => ({
 
 vi.mock('../services/sqliteService', () => ({
   db: {},
-  sqliteService: { getIsInitialized: () => true, persist: vi.fn() }
+  sqliteService: {
+    getIsInitialized: () => true,
+    persist: vi.fn(),
+    getContextValue: getContextValueMock,
+    setContextValue: setContextValueMock
+  }
 }));
 
 vi.mock('../services/localDbService', () => ({
@@ -126,11 +133,16 @@ const renderManager = (list: InventoryCampaign[], onRefresh = vi.fn()) => (
 describe('CampaignManager — exclusão de campanha', () => {
   beforeEach(() => {
     cleanup();
+    localStorage.clear();
+    sessionStorage.clear();
     adminFlag.value = true;
     manageCampaignsFlag.value = true;
     deleteCampaignMock.mockClear();
     localDeleteMock.mockClear();
     removeCampaignFromAssetsMock.mockClear();
+    getContextValueMock.mockReset();
+    getContextValueMock.mockResolvedValue(null);
+    setContextValueMock.mockClear();
     // A nuvem continua a devolver as duas (delete remoto pode ser recusado/atrasado):
     // a linha apagada não pode voltar para a lista por causa disso.
     fetchCampaignsMock.mockResolvedValue([...campaigns]);
@@ -197,6 +209,65 @@ describe('CampaignManager — exclusão de campanha', () => {
     fireEvent.click(screen.getByText('Inventário nov 2026'));
     expect(await screen.findByText('Arquivar')).toBeTruthy();
     expect(screen.queryByText('Excluir Campanha')).toBeNull();
+  });
+
+  it('fecha o alerta no clique, sem esperar o refresh do App terminar', async () => {
+    // Refresh do App pendente (banco grande/offline): antes o alerta só fechava
+    // depois desta promessa, com a linha já apagada — parecia botão morto.
+    let releaseRefresh: (() => void) | undefined;
+    const onRefresh = vi.fn(() => new Promise<void>((resolve) => { releaseRefresh = resolve; }));
+    render(renderManager(campaigns, onRefresh));
+
+    expect(await screen.findByText('Inventário nov 2026')).toBeTruthy();
+    fireEvent.click(screen.getAllByText('Excluir')[0]);
+    expect(await screen.findByText('ALERTA CRÍTICO')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Confirmar Exclusão'));
+
+    await waitFor(() => expect(screen.queryByText('ALERTA CRÍTICO')).toBeNull());
+    expect(onRefresh).toHaveBeenCalled();
+    expect(screen.queryByText('Inventário nov 2026')).toBeNull();
+    releaseRefresh?.();
+  });
+
+  it('não devolve a campanha excluída quando a releitura falha e o prop ainda está velho', async () => {
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    const view = render(renderManager(campaigns, onRefresh));
+    expect(await screen.findByText('Inventário nov 2026')).toBeTruthy();
+
+    fireEvent.click(screen.getAllByText('Excluir')[0]);
+    fireEvent.click(await screen.findByText('Confirmar Exclusão'));
+    await waitFor(() => expect(screen.queryByText('Inventário nov 2026')).toBeNull());
+
+    // A releitura (merge local+nuvem) falha e o prop do App continua com a linha
+    // apagada: o fallback não pode reabastecer a lista com ela.
+    fetchCampaignsMock.mockReset();
+    fetchCampaignsMock.mockRejectedValue(new Error('offline'));
+    view.rerender(renderManager(campaigns, onRefresh));
+    fireEvent.click(screen.getByTitle('Atualizar'));
+
+    await waitFor(() => expect(screen.queryByText('Inventário nov 2026')).toBeNull());
+    expect(screen.getByText('Nova campanha nov 2026')).toBeTruthy();
+  });
+
+  it('limpa cache por unidade, sessão e SYSTEM_CONTEXT da campanha excluída', async () => {
+    localStorage.setItem('kardek_campanha_ativa_010101 CICOPAL GO', 'true');
+    localStorage.setItem('app_current_campaign', 'camp-a');
+    sessionStorage.setItem('activeCampaignId', 'camp-a');
+    sessionStorage.setItem('activeCampaignStatus', 'ACTIVE');
+    getContextValueMock.mockResolvedValue('camp-a');
+
+    render(renderManager(campaigns));
+    expect(await screen.findByText('Inventário nov 2026')).toBeTruthy();
+
+    fireEvent.click(screen.getAllByText('Excluir')[0]);
+    fireEvent.click(await screen.findByText('Confirmar Exclusão'));
+
+    await waitFor(() => expect(localStorage.getItem('kardek_campanha_ativa_010101 CICOPAL GO')).toBeNull());
+    expect(localStorage.getItem('app_current_campaign')).toBeNull();
+    expect(sessionStorage.getItem('activeCampaignId')).toBeNull();
+    expect(sessionStorage.getItem('activeCampaignStatus')).toBeNull();
+    expect(setContextValueMock).toHaveBeenCalledWith('active_campaign', '');
   });
 
   it('cancelar mantém a campanha na lista e não apaga nada', async () => {

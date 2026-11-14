@@ -197,6 +197,32 @@ export const readActiveCampaignCache = (
   return units;
 };
 
+/**
+ * Remove do cache local a marca de campanha ACTIVA de uma unidade.
+ *
+ * Chamado ao excluir a campanha: o cache é derivado do banco, e sem esta
+ * limpeza o chip CAMPANHA e a liberação continuavam a apontar para uma
+ * campanha que já não existe (a linha saiu da tabela, o "ativo" ficou).
+ */
+export const clearActiveCampaignCacheForUnit = (
+  storage: { key: (i: number) => string | null; length: number; removeItem: (k: string) => void } | null | undefined,
+  unit: string | null | undefined
+): void => {
+  const target = normalizeKey(unit || '');
+  if (!storage || !target) return;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key || !key.startsWith(ACTIVE_CAMPAIGN_CACHE_PREFIX)) continue;
+      if (normalizeKey(key.slice(ACTIVE_CAMPAIGN_CACHE_PREFIX.length)) === target) keys.push(key);
+    }
+    keys.forEach(key => storage.removeItem(key));
+  } catch {
+    /* cache best-effort: falha de storage não pode abortar a exclusão */
+  }
+};
+
 /** Rótulo curto do que falta para liberar a unidade. */
 export const describeUnitReleaseMissing = (status: UnitReleaseStatus | null): string => {
   if (!status || status.released) return '';

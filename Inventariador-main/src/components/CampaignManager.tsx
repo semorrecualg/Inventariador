@@ -21,7 +21,8 @@ import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
 import { isAdminUser, userHasPermission } from '../services/rbacService';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot, fetchCampaigns, fetchAllCampaigns } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
-import { db } from '../services/sqliteService';
+import { db, sqliteService } from '../services/sqliteService';
+import { campaignUnitOf, clearActiveCampaignCacheForUnit } from '../utils/unitRelease';
 import { Device } from '@capacitor/device';
 import { logger } from '../utils/logger';
 import { resolveTenantId, resolveWorkingTenantId } from '../utils/tenantUtils';
@@ -150,10 +151,12 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       return visible;
     } catch (err) {
       logger.error(`>>> [Dexie Native] Erro na leitura automática:`, err);
+      // O fallback também respeita as exclusões desta sessão: cair para o prop
+      // cru devolvia à lista a campanha que já tinha saído da tabela.
       if (campaigns && campaigns.length > 0) {
-        setLocalCampaigns(campaigns);
+        setLocalCampaigns(withoutDeleted(campaigns));
       }
-      return campaigns;
+      return withoutDeleted(campaigns || []);
     } finally {
       setIsRefreshing(false);
     }
@@ -288,8 +291,35 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     }
   };
 
+  /**
+   * Esquece a campanha em todo o estado derivado (cache por unidade, campanha
+   * corrente na sessão e SYSTEM_CONTEXT). Sem isto o chip CAMPANHA e a liberação
+   * da unidade continuavam a apontar para uma campanha que já não existe.
+   */
+  const clearDeletedCampaignSelection = React.useCallback(async (campaignId: string, unit: string) => {
+    try {
+      if (typeof window !== 'undefined') clearActiveCampaignCacheForUnit(window.localStorage, unit);
+      if (typeof localStorage !== 'undefined' && String(localStorage.getItem('app_current_campaign') || '') === campaignId) {
+        localStorage.removeItem('app_current_campaign');
+      }
+      if (typeof sessionStorage !== 'undefined' && String(sessionStorage.getItem('activeCampaignId') || '') === campaignId) {
+        sessionStorage.removeItem('activeCampaignId');
+        sessionStorage.removeItem('activeCampaignStatus');
+      }
+      const stored = await sqliteService.getContextValue('active_campaign');
+      if (stored && String(stored) === campaignId) {
+        await sqliteService.setContextValue('active_campaign', '');
+      }
+    } catch (err) {
+      logger.warn('>>> [Governance] Falha ao limpar a campanha excluída do contexto:', err);
+    }
+  }, []);
+
   // ATIVAÇÃO OPERACIONAL E SEGURA DO BOTÃO "EXCLUIR CAMPANHA" (Hardware check e SQL)
   const executeDeleteCampaign = async (campaignId: string) => {
+    // Unidade da campanha: o cache de campanha activa é por filial.
+    const deletedCampaign = localCampaigns.find(c => String(c.id) === String(campaignId));
+    const deletedUnit = campaignUnitOf(deletedCampaign) || (initialUnit || '');
     // 4. RESTRANCA DE HARDWARE DE DISCO (Core v2.6):
     let isLowBattery = false;
     try {
@@ -323,6 +353,12 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       return;
     }
 
+    // O alerta fecha no clique, não no fim: a exclusão passa pelo Dexie, pelos
+    // ativos e pelo refresh do App, e o modal ficava aberto segundos depois de a
+    // linha já ter saído da tabela (parecia botão morto). `isSaving` mantém o
+    // "em curso" e impede o duplo clique.
+    setIsConfirmDeleteOpen(false);
+    setDeletingCampaignId(null);
     setIsSaving(true);
     try {
       logger.info(`>>> [Dexie] Executando deleção estrita para ID=${campaignId}`);
@@ -332,6 +368,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       // até o refresh terminar, e sem isto ela voltava para a lista.
       deletedCampaignIdsRef.current.add(String(campaignId));
       setLocalCampaigns(prev => prev.filter(c => String(c.id) !== String(campaignId)));
+
+      // Estado derivado da campanha (cache por unidade / contexto / sessão).
+      await clearDeletedCampaignSelection(String(campaignId), deletedUnit);
 
       // Limpeza de ativos relacionados vinculados a essa campanha
       await localDb.assets.removeCampaignFromAssets(String(campaignId));
@@ -346,7 +385,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       setSuccessMessage('Campanha excluída com sucesso');
       setTimeout(() => setSuccessMessage(null), 3000);
 
-      // Pós-deleção, limpa states e fecha modais/fichas
+      // Pós-deleção, limpa states/fichas (o alerta já fechou no clique)
       setIsConfirmDeleteOpen(false);
       setDeletingCampaignId(null);
       setSelectedCampaign(null);
