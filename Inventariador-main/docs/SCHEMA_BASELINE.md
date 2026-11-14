@@ -139,5 +139,5 @@ Indexação composta `[tenantid+filial]` → queries sub-12ms no `AddressSelecto
 - Dicionário: `src/constants/schema.ts`
 - Contrato: `src/__tests__/schemaBaseline.test.ts`
 - Plano: `docs/MIGRACAO_HIBRIDA.md` (Fase 0) · Arquitetura: `docs/ARCHITECTURE.md` §7
-- Padronização `tenantid`: `docs/ARCHITECTURE.md` §7.6 / §12.4
+- Padronização `tenantid`: `docs/ARCHITECTURE.md` §7.6 / § 12, item 4
 - Muro multi-tenant (chave composta): `docs/ARCHITECTURE.md` §7.1 · `CHANGELOG.md [Unreleased]`

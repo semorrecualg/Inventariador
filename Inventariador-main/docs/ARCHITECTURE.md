@@ -17,7 +17,7 @@ PWA mobile-first para **auditoria física de ativos imobilizados em campo** (con
 | Estado | React local no `App.tsx` (máquina de telas) + Zustand (`stores/`) |
 | Persistência local | **Dexie.js (IndexedDB)** — banco `InventoryLocalStore` (tabelas em §7) |
 | Nuvem (híbrida) | **Supabase** (Postgres multi-tenant, schema padronizado `tenantid` + `filial`) + Gemini (`@google/genai`) — ver §10 |
-| Testes | Vitest (95 arquivos / 852 testes) — ver §13 |
+| Testes | Vitest (96 arquivos / 860 testes) — ver §13 |
 | CI | GitHub Actions (APK Android) + PWA |
 
 **Localização:** o app vive em `Inventariador-main/` (subdiretório do workspace; raiz do repo GitHub `semorrecualg/Inventariador`).
@@ -522,7 +522,7 @@ emissão posterior à rotação), sem revelar o valor.
    isolamento por tenant (`[tenantid+filial]` — helpers em `utils/tenantUtils.ts`);
    alterações de schema local = nova `version(n)` no Dexie; alterações no Supabase via
    `scripts/migrate-*-supabase.sql`.
-5. **Valide**: `npx tsc --noEmit` (zero erros em `src/`) + `npx vitest run` (852 testes).
+5. **Valide**: `npx tsc --noEmit` (zero erros em `src/`) + `npx vitest run` (860 testes).
 6. **Reproduza** no navegador (Playwright headless) quando o bug for de fluxo/UI.
 
 ---
@@ -571,7 +571,7 @@ emissão posterior à rotação), sem revelar o valor.
 `tenantUtils`, `navigationMap`, `virtualSnapshot`, `schemaBaseline`, `securityExport`,
 `rbacService`, `tenantProvisioning`, `passwordPolicy`, `workContextUtils`,
 `routingTenantIsolation`, `postSelectionRouting`, `tenantContext`, `loadHistoryUtils`,
-`countAtivosByTenant` (95 arquivos / 852 testes).
+`countAtivosByTenant` (96 arquivos / 860 testes).
 - Ambiente `node` default; arquivos com `@vitest-environment jsdom` usam jsdom.
 - E2E: `npm run test:e2e` (Playwright) — ainda não configurado com browsers neste workspace.
 
@@ -599,7 +599,7 @@ emissão posterior à rotação), sem revelar o valor.
 
 - Configuração do contrato na nuvem: **resolvido** (sem pendência) — a config sobe para
   `config_<TENANT>`, o pull não leva identidade da linha para o estado e falhas de gravação
-  ficam em `audit_logs` (`CONFIG_SYNC_FAIL`). Ver §10 e §12.6.
+  ficam em `audit_logs` (`CONFIG_SYNC_FAIL`). Ver §10 e § 12, item 6.
 
 Rastreamento público: **GitHub Issue #6** (`semorrecualg/Inventariador`).
 

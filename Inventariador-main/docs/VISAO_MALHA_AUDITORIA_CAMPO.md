@@ -375,7 +375,7 @@ issue/chat para preencher a tabela com os valores reais.
 
 ### 6.5 F3 — Posse de território (1–2 semanas)
 
-- [ ] **F3.1** Claim local offline com lease de 16 h (decisão §10.2) e renovação.
+- [ ] **F3.1** Claim local offline com lease de 16 h (decisão § 10, item 2) e renovação.
   - **Aceite:** assumir território funciona em modo avião; claim sobrevive a reinício do app.
 - [ ] **F3.2** Encontro de claims no sync: livre fica com o primeiro; tomado mostra “em posse de”.
   - **Aceite:** dois aparelhos não iniciam contagem do mesmo território; decisão registada como evento `POSSE`.

@@ -33,7 +33,7 @@ O snapshot do schema (`SCHEMA_BASELINE.md` §2) lista **três tabelas com o mesm
 | `assets` | `DexieAsset` | `primarykey` | `filial`, `_is_synced`, `[tenantid+filial]` | 100% idêntica |
 
 `SCHEMA_BASELINE.md` §3.1 já confirma textualmente: *“Três tabelas espelho (mesmo
-tipo/shape)”* — e o fingerprint congelado (§5.2) é idêntico para as três.
+tipo/shape)”* — e o fingerprint congelado (§ 5 do `SCHEMA_BASELINE.md`) é idêntico para as três.
 
 ### 2.2 Comportamento de dados (documentado)
 

@@ -15,7 +15,7 @@
     "postinstall": "node scripts/postinstall.cjs",
     "test": "vitest run",
     "verify:governanca": "node scripts/verify-governance.cjs",
-    "check:docs": "node scripts/check-docs.cjs && node scripts/check-test-counts.cjs",
+    "check:docs": "node scripts/check-docs.cjs && node scripts/check-test-counts.cjs && node scripts/check-section-refs.cjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug",

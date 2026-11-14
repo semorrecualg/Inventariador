@@ -64,7 +64,7 @@ export function pickCanonical(rec: Record<string, unknown>, lowerKey: string): u
   leituras híbridas (`App.tsx:1893`, `Inventory.tsx:639`).
 - Na **C5** (fim), `pickCanonical` pode ser removido e as leituras passam a ser diretas.
 
-## 2. Escopo por classe (matriz do §6.4 + novos dados)
+## 2. Escopo por classe (matriz do § 6.4 de `HIGIENIZACAO_ENDERECO.md` + novos dados)
 
 | Classe | Campos (canônicos) | Regra | Ocorrências UPPER (src/) |
 |---|---|---|---|
@@ -159,7 +159,7 @@ Desvios SRE documentados (proteção de dados — contrato de risco zero):
 Entregue — Classe T na **carga**: `DatabaseLoaderService` (3 caminhos: `injetarDadosEmLotes`,
 `processExcelFile`, `importExcelBulkData`) roteia `status`, `descricaodoativo` e
 `nomefornecedor` por `normalizeFieldValue('…', …)` (regra T: TRIM + colapso de espaços,
-**caixa preservada** — decisão §9.3). `?? fallback` mantém `status`/`descricaodoativo`
+**caixa preservada** — decisão § 9, item 3). `?? fallback` mantém `status`/`descricaodoativo`
 não-nulos (contrato `DexieAsset.status/descricaodoativo: string`); `nomefornecedor` vazio →
 `null` (semântica idêntica à atual `|| null`).
 
@@ -332,7 +332,7 @@ Entregue:
     normalizados (assets canônica; fallback local_assets — espelha `getLocationsWithStats`);
     nunca apaga linhas existentes (zero perda; ids auto preservados).
 - **`src/services/sqliteService.ts`** — `version(5)` com **MESMAS assinaturas do v4** (sem
-  mudança estrutural); upgrade condicionado à flag `NORMALIZE_ON_UPGRADE` (decisão §9.2);
+  mudança estrutural); upgrade condicionado à flag `NORMALIZE_ON_UPGRADE` (decisão § 9, item 2);
   exporta `runMigrationV5DryRun()` (wrapper sobre o banco real).
 - **Sync Supabase (§7):** `mapColumnName` verificado — cobertura estrutural completa (o
   pass-through de colunas minúsculas já é 1:1 com o `public` 26/26 canônico; mapeia apenas
@@ -357,7 +357,7 @@ alinhado ao contrato do `public`). Sem achados SRE pendentes na Fase C.
 
 ## 7. Sync Supabase (public = no-op)
 
-- **Nenhuma DDL no `public`** (26/26 canônicas confirmadas — §6.7 do relatório).
+- **Nenhuma DDL no `public`** (26/26 canônicas confirmadas — § 6.7 de `HIGIENIZACAO_ENDERECO.md`).
 - `supabaseService.mapColumnName`: revisar para cobrir todos os canônicos lower do contrato
   (hoje cobre `_unitid`→`filial` e tenant); escrever sempre lower; ler com tolerância
   (`pickCanonical`) durante a transição.
