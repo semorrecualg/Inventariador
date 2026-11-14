@@ -692,46 +692,20 @@ export class SqliteService {
   }
 
   /**
-   * SRE ISOLAMENTO (local): filtra registros cuja chave (primarykey) já existe
-   * localmente sob OUTRO tenantid. O upsert local é por primarykey; sem essa
-   * proteção, um sync/restore de outro contrato sobrescreveria (e re-etiquetaria)
-   * os ativos deste contrato — mesmo bug sanitizado na nuvem. Registros de outro
-   * contrato são preservados intactos (a carga é ignorada apenas nessas chaves).
+   * SRE ISOLAMENTO (local): canoniciza o `tenantid` de cada linha antes da
+   * escrita. A chave primária é `[tenantid+primarykey]`, por isso o contrato de
+   * outro tenant é uma LINHA DIFERENTE — o muro entre contratos é estrutural e
+   * não há colisão a filtrar (era o que o antigo guard tentava bloquear, mas a
+   * comparação nunca podia disparar e foi removida).
+   *
+   * Tenant vazio adopta o contrato da sessão: a chave `['', primarykey]` nunca
+   * coincide com a linha gravada e o upsert ficaria inoperante.
    */
-  public async filterCrossTenantWrites(mappedChunk: DexieAsset[]): Promise<DexieAsset[]> {
-    // Normaliza o tenantid para UPPER (canônico) — garante chaves compostas
-    // consistentes [tenantid+primarykey] independentemente do case da fonte.
-    // Tenant vazio adoptaria o contrato da sessão: a chave ['', primarykey] nunca
-    // coincide com a linha gravada (o guard e o upsert ficavam inoperantes).
-    const normalizedChunk = mappedChunk.map(m => ({
+  public filterCrossTenantWrites(mappedChunk: DexieAsset[]): DexieAsset[] {
+    return mappedChunk.map(m => ({
       ...m,
       tenantid: resolveTenantKey(m.tenantid),
     }));
-    const existingRows = await db.local_assets.bulkGet(
-      normalizedChunk.map(m => [m.tenantid, String(m.primarykey || '')] as [string, string])
-    );
-    const safeChunk: DexieAsset[] = [];
-    let skipped = 0;
-    for (let k = 0; k < normalizedChunk.length; k++) {
-      const incoming = normalizedChunk[k];
-      const existing = existingRows[k];
-      // Com a chave composta [tenantid+primarykey] a colisão entre contratos é
-      // estruturalmente impossível; este guard permanece como invariante de
-      // segurança para escritas legadas que ignorem o par composto.
-      if (existing && String(existing.tenantid || '').trim().toUpperCase() !== String(incoming.tenantid || '').trim().toUpperCase()) {
-        skipped++;
-        logger.warn(
-          `[SRE ISOLAMENTO] Bloqueada sobrescrita entre contratos na chave ${incoming.primarykey}: ` +
-          `local=${String(existing.tenantid || '(vazio)')} × carga=${String(incoming.tenantid || '(vazio)')}. Registro local preservado.`
-        );
-        continue;
-      }
-      safeChunk.push(incoming);
-    }
-    if (skipped > 0) {
-      logger.warn(`[SRE ISOLAMENTO] ${skipped} registro(s) de outro contrato preservado(s) neste lote (chaves coincidentes).`);
-    }
-    return safeChunk;
   }
 
   public async bulkInsertAssetsOfflineFirst(
@@ -808,7 +782,7 @@ export class SqliteService {
 
           // SRE ISOLAMENTO (local): nunca sobrescrever registros de OUTRO contrato
           // (mesma regra aplicada na nuvem com onConflict 'tenantid, id').
-          const safeChunk = await this.filterCrossTenantWrites(mappedChunk);
+          const safeChunk = this.filterCrossTenantWrites(mappedChunk);
           await db.ativos.bulkPut(safeChunk);
           await db.assets.bulkPut(safeChunk);
           await db.local_assets.bulkPut(safeChunk);

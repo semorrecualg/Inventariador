@@ -65,9 +65,9 @@ describe('sqliteService.patchAsset — ativo sem tenantid', () => {
   });
 });
 
-describe('sqliteService.filterCrossTenantWrites — carga sem tenantid', () => {
+describe('sqliteService.filterCrossTenantWrites — canonicidade do tenant', () => {
   it('adopta o tenant da sessão e não cria chave vazia', async () => {
-    const safe = await sqliteService.filterCrossTenantWrites([
+    const safe = sqliteService.filterCrossTenantWrites([
       row({ tenantid: '', primarykey: 'NOVO-1', descricaodoativo: 'MESA' })
     ]);
 
@@ -79,14 +79,15 @@ describe('sqliteService.filterCrossTenantWrites — carga sem tenantid', () => {
     expect(await db.local_assets.get(['', 'NOVO-1'])).toBeUndefined();
   });
 
-  it('preserva a chave de outro contrato como veio', async () => {
-    await db.local_assets.put(row({ primarykey: 'CROSS-1', tenantid: 'OUTRO' }));
-
-    const safe = await sqliteService.filterCrossTenantWrites([
-      row({ tenantid: 'OUTRO', primarykey: 'CROSS-1' })
+  it('preserva a chave de outro contrato sem a reescrever', () => {
+    // O muro entre contratos é a própria chave composta: outro tenant é outra
+    // linha, logo não há nada a filtrar (o antigo guard de colisão era morto).
+    const safe = sqliteService.filterCrossTenantWrites([
+      row({ tenantid: 'outro', primarykey: 'CROSS-1' })
     ]);
-    // Colisão entre contratos é impossível com a chave composta: o par é preservado.
-    expect(safe[0].tenantid).toBe('OUTRO');
+
+    expect(safe.map(r => r.tenantid)).toEqual(['OUTRO']);
+    expect(safe.map(r => r.primarykey)).toEqual(['CROSS-1']);
   });
 });
 
