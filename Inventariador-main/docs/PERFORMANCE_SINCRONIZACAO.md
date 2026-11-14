@@ -181,3 +181,8 @@ encadeados.
   a lista.
 - Importação: a sobreposição `MODO IMPORTAÇÃO ATIVO` deve terminar sem o
   congelamento que vinha do dump integral do disco a cada ativo.
+- F0 (linha de base): cada operação emite
+  `>>> [PERF] boot|pull.full|pull.delta|push: Nms · N registro(s)`. As últimas
+  200 amostras ficam em `gbr_perf_samples_v1`; **Gestor de Base → Linha de Base
+  (F0) → Registrar** grava `gbr_perf_baseline_v1` com p50/p95 e a contagem por
+  espelho (`local_assets` / `ativos` / `assets`).

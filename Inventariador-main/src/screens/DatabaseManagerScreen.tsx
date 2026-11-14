@@ -9,6 +9,7 @@ import { isAdminUser } from '../utils/authUtils';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
+import { collectPerfSummary, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfSummary } from '../utils/perfMetrics';
 import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -19,6 +20,20 @@ export async function processAndInjectSpreadsheetData(file: File, onProgress: (p
   await DatabaseLoaderService.injetarDadosEmLotes(data, onProgress);
   return data;
 }
+
+/** Rótulos das métricas de F0 no cartão do Gestor. */
+const PERF_LABELS: Record<string, string> = {
+  boot: 'Boot',
+  'pull.full': 'Pull completo',
+  'pull.delta': 'Delta',
+  push: 'Push'
+};
+
+/** `p50 / p95 ms · n` ou “sem amostra”. */
+const fmtPerf = (summary?: PerfSummary): string =>
+  summary && summary.samples > 0 && summary.p50 !== null
+    ? `${summary.p50} / ${summary.p95} ms · n=${summary.samples}`
+    : 'sem amostra';
 
 interface DatabaseManagerScreenProps {
   onBack?: () => void;
@@ -54,6 +69,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   // Contra-prova física: cada espelho é contado em separado, para o painel poder
   // explicar uma diferença em vez de a esconder num único número.
   const [mirrors, setMirrors] = useState<{ local_assets: number; ativos: number; assets: number }>({ local_assets: 0, ativos: 0, assets: 0 });
+  // F0: resumo das amostras locais (boot/delta/push) + último retrato registrado.
+  const [perfSummaries, setPerfSummaries] = useState<Record<string, PerfSummary>>({});
+  const [baseline, setBaseline] = useState<PerfBaseline | null>(() => readPerfBaseline());
   // Espelho virtual (sandbox/iframe): é o que a Unidade Operacional lê quando o
   // banco local está vazio. Só é lido quando o banco está vazio (diagnóstico).
   const [virtualCount, setVirtualCount] = useState<number>(0);
@@ -245,6 +263,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       // `local_assets` e anunciava 0 ativos com dados vivos noutro espelho.
       const counts = await sqliteService.countAssetMirrors(tid || null);
       setMirrors({ local_assets: counts.local_assets, ativos: counts.ativos, assets: counts.assets });
+      setPerfSummaries(collectPerfSummary());
       const aCount = counts.total;
 
       // Banco local vazio: verifica o espelho virtual (iframe sandbox) — é dele
@@ -267,6 +286,23 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       }
     } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
       console.error("[SRE STATS ERR]", err);
+    }
+  }, [activeTenantid, addLog]);
+
+  /** F0: grava no aparelho o retrato da linha de base (espelhos + p50/p95). */
+  const registrarLinhaDeBase = useCallback(async () => {
+    try {
+      const counts = await sqliteService.countAssetMirrors(activeTenantid || null);
+      const saved = savePerfBaseline({ tenantid: activeTenantid || null, mirrors: counts });
+      setBaseline(saved);
+      setPerfSummaries(saved.metrics);
+      addLog(
+        `[F0] Linha de base registrada: local_assets=${counts.local_assets} · ativos=${counts.ativos} · assets=${counts.assets} · ` +
+        `boot=${fmtPerf(saved.metrics.boot)} · pull.full=${fmtPerf(saved.metrics['pull.full'])} · ` +
+        `pull.delta=${fmtPerf(saved.metrics['pull.delta'])} · push=${fmtPerf(saved.metrics.push)}`
+      );
+    } catch (err) {
+      addLog(`[F0] Falha ao registrar linha de base: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, [activeTenantid, addLog]);
 
@@ -632,6 +668,38 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         <div className="p-4 bg-slate-900/30 border border-slate-800/50 rounded-xl flex flex-col justify-between">
           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Registros de Auditoria</span>
           <span className="text-xl font-black text-blue-400 mt-1 font-mono">{logCount}</span>
+        </div>
+      </div>
+
+      {/* 3b. F0 — LINHA DE BASE (cronômetro boot · delta · push) */}
+      <div className="p-4 bg-slate-900/30 border border-slate-800/50 rounded-xl mb-6">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-300">Linha de Base (F0)</h3>
+            <p className="text-[8px] font-mono text-slate-500 uppercase tracking-wider mt-1">
+              Cronômetro local · p50/p95 por métrica · últimas 200 amostras
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { void registrarLinhaDeBase(); }}
+            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
+          >
+            Registrar
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          {(['boot', 'pull.full', 'pull.delta', 'push'] as const).map(name => (
+            <div key={name} className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
+              <div className="text-[8px] font-bold text-slate-500 uppercase tracking-wider">{PERF_LABELS[name]}</div>
+              <div className="text-[10px] font-mono font-black text-emerald-300 mt-0.5">{fmtPerf(perfSummaries[name])}</div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 text-[8px] font-mono text-slate-500 uppercase tracking-wider break-all">
+          {baseline
+            ? `Última: ${new Date(baseline.at).toLocaleString('pt-BR')} · local_assets ${baseline.mirrors?.local_assets ?? '—'} · ativos ${baseline.mirrors?.ativos ?? '—'} · assets ${baseline.mirrors?.assets ?? '—'}`
+            : 'Nenhuma linha de base registrada neste aparelho.'}
         </div>
       </div>
 

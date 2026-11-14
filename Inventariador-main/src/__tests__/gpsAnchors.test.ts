@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   hasRealAnchor,
+  isRealAnchorRecord,
   collectGpsAnchorsFromStorage,
   mergeUnitConfigIntoList
 } from '../utils/gpsAnchors';
@@ -33,6 +34,24 @@ describe('hasRealAnchor', () => {
     expect(hasRealAnchor(undefined, undefined)).toBe(false);
     expect(hasRealAnchor(NaN, NaN)).toBe(false);
     expect(hasRealAnchor('abc', '-49.1')).toBe(false);
+  });
+});
+
+describe('isRealAnchorRecord', () => {
+  it('aceita âncora com leitura de sensor', () => {
+    expect(isRealAnchorRecord({ lat: -16.7, lng: -49.1, source: 'sensor' })).toBe(true);
+  });
+  it('rejeita âncora posicionada manualmente no mapa', () => {
+    expect(isRealAnchorRecord({ lat: -16.7, lng: -49.1, source: 'manual' })).toBe(false);
+  });
+  it('mantém registros legados (sem source) como âncora real', () => {
+    expect(isRealAnchorRecord({ lat: -16.7, lng: -49.1 })).toBe(true);
+  });
+  it('rejeita coordenadas inválidas mesmo com source sensor', () => {
+    expect(isRealAnchorRecord({ lat: 0, lng: 0, source: 'sensor' })).toBe(false);
+    expect(isRealAnchorRecord({ lat: null, lng: null, source: 'sensor' })).toBe(false);
+    expect(isRealAnchorRecord(null)).toBe(false);
+    expect(isRealAnchorRecord(undefined)).toBe(false);
   });
 });
 
@@ -74,19 +93,63 @@ describe('collectGpsAnchorsFromStorage', () => {
     expect(anchors.has('OK')).toBe(true);
   });
 
+  it('ignora âncora posicionada manualmente no mapa (clique/arraste)', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_MANUAL': JSON.stringify({
+        filial: 'MANUAL',
+        lat: -15.7,
+        lng: -47.9,
+        source: 'manual'
+      })
+    });
+    expect(collectGpsAnchorsFromStorage(local, makeStorage()).has('MANUAL')).toBe(false);
+  });
+
+  it('conta âncora gravada com source sensor', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_SENSOR': JSON.stringify({
+        filial: 'SENSOR',
+        lat: -15.7,
+        lng: -47.9,
+        source: 'sensor'
+      })
+    });
+    expect(collectGpsAnchorsFromStorage(local, makeStorage()).has('SENSOR')).toBe(true);
+  });
+
   it('não quebra com JSON malformado (ignora o registro)', () => {
     const local = makeStorage({ 'kardek_gps_ancora_QUEBRADA': '{not-json' });
     expect(() => collectGpsAnchorsFromStorage(local, makeStorage())).not.toThrow();
     expect(collectGpsAnchorsFromStorage(local, makeStorage()).size).toBe(0);
   });
 
-  it('coleta pares gps_lat_/gps_lng_ do sessionStorage', () => {
+  it('coleta pares gps_lat_/gps_lng_ do sessionStorage com config de sensor salva', () => {
+    const session = makeStorage({
+      'gps_lat_010105 CICOPAL PA': '-15.7',
+      'gps_lng_010105 CICOPAL PA': '-47.9',
+      'unit_gps_config_010105 CICOPAL PA': JSON.stringify({ source: 'sensor' })
+    });
+    const anchors = collectGpsAnchorsFromStorage(makeStorage(), session);
+    expect(anchors.has('010105 CICOPAL PA')).toBe(true);
+  });
+
+  it('não conta rascunho de sessão sem config salva (posicionamento manual)', () => {
     const session = makeStorage({
       'gps_lat_010105 CICOPAL PA': '-15.7',
       'gps_lng_010105 CICOPAL PA': '-47.9'
     });
     const anchors = collectGpsAnchorsFromStorage(makeStorage(), session);
-    expect(anchors.has('010105 CICOPAL PA')).toBe(true);
+    expect(anchors.has('010105 CICOPAL PA')).toBe(false);
+  });
+
+  it('não conta par de sessão de unidade cuja âncora salva é manual', () => {
+    const session = makeStorage({
+      'gps_lat_010105 CICOPAL PA': '-15.7',
+      'gps_lng_010105 CICOPAL PA': '-47.9',
+      'unit_gps_config_010105 CICOPAL PA': JSON.stringify({ source: 'manual' })
+    });
+    const anchors = collectGpsAnchorsFromStorage(makeStorage(), session);
+    expect(anchors.has('010105 CICOPAL PA')).toBe(false);
   });
 
   it('exclui par do sessionStorage sem lng correspondente', () => {

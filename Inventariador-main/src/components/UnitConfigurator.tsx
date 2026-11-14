@@ -19,7 +19,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Geolocation } from '@capacitor/geolocation';
 import * as turf from '@turf/turf';
-import { UnitConfig, User, AppScreen } from '../types';
+import { AnchorSource, UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { logger } from '../utils/logger';
 import { mergeUnitConfigIntoList } from '../utils/gpsAnchors';
@@ -215,7 +215,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   // Solução para Stale Closure bugs (Captura os estados mais recentes nos listeners assíncronos do mapa)
   const selectedUnitRef = useRef<string | null>(null);
   const currentConfigRef = useRef<Partial<UnitConfig>>({});
-  const mapClickRef = useRef<(lat: number, lng: number) => void>(() => {});
+  const mapClickRef = useRef<(lat: number, lng: number, source?: AnchorSource) => void>(() => {});
+  // Proveniência da âncora exibida. Clique/arraste no mapa é posicionamento
+  // manual; só a leitura bem-sucedida do hardware marca 'sensor'.
+  const anchorSourceRef = useRef<AnchorSource>('manual');
 
   useEffect(() => {
     // Mantem o ref sempre alinhado: cai para initialUnit enquanto o estado nao for setado.
@@ -226,21 +229,6 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     currentConfigRef.current = currentConfig;
   }, [currentConfig]);
 
-  useEffect(() => {
-    mapClickRef.current = (lat: number, lng: number) => {
-      const activeUnit = selectedUnitRef.current;
-      if (!activeUnit) {
-        setMessage({ text: 'SELECIONE UMA OPERACIONAL NO PAINEL INFERIOR ANTES DE MARCAR O MAPA.', type: 'error' });
-        return;
-      }
-      setCurrentConfig(prev => ({ ...prev, lat, lng }));
-
-      // Gravação preventiva de rascunho na sessão
-      sessionStorage.setItem(`kardek_temp_gps_lat_${activeUnit}`, String(lat));
-      sessionStorage.setItem(`kardek_temp_gps_lng_${activeUnit}`, String(lng));
-    };
-  }, []);
-
   // ==========================================================================
   // MOTOR MAPLIBRE OFFLINE-FIRST
   // ==========================================================================
@@ -250,6 +238,21 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     // Guarda Defensiva: nunca alimenta o motor com coordenadas indefinidas/NaN
     const [safeLng, safeLat] = safeLngLat({ lat, lng });
     map.flyTo({ center: [safeLng, safeLat], zoom, essential: true, duration: 900 });
+  }, []);
+
+  useEffect(() => {
+    // Handler de clique no mapa: atualiza coordenadas; marcador/círculo reagem via estado
+    mapClickRef.current = (lat: number, lng: number, source: AnchorSource = 'manual') => {
+      const activeUnit = selectedUnitRef.current;
+      if (!activeUnit) {
+        setMessage({ text: 'SELECIONE UMA OPERACIONAL NO PAINEL INFERIOR ANTES DE MARCAR O MAPA.', type: 'error' });
+        return;
+      }
+      anchorSourceRef.current = source;
+      setCurrentConfig(prev => ({ ...prev, lat, lng }));
+      sessionStorage.setItem(`kardek_temp_gps_lat_${activeUnit}`, String(lat));
+      sessionStorage.setItem(`kardek_temp_gps_lng_${activeUnit}`, String(lng));
+    };
   }, []);
 
   const initMap = () => {
@@ -304,6 +307,12 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
           }
 
           mapInstance.current = map;
+
+          // Clique/toque no mapa move o pino e o círculo para a coordenada clicada
+          map.on('click', (e) => {
+            mapClickRef.current(e.lngLat.lat, e.lngLat.lng);
+          });
+
           setMapReady(true);
           setMapFailed(false);
           logger.info('>>> [MAP] MapLibre GL iniciado em modo OFFLINE (estilo inline, zero requisições de rede).');
@@ -364,9 +373,20 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     // o motor estoura 'Cannot read properties of undefined (reading lng)' -> ErrorBoundary.
     try {
       if (!markerRef.current) {
-        markerRef.current = new maplibregl.Marker({ color: '#ef4444' })
+        const marker = new maplibregl.Marker({ color: '#ef4444', draggable: true })
           .setLngLat([safeLng, safeLat])
           .addTo(map);
+        marker.on('dragend', () => {
+          const { lat, lng } = marker.getLngLat();
+          anchorSourceRef.current = 'manual';
+          setCurrentConfig(prev => ({ ...prev, lat, lng }));
+          const activeUnit = selectedUnitRef.current;
+          if (activeUnit) {
+            sessionStorage.setItem(`kardek_temp_gps_lat_${activeUnit}`, String(lat));
+            sessionStorage.setItem(`kardek_temp_gps_lng_${activeUnit}`, String(lng));
+          }
+        });
+        markerRef.current = marker;
       } else {
         markerRef.current.setLngLat([safeLng, safeLat]);
       }
@@ -444,7 +464,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       setCurrentConfig(prev => ({ ...prev, lat, lng }));
       flyTo(lat, lng, 16);
       setMessage({ text: 'POSIÇÃO FIXADA PELO HARDWARE DO DISPOSITIVO!', type: 'success' });
-      mapClickRef.current(lat, lng);
+      mapClickRef.current(lat, lng, 'sensor');
     } catch (err) {
       // Fallback suave: permissão negada/política no Desktop → câmera para Brasília-DF (zoom nacional)
       logger.warn('>>> [GPS Fallback] Hardware inacessível ou permissão negada no Desktop. Aplicando centro canônico (Brasília-DF):', err);
@@ -480,6 +500,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     const newLng = currentConfig.lng + deltaLng;
     const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: newLat, lng: newLng });
 
+    anchorSourceRef.current = 'manual';
     setCurrentConfig(prev => ({ ...prev, lat: safeLat, lng: safeLng }));
   };
 
@@ -655,12 +676,15 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
         is_active: true
       };
       setCurrentConfig(cfg);
+      // Rascunho não guarda proveniência: só pode ter vindo de posicionamento no mapa.
+      anchorSourceRef.current = 'manual';
       flyTo(cfg.lat, cfg.lng, UNIT_ZOOM);
     } else if (existing) {
       // Guarda Defensiva: registro do IndexedDB/SQLite pode estar parcialmente corrompido
       const { lat: safeLat, lng: safeLng } = safeLatLngPair(existing);
       const safeExisting = { ...existing, lat: safeLat, lng: safeLng };
       setCurrentConfig(safeExisting);
+      anchorSourceRef.current = existing.source ?? 'manual';
       flyTo(safeExisting.lat, safeExisting.lng, UNIT_ZOOM);
     } else {
       setCurrentConfig({
@@ -671,6 +695,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
         radius_meters: 500,
         is_active: true
       });
+      anchorSourceRef.current = 'manual';
       flyTo(BRASILIA_DEFAULT.lat, BRASILIA_DEFAULT.lng, DEFAULT_ZOOM);
     }
     setMessage(null);
@@ -832,10 +857,11 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     };
     const isAdminUser = checkIsAdmin();
 
-    // Validação Espacial Turf.js
-    let currentPhysicalLat = l_lat;
-    let currentPhysicalLng = l_lng;
-    let hasPhysicalGPS = false;
+    // Validação Espacial Turf.js — SÓ com leitura real do hardware. Sem leitura
+    // (desktop/iframe/offline), não existe distância física a comparar: o pino
+    // posicionado no mapa é gravado sem bloqueio. Nunca simular um deslocamento
+    // (~1,1 km) para forçar a geocerca: isso bloqueava o salvamento manual.
+    let physicalPosition: { lat: number; lng: number } | null = null;
 
     try {
       const pos = await Geolocation.getCurrentPosition({
@@ -844,21 +870,15 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
         maximumAge: 0
       });
       if (pos && pos.coords) {
-        currentPhysicalLat = pos.coords.latitude;
-        currentPhysicalLng = pos.coords.longitude;
-        hasPhysicalGPS = true;
+        physicalPosition = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       }
     } catch (e) {
-      logger.warn('>>> [GPS] Não foi possível ler localização real via hardware para validação espacial:', e);
-      // Simulação: se não conseguir ler, distancia a coordenada em ~1.2km (0.01 graus de lat/lng) para ativar a regra de georeferenciamento
-      currentPhysicalLat = l_lat + 0.01;
-      currentPhysicalLng = l_lng + 0.01;
-      hasPhysicalGPS = true;
+      logger.warn('>>> [GPS] Sem leitura real de hardware; validação de geocerca ignorada (âncora posicionada manualmente).', e);
     }
 
-    if (hasPhysicalGPS) {
+    if (physicalPosition) {
       try {
-        const fromPoint = turf.point([currentPhysicalLng, currentPhysicalLat]);
+        const fromPoint = turf.point([physicalPosition.lng, physicalPosition.lat]);
         const toPoint = turf.point([Number(l_lng), Number(l_lat)]);
         const distanceM = turf.distance(fromPoint, toPoint, { units: 'kilometers' }) * 1000;
 
@@ -892,6 +912,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       lng: safeLng,
       radius_meters: Number(l_radius),
       is_active: true,
+      source: anchorSourceRef.current,
       updated_by: user?.email || 'auditor',
       updated_at: new Date().toISOString()
     };
@@ -1283,13 +1304,13 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
           <div className="flex flex-col items-center">
             <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Latitude</span>
             <span className="text-[11px] font-mono font-bold text-slate-200 tracking-tight leading-none">
-              {currentConfig.lat !== undefined ? currentConfig.lat.toFixed(6) : 'AGUARDANDO GPS'}
+              {currentConfig.lat !== undefined ? Number(currentConfig.lat).toFixed(6) : 'AGUARDANDO GPS'}
             </span>
           </div>
           <div className="flex flex-col items-center border-l border-slate-800/80">
             <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Longitude</span>
             <span className="text-[11px] font-mono font-bold text-slate-200 tracking-tight leading-none">
-              {currentConfig.lng !== undefined ? currentConfig.lng.toFixed(6) : 'AGUARDANDO GPS'}
+              {currentConfig.lng !== undefined ? Number(currentConfig.lng).toFixed(6) : 'AGUARDANDO GPS'}
             </span>
           </div>
         </div>

@@ -1,9 +1,9 @@
 import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
-import { DatabaseStatus } from '../types';
+import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
-import { unitContextKey, splitUnitContextKey } from '../utils/unitContextUtils';
+import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
@@ -102,6 +102,15 @@ export interface DexieUnitConfig {
   allowNewAssets: number;
   allowWriteOffs: number;
   requirePlaqueta: number;
+  /** Contrato da unidade — sem ele a linha vira unidade "SEM CONTRATO". */
+  tenantid?: string;
+  lat?: number;
+  lng?: number;
+  radius_meters?: number;
+  is_active?: number;
+  updated_at?: string;
+  /** Proveniência da âncora: `manual` = pino no mapa, não é leitura de sensor. */
+  source?: AnchorSource | null;
 }
 
 export interface DexieCampaignSnapshot {
@@ -433,8 +442,9 @@ export class SqliteService {
   }
 
   public async saveUnitConfigs(configs: Record<string, unknown>[]): Promise<void> {
-    const mapped = configs.map(cfg => ({
+    const mapped: DexieUnitConfig[] = configs.map(cfg => ({
       id: String(cfg.id || cfg.filial || ''),
+      tenantid: String(cfg.tenantid || ''),
       filial: String(cfg.filial || ''),
       nome: String(cfg.nome || cfg.filial || ''),
       hasGps: cfg.hasGps ? 1 : 0,
@@ -448,6 +458,8 @@ export class SqliteService {
       lng: cfg.lng !== undefined && cfg.lng !== null ? Number(cfg.lng) : undefined,
       radius_meters: cfg.radius_meters !== undefined && cfg.radius_meters !== null ? Number(cfg.radius_meters) : undefined,
       is_active: cfg.is_active !== false ? 1 : 0,
+      // Proveniência da âncora (sensor | manual) preservada no espelho físico.
+      source: cfg.source === 'sensor' ? 'sensor' : cfg.source === 'manual' ? 'manual' : undefined,
       updated_at: String(cfg.updated_at || '')
     }));
     await db.unit_configs.bulkPut(mapped);
@@ -495,8 +507,12 @@ export class SqliteService {
         .map(c => unitContextKey(String((c as { tenantid?: string }).tenantid || ''), String(c.filial || c.nome || '')))
         .filter(k => splitUnitContextKey(k).filial !== '');
 
-      // União única de todas as unidades por chave composta
-      const allKeys = Array.from(new Set([...filiaisAssets, ...filiaisConfigs]));
+      // Config sem contrato que duplica uma filial já identificada pelos ativos
+      // não vira unidade própria (era o cartão "SEM CONTRATO" e a contagem dobrada).
+      const allKeys = Array.from(new Set([
+        ...filiaisAssets,
+        ...filterPhantomConfigKeys(filiaisAssets, filiaisConfigs)
+      ]));
 
       const stats = allKeys.map(k => {
         const { tenantid: t, filial: f } = splitUnitContextKey(k);

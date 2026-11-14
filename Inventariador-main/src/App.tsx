@@ -10,7 +10,8 @@ import { validateAndPushRoute, registerToastCallback } from './services/Navigati
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
-import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors';
+import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
+import { recordPerf, startPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -132,6 +133,11 @@ export class AppBootstrapError extends Error {
 }
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "";
+
+// F0 (Malha de Auditoria): cronômetro do boot — começa no import do módulo e
+// fecha quando o carregamento de dados termina (isDataLoaded -> true).
+const APP_BOOT_STARTED_AT = startPerf();
+let bootPerfRecorded = false;
 const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
 
 // Helper para verificar se um usuário é admin
@@ -2372,9 +2378,28 @@ useEffect(() => {
   useEffect(() => {
     let lastImportingState = sqliteService.isImportingBatch || (typeof window !== 'undefined' && (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch);
     setIsImportingBatchState(!!lastImportingState);
+    // Relógio da importação para o watchdog (ver intervalo abaixo).
+    let importingSince: number | null = lastImportingState ? Date.now() : null;
 
     const interval = setInterval(async () => {
-      const currentState = sqliteService.isImportingBatch || (typeof window !== 'undefined' && (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch);
+      let currentState = sqliteService.isImportingBatch || (typeof window !== 'undefined' && (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch);
+      // WATCHDOG: uma exceção no import/pull deixava a flag presa e a Unidade
+      // Operacional eternamente em "MODO IMPORTAÇÃO ATIVO" (0 entidades).
+      // Sem conclusão em 10 minutos, liberta as leituras e registra o incidente.
+      if (currentState) {
+        if (importingSince === null) importingSince = Date.now();
+        else if (Date.now() - importingSince > 10 * 60 * 1000) {
+          logger.error('>>> [SRE] Importação sem conclusão há mais de 10 minutos. Liberando leituras (watchdog).');
+          sqliteService.isImportingBatch = false;
+          if (typeof window !== 'undefined') {
+            (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch = false;
+          }
+          importingSince = null;
+          currentState = false;
+        }
+      } else {
+        importingSince = null;
+      }
       setIsImportingBatchState(!!currentState);
 
       if (lastImportingState && !currentState) {
@@ -2481,7 +2506,9 @@ useEffect(() => {
         if (isConferido && (!a.latitude || !a.longitude)) {
           const unitId = a.filial || a._unidade;
           const config = inv.unitConfigs?.find(c => c.unit_id === unitId);
-          if (config && config.lat && config.lng) {
+          // Só âncora com leitura de sensor posiciona o ativo: o pino manual não
+          // pode virar ponto no mapa de calor (não é leitura de sensor).
+          if (config && isRealAnchorRecord(config)) {
             hasRepaired = true;
             return { ...a, latitude: config.lat, longitude: config.lng };
           }
@@ -3369,6 +3396,7 @@ useEffect(() => {
           // escolha válida, a carga é ABORTADA e o usuário escolhe a filial:
           // antes, `bootFilial` indefinido fazia o pull trazer os 12.636 ativos
           // do contrato (e marcar todos como sincronizados).
+          try {
           const bootFilial = resolveBootPullPlan(user?.filial, readLastWorkContext(), user?.tenantid).unit;
           if (!bootFilial) {
             logger.warn('>>> [Boot Loader] Sem filial no perfil e sem última escolha: contrato inteiro NÃO é baixado. Exigindo a escolha da filial.');
@@ -3430,8 +3458,13 @@ useEffect(() => {
             setShowRecoveryToast(true);
             setTimeout(() => setShowRecoveryToast(false), 5000);
           }
-          if (typeof window !== 'undefined') {
-            ((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch = false;
+          } finally {
+            // Sempre limpa a flag, inclusive no `return` sem filial e em erro de
+            // rede: antes, uma falha do pull deixava a tela presa em
+            // "MODO IMPORTAÇÃO ATIVO" com 0 entidades.
+            if (typeof window !== 'undefined') {
+              ((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch = false;
+            }
           }
         }
       } catch (e) { 
@@ -3443,6 +3476,10 @@ useEffect(() => {
         logger.info("App init - Finalizando carregamento de dados. isDataLoaded -> true");
         setIsDataLoaded(true);
         const checkCount = savedInventory?.assets?.length || 0;
+        if (!bootPerfRecorded) {
+          bootPerfRecorded = true;
+          recordPerf('boot', APP_BOOT_STARTED_AT, { count: checkCount });
+        }
         if (checkCount > 0) {
           sessionStorage.setItem('isDatabaseLoaded', 'true');
           localStorage.setItem('isDatabaseLoaded', 'true');
@@ -6491,11 +6528,13 @@ useEffect(() => {
       typeof localStorage !== 'undefined' ? localStorage : null
     );
 
-    // Pre-calculate units with GPS config (ancora real: coordenadas finitas e nao-zero)
+    // Pré-cálculo das unidades com âncora contável como leitura de sensor.
+    // Pino posicionado manualmente no mapa (source: 'manual') NÃO conta aqui —
+    // e é daqui que saem a liberação da unidade e o chip de GPS.
     const unitsWithGps = new Set<string>();
     unitConfigs.forEach(c => {
       const uId = c.filial || c._unitid || c.unit_id;
-      if (uId && hasRealAnchor(c.lat, c.lng)) {
+      if (uId && isRealAnchorRecord(c)) {
         const norm = normalizeKey(uId);
         unitsWithGps.add(norm);
       }

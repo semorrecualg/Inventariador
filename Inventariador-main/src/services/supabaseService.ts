@@ -7,6 +7,7 @@ import { localDb } from './localDbService';
 import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
+import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { buildUnitFlags, mergeUnitFlags, pickUnitFlags } from '../utils/unitConfigFlags';
@@ -1215,6 +1216,11 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   );
 
   const elapsedMs = Date.now() - startedAt;
+  // F0: push — duração total e volume aceito (base para p50/p95 no Gestor).
+  recordPerfSample('push', elapsedMs, {
+    count: successfullySyncedIds.length,
+    meta: { total, batches: totalBatches, rejected: failedRows.length }
+  });
   logger.info(
     `>>> [Supabase] Espelhamento: ${successfullySyncedIds.length}/${total} ativos em ` +
     `${totalBatches} lote(s) de ${CHUNK_SIZE} · ${Math.round(elapsedMs / 100) / 10}s ` +
@@ -2172,6 +2178,8 @@ const fetchFullInventoryImpl = async (
   options?: FetchInventoryOptions
 ): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase) return null;
+  // F0: pull completo × delta — nome da métrica pela opção `since`.
+  const pullStartedAt = startPerf();
 
   logger.info(`>>> [Supabase] fetchFullInventory para tenantid: ${JSON.stringify(resolvedTenantid)}, unitid: ${unitid || 'GERAL'}`);
 
@@ -2308,6 +2316,14 @@ const fetchFullInventoryImpl = async (
       advanceSyncCheckpoint(pullDedupKey(firstTenant, unitid), computeMaxUpdatedAt(assets));
       logger.info(`>>> [Supabase] Checkpoint ${pullDedupKey(firstTenant, unitid)} avançado (delta ativo para a próxima sincronização).`);
     }
+
+    recordPerf(options?.since ? 'pull.delta' : 'pull.full', pullStartedAt, {
+      count: assets.length,
+      meta: {
+        tenantid: Array.isArray(resolvedTenantid) ? resolvedTenantid.join(',') : String(resolvedTenantid || ''),
+        unitid: String(unitid || '')
+      }
+    });
 
     return {
       assets: assets,
@@ -3596,6 +3612,9 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       lng: Number(config.lng),
       radius_meters: Number(config.radius_meters),
       is_active: Boolean(config.is_active),
+      // Proveniência da âncora (sensor | manual): viaja no JSONB `inventory_config.data`,
+      // sem depender de coluna nova na tabela da nuvem.
+      source: config.source,
       updated_by: String(config.updated_by || 'system'),
       updated_at: new Date().toISOString(),
       // Flags de política viajam no cache local (e no data do inventory_config):
@@ -3782,7 +3801,22 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
           const unit = key.slice('gps_lat_'.length);
           const lat = Number(sessionStorage.getItem(key));
           const lng = Number(sessionStorage.getItem('gps_lng_' + unit));
-          if (unit && hasRealAnchor(lat, lng)) {
+          // Nunca sobrescreve uma config mais rica (local/nuvem): era isso que
+          // apagava a proveniência `source` da âncora a cada leitura de sessão.
+          if (unit && hasRealAnchor(lat, lng) && !configs[unit]) {
+            // Proveniência vem do config gravado no salvamento.
+            // Se houver rascunho salvo, usa-se a proveniência armazenada;
+            // senão, só usa 'manual' para unidades verdadeiramente novas (sem config prévio).
+            const savedRaw = sessionStorage.getItem(`unit_gps_config_${unit}`);
+            let source: UnitConfig['source'];
+            try {
+              const saved = savedRaw ? (JSON.parse(savedRaw) as { source?: UnitConfig['source'] }) : null;
+              // Sempre que houver chave de config salva, respeita-se a proveniência.
+              // Isso evita que trocar de unidade e voltar rebaixe sensor para manual.
+              source = saved ? (saved.source || 'manual') : 'manual';
+            } catch {
+              source = 'manual';
+            }
             configs[unit] = {
               filial: unit,
               unit_id: unit,
@@ -3791,6 +3825,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
               lng,
               radius_meters: Number(sessionStorage.getItem('unit_gps_radius_' + unit)) || 500,
               is_active: true,
+              source,
               updated_at: new Date().toISOString()
             } as UnitConfig;
           }

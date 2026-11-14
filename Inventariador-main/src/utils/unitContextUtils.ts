@@ -22,6 +22,29 @@ export function splitUnitContextKey(key: string): { tenantid: string; filial: st
 }
 
 /**
+ * Remove chaves de CONFIGURAÇÃO sem contrato que duplicam uma unidade já
+ * identificada com contrato pelos ativos.
+ *
+ * `unit_configs` pode ter linhas legadas/gravadas sem `tenantid`. Elas criavam
+ * uma SEGUNDA unidade da mesma filial ("SEM CONTRATO") na Unidade Operacional,
+ * e o mesmo ativo era somado nos dois cartões (12.636 viravam 25.272).
+ * A configuração sem contrato só vira unidade própria quando NENHUM ativo
+ * daquela filial define o contrato.
+ */
+export function filterPhantomConfigKeys(assetKeys: string[], configKeys: string[]): string[] {
+  const filiaisComContrato = new Set(
+    assetKeys
+      .map(k => splitUnitContextKey(k))
+      .filter(u => u.tenantid !== '')
+      .map(u => u.filial)
+  );
+  return configKeys.filter(k => {
+    const u = splitUnitContextKey(k);
+    return u.tenantid !== '' || !filiaisComContrato.has(u.filial);
+  });
+}
+
+/**
  * Casa duas unidades exigindo o MESMO tenant quando ambos os lados o definem.
  * Quando um dos lados não tem tenant (dado legado/sem contrato), cai na
  * tolerância por nome via matchUnitKeys (comportamento legado preservado).
