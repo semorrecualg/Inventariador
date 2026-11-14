@@ -825,6 +825,37 @@ export class DatabaseLoaderService {
 
 export const databaseLoaderService = new DatabaseLoaderService();
 
+/**
+ * Repõe os três espelhos com o snapshot dado, na mesma transação.
+ *
+ * Canoniza o `tenantid` de cada linha (UPPER + contrato da sessão quando vazio):
+ * caminho único dos dois restauros, para que nem variantes de case nem chaves
+ * `['', primarykey]` cheguem à base. Invalida o marcador de case porque o
+ * snapshot pode trazer `tenantid` não canónico. Devolve as linhas repostas.
+ */
+async function replaceAssetMirrors(rows: unknown[]): Promise<number> {
+  const snapshot = (rows as DexieAsset[]).map(asset => ({
+    ...asset,
+    tenantid: resolveTenantKey(asset.tenantid)
+  }));
+  if (snapshot.length === 0) return 0;
+
+  await invalidateTenantCaseMarker();
+  await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
+    await db.local_assets.clear();
+    await db.ativos.clear();
+    await db.assets.clear();
+
+    // O backup é uma cópia integral dos ativos: os três espelhos recebem-na
+    // (dashboards, mapa e sync leem `ativos`/`assets`, não só `local_assets`).
+    await db.local_assets.bulkPut(snapshot);
+    await db.ativos.bulkPut(snapshot);
+    await db.assets.bulkPut(snapshot);
+  });
+
+  return snapshot.length;
+}
+
 export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
   try {
     const fileContent = await Filesystem.readFile({
@@ -836,32 +867,7 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
     if (fileContent.data) {
       const backup = JSON.parse(fileContent.data as string);
       if (!Array.isArray(backup) || backup.length === 0) return false;
-
-      // Mesma regra da carga e do restauro legado: `tenantid` canónico (UPPER) e,
-      // quando vem vazio, o contrato da sessão. Sem isto as linhas entravam como
-      // `['cicopal', pk]` (chave que não casa com o contrato activo) ou como
-      // `['', primarykey]` — e a migração de case ignora tenant vazio, deixando-as
-      // órfãs para sempre.
-      const restoredAssets = (backup as DexieAsset[]).map(asset => ({
-        ...asset,
-        tenantid: resolveTenantKey(asset.tenantid)
-      }));
-
-      // Só invalida quando há mesmo restauro: este caminho corre em todo boot.
-      await invalidateTenantCaseMarker();
-      // Alimenta atomicamente o Dexie.js para restabelecer os 12.636 ativos sem Race Conditions.
-      // O backup é uma cópia integral de `local_assets`: repô-lo só nesse espelho
-      // deixava `ativos`/`assets` vazios ou desactualizados (dashboards, mapa e
-      // sync leem esses espelhos), por isso os três recebem a mesma cópia.
-      await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
-        await db.local_assets.clear();
-        await db.local_assets.bulkAdd(restoredAssets);
-        await db.ativos.clear();
-        await db.ativos.bulkAdd(restoredAssets);
-        await db.assets.clear();
-        await db.assets.bulkAdd(restoredAssets);
-      });
-      return true;
+      return (await replaceAssetMirrors(backup)) > 0;
     }
   } catch {
     // Arquivo ainda não criado no primeiro boot limpo (Comportamento Esperado)
@@ -872,31 +878,11 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
 /**
  * Restauro manual do backup em JSON escolhido no painel do gestor.
  *
- * O ficheiro pode trazer `tenantid` em qualquer casing — ou vazio. Gravar como
- * vem criava variantes de case e chaves `['', primarykey]`; aqui aplica-se a
- * mesma canonização da carga antes de repor os três espelhos. Devolve o número
- * de linhas repostas (0 para backup vazio).
+ * O ficheiro pode trazer `tenantid` em qualquer casing — ou vazio; a canonização
+ * fica em `replaceAssetMirrors`. Devolve o número de linhas repostas.
  */
 export async function restoreBackupSnapshot(rows: unknown[]): Promise<number> {
-  const snapshot = (rows as DexieAsset[]).map(asset => ({
-    ...asset,
-    tenantid: resolveTenantKey(asset.tenantid)
-  }));
-  if (snapshot.length === 0) return 0;
-
-  // Backup pode trazer tenantid não canónico: a migração volta a correr no boot.
-  await invalidateTenantCaseMarker();
-  await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
-    await db.ativos.clear();
-    await db.assets.clear();
-    await db.local_assets.clear();
-
-    await db.ativos.bulkPut(snapshot);
-    await db.assets.bulkPut(snapshot);
-    await db.local_assets.bulkPut(snapshot);
-  });
-
-  return snapshot.length;
+  return replaceAssetMirrors(rows);
 }
 
 /**
