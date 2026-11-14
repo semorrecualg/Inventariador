@@ -17,6 +17,20 @@ import { DatabaseLoaderService, restoreBackupSnapshot } from '../services/Databa
 import type { Asset } from '../types';
 
 const TENANT = 'CICOPAL';
+
+const CABECALHO = [
+  'tenantid', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo', 'serial',
+  'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 'endereco', 'registro',
+  'subreg', 'databaixa', 'contacontabil', 'primarykey', 'centrodecusto',
+  'vlraquisic', 'sn1_recno', 'sn3_recno'
+];
+
+/** CSV com as 21 colunas do contrato, na ordem exigida. */
+const planilha = (linhas: Array<Partial<Record<typeof CABECALHO[number], string>>>): Blob => {
+  const corpo = linhas.map(celulas => CABECALHO.map(col => celulas[col] ?? '').join(';'));
+  const csv = [CABECALHO.join(';'), ...corpo].join('\n');
+  return new Blob([csv], { type: 'text/csv' });
+};
 const ESPELHOS = ['local_assets', 'ativos', 'assets'] as const;
 
 const chaveVazia = async (): Promise<boolean> => {
@@ -41,24 +55,58 @@ beforeEach(async () => {
   for (const table of ESPELHOS) await db[table].clear();
 });
 
-describe('carga da planilha — linha sem tenantid', () => {
-  it('adopta o contrato da sessão em vez de gravar a chave vazia', async () => {
-    await DatabaseLoaderService.injetarDadosEmLotes([
-      { filial: 'MATRIZ', primarykey: 'SEM-TENANT', etiqueta: 'SEM-TENANT', descricaodoativo: 'CADEIRA', qt: 1 },
-      { tenantid: TENANT, filial: 'MATRIZ', primarykey: 'COM-TENANT', etiqueta: 'COM-TENANT', qt: 1 }
+describe('carga da planilha — política de identidade por linha', () => {
+  it('bloqueia a carga quando uma linha não traz tenantid, listando a linha', async () => {
+    const arquivo = planilha([
+      { filial: 'MATRIZ', primarykey: 'SEM-TENANT', etiqueta: 'SEM-TENANT', qt: '1' },
+      { tenantid: TENANT, filial: 'MATRIZ', primarykey: 'COM-TENANT', etiqueta: 'COM-TENANT', qt: '1' }
     ]);
 
-    expect(await emTodosOsEspelhos()).toBe(3);
+    await expect(DatabaseLoaderService.extrairDadosDaPlanilha(arquivo))
+      .rejects.toThrow(/CARGA BLOQUEADA: 1 linha\(s\) sem tenantid — linha\(s\) 2/);
+    // Nada foi gravado: a carga inteira é recusada.
     expect(await chaveVazia()).toBe(false);
+    expect(await emTodosOsEspelhos()).toBe(0);
   });
 
-  it('normaliza o casing do tenantid da linha', async () => {
-    await DatabaseLoaderService.injetarDadosEmLotes([
-      { tenantid: 'cicopal', filial: 'MATRIZ', primarykey: 'MINUSCULO', etiqueta: 'MINUSCULO', qt: 1 }
+  it('lista todas as linhas afectadas, na numeração do Excel', async () => {
+    const arquivo = planilha([
+      { tenantid: TENANT, filial: 'MATRIZ', primarykey: 'OK-1', etiqueta: 'OK-1', qt: '1' },
+      { filial: 'MATRIZ', primarykey: 'VAZIA-1', etiqueta: 'VAZIA-1', qt: '1' },
+      { tenantid: '   ', filial: 'MATRIZ', primarykey: 'VAZIA-2', etiqueta: 'VAZIA-2', qt: '1' },
+      { tenantid: TENANT, filial: 'MATRIZ', primarykey: 'OK-2', etiqueta: 'OK-2', qt: '1' },
+      { filial: 'MATRIZ', primarykey: 'VAZIA-3', etiqueta: 'VAZIA-3', qt: '1' }
     ]);
 
-    expect(await db.local_assets.get([TENANT, 'MINUSCULO'])).toBeDefined();
-    expect(await db.local_assets.get(['cicopal', 'MINUSCULO'])).toBeUndefined();
+    await expect(DatabaseLoaderService.extrairDadosDaPlanilha(arquivo))
+      .rejects.toThrow(/3 linha\(s\) sem tenantid — linha\(s\) 3, 4, 6/);
+  });
+
+  it('bloqueia linhas de outro contrato e nomeia o contrato encontrado', async () => {
+    const arquivo = planilha([
+      { tenantid: TENANT, filial: 'MATRIZ', primarykey: 'OK-1', etiqueta: 'OK-1', qt: '1' },
+      { tenantid: 'OUTRO_CLIENTE', filial: 'MATRIZ', primarykey: 'ALHEIO', etiqueta: 'ALHEIO', qt: '1' },
+      { tenantid: 'outro_cliente', filial: 'MATRIZ', primarykey: 'ALHEIO-2', etiqueta: 'ALHEIO-2', qt: '1' }
+    ]);
+
+    await expect(DatabaseLoaderService.extrairDadosDaPlanilha(arquivo))
+      .rejects.toThrow(/2 linha\(s\) trazem contrato diferente do contrato activo \(CICOPAL\) — linha 3 \(OUTRO_CLIENTE\), linha 4 \(OUTRO_CLIENTE\)/);
+    expect(await emTodosOsEspelhos()).toBe(0);
+  });
+
+  it('aceita planilha de um só contrato e canoniza o casing antes de gravar', async () => {
+    const linhas = await DatabaseLoaderService.extrairDadosDaPlanilha(planilha([
+      { tenantid: 'cicopal', filial: 'MATRIZ', primarykey: 'MINUSCULO', etiqueta: 'MINUSCULO', qt: '1' },
+      { tenantid: TENANT, filial: 'MATRIZ', primarykey: 'MAIUSCULO', etiqueta: 'MAIUSCULO', qt: '1' }
+    ]));
+    await DatabaseLoaderService.injetarDadosEmLotes(linhas);
+
+    for (const table of ESPELHOS) {
+      expect(await db[table].get([TENANT, 'MINUSCULO'])).toBeDefined();
+      expect(await db[table].get([TENANT, 'MAIUSCULO'])).toBeDefined();
+      expect(await db[table].get(['cicopal', 'MINUSCULO'])).toBeUndefined();
+    }
+    expect(await chaveVazia()).toBe(false);
   });
 });
 

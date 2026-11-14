@@ -8,7 +8,7 @@ import { logger } from '../utils/logger';
 import { normalizeFieldValue, normalizeDateISO, normalizeNumeric } from '../utils/normalize';
 import { contentFingerprint, createFallbackKeyAllocator, resolveAssetKey, sanitizeAssetKey } from '../utils/assetKey';
 import { reportRecnoCollisions } from './recnoGuardService';
-import { resolveTenantKey } from '../utils/tenantSession';
+import { getCurrentTenantid, resolveTenantKey } from '../utils/tenantSession';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -61,7 +61,9 @@ function getRowValue(row: Record<string, unknown>, ...keys: string[]): string | 
 
 /**
  * CONTRATO SRE (planilha): nomes e ordem das colunas obrigatórias definidos pelo operador.
- * O tenantid (Índice 0) nunca recebe valor fixo/fallback — vem exclusivamente da planilha.
+ * O tenantid (Índice 0) vem exclusivamente da planilha: cada linha tem de trazê-lo e
+ * tem de ser o contrato activo — a carga não herda o contrato da sessão nem aceita
+ * o de outro cliente (ver `validateSpreadsheetContract`).
  */
 /**
  * Espelha a coluna 'filial' exatamente como veio da planilha: sem trim, sem
@@ -150,6 +152,51 @@ function validateSpreadsheetContract(worksheet: XLSX.WorkSheet): void {
     logger.error(`[SRE_LOADER] ${msg}`);
     throw new Error(msg);
   }
+
+  // 4) POLÍTICA DE IDENTIDADE POR LINHA: cada ativo tem de trazer o seu contrato.
+  // A planilha é a única fonte de identidade do bem — herdar o contrato da sessão
+  // numa linha vazia transformaria um erro de digitação numa atribuição de dono
+  // silenciosa, e no push o ativo passaria a ser do cliente errado. Linhas sem
+  // identidade e linhas de outro contrato bloqueiam a carga inteira.
+  const sessionTenant = getCurrentTenantid().trim().toUpperCase();
+  const semTenant: number[] = [];
+  const outroContrato: Array<{ linha: number; tenant: string }> = [];
+
+  aoa.slice(1).forEach((row, i) => {
+    const celulas = Array.isArray(row) ? row : [];
+    // Linha totalmente vazia (rodapé, linha em branco) não é um ativo: ignora.
+    const temConteudo = celulas.some(c => c !== undefined && c !== null && String(c).trim() !== '');
+    if (!temConteudo) return;
+
+    const linha = i + 2; // +1 do cabeçalho, +1 da numeração do Excel
+    const raw = celulas[0];
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+      semTenant.push(linha);
+      return;
+    }
+    const canonico = String(raw).trim().toUpperCase();
+    if (canonico !== sessionTenant) outroContrato.push({ linha, tenant: canonico });
+  });
+
+  if (semTenant.length > 0) {
+    const msg =
+      `CARGA BLOQUEADA: ${semTenant.length} linha(s) sem tenantid — linha(s) ${semTenant.join(', ')}. ` +
+      "Preencha a coluna 'tenantid' (Índice 0) de cada ativo antes de carregar: " +
+      'o contrato do ativo não é herdado da sessão.';
+    logger.error(`[SRE_LOADER] ${msg}`);
+    throw new Error(msg);
+  }
+
+  if (outroContrato.length > 0) {
+    const detalhe = outroContrato.map(r => `linha ${r.linha} (${r.tenant})`).join(', ');
+    const msg = sessionTenant
+      ? `CARGA BLOQUEADA: ${outroContrato.length} linha(s) trazem contrato diferente do contrato activo (${sessionTenant}) — ${detalhe}. ` +
+        'Entre no contrato certo antes de carregar, ou corrija a coluna tenantid.'
+      : `CARGA BLOQUEADA: ${outroContrato.length} linha(s) trazem um contrato (${detalhe}) ` +
+        'sem contrato activo na sessão. Entre no contrato do cliente antes de carregar.';
+    logger.error(`[SRE_LOADER] ${msg}`);
+    throw new Error(msg);
+  }
 }
 
 export class DatabaseLoaderService {
@@ -206,10 +253,10 @@ export class DatabaseLoaderService {
       const loteBruto = dadosBrutos.slice(i, i + this.CHUNK_SIZE) as Record<string, unknown>[];
       
       const loteHigienizado: DexieAsset[] = loteBruto.map((row) => {
-        // REGRA DE CONTRATO (planilha): o tenantid NUNCA recebe valor fixo. Vem da
-        // coluna 'tenantid' (Índice 0); quando a linha não o traz, adopta o
-        // contrato da sessão — gravar ['', primarykey] deixaria a linha órfã,
-        // invisível para a contagem e fora do alcance da migração de case.
+        // REGRA DE CONTRATO (planilha): o tenantid vem da coluna 'tenantid'
+        // (Índice 0). A validação da planilha já recusa linhas vazias ou de outro
+        // contrato; `resolveTenantKey` fica aqui para canonizar o casing e para os
+        // chamadores que não passam pelo ficheiro (nunca para inventar dono).
         const tenantid = resolveTenantKey(getRowValue(row, 'tenantid'));
         const rawFilial = mirrorFilial(row.filial);
         // Chave canônica única (utils/assetKey): primarykey → etiqueta → tag →

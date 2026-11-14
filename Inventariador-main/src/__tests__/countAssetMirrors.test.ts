@@ -229,6 +229,9 @@ describe('countAssetMirrors (F0)', () => {
 
     // Com o marcador invalidado a contagem volta à varredura e vê o resíduo
     // em minúsculas que a importação pode deixar (o entrypoint não o apagou).
+    // A importação acima é válida e grava a sua própria linha: limpa-se o espelho
+    // para a contagem medir só o resíduo que este teste isola.
+    await db.local_assets.clear();
     await db.local_assets.bulkPut([row('cicopal', 'b')]);
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
   });
@@ -258,7 +261,11 @@ function minimalValidXlsxFile(): File {
 
   const headerItems = headers.map(h => `<Cell><Data ss:Type="String">${h}</Data></Cell>`);
   const headerRow = headerItems.join('');
-  const dataRow = headers.map(() => `<Cell><Data ss:Type="String">dummy</Data></Cell>`).join('');
+  // tenantid (Índice 0) tem de ser o contrato activo: a carga não herda nem aceita
+  // o de outro cliente desde a guarda de identidade por linha.
+  const dataRow = headers
+    .map((_, i) => `<Cell><Data ss:Type="String">${i === 0 ? 'CICOPAL' : 'dummy'}</Data></Cell>`)
+    .join('');
 
   const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"' +
