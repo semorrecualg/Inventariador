@@ -107,12 +107,26 @@ if (!existsSync(repoRoot)) {
   process.exit(1);
 }
 
-const allFiles = walk(repoRoot);
-const mdFiles = allFiles.filter(file => file.toLowerCase().endsWith('.md'));
-
+// Raízes a indexar: a varrida e a de cada extra que viva fora dela. Sem isto,
+// um `ci.yml` citado no AGENTS.md não resolve quando a raiz é a pasta do app —
+// a resolução e o índice de nomes soltos só conheceriam o que foi varrido.
+const raizes = [repoRoot];
+const extraFiles = [];
 for (const extra of extras) {
   const full = resolve(appRoot, extra);
-  if (existsSync(full) && !mdFiles.includes(full)) mdFiles.push(full);
+  if (!existsSync(full)) continue;
+  extraFiles.push(full);
+  if (relative(repoRoot, full).startsWith('..')) {
+    const raiz = findRepoRoot(dirname(full));
+    if (!raizes.includes(raiz)) raizes.push(raiz);
+  }
+}
+
+const allFiles = [...new Set(raizes.flatMap(raiz => walk(raiz)))];
+const mdFiles = allFiles.filter(file => file.toLowerCase().endsWith('.md'));
+
+for (const full of extraFiles) {
+  if (!mdFiles.includes(full)) mdFiles.push(full);
 }
 const basenames = new Set(allFiles.map(file => basename(file)));
 const rel = file => relative(repoRoot, file).split('\\').join('/');
@@ -122,9 +136,7 @@ let linkCount = 0;
 let refCount = 0;
 
 const resolves = (file, ref) =>
-  [resolve(dirname(file), ref), resolve(repoRoot, ref), resolve(appRoot, ref)].some(candidate =>
-    existsSync(candidate)
-  );
+  [dirname(file), repoRoot, appRoot, ...raizes].some(base => existsSync(resolve(base, ref)));
 
 for (const file of mdFiles) {
   const text = readFileSync(file, 'utf8');

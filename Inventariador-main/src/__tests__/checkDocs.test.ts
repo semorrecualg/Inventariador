@@ -80,6 +80,27 @@ describe('check-docs — gate de referências dos docs', () => {
     expect(result.stderr).toContain('AGENTS.md');
   });
 
+  it('resolve nomes soltos do extra contra a raiz onde ele vive', () => {
+    // `ci.yml` só existe em `.github/workflows/`: com a raiz apontada ao app, o
+    // índice de nomes soltos (e a resolução) tem de incluir a raiz do extra.
+    const base = mkdtempSync(join(tmpdir(), 'check-docs-repo-'));
+    mkdirSync(join(base, '.github', 'workflows'), { recursive: true });
+    writeFileSync(join(base, '.github', 'workflows', 'ci.yml'), 'name: CI\n', 'utf8');
+    writeFileSync(join(base, 'AGENTS.md'), 'CI em `ci.yml`.\n', 'utf8');
+    const app = join(base, 'app');
+    mkdirSync(app);
+    writeFileSync(join(app, 'vazio.md'), '# Vazio\n', 'utf8');
+
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, app, '--extra', join(base, 'AGENTS.md')],
+      { encoding: 'utf8' }
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('[ OK ]');
+  });
+
   it('doc sem referências passa', () => {
     const result = runAgainst('# Título\n\nTexto simples, sem caminhos.\n');
 
