@@ -178,23 +178,17 @@ describe('countAssetMirrors (F0)', () => {
   });
 
   it('importExcelBulkData invalida o marcador antes de gravar', async () => {
+    // Base já migrada: marcador presente e contagem a usar o índice.
     await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
-    // Verifica que o método importExcelBulkData existe e chama invalidateTenantCaseMarker no início.
-    // Usa vi.spyOn para espiar o método e verificar o efeito de invalidação.
-    const loader = new DatabaseLoaderService();
-    // Garante que o marcador existe antes da chamada
-    await db.SYSTEM_CONTEXT.put({ key: TENANT_CASE_MARKER, value: '1', updated_at: new Date().toISOString() });
-    const markerBefore = await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER);
-    expect(markerBefore?.value).toBe('1');
-    // Cria um arquivo XLSX mínimo com headers obrigatórios para passar a validação de contrato
-    const minXlsx = minimalValidXlsxFile();
-    // Chama importExcelBulkData - o entrypoint chama invalidateTenantCaseMarker antes de processar
-    await loader.importExcelBulkData(minXlsx, 'CICOPAL', 'UNIT1', () => {});
-    // O marcador deve ter sido invalidado pelo entrypoint
-    const markerAfter = await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER);
-    // O marcador deve ter sido invalidado (value deve ser undefined ou diferente de '1')
-    expect(markerAfter?.value).not.toBe('1');
-    // Com o marcador invalidado a contagem varre e vê a linha em minúsculas.
+    expect((await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER))?.value).toBe('1');
+
+    // O entrypoint tem de invalidar o marcador antes de escrever os ativos.
+    await new DatabaseLoaderService().importExcelBulkData(minimalValidXlsxFile(), 'CICOPAL', 'UNIT1', () => {});
+    await expect(db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)).resolves.toBeUndefined();
+
+    // Com o marcador invalidado a contagem volta à varredura e vê o resíduo
+    // em minúsculas que a importação pode deixar (o entrypoint não o apagou).
+    await db.local_assets.bulkPut([row('cicopal', 'b')]);
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
   });
 
