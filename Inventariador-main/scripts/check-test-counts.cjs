@@ -36,8 +36,13 @@ const DOCS_ATUAIS = [
 /** `N testes / M arquivos` e a ordem inversa. */
 const COMPOSTO_TESTES = /(\d+)\s+testes?\s*\/\s*(\d+)\s+arquivos?/;
 const COMPOSTO_ARQUIVOS = /(\d+)\s+arquivos?\s*\/\s*(\d+)\s+testes?/;
-/** Afirmações de só testes: "(844 testes)" junto ao comando ou a "Vitest (…)". */
-const TOTAL_TESTES = /(?:vitest run|Vitest)\s*\(?(\d+)\s+testes?/;
+/**
+ * Afirmações de só testes junto ao comando: "`npx vitest run` (844 testes)",
+ * "Vitest (844 testes)". Aceita o que vier entre o comando e o número (crase,
+ * parêntese, travessão) — antes exigia só espaços e deixava passar a forma com
+ * o comando em backticks, que é justamente a usada nos passos de validação.
+ */
+const TOTAL_TESTES = /(?:vitest run|Vitest)[^\n]{0,30}?(\d+)\s+testes?/;
 
 const PLACEHOLDER = /(<|…|\bN\b|\bNN\b)/;
 

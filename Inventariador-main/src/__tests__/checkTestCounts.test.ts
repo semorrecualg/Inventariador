@@ -63,6 +63,24 @@ describe('check:test-counts', () => {
     expect(r.stderr).toContain('docs/ARCHITECTURE.md:1');
   });
 
+  it('apanha a forma "`npx vitest run` (N testes)" dos passos de validação', () => {
+    escrever('docs/ARCHITECTURE.md', '5. **Valide**: `npx tsc --noEmit` + `npx vitest run` (366 testes).\n');
+
+    const r = correr(['--tests', '844', '--files', '94']);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('docs/ARCHITECTURE.md:1');
+    expect(r.stderr).toContain('366 testes');
+  });
+
+  it('aceita a mesma forma com a contagem certa', () => {
+    escrever('docs/ARCHITECTURE.md', '5. **Valide**: `npx vitest run` (844 testes).\n');
+
+    const r = correr(['--tests', '844', '--files', '94']);
+
+    expect(r.status).toBe(0);
+  });
+
   it('detecta contagem errada mesmo quando os ficheiros não existem', () => {
     escrever('docs/GOVERNANCA.md', '| `npm test` | **844 testes / 94 arquivos** verdes |\n');
 
