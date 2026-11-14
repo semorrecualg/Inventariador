@@ -8,6 +8,11 @@ interface RestoreWarningToastProps {
   /** Texto do aviso; `null` mantém o toast fora do ecrã. */
   message: string | null;
   onDismiss: () => void;
+  /**
+   * Muda a cada disparo. Sem isto, repetir o MESMO aviso com o toast ainda
+   * visível não alterava `message` e o temporizador seguia o ciclo anterior.
+   */
+  restartToken?: number;
 }
 
 /**
@@ -17,12 +22,16 @@ interface RestoreWarningToastProps {
  * — esse canal abre um modal "Controle de Fluxo SRE" e descarta o tipo, o que
  * transformava este alerta num modal (ou o perdia para o toast de sucesso).
  */
-export const RestoreWarningToast: React.FC<RestoreWarningToastProps> = ({ message, onDismiss }) => {
+export const RestoreWarningToast: React.FC<RestoreWarningToastProps> = ({
+  message,
+  onDismiss,
+  restartToken = 0
+}) => {
   useEffect(() => {
     if (!message) return;
     const timer = setTimeout(onDismiss, AUTO_DISMISS_MS);
     return () => clearTimeout(timer);
-  }, [message, onDismiss]);
+  }, [message, restartToken, onDismiss]);
 
   if (!message) return null;
 

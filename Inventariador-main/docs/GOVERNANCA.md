@@ -6,7 +6,7 @@
 >
 > **Última verificação:** 2026-11-02 · **App:** v2.6.0 · **Baseline local:** Dexie v7
 > Complementa (não substitui) `SPEC.md`, `ARCHITECTURE.md`, `RBAC_GOVERNANCA.md` e
-> `SCHEMA_BASELINE.md` — ver § 11.
+> `SCHEMA_BASELINE.md` — ver § 12.
 
 ---
 
@@ -67,7 +67,7 @@ na raiz do repositório é erro — os órfãos herdados foram removidos.
 Sem as duas → **INTERNAL** (100% offline). Presentes → **SUPABASE**.
 
 > Consequência prática: um build sem credenciais é *silenciosamente offline*.
-> Por isso o `verify:governanca` (§ 8) e o checklist de release (§ 9) existem.
+> Por isso o `verify:governanca` (§ 9) e o checklist de release (§ 10) existem.
 
 Arquivos de ambiente:
 
@@ -100,7 +100,7 @@ Arquivos de ambiente:
 
 ```
 dev local ──commit──▶ branch ──PR──▶ CI verde ──merge──▶ main
-                                                     └──▶ APK só sob demanda (§ 9.1)
+                                                     └──▶ APK só sob demanda (§ 10.1)
 ```
 
 1. Branch de trabalho a partir de `main` atualizada (`git fetch` antes).
@@ -173,7 +173,7 @@ nunca entra em variável `VITE_*`.
    `tenants`, `filial`. Se houver legado incompatível, ver cabeçalho do bootstrap.
 5. Cadastrar `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` em *GitHub → Settings →
    Secrets* (usados pelo `ci.yml` e pelo `android-build.yml`).
-6. Rodar `npm run verify:governanca` (§ 8) e fazer um login real de teste.
+6. Rodar `npm run verify:governanca` (§ 9) e fazer um login real de teste.
 
 ### 7.3 Uso e limites
 
@@ -191,7 +191,72 @@ nunca entra em variável `VITE_*`.
 
 ---
 
-## 8. Verificação automatizada
+## 8. Regras de tenant (chave composta `[tenantid+primarykey]`)
+
+As tabelas locais de ativos (`local_assets`, `ativos`, `assets`) têm chave
+composta `[tenantid+primarykey]`. Toda leitura e escrita passa por essa chave —
+daí as regras abaixo, que valem para a carga e para o restauro.
+
+### 8.1 Regra única da chave
+
+`resolveTenantKey` (`src/utils/tenantSession.ts`) é a **única** forma de obter o
+tenant de uma chave: `UPPER` sobre o valor recebido e, quando ele vem vazio, o
+contrato da sessão (`getCurrentTenantid`). A chave `['', primarykey]` é proibida:
+não casa com nenhuma linha gravada, fica invisível para `countAssetMirrors` e
+fora do alcance da migração de case.
+
+### 8.2 Carga de planilha — identidade por linha
+
+O `tenantid` de cada ativo vem **exclusivamente** da coluna 0 (índice 0) da
+planilha. `validateSpreadsheetContract` (`src/services/DatabaseLoaderService.ts`)
+recusa a carga inteira, antes de qualquer escrita, quando:
+
+- a coluna `tenantid` está ausente ou fora do índice 0;
+- as 21 colunas obrigatórias não estão na ordem do contrato;
+- **alguma linha** traz `tenantid` vazio — a mensagem lista as linhas na
+  numeração do Excel (cortada em 10, com «… e mais N»);
+- **alguma linha** traz um contrato diferente do contrato activo — a mensagem
+  nomeia a linha e o contrato encontrado.
+
+Não há herança do contrato da sessão numa linha vazia: a planilha é a única
+fonte de identidade do bem, e herdar transformaria um erro de digitação numa
+atribuição de dono silenciosa que o push levaria para o cliente errado. O casing
+continua a ser canonizado (`UPPER`) na escrita.
+
+### 8.3 Restauro de backup — recuperação, não importação
+
+O restauro repõe a base do aparelho, por isso **não é bloqueado** por trazer
+linhas de outro contrato: bloquear deixaria o utilizador sem base nenhuma no
+momento em que precisa dela. O que garante isolamento é o registo do que foi
+feito:
+
+- `replaceAssetMirrors` canoniza o `tenantid`, repõe os três espelhos na mesma
+  transação e devolve `RestoreSummary` (`total`, linhas por contrato e as
+  `primarykey` que adoptaram o contrato da sessão por virem sem `tenantid`);
+- o painel (`src/screens/DatabaseManagerScreen.tsx`) mostra um **toast vermelho**
+  com auto-dismiss quando o contrato activo não está entre os repostos — nunca um
+  modal de fluxo;
+- `audit_logs` recebe `RESTORE_CROSS_TENANT` (mais de um contrato, ou contrato
+  activo ausente do snapshot) e `RESTORE_TENANT_ADOPTED` (as pks adoptadas);
+- o restauro físico do boot grava **uma vez por ficheiro**: a impressão digital
+  do resumo fica em `SYSTEM_CONTEXT` e só um `.dat` diferente volta a auditar.
+
+### 8.4 Migração de case
+
+`repairTenantCase` (`src/services/sqliteService.ts`) repara apenas diferenças de
+caixa e **ignora tenant vazio**: não há contrato a atribuir numa migração que
+corre antes do login, e adivinhar o dono seria pior do que o registo em falta. É
+a guarda da carga que impede o aparecimento de linhas vazias.
+
+### 8.5 Escrita pela UI
+
+`toDexieAsset` e as actualizações de campo (`src/services/localDbService.ts`)
+canonizam o tenant antes de gravar, de modo a que nenhuma escrita iniciada pelo
+ecrã crie `['', primarykey]` nem variantes de case.
+
+---
+
+## 9. Verificação automatizada
 
 ```bash
 npm run verify:governanca              # git + env + Supabase (rede)
@@ -218,7 +283,7 @@ rede e de secrets — o CI garante o código; este script garante o **ambiente**
 
 ---
 
-## 9. Checklist de release
+## 10. Checklist de release
 
 1. `git fetch` + `git switch main` + `git pull --ff-only`.
 2. `npm ci --legacy-peer-deps`.
@@ -226,12 +291,12 @@ rede e de secrets — o CI garante o código; este script garante o **ambiente**
 4. `npm run verify:governanca` — sem falhas.
 5. Versão em `package.json` + entrada no `CHANGELOG.md` (Keep a Changelog).
 6. PR com CI verde → merge em `main`.
-7. **APK só sob demanda** (§ 9.1); a entrega web fica no que for publicado a partir de `main`.
+7. **APK só sob demanda** (§ 10.1); a entrega web fica no que for publicado a partir de `main`.
 8. Conferir artefato: se o build deveria ser nuvem, validar que **não** caiu em
    INTERNAL (login Supabase funciona).
 9. Tag + release no GitHub com o APK anexado (`SKILL.md` descreve o processo).
 
-### 9.1 APK sob demanda
+### 10.1 APK sob demanda
 
 O `android-build.yml` **não dispara em push para `main`**: o APK nasce apenas
 quando alguém o pede. Três gestos, e só três:
@@ -252,7 +317,7 @@ Regras:
    O SHA-256 do APK e do certificado sai no resumo do job.
 3. Artefato fica disponível por 7 dias (`gbr-kardek-apk`). Para release, anexe o
    APK à tag no GitHub (passo 9) — o artefato do Actions expira.
-4. **A chave de assinatura é fixa (§ 9.2).** Vive no repositório, sem passo
+4. **A chave de assinatura é fixa (§ 10.2).** Vive no repositório, sem passo
    manual; chave diferente = “O app não foi instalado”.
 5. **`/apk` exige escrita no repositório.** O job valida a permissão
    (`admin`/`maintain`/`write`) antes de compilar e falha fechado; PR de fork não
@@ -262,7 +327,7 @@ Regras:
    existe em `main`: no primeiro uso, faça o merge e peça o build a seguir. O
    mesmo vale para `/apk` — o GitHub lê o workflow da branch padrão.
 
-### 9.2 Chave de assinatura do APK
+### 10.2 Chave de assinatura do APK
 
 A chave com que **todos** os APKs são assinados está no repositório:
 `keystore/debug.keystore` (chave de *debug*, alias `androiddebugkey`, senhas
@@ -282,7 +347,7 @@ Detalhes da chave e do custo de a manter no repositório:
 
 ---
 
-## 10. Pendências conhecidas
+## 11. Pendências conhecidas
 
 | # | Pendência | Impacto | Depende de |
 |---|---|---|---|
@@ -302,7 +367,7 @@ na conta — se um dia o remote passar para SSH, registrar no painel e trocar a 
 
 ---
 
-## 11. Mapa de documentos
+## 12. Mapa de documentos
 
 | Documento | Papel |
 |---|---|

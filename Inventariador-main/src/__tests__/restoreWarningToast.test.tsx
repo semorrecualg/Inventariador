@@ -38,6 +38,26 @@ describe('RestoreWarningToast', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('reinicia o temporizador quando o mesmo aviso é disparado outra vez', () => {
+    const onDismiss = vi.fn();
+    const { rerender } = render(
+      <RestoreWarningToast message="BASE REPOSTA" restartToken={1} onDismiss={onDismiss} />
+    );
+
+    // 7s do primeiro ciclo: ainda visível.
+    act(() => { vi.advanceTimersByTime(7000); });
+    expect(onDismiss).not.toHaveBeenCalled();
+
+    // Mesmo texto, novo disparo: o ciclo tem de recomeçar do zero.
+    rerender(<RestoreWarningToast message="BASE REPOSTA" restartToken={2} onDismiss={onDismiss} />);
+    act(() => { vi.advanceTimersByTime(7000); });
+    expect(onDismiss).not.toHaveBeenCalled();
+
+    // 8s desde o segundo disparo: fecha uma única vez.
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
   it('fecha pelo botão sem esperar o temporizador', () => {
     const onDismiss = vi.fn();
     render(<RestoreWarningToast message="aviso" onDismiss={onDismiss} />);

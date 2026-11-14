@@ -69,7 +69,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   };
   // Aviso de contrato reposto: toast próprio no painel (vermelho, auto-dismiss).
   // Não passa pelo canal global de mensagens, que abre um modal e descarta o tipo.
-  const [avisoContrato, setAvisoContrato] = useState<string | null>(null);
+  const [avisoContrato, setAvisoContrato] = useState<{ texto: string; token: number } | null>(null);
   const fecharAvisoContrato = useCallback(() => setAvisoContrato(null), []);
   const [assetCount, setAssetCount] = useState<number>(0);
   // Contra-prova física: cada espelho é contado em separado, para o painel poder
@@ -158,7 +158,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         setIsUploading(false);
         if (avisoRestauro) {
           addLog("[SRE_BACKUP] Restauração concluída COM AVISO — ver o toast do contrato reposto.");
-          setAvisoContrato(avisoRestauro);
+          // O token conta disparos: o mesmo aviso repetido reinicia o temporizador.
+          setAvisoContrato(prev => ({ texto: avisoRestauro, token: (prev?.token ?? 0) + 1 }));
         } else {
           addLog("[SRE_BACKUP] Restauração e sincronização do backup concluídas com sucesso.");
           showRecoveryToast("✓ BACKUP FISICO RECONECTADO COM SUCESSO.", "blue");
@@ -671,7 +672,11 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col p-6 font-sans">
-      <RestoreWarningToast message={avisoContrato} onDismiss={fecharAvisoContrato} />
+      <RestoreWarningToast
+        message={avisoContrato?.texto ?? null}
+        restartToken={avisoContrato?.token}
+        onDismiss={fecharAvisoContrato}
+      />
       {/* 1. Header do Gestor */}
       <div className="flex items-center justify-between mb-8 pb-4 border-b border-slate-800">
         <div className="flex items-center space-x-3">
