@@ -39,6 +39,8 @@ export interface MirrorCounts {
 
 export interface PerfBaseline {
   at: string;
+  /** O que disparou o retrato: fim do boot, fim de um pull completo ou botão. */
+  trigger: 'boot' | 'pull.full' | 'manual';
   tenantid: string | null;
   mirrors: MirrorCounts | null;
   metrics: Record<PerfMetricName, PerfSummary>;
@@ -47,6 +49,8 @@ export interface PerfBaseline {
 const SAMPLES_KEY = 'gbr_perf_samples_v1';
 const BASELINE_KEY = 'gbr_perf_baseline_v1';
 const MAX_SAMPLES = 200;
+const PERF_TRIGGERS: PerfBaseline['trigger'][] = ['boot', 'pull.full', 'manual'];
+const EMPTY_SUMMARY: PerfSummary = { samples: 0, p50: null, p95: null, last: null };
 
 /** `performance.now()` quando existe; `Date.now()` como fallback (testes/SSR). */
 const now = (): number =>
@@ -62,8 +66,33 @@ const safeStorage = (): Storage | null => {
   }
 };
 
-/** Marca o início de um intervalo (boot, delta, push). */
+/** Marca o início de um intervalo relativo (delta, push). */
 export const startPerf = (): number => now();
+
+/**
+ * Início do boot = início da navegação.
+ *
+ * `performance.now()` já conta desde `performance.timeOrigin`, logo o marco é 0
+ * e `recordPerf('boot', …)` devolve o tempo total (documento, scripts, dados),
+ * não apenas desde o import deste módulo. Sem `performance` (testes/SSR antigo)
+ * não há origem de navegação: cai para o instante do import.
+ */
+export const startBootPerf = (): number =>
+  typeof performance !== 'undefined' && typeof performance.now === 'function' ? 0 : Date.now();
+
+/**
+ * Executa uma tarefa quando a thread estiver ociosa — usada para a contagem
+ * dos espelhos do auto-registro F0 não competir com o boot/persistência.
+ * `requestIdleCallback` quando existe; `setTimeout(0)` como fallback.
+ */
+export const scheduleIdle = (task: () => void | Promise<void>, timeoutMs = 2000): void => {
+  const run = (): void => { void task(); };
+  const idle = (globalThis as {
+    requestIdleCallback?: (cb: () => void, options?: { timeout?: number }) => number;
+  }).requestIdleCallback;
+  if (typeof idle === 'function') idle(run, { timeout: timeoutMs });
+  else setTimeout(run, 0);
+};
 
 /** Amostras válidas, da mais antiga para a mais recente. */
 export const getPerfSamples = (): PerfSample[] => {
@@ -126,17 +155,16 @@ export const recordPerf = (
 
 /** p50/p95 por posto (nearest-rank) — sem dependências. */
 export const summarizeSamples = (samples: PerfSample[], name: PerfMetricName): PerfSummary => {
-  const values = samples
-    .filter(s => s.name === name)
-    .map(s => s.ms)
-    .sort((a, b) => a - b);
-  if (values.length === 0) return { samples: 0, p50: null, p95: null, last: null };
+  const own = samples.filter(s => s.name === name);
+  if (own.length === 0) return { samples: 0, p50: null, p95: null, last: null };
+  const values = own.map(s => s.ms).sort((a, b) => a - b);
   const at = (p: number): number => values[Math.min(values.length - 1, Math.ceil((p / 100) * values.length) - 1)];
   return {
     samples: values.length,
     p50: at(50),
     p95: at(95),
-    last: values[values.length - 1]
+    // Ordem de gravação, não de grandeza: é a amostra mais recente.
+    last: own[own.length - 1].ms
   };
 };
 
@@ -161,9 +189,11 @@ export const clearPerfSamples = (): void => {
 export const savePerfBaseline = (input: {
   tenantid: string | null;
   mirrors: MirrorCounts | null;
+  trigger?: PerfBaseline['trigger'];
 }): PerfBaseline => {
   const baseline: PerfBaseline = {
     at: new Date().toISOString(),
+    trigger: input.trigger ?? 'manual',
     tenantid: input.tenantid,
     mirrors: input.mirrors,
     metrics: collectPerfSummary()
@@ -174,8 +204,8 @@ export const savePerfBaseline = (input: {
     /* ignore */
   }
   logger.info(
-    `>>> [PERF] Linha de base registrada${input.tenantid ? ` (${input.tenantid})` : ''}: ` +
-      `mirrors=${input.mirrors ? `${input.mirrors.local_assets}/${input.mirrors.ativos}/${input.mirrors.assets}` : 'n/d'} · ` +
+    `>>> [PERF] Linha de base registrada (${baseline.trigger})${baseline.tenantid ? ` (${baseline.tenantid})` : ''}: ` +
+      `mirrors=${baseline.mirrors ? `${baseline.mirrors.local_assets}/${baseline.mirrors.ativos}/${baseline.mirrors.assets}` : 'n/d'} · ` +
       PERF_METRICS.map(name => {
         const s = baseline.metrics[name];
         return `${name}=${s.samples > 0 ? `${s.p50}ms(p50)/${s.p95}ms(p95) n=${s.samples}` : 'sem amostra'}`;
@@ -184,15 +214,47 @@ export const savePerfBaseline = (input: {
   return baseline;
 };
 
+/** Snapshot em JSON indentado — é o texto do botão Copiar/Exportar. */
+export const formatPerfBaseline = (baseline: PerfBaseline): string =>
+  JSON.stringify(baseline, null, 2);
+
+/**
+ * Aceita snapshots antigos (gravados antes de existir `trigger`): sem gatilho
+ * válido, assume `manual`. Campos em falta são normalizados, nunca rejeitados.
+ */
+export const normalizePerfBaseline = (raw: unknown): PerfBaseline | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const candidate = raw as Partial<PerfBaseline> & { metrics?: unknown };
+  if (typeof candidate.at !== 'string' || !candidate.metrics || typeof candidate.metrics !== 'object') {
+    return null;
+  }
+  const trigger = PERF_TRIGGERS.includes(candidate.trigger as PerfBaseline['trigger'])
+    ? (candidate.trigger as PerfBaseline['trigger'])
+    : 'manual';
+  const rawMetrics = candidate.metrics as Partial<Record<PerfMetricName, PerfSummary>>;
+  const metrics = PERF_METRICS.reduce((acc, name) => {
+    const summary = rawMetrics[name];
+    acc[name] = summary && typeof summary === 'object' ? summary : EMPTY_SUMMARY;
+    return acc;
+  }, {} as Record<PerfMetricName, PerfSummary>);
+  return {
+    at: candidate.at,
+    trigger,
+    tenantid: typeof candidate.tenantid === 'string' ? candidate.tenantid : null,
+    mirrors: candidate.mirrors && typeof candidate.mirrors === 'object'
+      ? (candidate.mirrors as MirrorCounts)
+      : null,
+    metrics
+  };
+};
+
 export const readPerfBaseline = (): PerfBaseline | null => {
   const storage = safeStorage();
   if (!storage) return null;
   try {
     const raw = storage.getItem(BASELINE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<PerfBaseline>;
-    if (!parsed || typeof parsed.at !== 'string' || typeof parsed.metrics !== 'object') return null;
-    return parsed as PerfBaseline;
+    return normalizePerfBaseline(JSON.parse(raw) as unknown);
   } catch {
     return null;
   }

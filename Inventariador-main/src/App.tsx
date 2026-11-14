@@ -11,7 +11,7 @@ import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagI
 import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
-import { recordPerf, startPerf } from './utils/perfMetrics';
+import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -134,10 +134,37 @@ export class AppBootstrapError extends Error {
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "";
 
-// F0 (Malha de Auditoria): cronômetro do boot — começa no import do módulo e
-// fecha quando o carregamento de dados termina (isDataLoaded -> true).
-const APP_BOOT_STARTED_AT = startPerf();
+// F0 (Malha de Auditoria): cronômetro do boot — começa no início da navegação
+// (performance.timeOrigin) e fecha quando o carregamento de dados termina
+// (isDataLoaded -> true), cobrindo documento, scripts e pull.
+const APP_BOOT_STARTED_AT = startBootPerf();
 let bootPerfRecorded = false;
+
+/**
+ * F0: grava o retrato da linha de base sem bloquear o fluxo medido.
+ * Chamado no fim do boot e no fim de um pull completo (persistência concluída).
+ *
+ * A contagem dos três espelhos percorre a base inteira: fica para um momento
+ * ocioso (`scheduleIdle`) para não pesar no boot nem competir com a gravação.
+ */
+const autoRegisterPerfBaseline = (
+  trigger: 'boot' | 'pull.full',
+  tenantid?: string | null
+): void => {
+  scheduleIdle(async () => {
+    try {
+      // Migração de casing uma vez por base, fora da contagem (transação própria).
+      await sqliteService.migrateLegacyTenantids();
+      const mirrors = await sqliteService.countAssetMirrors(tenantid || null);
+      // Base vazia (boot sem dados/login) não é linha de base: preserva o último
+      // retrato útil em vez de o sobrescrever com zeros.
+      if (mirrors.total === 0) return;
+      savePerfBaseline({ tenantid: tenantid || null, mirrors, trigger });
+    } catch (err) {
+      logger.warn('>>> [PERF] Falha ao registrar linha de base automática:', err);
+    }
+  });
+};
 const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
 
 // Helper para verificar se um usuário é admin
@@ -2885,7 +2912,13 @@ useEffect(() => {
             status: (mergedAssets.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
             lastUpdated: syncTimestamp
           };
-          saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
+          saveInventory(newState)
+            .then(() => {
+              if (!incremental) {
+                autoRegisterPerfBaseline('pull.full', Array.isArray(firstTenant) ? firstTenant[0] : firstTenant);
+              }
+            })
+            .catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
           if (cloudAssets.length > 0) {
             syncAuditDetails = `Sincronização de ${cloudAssets.length} ativos da nuvem para o local.`;
           }
@@ -3479,6 +3512,7 @@ useEffect(() => {
         if (!bootPerfRecorded) {
           bootPerfRecorded = true;
           recordPerf('boot', APP_BOOT_STARTED_AT, { count: checkCount });
+          autoRegisterPerfBaseline('boot', user?.tenantid || null);
         }
         if (checkCount > 0) {
           sessionStorage.setItem('isDatabaseLoaded', 'true');

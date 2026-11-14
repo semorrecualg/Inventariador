@@ -1,7 +1,7 @@
 import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
 import * as XLSX from 'xlsx';
-import { db, DexieAsset } from './sqliteService';
+import { db, DexieAsset, invalidateTenantCaseMarker } from './sqliteService';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
@@ -195,6 +195,8 @@ export class DatabaseLoaderService {
   }
 
   static async injetarDadosEmLotes(dadosBrutos: unknown[], onProgresso?: (porcentagem: number) => void): Promise<number> {
+    // Carga nova pode reintroduzir tenantid não canónico: invalida o marcador.
+    await invalidateTenantCaseMarker();
     let registrosProcessados = 0;
     // Chaves derivadas (linhas sem identidade) contam por carga inteira, não por lote.
     const allocateFallbackKey = createFallbackKeyAllocator();
@@ -547,6 +549,7 @@ export class DatabaseLoaderService {
     unitId: string,
     onProgress: (processed: number, total: number) => void
   ): Promise<number> {
+    await invalidateTenantCaseMarker();
     // 1. Validação Preventiva de Bateria Crítica (< 5% sem fonte externa)
     let currentBatteryLevel = 1.0;
     let isDeviceCharging = true;
@@ -829,6 +832,8 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
 
     if (fileContent.data) {
       const restoredAssets = JSON.parse(fileContent.data as string);
+      // Só invalida quando há mesmo restauro: este caminho corre em todo boot.
+      await invalidateTenantCaseMarker();
       // Alimenta atomicamente o Dexie.js para restabelecer os 12.636 ativos sem Race Conditions
       await db.transaction('rw', [db.local_assets], async () => {
         await db.local_assets.clear();

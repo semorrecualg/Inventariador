@@ -312,6 +312,22 @@ export const runMigrationV5DryRun = (): Promise<V5DryRunReport> =>
 
 export const db = new InventoryDexieDatabase();
 
+/** Marcador da migração única de `tenantid` para UPPER (ver migrateLegacyTenantids). */
+export const TENANT_CASE_MARKER = 'f0_tenant_case_canonical_v1';
+
+/**
+ * Restore/importação podem trazer `tenantid` fora do UPPER: o marcador deixa de
+ * valer e a contagem volta à varredura até a próxima migração. Chamar antes de
+ * escrever os ativos (o pior caso é uma varredura, nunca uma contagem errada).
+ */
+export const invalidateTenantCaseMarker = async (): Promise<void> => {
+  try {
+    await db.SYSTEM_CONTEXT.delete(TENANT_CASE_MARKER);
+  } catch (err) {
+    logger.warn('[SRE] Não foi possível invalidar o marcador de casing; a contagem usa varredura.', err);
+  }
+};
+
 export class SQLitePersistenceException extends Error {
   constructor(message: string) {
     super(`[SQLitePersistenceException] ${message}`);
@@ -1023,6 +1039,56 @@ export class SqliteService {
   }
 
   /**
+   * F0: resíduos anteriores à v7 podem ter `tenantid` fora do UPPER canónico e,
+   * como o índice `[tenantid+primarykey]` é sensível a maiúsculas, ficariam
+   * fora da contagem pelo índice. Esta normalização é uma migração explícita:
+   * roda em transação única, uma vez por base (marcador em SYSTEM_CONTEXT), e
+   * NUNCA dentro de `countAssetMirrors`.
+   *
+   * Colisão com a linha canónica: a canónica é preservada intacta e a variante
+   * legada fica onde está (não é apagada nem sobrescreve). Como as duas têm a
+   * mesma `primarykey`, contam como um único ativo.
+   */
+  public async migrateLegacyTenantids(): Promise<{ repaired: number; skipped: number }> {
+    try {
+      if (await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)) return { repaired: 0, skipped: 0 };
+    } catch {
+      return { repaired: 0, skipped: 0 };
+    }
+    let repaired = 0;
+    let skipped = 0;
+    await db.transaction('rw', db.local_assets, db.ativos, db.assets, db.SYSTEM_CONTEXT, async () => {
+      const tables: Array<'local_assets' | 'ativos' | 'assets'> = ['local_assets', 'ativos', 'assets'];
+      for (const table of tables) {
+        const rows = (await db[table].toArray()) as Array<{ tenantid?: unknown; primarykey?: unknown; id?: unknown }>;
+        for (const row of rows) {
+          const raw = String(row.tenantid ?? '');
+          const canonical = raw.trim().toUpperCase();
+          if (canonical === '' || raw === canonical) continue;
+          const primarykey = String(row.primarykey ?? row.id ?? '');
+          const target: [string, string] = [canonical, primarykey];
+          if (await db[table].get(target)) {
+            skipped++;
+            continue;
+          }
+          await db[table].delete([raw, primarykey]);
+          await db[table].put({ ...row, tenantid: canonical } as DexieAsset);
+          repaired++;
+        }
+      }
+      await db.SYSTEM_CONTEXT.put({
+        key: TENANT_CASE_MARKER,
+        value: '1',
+        updated_at: new Date().toISOString()
+      });
+    });
+    if (repaired > 0 || skipped > 0) {
+      logger.warn(`[SRE] tenantid legado: ${repaired} normalizada(s) em transação; ${skipped} ignorada(s) por já existir a linha canónica.`);
+    }
+    return { repaired, skipped };
+  }
+
+  /**
    * Contra-prova por espelho físico: conta `local_assets`, `ativos` e `assets`
    * separadamente e devolve o total canónico (maior espelho) — a MESMA regra de
    * `getAssetCount`/`countAtivosByTenant`. O Gestor de Base contava só
@@ -1030,14 +1096,28 @@ export class SqliteService {
    * escreviam apenas um), anunciava 0 ativos enquanto a Unidade Operacional
    * mostrava milhares. Devolver cada espelho permite explicar a diferença em
    * vez de escondê-la.
+   *
+   * Leitura pura: usa o índice `[tenantid+primarykey]` quando a migração de
+   * casing já correu; até lá — e sem nunca escrever — cai na varredura para não
+   * perder resíduo legado.
    */
   public async countAssetMirrors(
     tenantid?: string | null
   ): Promise<{ local_assets: number; ativos: number; assets: number; total: number }> {
     const t = String(tenantid || '').trim().toUpperCase();
+    // Uma leitura só para as três tabelas; falha no marcador = varredura segura.
+    const canonicalized = await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)
+      .then(Boolean)
+      .catch(() => false);
     const countTable = async (table: 'local_assets' | 'ativos' | 'assets'): Promise<number> => {
       try {
         if (!t) return await db[table].count();
+        if (canonicalized) {
+          return await db[table]
+            .where('[tenantid+primarykey]')
+            .between([t, Dexie.minKey], [t, Dexie.maxKey])
+            .count();
+        }
         const rows = (await db[table].toArray()) as { tenantid?: unknown }[];
         return rows.filter(a => String(a.tenantid || '').trim().toUpperCase() === t).length;
       } catch {

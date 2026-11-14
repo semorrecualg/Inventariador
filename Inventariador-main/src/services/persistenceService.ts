@@ -4,7 +4,7 @@ import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
 import { syncAssetsToCloudAndMark, syncConfigToCloud } from './supabaseService';
 import { encryption } from './securityService';
 import { localDb, backupDatabaseToPhysicalStorage } from './localDbService';
-import { sqliteService, db, DexieAsset } from './sqliteService';
+import { sqliteService, db, DexieAsset, invalidateTenantCaseMarker } from './sqliteService';
 import { generateChecksum } from './utils';
 import { normalizeAssetContract } from '../utils/schema';
 import { FileSystemStorageService } from './FileSystemStorageService';
@@ -102,6 +102,8 @@ export const restoreInventory = async (file: File, mode: DatabaseMode): Promise<
         if (!data.assets || !Array.isArray(data.assets)) {
           throw new Error('Formato de backup inválido');
         }
+        // Backup pode ter tenantid em qualquer casing: invalida a migração.
+        await invalidateTenantCaseMarker();
 
         const newState: InventoryState = {
           ...(data.config || {}),

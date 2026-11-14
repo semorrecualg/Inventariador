@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { db, sqliteService } from '../services/sqliteService';
+import { db, sqliteService, invalidateTenantCaseMarker } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
@@ -9,7 +9,7 @@ import { isAdminUser } from '../utils/authUtils';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
-import { collectPerfSummary, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfSummary } from '../utils/perfMetrics';
+import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
 import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -22,7 +22,7 @@ export async function processAndInjectSpreadsheetData(file: File, onProgress: (p
 }
 
 /** Rótulos das métricas de F0 no cartão do Gestor. */
-const PERF_LABELS: Record<string, string> = {
+const PERF_LABELS: Record<PerfMetricName, string> = {
   boot: 'Boot',
   'pull.full': 'Pull completo',
   'pull.delta': 'Delta',
@@ -70,7 +70,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   // explicar uma diferença em vez de a esconder num único número.
   const [mirrors, setMirrors] = useState<{ local_assets: number; ativos: number; assets: number }>({ local_assets: 0, ativos: 0, assets: 0 });
   // F0: resumo das amostras locais (boot/delta/push) + último retrato registrado.
-  const [perfSummaries, setPerfSummaries] = useState<Record<string, PerfSummary>>({});
+  const [perfSummaries, setPerfSummaries] = useState<Partial<Record<PerfMetricName, PerfSummary>>>({});
   const [baseline, setBaseline] = useState<PerfBaseline | null>(() => readPerfBaseline());
   // Espelho virtual (sandbox/iframe): é o que a Unidade Operacional lê quando o
   // banco local está vazio. Só é lido quando o banco está vazio (diagnóstico).
@@ -117,6 +117,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         setProgress(40);
         addLog(`[SRE_BACKUP] ${parsed.length} ativos lidos do backup. Gravando no banco físico do dispositivo...`);
 
+        // Backup pode trazer tenantid em qualquer casing: invalida a migração.
+        await invalidateTenantCaseMarker();
         await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
           await db.ativos.clear();
           await db.assets.clear();
@@ -292,6 +294,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   /** F0: grava no aparelho o retrato da linha de base (espelhos + p50/p95). */
   const registrarLinhaDeBase = useCallback(async () => {
     try {
+      // Garante a contagem exata mesmo antes do boot ter migrado o casing.
+      await sqliteService.migrateLegacyTenantids();
       const counts = await sqliteService.countAssetMirrors(activeTenantid || null);
       const saved = savePerfBaseline({ tenantid: activeTenantid || null, mirrors: counts });
       setBaseline(saved);
@@ -305,6 +309,54 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       addLog(`[F0] Falha ao registrar linha de base: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, [activeTenantid, addLog]);
+
+  /** F0: copia o snapshot registrado (JSON) para colar no chat/issue. */
+  const copiarLinhaDeBase = useCallback(async () => {
+    const current = baseline ?? readPerfBaseline();
+    if (!current) {
+      addLog('[F0] Nenhuma linha de base para copiar — clique em Registrar.');
+      return;
+    }
+    const text = formatPerfBaseline(current);
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const area = document.createElement('textarea');
+        area.value = text;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+      }
+      addLog('[F0] Snapshot copiado (JSON). Cole no chat para preencher §6.2.1.');
+    } catch (err) {
+      addLog(`[F0] Falha ao copiar snapshot: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [baseline, addLog]);
+
+  /** F0: baixa o snapshot registrado como arquivo JSON. */
+  const exportarLinhaDeBase = useCallback(() => {
+    const current = baseline ?? readPerfBaseline();
+    if (!current) {
+      addLog('[F0] Nenhuma linha de base para exportar — clique em Registrar.');
+      return;
+    }
+    try {
+      const blob = new Blob([formatPerfBaseline(current)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `linha-de-base-f0-${current.at.slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      addLog('[F0] Snapshot exportado em JSON.');
+    } catch (err) {
+      addLog(`[F0] Falha ao exportar snapshot: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [baseline, addLog]);
 
   // Recalcula as estatísticas no boot E quando o tenant ativo é detectado:
   // loadStats muda de identidade junto com activeTenantid, então um único
@@ -680,16 +732,32 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
               Cronômetro local · p50/p95 por métrica · últimas 200 amostras
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => { void registrarLinhaDeBase(); }}
-            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
-          >
-            Registrar
-          </button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => { void registrarLinhaDeBase(); }}
+              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
+            >
+              Registrar
+            </button>
+            <button
+              type="button"
+              onClick={() => { void copiarLinhaDeBase(); }}
+              className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
+            >
+              Copiar
+            </button>
+            <button
+              type="button"
+              onClick={exportarLinhaDeBase}
+              className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
+            >
+              Exportar
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-2 mt-3">
-          {(['boot', 'pull.full', 'pull.delta', 'push'] as const).map(name => (
+          {PERF_METRICS.map(name => (
             <div key={name} className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
               <div className="text-[8px] font-bold text-slate-500 uppercase tracking-wider">{PERF_LABELS[name]}</div>
               <div className="text-[10px] font-mono font-black text-emerald-300 mt-0.5">{fmtPerf(perfSummaries[name])}</div>
@@ -698,7 +766,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         </div>
         <div className="mt-2 text-[8px] font-mono text-slate-500 uppercase tracking-wider break-all">
           {baseline
-            ? `Última: ${new Date(baseline.at).toLocaleString('pt-BR')} · local_assets ${baseline.mirrors?.local_assets ?? '—'} · ativos ${baseline.mirrors?.ativos ?? '—'} · assets ${baseline.mirrors?.assets ?? '—'}`
+            ? `Última: ${new Date(baseline.at).toLocaleString('pt-BR')} · ${baseline.trigger} · local_assets ${baseline.mirrors?.local_assets ?? '—'} · ativos ${baseline.mirrors?.ativos ?? '—'} · assets ${baseline.mirrors?.assets ?? '—'}`
             : 'Nenhuma linha de base registrada neste aparelho.'}
         </div>
       </div>
