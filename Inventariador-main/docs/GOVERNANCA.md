@@ -125,7 +125,7 @@ Obrigatório estar verde **localmente e no CI** antes de abrir PR:
 |---|---|
 | `npm run lint` | 0 erros, 0 warnings (`--max-warnings 0`) |
 | `npx tsc --noEmit` | 0 erros |
-| `npm test` | **864 testes / 96 arquivos** verdes |
+| `npm test` | **868 testes / 97 arquivos** verdes |
 | `npm run build` | `dist/` gerado, PWA com 28 entradas de precache |
 
 ### Suíte hermética (importante)
@@ -271,14 +271,15 @@ planeadas («a criar», «Criar» em checklist, «planejada», «nunca foi criad
 aceites **só quando o marcador está colado à referência** (antes ou depois dela):
 a palavra solta noutro ponto da linha não isenta nada.
 
-`check:docs` encadeia três verificações: `check-docs.cjs` (links e referências a
-ficheiros), `check-test-counts.cjs`, que compara a contagem real do Vitest
+`check:docs` encadeia quatro verificações: `check-docs.cjs` (links e referências
+a ficheiros), `check-test-counts.cjs`, que compara a contagem real do Vitest
 (`vitest list --json`, sem executar a suíte) com a que os documentos de estado
 atual afirmam — README, SKILL, SPEC, ARCHITECTURE, esta governança e a skill de
-contexto —, e `check-section-refs.cjs`, que confirma que cada «§ N» citada
-resolve numa secção existente (do próprio documento ou de um documento nomeado
-na mesma linha). Um teste novo, ou uma renumeração, faz o CI falhar com
-ficheiro e linha.
+contexto —, `check-section-refs.cjs`, que confirma que cada «§ N» citada resolve
+numa secção existente (do próprio documento ou de um documento nomeado na mesma
+linha), e `check-npm-scripts.cjs`, que confirma que cada `npm run <script>`
+documentado existe no `package.json`. Um teste novo, uma renumeração ou um script
+removido faz o CI falhar com ficheiro e linha.
 Documentos de HISTÓRICO (CHANGELOG, planos de fase datados) ficam fora por
 desenho: lá o número é o retrato de uma entrega, não uma afirmação do presente.
 
