@@ -17,7 +17,7 @@ PWA mobile-first para **auditoria física de ativos imobilizados em campo** (con
 | Estado | React local no `App.tsx` (máquina de telas) + Zustand (`stores/`) |
 | Persistência local | **Dexie.js (IndexedDB)** — banco `InventoryLocalStore` (tabelas em §7) |
 | Nuvem (híbrida) | **Supabase** (Postgres multi-tenant, schema padronizado `tenantid` + `filial`) + Gemini (`@google/genai`) — ver §10 |
-| Testes | Vitest (36 arquivos / 366 testes) — ver §13 |
+| Testes | Vitest (94 arquivos / 844 testes) — ver §13 |
 | CI | GitHub Actions (APK Android) + PWA |
 
 **Localização:** o app vive em `Inventariador-main/` (subdiretório do workspace; raiz do repo GitHub `semorrecualg/Inventariador`).
@@ -486,7 +486,7 @@ cai para INTERNAL em vez de rebentar.
 | Credencial válida | `Credenciais do Supabase presentes (URL e chave publica).` sem warnings | passo *Validar credenciais* |
 
 `${{ … }}` só aceita contexto (`secrets.`, `vars.`, `github.`, `env.`, `runner.`) e operadores.
-No YAML entra apenas o **nome** do secret; o valor vive em Settings (§5 da governança).
+No YAML entra apenas o **nome** do secret; o valor vive em Settings (§4 da governança).
 
 **Rodar a chave obriga a reconstruir.** Como a substituição é estática, o APK já publicado
 mantém a chave antiga e passa a falhar a autenticação (`Invalid API key`) ou cai para
@@ -522,7 +522,7 @@ emissão posterior à rotação), sem revelar o valor.
    isolamento por tenant (`[tenantid+filial]` — helpers em `utils/tenantUtils.ts`);
    alterações de schema local = nova `version(n)` no Dexie; alterações no Supabase via
    `scripts/migrate-*-supabase.sql`.
-5. **Valide**: `npx tsc --noEmit` (zero erros em `src/`) + `npx vitest run` (366 testes).
+5. **Valide**: `npx tsc --noEmit` (zero erros em `src/`) + `npx vitest run` (844 testes).
 6. **Reproduza** no navegador (Playwright headless) quando o bug for de fluxo/UI.
 
 ---

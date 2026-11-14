@@ -125,7 +125,7 @@ Obrigatório estar verde **localmente e no CI** antes de abrir PR:
 |---|---|
 | `npm run lint` | 0 erros, 0 warnings (`--max-warnings 0`) |
 | `npx tsc --noEmit` | 0 erros |
-| `npm test` | **366 testes / 36 arquivos** verdes |
+| `npm test` | **844 testes / 94 arquivos** verdes |
 | `npm run build` | `dist/` gerado, PWA com 28 entradas de precache |
 
 ### Suíte hermética (importante)
