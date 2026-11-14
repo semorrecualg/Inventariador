@@ -2372,9 +2372,28 @@ useEffect(() => {
   useEffect(() => {
     let lastImportingState = sqliteService.isImportingBatch || (typeof window !== 'undefined' && (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch);
     setIsImportingBatchState(!!lastImportingState);
+    // Relógio da importação para o watchdog (ver intervalo abaixo).
+    let importingSince: number | null = lastImportingState ? Date.now() : null;
 
     const interval = setInterval(async () => {
-      const currentState = sqliteService.isImportingBatch || (typeof window !== 'undefined' && (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch);
+      let currentState = sqliteService.isImportingBatch || (typeof window !== 'undefined' && (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch);
+      // WATCHDOG: uma exceção no import/pull deixava a flag presa e a Unidade
+      // Operacional eternamente em "MODO IMPORTAÇÃO ATIVO" (0 entidades).
+      // Sem conclusão em 10 minutos, liberta as leituras e registra o incidente.
+      if (currentState) {
+        if (importingSince === null) importingSince = Date.now();
+        else if (Date.now() - importingSince > 10 * 60 * 1000) {
+          logger.error('>>> [SRE] Importação sem conclusão há mais de 10 minutos. Liberando leituras (watchdog).');
+          sqliteService.isImportingBatch = false;
+          if (typeof window !== 'undefined') {
+            (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch = false;
+          }
+          importingSince = null;
+          currentState = false;
+        }
+      } else {
+        importingSince = null;
+      }
       setIsImportingBatchState(!!currentState);
 
       if (lastImportingState && !currentState) {
@@ -3371,6 +3390,7 @@ useEffect(() => {
           // escolha válida, a carga é ABORTADA e o usuário escolhe a filial:
           // antes, `bootFilial` indefinido fazia o pull trazer os 12.636 ativos
           // do contrato (e marcar todos como sincronizados).
+          try {
           const bootFilial = resolveBootPullPlan(user?.filial, readLastWorkContext(), user?.tenantid).unit;
           if (!bootFilial) {
             logger.warn('>>> [Boot Loader] Sem filial no perfil e sem última escolha: contrato inteiro NÃO é baixado. Exigindo a escolha da filial.');
@@ -3432,8 +3452,13 @@ useEffect(() => {
             setShowRecoveryToast(true);
             setTimeout(() => setShowRecoveryToast(false), 5000);
           }
-          if (typeof window !== 'undefined') {
-            ((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch = false;
+          } finally {
+            // Sempre limpa a flag, inclusive no `return` sem filial e em erro de
+            // rede: antes, uma falha do pull deixava a tela presa em
+            // "MODO IMPORTAÇÃO ATIVO" com 0 entidades.
+            if (typeof window !== 'undefined') {
+              ((window as unknown) as { __isImportingBatch?: boolean }).__isImportingBatch = false;
+            }
           }
         }
       } catch (e) { 

@@ -619,16 +619,28 @@ export const localDb = {
   unitConfigs: {
     put: async (config: UnitConfig) => {
       const cfg = config as unknown as Record<string, unknown>;
+      const id = String(cfg.id || cfg.filial || '');
+      // `put` substitui a linha INTEIRA. Sem herdar a existente, este espelho
+      // apagava lat/lng/source/tenantid gravados pelo sqliteService — a unidade
+      // voltava "SEM CONTRATO", sem âncora, e o GPS reabria em loop.
+      const existing = await db.unit_configs.get(id);
       await db.unit_configs.put({
-        id: String(cfg.id || cfg.filial || ''),
-        filial: String(cfg.filial || ''),
-        nome: String(cfg.nome || cfg.filial || ''),
-        hasGps: cfg.hasGps ? 1 : 0,
-        requireNf: cfg.requireNf ? 1 : 0,
-        requireSeriado: cfg.requireSeriado ? 1 : 0,
-        allowNewAssets: cfg.allowNewAssets !== false ? 1 : 0,
-        allowWriteOffs: cfg.allowWriteOffs !== false ? 1 : 0,
-        requirePlaqueta: cfg.requirePlaqueta ? 1 : 0
+        ...(existing || {}),
+        id,
+        tenantid: String(cfg.tenantid || existing?.tenantid || ''),
+        filial: String(cfg.filial || existing?.filial || ''),
+        nome: String(cfg.nome || cfg.filial || existing?.nome || ''),
+        lat: cfg.lat !== undefined ? Number(cfg.lat) : existing?.lat,
+        lng: cfg.lng !== undefined ? Number(cfg.lng) : existing?.lng,
+        radius_meters: cfg.radius_meters !== undefined ? Number(cfg.radius_meters) : existing?.radius_meters,
+        is_active: cfg.is_active !== undefined ? (cfg.is_active ? 1 : 0) : existing?.is_active,
+        hasGps: cfg.hasGps !== undefined ? (cfg.hasGps ? 1 : 0) : (existing?.hasGps ?? 0),
+        requireNf: cfg.requireNf !== undefined ? (cfg.requireNf ? 1 : 0) : (existing?.requireNf ?? 0),
+        requireSeriado: cfg.requireSeriado !== undefined ? (cfg.requireSeriado ? 1 : 0) : (existing?.requireSeriado ?? 0),
+        allowNewAssets: cfg.allowNewAssets !== undefined ? (cfg.allowNewAssets ? 1 : 0) : (existing?.allowNewAssets ?? 1),
+        allowWriteOffs: cfg.allowWriteOffs !== undefined ? (cfg.allowWriteOffs ? 1 : 0) : (existing?.allowWriteOffs ?? 1),
+        requirePlaqueta: cfg.requirePlaqueta !== undefined ? (cfg.requirePlaqueta ? 1 : 0) : (existing?.requirePlaqueta ?? 0),
+        updated_at: String(cfg.updated_at || existing?.updated_at || '')
       });
     },
 
