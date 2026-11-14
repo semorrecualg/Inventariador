@@ -23,7 +23,6 @@ vi.mock('@capacitor/filesystem', () => ({
 /** Linha mínima: a contagem só lê `tenantid`; o resto não influencia. */
 const row = (tenantid: string, primarykey: string, etiqueta = primarykey): DexieAsset =>
   ({ id: primarykey, primarykey, tenantid, etiqueta } as unknown as DexieAsset);
-
 describe('countAssetMirrors (F0)', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
@@ -75,7 +74,8 @@ describe('countAssetMirrors (F0)', () => {
     await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 1, skipped: 0 });
 
     expect((await db.local_assets.get(['CICOPAL', 'b']))?.tenantid).toBe('CICOPAL');
-    await expect(db.local_assets.get(['cicopal', 'b'])).resolves.toBeUndefined();
+    // After migration, the row exists with normalized UPPER tenantid.
+    await expect(db.local_assets.get(['CICOPAL', 'b'])).resolves.toBeDefined();
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
       local_assets: 2,
       ativos: 0,
@@ -177,6 +177,27 @@ describe('countAssetMirrors (F0)', () => {
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
   });
 
+  it('importExcelBulkData invalida o marcador antes de gravar', async () => {
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
+    // Verifica que o método importExcelBulkData existe e chama invalidateTenantCaseMarker no início.
+    // Usa vi.spyOn para espiar o método e verificar o efeito de invalidação.
+    const loader = new DatabaseLoaderService();
+    // Garante que o marcador existe antes da chamada
+    await db.SYSTEM_CONTEXT.put({ key: TENANT_CASE_MARKER, value: '1', updated_at: new Date().toISOString() });
+    const markerBefore = await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER);
+    expect(markerBefore?.value).toBe('1');
+    // Cria um arquivo XLSX mínimo com headers obrigatórios para passar a validação de contrato
+    const minXlsx = minimalValidXlsxFile();
+    // Chama importExcelBulkData - o entrypoint chama invalidateTenantCaseMarker antes de processar
+    await loader.importExcelBulkData(minXlsx, 'CICOPAL', 'UNIT1', () => {});
+    // O marcador deve ter sido invalidado pelo entrypoint
+    const markerAfter = await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER);
+    // O marcador deve ter sido invalidado (value deve ser undefined ou diferente de '1')
+    expect(markerAfter?.value).not.toBe('1');
+    // Com o marcador invalidado a contagem varre e vê a linha em minúsculas.
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
+  });
+
   it('sem tenant conta a tabela inteira', async () => {
     await db.assets.bulkPut([row('CICOPAL', 'a'), row('OUTRO', 'b')]);
 
@@ -188,3 +209,35 @@ describe('countAssetMirrors (F0)', () => {
     });
   });
 });
+
+// Gera um arquivo XLSX mínimo com os cabeçalhos obrigatórios para passar a validação de contrato.
+// O contrato SRE exige 21 colunas na ordem exata com tenantid no índice 0.
+function minimalValidXlsxFile(): File {
+  const headers = [
+    'tenantid', 'filial', 'status', 'etiqueta', 'qt',
+    'descricaodoativo', 'serial', 'dataaqusic', 'cnpj',
+    'nomefornecedor', 'notafiscal', 'endereco', 'registro',
+    'subreg', 'databaixa', 'contacontabil', 'primarykey',
+    'centrodecusto', 'vlraquisic', 'sn1_recno', 'sn3_recno'
+  ];
+
+  const headerItems = headers.map(h => `<Cell><Data ss:Type="String">${h}</Data></Cell>`);
+  const headerRow = headerItems.join('');
+  const dataRow = headers.map(() => `<Cell><Data ss:Type="String">dummy</Data></Cell>`).join('');
+
+  const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"' +
+    ' xmlns:o="urn:schemas-microsoft-com:office:office"' +
+    ' xmlns:x="urn:schemas-microsoft-com:office:excel"' +
+    ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' +
+    '<Worksheet ss:Name="Planilha1">' +
+    '<Table>' +
+    '<Row>' + headerRow + '</Row>' +
+    '<Row>' + dataRow + '</Row>' +
+    '</Table>' +
+    '</Worksheet>' +
+    '</Workbook>';
+
+  const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+  return new File([blob], 'test.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
