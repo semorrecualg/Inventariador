@@ -1,12 +1,13 @@
 import React, { useEffect } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 
+/** Tempo de vida do aviso: 8s é o suficiente para ler dois contratos e a contagem. */
+const AUTO_DISMISS_MS = 8000;
+
 interface RestoreWarningToastProps {
   /** Texto do aviso; `null` mantém o toast fora do ecrã. */
   message: string | null;
   onDismiss: () => void;
-  /** Auto-dismiss em ms (0 desliga). */
-  autoDismissMs?: number;
 }
 
 /**
@@ -16,23 +17,18 @@ interface RestoreWarningToastProps {
  * — esse canal abre um modal "Controle de Fluxo SRE" e descarta o tipo, o que
  * transformava este alerta num modal (ou o perdia para o toast de sucesso).
  */
-export const RestoreWarningToast: React.FC<RestoreWarningToastProps> = ({
-  message,
-  onDismiss,
-  autoDismissMs = 8000
-}) => {
+export const RestoreWarningToast: React.FC<RestoreWarningToastProps> = ({ message, onDismiss }) => {
   useEffect(() => {
-    if (!message || autoDismissMs <= 0) return;
-    const timer = setTimeout(onDismiss, autoDismissMs);
+    if (!message) return;
+    const timer = setTimeout(onDismiss, AUTO_DISMISS_MS);
     return () => clearTimeout(timer);
-  }, [message, onDismiss, autoDismissMs]);
+  }, [message, onDismiss]);
 
   if (!message) return null;
 
   return (
     <div
       role="alert"
-      data-testid="restore-warning-toast"
       className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] w-[90%] max-w-sm bg-red-600 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-start gap-3 border border-white/20"
     >
       <AlertTriangle size={18} className="shrink-0 mt-0.5" />

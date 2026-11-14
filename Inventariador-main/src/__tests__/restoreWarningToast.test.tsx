@@ -29,7 +29,7 @@ describe('RestoreWarningToast', () => {
 
   it('fecha sozinho depois do tempo de auto-dismiss', () => {
     const onDismiss = vi.fn();
-    render(<RestoreWarningToast message="aviso" onDismiss={onDismiss} autoDismissMs={8000} />);
+    render(<RestoreWarningToast message="aviso" onDismiss={onDismiss} />);
 
     act(() => { vi.advanceTimersByTime(7999); });
     expect(onDismiss).not.toHaveBeenCalled();

@@ -128,10 +128,12 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
         // Aviso no painel: restaurar uma base de outro contrato não é bloqueado
         // (é recuperação), mas quem restaurou tem de saber que a tela vai ficar vazia.
-        let avisoRestauro: string | null = null;
-        if (contratoAtivo && resumo.tenants[contratoAtivo] === undefined) {
+        // O texto é derivado do resumo e serve de interruptor para o toast final.
+        const avisoRestauro = contratoAtivo && resumo.tenants[contratoAtivo] === undefined
+          ? `BASE REPOSTA SEM O CONTRATO ACTIVO (${contratoAtivo}): ${detalheContratos}`
+          : null;
+        if (avisoRestauro) {
           addLog(`[SRE_BACKUP] AVISO: o backup não contém o contrato activo (${contratoAtivo}). Repostos ${resumo.total} ativo(s) — ${detalheContratos}.`);
-          avisoRestauro = `BASE REPOSTA SEM O CONTRATO ACTIVO (${contratoAtivo}): ${detalheContratos}`;
         } else if (contratosRepostos.length > 1) {
           addLog(`[SRE_BACKUP] AVISO: backup com ${contratosRepostos.length} contratos — ${detalheContratos}.`);
         }
