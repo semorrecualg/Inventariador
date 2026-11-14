@@ -1,11 +1,13 @@
 
-import { supabase } from './supabaseService';
+import { supabase, getDatabaseMode } from './supabaseService';
 import { AssetGroup, AssetMovement, DepreciationHistory, Asset, ChartOfAccount, NCMClassifier } from '../types';
 
 export const assetControlService = {
   // Plano de Contas
   async getChartOfAccounts(tenantid: string | string[]): Promise<ChartOfAccount[]> {
-    if (!supabase) throw new Error("Supabase não configurado.");
+    // INTERNAL é offline-first: sem plano de contas remoto, sem pedido (o
+    // cliente existe sempre, mas aponta para o placeholder).
+    if (getDatabaseMode() === 'INTERNAL' || !supabase) return [];
     let query = supabase.from('chart_of_accounts').select('*');
     
     if (Array.isArray(tenantid)) {
@@ -41,7 +43,7 @@ export const assetControlService = {
 
   // Grupos Contábeis (Bens)
   async getAssetGroups(tenantid: string | string[]): Promise<AssetGroup[]> {
-    if (!supabase) throw new Error("Supabase não configurado.");
+    if (getDatabaseMode() === 'INTERNAL' || !supabase) return [];
     let query = supabase.from('asset_groups').select('*');
     
     if (Array.isArray(tenantid)) {
@@ -77,7 +79,7 @@ export const assetControlService = {
 
   // Classificador NCM
   async getNCMClassifiers(tenantid: string | string[]): Promise<NCMClassifier[]> {
-    if (!supabase) throw new Error("Supabase não configurado.");
+    if (getDatabaseMode() === 'INTERNAL' || !supabase) return [];
     let query = supabase.from('ncm_classifiers').select('*');
     
     if (Array.isArray(tenantid)) {
