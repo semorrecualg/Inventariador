@@ -82,6 +82,25 @@ describe('carga da planilha — política de identidade por linha', () => {
       .rejects.toThrow(/3 linha\(s\) sem tenantid — linha\(s\) 3, 4, 6/);
   });
 
+  it('bloqueia também quando nenhuma linha traz tenantid (regra única)', async () => {
+    const arquivo = planilha([
+      { filial: 'MATRIZ', primarykey: 'VAZIA-1', etiqueta: 'VAZIA-1', qt: '1' },
+      { filial: 'MATRIZ', primarykey: 'VAZIA-2', etiqueta: 'VAZIA-2', qt: '1' }
+    ]);
+
+    await expect(DatabaseLoaderService.extrairDadosDaPlanilha(arquivo))
+      .rejects.toThrow(/CARGA BLOQUEADA: 2 linha\(s\) sem tenantid — linha\(s\) 2, 3/);
+  });
+
+  it('corta a lista de linhas afectadas para não gerar uma mensagem gigante', async () => {
+    const arquivo = planilha(
+      Array.from({ length: 14 }, (_, i) => ({ filial: 'MATRIZ', primarykey: `VAZIA-${i}`, etiqueta: `VAZIA-${i}`, qt: '1' }))
+    );
+
+    await expect(DatabaseLoaderService.extrairDadosDaPlanilha(arquivo))
+      .rejects.toThrow(/14 linha\(s\) sem tenantid — linha\(s\) 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 … e mais 4/);
+  });
+
   it('bloqueia linhas de outro contrato e nomeia o contrato encontrado', async () => {
     const arquivo = planilha([
       { tenantid: TENANT, filial: 'MATRIZ', primarykey: 'OK-1', etiqueta: 'OK-1', qt: '1' },

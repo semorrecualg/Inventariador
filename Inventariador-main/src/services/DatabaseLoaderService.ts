@@ -93,8 +93,8 @@ function normalizeHeaderKey(value: unknown): string {
 /**
  * CONTRATO SRE (planilha): valida o cabeçalho completo da planilha.
  * Bloqueia a carga se a coluna 'tenantid' (Índice 0) estiver AUSENTE, fora do
- * Índice 0 ou VAZIA em todas as linhas, ou se as 21 colunas obrigatórias não
- * estiverem presentes EXATAMENTE na ordem do contrato.
+ * Índice 0, se as 21 colunas obrigatórias não estiverem presentes EXATAMENTE na
+ * ordem do contrato, ou se alguma linha vier sem tenantid / com outro contrato.
  */
 function validateSpreadsheetContract(worksheet: XLSX.WorkSheet): void {
   const aoa = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1 });
@@ -140,47 +140,41 @@ function validateSpreadsheetContract(worksheet: XLSX.WorkSheet): void {
     throw new Error(msg);
   }
 
-  const hasTenantValue = aoa.slice(1).some(row => {
-    const v = row[0];
-    return v !== undefined && v !== null && String(v).trim() !== '';
-  });
-
-  if (!hasTenantValue) {
-    const msg =
-      "CARGA BLOQUEADA: a coluna 'tenantid' (Índice 0) está VAZIA em todas as linhas. " +
-      "Preencha o tenantid de cada ativo na planilha antes de carregar.";
-    logger.error(`[SRE_LOADER] ${msg}`);
-    throw new Error(msg);
-  }
-
-  // 4) POLÍTICA DE IDENTIDADE POR LINHA: cada ativo tem de trazer o seu contrato.
+  // 3) POLÍTICA DE IDENTIDADE POR LINHA: cada ativo tem de trazer o seu contrato.
   // A planilha é a única fonte de identidade do bem — herdar o contrato da sessão
   // numa linha vazia transformaria um erro de digitação numa atribuição de dono
   // silenciosa, e no push o ativo passaria a ser do cliente errado. Linhas sem
-  // identidade e linhas de outro contrato bloqueiam a carga inteira.
+  // identidade e linhas de outro contrato bloqueiam a carga inteira; cobre também
+  // o caso da coluna vazia em todas as linhas, que antes tinha regra própria.
   const sessionTenant = getCurrentTenantid().trim().toUpperCase();
   const semTenant: number[] = [];
   const outroContrato: Array<{ linha: number; tenant: string }> = [];
 
-  aoa.slice(1).forEach((row, i) => {
-    const celulas = Array.isArray(row) ? row : [];
+  for (let i = 1; i < aoa.length; i++) {
+    const celulas = Array.isArray(aoa[i]) ? (aoa[i] as unknown[]) : [];
     // Linha totalmente vazia (rodapé, linha em branco) não é um ativo: ignora.
     const temConteudo = celulas.some(c => c !== undefined && c !== null && String(c).trim() !== '');
-    if (!temConteudo) return;
+    if (!temConteudo) continue;
 
-    const linha = i + 2; // +1 do cabeçalho, +1 da numeração do Excel
+    const linha = i + 1; // numeração do Excel: aoa[0] é o cabeçalho
     const raw = celulas[0];
     if (raw === undefined || raw === null || String(raw).trim() === '') {
       semTenant.push(linha);
-      return;
+      continue;
     }
     const canonico = String(raw).trim().toUpperCase();
     if (canonico !== sessionTenant) outroContrato.push({ linha, tenant: canonico });
-  });
+  }
+
+  // Lista curta: planilha inteira sem tenantid não pode virar uma mensagem de 60 KB.
+  const LIMITE_LISTA = 10;
+  const listarLinhas = (linhas: number[]): string => linhas.length <= LIMITE_LISTA
+    ? linhas.join(', ')
+    : `${linhas.slice(0, LIMITE_LISTA).join(', ')} … e mais ${linhas.length - LIMITE_LISTA}`;
 
   if (semTenant.length > 0) {
     const msg =
-      `CARGA BLOQUEADA: ${semTenant.length} linha(s) sem tenantid — linha(s) ${semTenant.join(', ')}. ` +
+      `CARGA BLOQUEADA: ${semTenant.length} linha(s) sem tenantid — linha(s) ${listarLinhas(semTenant)}. ` +
       "Preencha a coluna 'tenantid' (Índice 0) de cada ativo antes de carregar: " +
       'o contrato do ativo não é herdado da sessão.';
     logger.error(`[SRE_LOADER] ${msg}`);
@@ -188,7 +182,9 @@ function validateSpreadsheetContract(worksheet: XLSX.WorkSheet): void {
   }
 
   if (outroContrato.length > 0) {
-    const detalhe = outroContrato.map(r => `linha ${r.linha} (${r.tenant})`).join(', ');
+    const detalhe = outroContrato.length <= LIMITE_LISTA
+      ? outroContrato.map(r => `linha ${r.linha} (${r.tenant})`).join(', ')
+      : `${outroContrato.slice(0, LIMITE_LISTA).map(r => `linha ${r.linha} (${r.tenant})`).join(', ')} … e mais ${outroContrato.length - LIMITE_LISTA}`;
     const msg = sessionTenant
       ? `CARGA BLOQUEADA: ${outroContrato.length} linha(s) trazem contrato diferente do contrato activo (${sessionTenant}) — ${detalhe}. ` +
         'Entre no contrato certo antes de carregar, ou corrija a coluna tenantid.'
