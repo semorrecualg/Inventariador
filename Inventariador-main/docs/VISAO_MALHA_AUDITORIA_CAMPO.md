@@ -260,20 +260,134 @@ durante a migração e saem na versão seguinte.
 
 ---
 
-## 6. Fases (o que fazer primeiro)
+## 6. Fases — checklist executável
 
-| Fase | Entrega | Critério de aceite | Esforço |
-|---|---|---|---|
-| **F0** | Medição: cronômetro no monitor SRE do boot, do delta e do push | Relatório com tempos reais no celular (abertura, delta, push de 500 eventos) | 1–2 dias |
-| **F1** | `field_events` + projetor + gravação de LEITURA/DIVERGENCIA como evento (projeção ainda escreve em `local_assets`) | Teste de propriedade: 10 mil eventos aleatórios em ordem embaralhada produzem o mesmo estado em dois aparelhos | 1–2 semanas |
-| **F2** | Sessão de sync com recibo + idempotência + retomada | Desligar a rede no meio de um lote e retomar sem duplicar nem perder; recibo bate dos dois lados | 1 semana |
-| **F3** | Posse de território + Bússola de Retomada | Dois aparelhos em modo avião assumindo territórios; ao reconectar, um vê o outro e não duplica contagem | 1–2 semanas |
-| **F4** | Painel de Convergência + conflitos no web | Conflito de duas leituras aparece com foto/GPS dos dois e é decidido no painel | 1–2 semanas |
-| **F5** | Redução das três cópias + limpeza | Só `local_assets` ativa; migração testada em base de 12.636 ativos | 3–5 dias |
+> **Como usar:** uma fase por PR. Um item só recebe `[x]` quando o critério de
+> aceite indicado estiver comprovado pela evidência pedida. Nenhuma fase começa
+> antes do aceite da anterior, salvo onde a ordem disser o contrário. Os portões
+> do repositório (`npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run build`)
+> correm em todas as fases; `npm run check:docs` também, por haver alteração de doc.
+> Rollback de uma fase = reverter o PR da fase — nenhum item depende de dado apagado.
 
-Ordem recomendada: **F0 → F2 → F1 → F3 → F4**. F2 antes de F1 porque o recibo de
-sync é o que impede perda de dados durante a própria migração; a projeção de
-eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a tela.
+### 6.1 Ordem recomendada
+
+**F0 → F2 → F1 → F3 → F4 → F5**
+
+| Ordem | Fase | Por que nesta posição |
+|---|---|---|
+| 1 | **F0 — Medição** | Sem números de base não há como provar que F2/F5 melhoraram. |
+| 2 | **F2 — Recibo de sync** | Dor mais urgente (“subiu tudo?”) e pré-requisito de segurança para migrar dados em F1/F5. |
+| 3 | **F1 — Eventos + projeção** | Mudança mais profunda; entra por baixo, sem trocar a tela, já com sync confiável. |
+| 4 | **F3 — Posse de território** | Depende do log de eventos (`POSSE`) e do sync com recibo. |
+| 5 | **F4 — Painel de convergência** | Depende de F1 (projeção) e F3 (posse); é a única fase que pode atrasar sem travar o campo. |
+| 6 | **F5 — Redução das três cópias** | Só com F1 estável: a projeção passa a ser dona do estado. |
+
+Dependências duras: **F2 → F1** (recibo antes da migração), **F1 → F3**,
+**F1 + F3 → F4**, **F1 → F5**. F0 não bloqueia código, mas bloqueia o *aceite*
+das fases seguintes, porque define as metas.
+
+### 6.2 F0 — Medição (1–2 dias)
+
+- [ ] **F0.1** Cronômetro no monitor SRE para boot, delta e push.
+  - **Aceite:** tempos p50/p95 de abertura a frio, delta de 1 filial e push de 500 eventos, em aparelho real.
+  - **Evidência:** tabela de tempos anexada à issue/PR da fase.
+- [ ] **F0.2** Linha de base do estado atual (contagem por espelho, duração do pull de 12.636 ativos).
+  - **Aceite:** números datados, com aparelho e versão; divergência entre `local_assets`, `ativos` e `assets` medida, não estimada.
+  - **Evidência:** saída do Gestor de Base + log do pull.
+- [ ] **F0.3** Metas numéricas acordadas por fase.
+  - **Aceite:** metas escritas (ex.: push de 500 eventos < X s; abertura < Y s; F5 sem regressão > 10%).
+  - **Evidência:** secção “Metas” neste documento.
+
+**Saída da fase:** baseline + metas publicadas; nenhuma mudança de comportamento.
+
+### 6.3 F2 — Sessão de sync com recibo (1 semana)
+
+- [ ] **F2.1** Contrato de sessão (abrir → enviar → confirmar → puxar → aplicar → recibo) em `src/services/syncSessionService.ts` (a criar).
+  - **Aceite:** teste de contrato cobre os seis passos; nenhum passo altera estado local antes da confirmação.
+- [ ] **F2.2** Idempotência: reenvio não duplica (chave por ativo/versão até F1 existir; `event_id` depois).
+  - **Aceite:** reenviar o mesmo lote 3× termina com a mesma contagem e o mesmo estado.
+- [ ] **F2.3** Retomada após queda no meio do lote.
+  - **Aceite:** teste corta a rede no lote 3 de 10 e retoma; zero perda, zero duplicação.
+- [ ] **F2.4** Recibo persistido e visível (enviados, aceitos, recebidos, rejeitados, faltantes).
+  - **Aceite:** enviados = aceitos + rejeitados; faltantes = 0 quando o recibo fecha; recibo acessível na tela e no log de suporte.
+- [ ] **F2.5** Rejeição com motivo explícito (ex.: território de outro contrato).
+  - **Aceite:** item de tela com razão, não erro genérico; nada é descartado em silêncio.
+- [ ] **F2.6** Retenção de 90 dias das sessões (`SYNC_SESSION_RETENTION_MS`).
+  - **Aceite:** rotina apaga só o que passou da janela, com teste de relógio falso.
+
+**Saída da fase:** queda de rede em qualquer ponto não perde nem duplica; recibo bate dos dois lados.
+
+### 6.4 F1 — Eventos + projeção (1–2 semanas)
+
+- [ ] **F1.1** Tabela local `field_events` (Dexie v8) com índices `event_id`, `[tenantid+filial]`, `[tenantid+asset_key]`, `_synced`; escrita só-adição.
+  - **Aceite:** `docs/SCHEMA_BASELINE.md` e `src/__tests__/schemaBaseline.test.ts` atualizados; teste proíbe update/delete pela aplicação.
+- [ ] **F1.2** Projetor puro em `src/services/fieldProjection.ts` (a criar), sem I/O, ordem `(lamport, device_id, event_id)`.
+  - **Aceite:** a mesma entrada produz a mesma saída em qualquer ordem de chegada; coberto por testes.
+- [ ] **F1.3** Emissão de `LEITURA` e `DIVERGENCIA` nas telas de campo, mantendo a tela atual.
+  - **Aceite:** conferir/divergir gera evento com `lamport`, GPS e aparelho; nenhuma tela nova.
+- [ ] **F1.4** Projeção escreve o estado em `local_assets` (única tabela de estado).
+  - **Aceite:** `_conferido`, `_auditor`, `_dataLeitura`, `_localMaster`, `gps_lat/lng` e `_version` derivados; escrita manual removida do caminho de conferência.
+- [ ] **F1.5** Teste de propriedade: 10 mil eventos aleatórios, ordem embaralhada.
+  - **Aceite:** dois “aparelhos” chegam ao mesmo estado; `_version` denuncia buraco na sequência.
+- [ ] **F1.6** Cadeia de hash por aparelho (`prev_hash`/`hash`) e verificação no boot.
+  - **Aceite:** edição retroativa quebra a cadeia e é denunciada; boot íntegro não gera falso positivo.
+
+**Saída da fase:** telas inalteradas; estado reconstruído por eventos; teste de propriedade verde.
+
+### 6.5 F3 — Posse de território (1–2 semanas)
+
+- [ ] **F3.1** Claim local offline com lease de 16 h (decisão §10.2) e renovação.
+  - **Aceite:** assumir território funciona em modo avião; claim sobrevive a reinício do app.
+- [ ] **F3.2** Encontro de claims no sync: livre fica com o primeiro; tomado mostra “em posse de”.
+  - **Aceite:** dois aparelhos não iniciam contagem do mesmo território; decisão registada como evento `POSSE`.
+- [ ] **F3.3** Expiração automática e transferência pelo gestor.
+  - **Aceite:** lease vencido liberta o território com registo; transferência desce no sync seguinte.
+- [ ] **F3.4** Bússola de Retomada (tela curta): onde parei, itens em mãos, o que mudou, conflitos a decidir.
+  - **Aceite:** os quatro dados aparecem com números reais do aparelho; sem rede, mostra o último estado conhecido.
+
+**Saída da fase:** dois aparelhos em modo avião assumem territórios; ao reconectar, um vê o outro e não duplica contagem.
+
+### 6.6 F4 — Painel de Convergência + conflitos (1–2 semanas)
+
+- [ ] **F4.1** Lista/mapa de territórios: posse, % conferido, heartbeat, conflitos abertos e tempo desde o último sync.
+  - **Aceite:** o painel reflete o estado projetado, não uma cópia paralela.
+- [ ] **F4.2** Farol de divergência: duas leituras lado a lado com foto e GPS, botão “decidir”.
+  - **Aceite:** decisão humana fica registada com autor e hora; nenhum vencedor automático.
+- [ ] **F4.3** Regras de conflito do §4 implementadas (complementares aplicam; disputa → `EM_CONFLITO`; empate → `device_id`, marcado `resolvido_por_regra`).
+  - **Aceite:** o relatório marca o ativo como pendente até a decisão, nunca “conferido”.
+- [ ] **F4.4** Selo de integridade: hash da cadeia por aparelho no painel.
+  - **Aceite:** hash do painel confere com o do aparelho para o mesmo intervalo.
+
+**Saída da fase:** conflito real de duas leituras aparece com ambos os lados e a decisão fica registada.
+
+### 6.7 F5 — Redução das três cópias (3–5 dias)
+
+- [ ] **F5.1** Uma única tabela de estado; `ativos` e `assets` viram aliases de leitura durante a migração.
+  - **Aceite:** nenhuma escrita nova em `ativos`/`assets`; leituras antigas continuam funcionando.
+- [ ] **F5.2** Migração idempotente com dry-run: divergências `ativos → local_assets` resolvidas antes de remover.
+  - **Aceite:** dry-run lista cada divergência com chave e decisão; segunda execução = zero escritas.
+- [ ] **F5.3** Remoção de `ativos` na versão seguinte do schema.
+  - **Aceite:** `docs/SCHEMA_BASELINE.md` e `src/__tests__/schemaBaseline.test.ts` com 8 tabelas; nenhuma referência de código a `db.ativos`.
+- [ ] **F5.4** Ensaio na base real de 12.636 ativos.
+  - **Aceite:** contagem e checksum por tabela iguais antes/depois; rollback testado (reverter PR + restaurar backup).
+- [ ] **F5.5** Atualizar `docs/ARCHITECTURE.md` e este documento (estado final).
+  - **Aceite:** documentação descreve uma tabela de estado e o caminho de sync, sem menções a triple-write.
+
+**Saída da fase:** só uma tabela de estado ativa; migração testada em 12.636 ativos; documentação coerente.
+
+### 6.8 Registo de aceite
+
+Preencher ao fechar cada fase — uma linha por fase. Enquanto uma linha estiver
+vazia, a fase seguinte não começa.
+
+| Fase | Data | Responsável | Evidência (PR/teste) | Aceite por |
+|---|---|---|---|---|
+| F0 |  |  |  |  |
+| F1 |  |  |  |  |
+| F2 |  |  |  |  |
+| F3 |  |  |  |  |
+| F4 |  |  |  |  |
+| F5 |  |  |  |  |
 
 ---
 
