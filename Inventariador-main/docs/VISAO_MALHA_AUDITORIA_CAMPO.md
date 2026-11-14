@@ -302,8 +302,11 @@ das fases seguintes, porque define as metas.
 `src/utils/perfMetrics.ts` marcam `boot`, `pull.full`, `pull.delta` e `push`,
 emitem `>>> [PERF] nome: Nms · N registro(s)` no log e mantêm as últimas 200
 amostras em `gbr_perf_samples_v1` (localStorage). O Gestor de Base de Dados
-ganhou o cartão **Linha de Base (F0)**, com p50/p95 por métrica e o botão
-**Registrar**, que grava `gbr_perf_baseline_v1` com a contagem por espelho.
+ganhou o cartão **Linha de Base (F0)**, com p50/p95 por métrica e os botões
+**Registrar**, **Copiar** e **Exportar** (JSON). O retrato
+(`gbr_perf_baseline_v1`) é gravado **automaticamente no fim do boot e de cada
+pull completo** — depois da persistência, para a contagem por espelho já
+refletir a base nova — e também sob demanda pelo botão Registrar.
 
 **Falta para fechar F0:** medir em aparelho real (abertura a frio, delta de 1
 filial, push de 500 eventos) e preencher a tabela abaixo. Este ambiente não tem
@@ -311,6 +314,10 @@ a base de 12.636 ativos nem o aparelho, portanto os números não podem ser
 produzidos aqui — só instrumentados e registrados no primeiro uso.
 
 ### 6.2.1 Linha de base — registro
+
+O retrato automático aparece no cartão **Linha de Base (F0)** do Gestor de Base
+e sai em JSON pelos botões **Copiar** / **Exportar**. Basta colar o JSON na
+issue/chat para preencher a tabela com os valores reais.
 
 | Data | Aparelho / versão | local_assets | ativos | assets | Pull completo (12.636) | Boot p50/p95 | Delta p50/p95 | Push p50/p95 |
 |---|---|---|---|---|---|---|---|---|

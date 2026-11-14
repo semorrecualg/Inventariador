@@ -39,6 +39,8 @@ export interface MirrorCounts {
 
 export interface PerfBaseline {
   at: string;
+  /** O que disparou o retrato: fim do boot, fim de um pull completo ou botão. */
+  trigger: 'boot' | 'pull.full' | 'manual';
   tenantid: string | null;
   mirrors: MirrorCounts | null;
   metrics: Record<PerfMetricName, PerfSummary>;
@@ -161,9 +163,11 @@ export const clearPerfSamples = (): void => {
 export const savePerfBaseline = (input: {
   tenantid: string | null;
   mirrors: MirrorCounts | null;
+  trigger?: PerfBaseline['trigger'];
 }): PerfBaseline => {
   const baseline: PerfBaseline = {
     at: new Date().toISOString(),
+    trigger: input.trigger ?? 'manual',
     tenantid: input.tenantid,
     mirrors: input.mirrors,
     metrics: collectPerfSummary()
@@ -174,7 +178,7 @@ export const savePerfBaseline = (input: {
     /* ignore */
   }
   logger.info(
-    `>>> [PERF] Linha de base registrada${input.tenantid ? ` (${input.tenantid})` : ''}: ` +
+    `>>> [PERF] Linha de base registrada (${baseline.trigger})${input.tenantid ? ` (${input.tenantid})` : ''}: ` +
       `mirrors=${input.mirrors ? `${input.mirrors.local_assets}/${input.mirrors.ativos}/${input.mirrors.assets}` : 'n/d'} · ` +
       PERF_METRICS.map(name => {
         const s = baseline.metrics[name];
@@ -183,6 +187,10 @@ export const savePerfBaseline = (input: {
   );
   return baseline;
 };
+
+/** Snapshot em JSON indentado — é o texto do botão Copiar/Exportar. */
+export const formatPerfBaseline = (baseline: PerfBaseline): string =>
+  JSON.stringify(baseline, null, 2);
 
 export const readPerfBaseline = (): PerfBaseline | null => {
   const storage = safeStorage();

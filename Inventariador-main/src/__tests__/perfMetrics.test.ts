@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeSamples, PERF_METRICS, type PerfSample } from '../utils/perfMetrics';
+import { summarizeSamples, formatPerfBaseline, PERF_METRICS, type PerfSample } from '../utils/perfMetrics';
 
 const sample = (name: PerfSample['name'], ms: number): PerfSample => ({
   name,
@@ -24,5 +24,24 @@ describe('summarizeSamples', () => {
 
   it('mantém as quatro métricas de F0 no contrato', () => {
     expect(PERF_METRICS).toEqual(['boot', 'pull.full', 'pull.delta', 'push']);
+  });
+
+  it('formata o snapshot em JSON legível, com trigger e espelhos', () => {
+    const text = formatPerfBaseline({
+      at: '2026-11-14T12:00:00.000Z',
+      trigger: 'pull.full',
+      tenantid: 'CICOPAL',
+      mirrors: { local_assets: 12636, ativos: 12636, assets: 12636, total: 12636 },
+      metrics: {
+        boot: { samples: 1, p50: 900, p95: 900, last: 900 },
+        'pull.full': { samples: 1, p50: 1200, p95: 1200, last: 1200 },
+        'pull.delta': { samples: 0, p50: null, p95: null, last: null },
+        push: { samples: 0, p50: null, p95: null, last: null }
+      }
+    });
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    expect(parsed.trigger).toBe('pull.full');
+    expect(parsed.tenantid).toBe('CICOPAL');
+    expect((parsed.mirrors as Record<string, number>).local_assets).toBe(12636);
   });
 });

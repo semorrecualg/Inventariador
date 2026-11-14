@@ -11,7 +11,7 @@ import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagI
 import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
-import { recordPerf, startPerf } from './utils/perfMetrics';
+import { recordPerf, savePerfBaseline, startPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -138,6 +138,22 @@ const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "";
 // fecha quando o carregamento de dados termina (isDataLoaded -> true).
 const APP_BOOT_STARTED_AT = startPerf();
 let bootPerfRecorded = false;
+
+/**
+ * F0: grava o retrato da linha de base sem bloquear o fluxo medido.
+ * Chamado no fim do boot e no fim de um pull completo (persistência concluída).
+ */
+const autoRegisterPerfBaseline = async (
+  trigger: 'boot' | 'pull.full',
+  tenantid?: string | null
+): Promise<void> => {
+  try {
+    const mirrors = await sqliteService.countAssetMirrors(tenantid || null);
+    savePerfBaseline({ tenantid: tenantid || null, mirrors, trigger });
+  } catch (err) {
+    logger.warn('>>> [PERF] Falha ao registrar linha de base automática:', err);
+  }
+};
 const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
 
 // Helper para verificar se um usuário é admin
@@ -2885,7 +2901,13 @@ useEffect(() => {
             status: (mergedAssets.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
             lastUpdated: syncTimestamp
           };
-          saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
+          saveInventory(newState)
+            .then(() => {
+              if (!incremental) {
+                void autoRegisterPerfBaseline('pull.full', Array.isArray(firstTenant) ? firstTenant[0] : firstTenant);
+              }
+            })
+            .catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
           if (cloudAssets.length > 0) {
             syncAuditDetails = `Sincronização de ${cloudAssets.length} ativos da nuvem para o local.`;
           }
@@ -3479,6 +3501,7 @@ useEffect(() => {
         if (!bootPerfRecorded) {
           bootPerfRecorded = true;
           recordPerf('boot', APP_BOOT_STARTED_AT, { count: checkCount });
+          void autoRegisterPerfBaseline('boot', user?.tenantid || null);
         }
         if (checkCount > 0) {
           sessionStorage.setItem('isDatabaseLoaded', 'true');
