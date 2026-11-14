@@ -1038,6 +1038,15 @@ export class SqliteService {
     const countTable = async (table: 'local_assets' | 'ativos' | 'assets'): Promise<number> => {
       try {
         if (!t) return await db[table].count();
+        // v7 indexa [tenantid+primarykey] e grava `tenantid` em UPPER: o prefixo
+        // resolve o count sem materializar as linhas (antes: toArray + filter ×3).
+        const indexed = await db[table]
+          .where('[tenantid+primarykey]')
+          .between([t, Dexie.minKey], [t, Dexie.maxKey])
+          .count();
+        if (indexed > 0) return indexed;
+        // Nenhum resultado no índice: pode haver linha antiga fora do formato
+        // canónico — aí sim vale a varredura única, só para este caso.
         const rows = (await db[table].toArray()) as { tenantid?: unknown }[];
         return rows.filter(a => String(a.tenantid || '').trim().toUpperCase() === t).length;
       } catch {

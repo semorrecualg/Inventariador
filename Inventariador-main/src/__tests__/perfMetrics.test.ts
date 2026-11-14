@@ -1,10 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeSamples, formatPerfBaseline, normalizePerfBaseline, PERF_METRICS, type PerfSample } from '../utils/perfMetrics';
+import { summarizeSamples, formatPerfBaseline, normalizePerfBaseline, startBootPerf, PERF_METRICS, type PerfSample } from '../utils/perfMetrics';
 
 const sample = (name: PerfSample['name'], ms: number): PerfSample => ({
   name,
   ms,
   at: '2026-11-14T00:00:00.000Z'
+});
+
+describe('startBootPerf', () => {
+  it('usa a origem da navegação (marco 0), não o import do módulo', () => {
+    const started = startBootPerf();
+    // performance.now() de vitest começa perto de 0; um timestamp epoch seria ~1.7e12.
+    expect(started).toBeGreaterThanOrEqual(0);
+    expect(started).toBeLessThan(1e6);
+    expect(typeof performance !== 'undefined' ? started : Date.now() - started).toBeLessThan(1e6);
+  });
 });
 
 describe('summarizeSamples', () => {

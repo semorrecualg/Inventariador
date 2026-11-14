@@ -11,7 +11,7 @@ import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagI
 import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
-import { recordPerf, savePerfBaseline, scheduleIdle, startPerf } from './utils/perfMetrics';
+import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -134,9 +134,10 @@ export class AppBootstrapError extends Error {
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "";
 
-// F0 (Malha de Auditoria): cronômetro do boot — começa no import do módulo e
-// fecha quando o carregamento de dados termina (isDataLoaded -> true).
-const APP_BOOT_STARTED_AT = startPerf();
+// F0 (Malha de Auditoria): cronômetro do boot — começa no início da navegação
+// (performance.timeOrigin) e fecha quando o carregamento de dados termina
+// (isDataLoaded -> true), cobrindo documento, scripts e pull.
+const APP_BOOT_STARTED_AT = startBootPerf();
 let bootPerfRecorded = false;
 
 /**

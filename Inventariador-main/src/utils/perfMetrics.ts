@@ -66,8 +66,19 @@ const safeStorage = (): Storage | null => {
   }
 };
 
-/** Marca o início de um intervalo (boot, delta, push). */
+/** Marca o início de um intervalo relativo (delta, push). */
 export const startPerf = (): number => now();
+
+/**
+ * Início do boot = início da navegação.
+ *
+ * `performance.now()` já conta desde `performance.timeOrigin`, logo o marco é 0
+ * e `recordPerf('boot', …)` devolve o tempo total (documento, scripts, dados),
+ * não apenas desde o import deste módulo. Sem `performance` (testes/SSR antigo)
+ * não há origem de navegação: cai para o instante do import.
+ */
+export const startBootPerf = (): number =>
+  typeof performance !== 'undefined' && typeof performance.now === 'function' ? 0 : Date.now();
 
 /**
  * Executa uma tarefa quando a thread estiver ociosa — usada para a contagem

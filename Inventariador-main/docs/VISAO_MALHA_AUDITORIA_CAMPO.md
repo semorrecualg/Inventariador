@@ -299,16 +299,18 @@ das fases seguintes, porque define as metas.
   - **Evidência:** secção “Metas” neste documento.
 
 **Instrumentação entregue (F0.1):** `recordPerf`/`recordPerfSample` em
-`src/utils/perfMetrics.ts` marcam `boot`, `pull.full`, `pull.delta` e `push`,
-emitem `>>> [PERF] nome: Nms · N registro(s)` no log e mantêm as últimas 200
+`src/utils/perfMetrics.ts` marcam `boot`, `pull.full`, `pull.delta` e `push`
+(o boot conta desde o início da navegação, via `performance.timeOrigin`),
+e emitem `>>> [PERF] nome: Nms · N registro(s)` no log e mantêm as últimas 200
 amostras em `gbr_perf_samples_v1` (localStorage). O Gestor de Base de Dados
 ganhou o cartão **Linha de Base (F0)**, com p50/p95 por métrica e os botões
 **Registrar**, **Copiar** e **Exportar** (JSON). O retrato
 (`gbr_perf_baseline_v1`) é gravado **automaticamente no fim do boot e de cada
 pull completo** — depois da persistência, para a contagem por espelho já
 refletir a base nova. A contagem dos três espelhos roda em **momento ocioso**
-(`requestIdleCallback`, com `setTimeout` de fallback) para não pesar no boot, e
-também há o botão Registrar. Boot com base vazia **não** grava retrato: preserva
+(`requestIdleCallback`, com `setTimeout` de fallback) para não pesar no boot e
+usa o índice `[tenantid+primarykey]` (prefixo), sem varrer a tabela; a varredura
+só existe como fallback de linha legada. Também há o botão Registrar. Boot com base vazia **não** grava retrato: preserva
 o último útil em vez de o sobrescrever com zeros. Snapshots antigos sem
 `trigger` são lidos como `manual`, com métricas ausentes preenchidas como "sem
 amostra".

@@ -182,7 +182,9 @@ encadeados.
 - Importação: a sobreposição `MODO IMPORTAÇÃO ATIVO` deve terminar sem o
   congelamento que vinha do dump integral do disco a cada ativo.
 - F0 (linha de base): cada operação emite
-  `>>> [PERF] boot|pull.full|pull.delta|push: Nms · N registro(s)`. As últimas
+  `>>> [PERF] boot|pull.full|pull.delta|push: Nms · N registro(s)`. O boot conta
+  desde o **início da navegação** (`performance.timeOrigin`), não desde o import
+  do módulo; as últimas
   200 amostras ficam em `gbr_perf_samples_v1`. **Gestor de Base → Linha de Base
   (F0)** grava `gbr_perf_baseline_v1` com p50/p95 e a contagem por espelho
   (`local_assets` / `ativos` / `assets`) — automaticamente no fim do boot e de
