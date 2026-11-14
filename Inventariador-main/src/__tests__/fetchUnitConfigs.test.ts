@@ -81,15 +81,29 @@ describe('fetchUnitConfigs — merge local + fallback de tenant + âncoras de st
     expect(Number(found?.lat)).toBeCloseTo(-16.7);
   });
 
-  it('lê o par gps_lat_/gps_lng_ do sessionStorage', async () => {
+  it('lê o par gps_lat_/gps_lng_ SALVO (com unit_gps_config_) do sessionStorage', async () => {
     localStorage.setItem('app_database_mode', 'INTERNAL');
     sessionStorage.setItem('gps_lat_010105 CICOPAL PA', '-15.7');
     sessionStorage.setItem('gps_lng_010105 CICOPAL PA', '-47.9');
+    sessionStorage.setItem(
+      'unit_gps_config_010105 CICOPAL PA',
+      JSON.stringify({ filial: '010105 CICOPAL PA', lat: -15.7, lng: -47.9, source: 'manual' })
+    );
 
     const res = await fetchUnitConfigs('CICOPAL');
     const found = res.find(c => c.filial === '010105 CICOPAL PA');
     expect(found).toBeTruthy();
     expect(Number(found?.lng)).toBeCloseTo(-47.9);
+    expect(found?.source).toBe('manual');
+  });
+
+  it('ignora par gps_lat_/gps_lng_ sem unit_gps_config_ (rascunho não libera unidade)', async () => {
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    sessionStorage.setItem('gps_lat_010105 CICOPAL PA', '-15.7');
+    sessionStorage.setItem('gps_lng_010105 CICOPAL PA', '-47.9');
+
+    const res = await fetchUnitConfigs('CICOPAL');
+    expect(res.some(c => c.filial === '010105 CICOPAL PA')).toBe(false);
   });
 
   it('não quebra com storage vazio ou local_unit_configs malformado', async () => {

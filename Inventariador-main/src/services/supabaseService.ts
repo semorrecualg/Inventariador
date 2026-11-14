@@ -3804,22 +3804,22 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
           const unit = key.slice('gps_lat_'.length);
           const lat = Number(sessionStorage.getItem(key));
           const lng = Number(sessionStorage.getItem('gps_lng_' + unit));
+          // A âncora só vale se foi SALVA: `unit_gps_config_<unidade>` é
+          // gravado pelo FIXAR ÂNCORA GPS. Sem ele o par de sessão é rascunho
+          // de clique no mapa e não pode liberar a unidade — mesma regra de
+          // utils/gpsAnchors (collectGpsAnchorsFromStorage).
+          const savedRaw = sessionStorage.getItem(`unit_gps_config_${unit}`);
+          if (!savedRaw) continue;
           // Nunca sobrescreve uma config mais rica (local/nuvem): era isso que
           // apagava a proveniência `source` da âncora a cada leitura de sessão.
           if (unit && hasRealAnchor(lat, lng) && !configs[unit]) {
-            // Proveniência vem do config gravado no salvamento.
-            // Se houver rascunho salvo, usa-se a proveniência armazenada;
-            // senão, só usa 'manual' para unidades verdadeiramente novas (sem config prévio).
-            const savedRaw = sessionStorage.getItem(`unit_gps_config_${unit}`);
-            let source: UnitConfig['source'];
+            // Proveniência vem do config gravado no salvamento; registro
+            // ilegível ou legado cai em 'manual'.
+            let source: UnitConfig['source'] = 'manual';
             try {
-              const saved = savedRaw ? (JSON.parse(savedRaw) as { source?: UnitConfig['source'] }) : null;
-              // Sempre que houver chave de config salva, respeita-se a proveniência.
-              // Isso evita que trocar de unidade e voltar rebaixe sensor para manual.
-              source = saved ? (saved.source || 'manual') : 'manual';
-            } catch {
-              source = 'manual';
-            }
+              const saved = JSON.parse(savedRaw) as { source?: UnitConfig['source'] };
+              source = saved.source || 'manual';
+            } catch { /* config ilegível: mantém 'manual' */ }
             configs[unit] = {
               filial: unit,
               unit_id: unit,
