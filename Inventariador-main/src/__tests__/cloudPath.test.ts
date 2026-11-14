@@ -8,7 +8,8 @@
 // INTERNAL:
 //   1. `fetchTenantFiliais`  — listagem de filiais;
 //   2. `syncConfigToCloud`   — configuração do contrato;
-//   3. `fetchFullInventory`  — pull incremental (`since` → `updated_at >`).
+//   3. `fetchFullInventory`  — pull incremental (`since` → `updated_at >`);
+//   4. `assetControlService` — leituras do módulo contábil.
 // ============================================================================
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
@@ -101,11 +102,14 @@ function exigirTransporte(...tabelas: string[]): void {
 }
 
 let mod: typeof import('../services/supabaseService');
+let assetCtrl: typeof import('../services/assetControlService');
 
 beforeAll(async () => {
   // createClient é chamado no import do módulo: o fake tem de existir antes.
   createClientMock.mockReturnValue(clienteFake());
   mod = await import('../services/supabaseService');
+  // Importado depois do cliente falso: o módulo lê o `supabase` no load.
+  assetCtrl = await import('../services/assetControlService');
 });
 
 beforeEach(() => {
@@ -143,6 +147,15 @@ describe('canário das passagens INTERNAL/SUPABASE_PLUS', () => {
     );
 
     exigirTransporte('inventory_config');
+  });
+
+  it('lê as tabelas do Controle de Ativos pela nuvem apenas no modo SUPABASE_PLUS', async () => {
+    const contas = await assetCtrl.assetControlService.getChartOfAccounts('CICOPAL');
+    const grupos = await assetCtrl.assetControlService.getAssetGroups('CICOPAL');
+    const ncms = await assetCtrl.assetControlService.getNCMClassifiers('CICOPAL');
+
+    exigirTransporte('chart_of_accounts', 'asset_groups', 'ncm_classifiers');
+    expect([contas, grupos, ncms]).toEqual([[], [], []]);
   });
 
   it('faz o pull incremental pela nuvem apenas no modo SUPABASE_PLUS', async () => {
