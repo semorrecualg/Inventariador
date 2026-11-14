@@ -240,11 +240,11 @@ export const localDb = {
 
         // SRE ISOLAMENTO (local): preserva registros de outro contrato com chaves
         // coincidentes (mesma proteção do bulkInsertAssetsOfflineFirst).
-        const safeChunk = sqliteService.filterCrossTenantWrites(mappedChunk);
+        const canonicalChunk = sqliteService.canonicalizeTenantidChunk(mappedChunk);
         await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
-          await db.ativos.bulkPut(safeChunk);
-          await db.assets.bulkPut(safeChunk);
-          await db.local_assets.bulkPut(safeChunk);
+          await db.ativos.bulkPut(canonicalChunk);
+          await db.assets.bulkPut(canonicalChunk);
+          await db.local_assets.bulkPut(canonicalChunk);
         });
         
         // Respiro para SRE e GC (Garbage Collector)

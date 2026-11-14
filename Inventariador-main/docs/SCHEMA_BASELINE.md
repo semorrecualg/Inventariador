@@ -23,7 +23,7 @@
 | **v4** | **Canônico `tenantid`** (minúsculo) — migração **idempotente** via `upgrade(tx)`: copia `tenantId`/`_tenantid`/`tenant_id` → `tenantid` e remove as legadas nas tabelas `local_assets`, `ativos`, `assets`, `campaigns`, `addresses`; índices compostos passam a `[tenantid+filial]` |
 | **v5** | **Fase C4** — MESMAS assinaturas do v4 (sem mudança estrutural). Etapa de DADOS no `upgrade(tx)`: reescreve chaves UPPER → canônico minúsculo e normaliza valores por classe (K/T/N/D/F) nas 3 tabelas de ativos + reconcile **aditivo** de `addresses` (nunca apaga linhas). Idempotente (`modify` retorna `false` quando nada muda — 2ª execução → 0 escritas); PK (`primarykey`/`id`) imutável; chaves de runtime (`TAG_INVENTARIO`, `DE_PARA`, …) preservadas; pulável via `NORMALIZE_ON_UPGRADE=false` (rollback instantâneo). Módulo: `src/services/migrationV5.ts` |
 | **v6** | **Muro multi-tenant (passo 1/2)** — o Dexie **não suporta trocar a chave primária num upgrade direto** ("Not yet support for changing primary key"); a receita oficial é REMOVER numa versão e RECRIAR na seguinte. v6: DROP das 3 tabelas de ativos (`local_assets`, `ativos`, `assets`) + cópia **integral** para backups `_v6_bkp_local/_v6_bkp_ativos/_v6_bkp_assets` |
-| **v7** | **Muro multi-tenant (passo 2/2)** — RECREATE com **chave primária composta `[tenantid+primarykey]`** nas 3 tabelas (o `tenantid` normalizado para UPPER canônico garante chaves consistentes; `primarykey` vira **índice**) + restauração a partir dos backups + descarte dos backups. Dois contratos com a mesma chave de origem **coexistem sem colidir** (mesma regra da nuvem: PK composta `(tenantid, id)`). Guard `filterCrossTenantWrites` (`sqliteService`) permanece como invariante de segurança p/ escritas legadas |
+| **v7** | **Muro multi-tenant (passo 2/2)** — RECREATE com **chave primária composta `[tenantid+primarykey]`** nas 3 tabelas (o `tenantid` normalizado para UPPER canônico garante chaves consistentes; `primarykey` vira **índice**) + restauração a partir dos backups + descarte dos backups. Dois contratos com a mesma chave de origem **coexistem sem colidir** (mesma regra da nuvem: PK composta `(tenantid, id)`). `canonicalizeTenantidChunk` (`sqliteService`) canoniza o `tenantid` de cada linha antes da escrita |
 
 **Regra de evolução:** alterar o schema local = **nova `version(n)`** no
 `InventoryDexieDatabase` (`src/services/sqliteService.ts`) com `upgrade` idempotente,
@@ -128,8 +128,8 @@ Indexação composta `[tenantid+filial]` → queries sub-12ms no `AddressSelecto
 3. **Proibição:** editar `version(4)`/`version(5)`/`version(6)` retroativo; escrever colunas legadas (`_unitid`,
    `tenantId`, `tenant_id`, `_tenantid`); SQL raw (proibido pelo contrato SRE — só API Dexie).
 4. **Muro multi-tenant:** a chave composta `[tenantid+primarykey]` torna a colisão entre
-   contratos **estruturalmente impossível**; o guard `filterCrossTenantWrites` bloqueia
-   sobrescritas de escritas legadas que ignorem o par composto.
+   contratos **estruturalmente impossível**; `canonicalizeTenantidChunk` canoniza o `tenantid` de
+   cada linha antes da escrita (sem filtro de colisão: outro tenant é outra linha).
 
 ---
 

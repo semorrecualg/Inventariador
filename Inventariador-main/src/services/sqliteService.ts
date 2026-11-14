@@ -701,7 +701,7 @@ export class SqliteService {
    * Tenant vazio adopta o contrato da sessão: a chave `['', primarykey]` nunca
    * coincide com a linha gravada e o upsert ficaria inoperante.
    */
-  public filterCrossTenantWrites(mappedChunk: DexieAsset[]): DexieAsset[] {
+  public canonicalizeTenantidChunk(mappedChunk: DexieAsset[]): DexieAsset[] {
     return mappedChunk.map(m => ({
       ...m,
       tenantid: resolveTenantKey(m.tenantid),
@@ -782,10 +782,10 @@ export class SqliteService {
 
           // SRE ISOLAMENTO (local): nunca sobrescrever registros de OUTRO contrato
           // (mesma regra aplicada na nuvem com onConflict 'tenantid, id').
-          const safeChunk = this.filterCrossTenantWrites(mappedChunk);
-          await db.ativos.bulkPut(safeChunk);
-          await db.assets.bulkPut(safeChunk);
-          await db.local_assets.bulkPut(safeChunk);
+          const canonicalChunk = this.canonicalizeTenantidChunk(mappedChunk);
+          await db.ativos.bulkPut(canonicalChunk);
+          await db.assets.bulkPut(canonicalChunk);
+          await db.local_assets.bulkPut(canonicalChunk);
 
           processed += chunk.length;
           if (onProgress) {

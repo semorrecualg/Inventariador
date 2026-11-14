@@ -15,7 +15,7 @@ estritamente amarrado ao contrato do usuário (sem "GLOBAL").
 - **Chave composta local `[tenantid+primarykey]`** — migração Dexie v6→v7 em 2 passos
   (v6: DROP + backup integral; v7: RECREATE + restauração), preservando 100% dos
   registros; `primarykey` vira índice. Dois contratos com a mesma chave de origem
-  coexistem sem colidir. Guard `filterCrossTenantWrites` bloqueia sobrescritas legadas.
+  coexistem sem colidir. Canonicalização do `tenantid` (`canonicalizeTenantidChunk`) antes da escrita.
 - **Nuvem:** upsert escopado `onConflict('tenantid, id')` no `syncAssetsToCloud` + índice
   único composto no `docs/supabase_bootstrap.sql`; sanitização das cargas misturadas
   (CICOPAL × CLIENTETESTE) local e nuvem.

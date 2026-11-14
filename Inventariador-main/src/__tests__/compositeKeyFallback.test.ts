@@ -5,7 +5,7 @@
 //
 // Com `tenantid` vazio a chave vira `['', primarykey]`: o `get`/`update` não
 // encontra a linha gravada e o ativo é ignorado em silêncio (flushFieldChanges)
-// ou a carga cria uma linha órfã (filterCrossTenantWrites). Estes testes fixam o
+// ou a carga cria uma linha órfã (canonicalizeTenantidChunk). Estes testes fixam o
 // fallback no `sqliteService` e no wrapper `localDb.assets.update`.
 // ============================================================================
 import 'fake-indexeddb/auto';
@@ -65,9 +65,9 @@ describe('sqliteService.patchAsset — ativo sem tenantid', () => {
   });
 });
 
-describe('sqliteService.filterCrossTenantWrites — canonicidade do tenant', () => {
+describe('sqliteService.canonicalizeTenantidChunk — canonicidade do tenant', () => {
   it('adopta o tenant da sessão e não cria chave vazia', async () => {
-    const safe = sqliteService.filterCrossTenantWrites([
+    const safe = sqliteService.canonicalizeTenantidChunk([
       row({ tenantid: '', primarykey: 'NOVO-1', descricaodoativo: 'MESA' })
     ]);
 
@@ -82,7 +82,7 @@ describe('sqliteService.filterCrossTenantWrites — canonicidade do tenant', () 
   it('preserva a chave de outro contrato sem a reescrever', () => {
     // O muro entre contratos é a própria chave composta: outro tenant é outra
     // linha, logo não há nada a filtrar (o antigo guard de colisão era morto).
-    const safe = sqliteService.filterCrossTenantWrites([
+    const safe = sqliteService.canonicalizeTenantidChunk([
       row({ tenantid: 'outro', primarykey: 'CROSS-1' })
     ]);
 

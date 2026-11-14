@@ -66,7 +66,7 @@ uma **única camada de repositórios** por trás das telas:
       — `docs/SCHEMA_BASELINE.md` (v4 canônica `tenantid`) + contrato `src/__tests__/schemaBaseline.test.ts`.
 - [x] **Muro multi-tenant local** (chave composta) ✅ 2026-08-12 — migração v6→v7 em 2
       passos (DROP+backup → RECREATE+restauração) com PK `[tenantid+primarykey]` nas 3
-      tabelas de ativos; guard `filterCrossTenantWrites`; baseline atualizado para `verno 7`.
+      tabelas de ativos; canonicalização `canonicalizeTenantidChunk`; baseline atualizado para `verno 7`.
 - [x] **Login por contrato** ✅ 2026-08-12 — perfil do dono amarrado ao `tenantid`;
       Barreira Local bloqueia admin sem contrato; sync escopado `onConflict('tenantid, id')`
       + índice único composto `(tenantid, primarykey)` no bootstrap SQL.

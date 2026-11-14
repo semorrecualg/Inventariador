@@ -590,7 +590,7 @@ emissão posterior à rotação), sem revelar o valor.
   composto `(tenantid, primarykey)` e upsert `onConflict('tenantid, id')` aplicados;
   migrações em `scripts/migrate-*-supabase.sql` + `docs/supabase_bootstrap.sql`.
 - Muro multi-tenant local: chave composta `[tenantid+primarykey]` (v6→v7) + guard
-  `filterCrossTenantWrites` — validado com coexistência de contratos no mesmo device.
+  `canonicalizeTenantidChunk` — canoniza o `tenantid` das escritas; coexistência de contratos validada no mesmo device.
 - Login por contrato: perfil do dono amarrado ao `tenantid` (user_permissions + metadata
   do auth); Barreira Local bloqueia admin sem contrato.
 - Provisionamento MASTER: `LicenseProvisioning`/`tenantProvisioningService` com senha

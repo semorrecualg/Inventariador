@@ -45,7 +45,7 @@ Antes de propor, gerar ou alterar qualquer código, **leia integralmente**:
   (`resolveTenantId`, `readLocalTenantId`, `readSessionTenantId`); **escrita proibida**.
   Alterações de schema no Supabase passam por `scripts/migrate-*-supabase.sql`.
 - **Muro multi-tenant**: chave composta local `[tenantid+primarykey]` (migração v6→v7 em 2
-  passos, `filterCrossTenantWrites`) + nuvem com índice único composto `(tenantid, primarykey)`
+  passos, `canonicalizeTenantidChunk`) + nuvem com índice único composto `(tenantid, primarykey)`
   e upsert `onConflict('tenantid, id')`. **NUNCA** propor chave única global de volta.
 - **Loader (contrato rígido)**: planilha com **exatamente 21 colunas** em nome E ordem fixas
   (`tenantid` na posição 0; cabeçalho completo em `docs/ARCHITECTURE.md` §7.2). Carga

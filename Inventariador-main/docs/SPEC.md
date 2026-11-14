@@ -119,7 +119,7 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
 
 **Convenções:** isolamento multi-tenant por `tenantid` + `filial` — chave composta
 `[tenantid+primarykey]` (colisão entre contratos estruturalmente impossível) + guard
-`filterCrossTenantWrites` p/ escritas legadas; manipulação de dados **somente via API
+`canonicalizeTenantidChunk` canoniza o `tenantid` das escritas; manipulação de dados **somente via API
 Dexie** (proibido SQL raw no browser); alteração de schema = nova `version(n)` no Dexie.
 
 > **Nota de padronização:** o campo foi unificado como **`tenantid`** em todo o código;
