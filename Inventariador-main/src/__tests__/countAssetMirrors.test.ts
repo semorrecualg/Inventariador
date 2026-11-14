@@ -10,7 +10,15 @@ vi.mock('../services/supabaseService', () => ({
   syncAssetsToCloudAndMark: vi.fn(),
   syncConfigToCloud: vi.fn()
 }));
-import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
+import { DatabaseLoaderService, verifyAndRestorePhysicalBackup } from '../services/DatabaseLoaderService';
+
+// Backup físico: o conteúdo lido do "dispositivo" é controlado pelo teste.
+const physicalBackup = vi.hoisted(() => ({ data: '' }));
+vi.mock('@capacitor/filesystem', () => ({
+  Filesystem: { readFile: vi.fn(async () => ({ data: physicalBackup.data })) },
+  Directory: { Documents: 'DOCUMENTS' },
+  Encoding: { UTF8: 'utf8' }
+}));
 
 /** Linha mínima: a contagem só lê `tenantid`; o resto não influencia. */
 const row = (tenantid: string, primarykey: string, etiqueta = primarykey): DexieAsset =>
@@ -140,6 +148,22 @@ describe('countAssetMirrors (F0)', () => {
 
     // Base restaurada: a linha em minúsculas volta a ser contada pela varredura.
     await db.local_assets.bulkPut([row('cicopal', 'b')]);
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
+  });
+
+  it('verifyAndRestorePhysicalBackup (caminho real) invalida o marcador e conta o legado', async () => {
+    // Base já migrada: marcador presente e índice ativo.
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
+    expect(await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)).toBeTruthy();
+
+    physicalBackup.data = JSON.stringify([row('cicopal', 'b')]);
+    await expect(verifyAndRestorePhysicalBackup()).resolves.toBe(true);
+
+    // Se a invalidação sair do restore físico, o marcador continua e falha aqui.
+    await expect(db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)).resolves.toBeUndefined();
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
+
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 1, skipped: 0 });
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
   });
 
