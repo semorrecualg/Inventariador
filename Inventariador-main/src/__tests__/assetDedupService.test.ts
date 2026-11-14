@@ -5,7 +5,7 @@ import { db } from '../services/sqliteService';
 import type { DexieAsset } from '../services/sqliteService';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup } from '../services/assetDedupService';
 
-const asset = (over: Partial<DexieAsset> & { primarykey: string }): DexieAsset =>
+const asset = (over: Partial<DexieAsset> & { primarykey: string; updated_at?: string }): DexieAsset =>
   ({
     id: over.primarykey,
     tenantid: 'CICOPAL',
@@ -99,6 +99,33 @@ describe('assetDedupService — limpeza de cópias na base local', () => {
     expect(conferido?._dataLeitura).toBe('2026-11-12T10:00:00Z');
     // Ativo sem etiqueta nunca é tocado.
     expect(kept.some(row => row.primarykey === 'SEM-ID')).toBe(true);
+  });
+
+  it('patch de conferência usa a chave composta nos três espelhos', async () => {
+    // Keeper (mais recente) sem autor/data; a cópia removida traz a conferência.
+    // O patch é aplicado com table.update([tenantid, primarykey]) — uma chave
+    // simples deixaria de encontrar a linha e o autor da conferência perdia-se.
+    await seed([
+      asset({ primarykey: 'A1', _conferido: 1, updated_at: '2026-11-12T10:00:00Z' }),
+      asset({
+        primarykey: 'A2',
+        _conferido: 1,
+        _auditor: 'auditor@gbk.com',
+        _dataLeitura: '2026-11-11T09:00:00Z',
+        updated_at: '2026-11-10T10:00:00Z'
+      })
+    ]);
+
+    const report = await applyAssetDuplicateCleanup();
+    expect(report.removed).toBe(1);
+
+    for (const table of ['local_assets', 'ativos', 'assets'] as const) {
+      const keeper = await db.table(table).get(['CICOPAL', 'A1']);
+      expect(keeper?._auditor).toBe('auditor@gbk.com');
+      expect(keeper?._dataLeitura).toBe('2026-11-11T09:00:00Z');
+      // A cópia foi mesmo apagada pelo par composto.
+      expect(await db.table(table).get(['CICOPAL', 'A2'])).toBeUndefined();
+    }
   });
 
   it('correr a limpeza duas vezes é seguro (idempotente)', async () => {

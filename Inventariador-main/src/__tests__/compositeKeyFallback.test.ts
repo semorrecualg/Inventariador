@@ -11,6 +11,7 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db, sqliteService } from '../services/sqliteService';
+import { saveCollectedAssetAtomic } from '../services/persistenceService';
 import type { DexieAsset } from '../services/sqliteService';
 import { localDb } from '../services/localDbService';
 
@@ -88,6 +89,18 @@ describe('sqliteService.canonicalizeTenantidChunk — canonicidade do tenant', (
 
     expect(safe.map(r => r.tenantid)).toEqual(['OUTRO']);
     expect(safe.map(r => r.primarykey)).toEqual(['CROSS-1']);
+  });
+});
+
+describe('persistenceService — update do espelho ativos pelo par composto', () => {
+  it('marca _conferido na linha [tenantid+primarykey] de ativos', async () => {
+    // Espelho `ativos` com o ativo ainda por conferir.
+    await db.ativos.put(row({ _conferido: 0 }));
+
+    await saveCollectedAssetAtomic({ tenantid: TENANT, primarykey: PK });
+
+    expect((await db.ativos.get([TENANT, PK]))?._conferido).toBe(1);
+    expect((await db.local_assets.get([TENANT, PK]))?._conferido).toBe(1);
   });
 });
 
