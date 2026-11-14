@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { db, sqliteService, invalidateTenantCaseMarker, TENANT_CASE_MARKER, type DexieAsset } from '../services/sqliteService';
 import { DatabaseMode } from '../types';
+import { restoreInventory } from '../services/persistenceService';
 
 // persistenceService importa o cliente Supabase; o restore não o usa.
 vi.mock('../services/supabaseService', () => ({
@@ -113,23 +114,18 @@ describe('countAssetMirrors (F0)', () => {
   });
 
   it('restoreInventory (caminho real) invalida o marcador', async () => {
-    // persistenceService lê localStorage no import; jsdom sem URL não o expõe.
-    if (!globalThis.localStorage) {
-      const mem = new Map<string, string>();
-      Object.defineProperty(globalThis, 'localStorage', {
-        configurable: true,
-        value: {
-          getItem: (k: string) => mem.get(k) ?? null,
-          setItem: (k: string, v: string) => { mem.set(k, String(v)); },
-          removeItem: (k: string) => { mem.delete(k); },
-          clear: () => mem.clear(),
-          key: (i: number) => Array.from(mem.keys())[i] ?? null,
-          get length() { return mem.size; }
-        }
-      });
-    }
-    const { restoreInventory } = await import('../services/persistenceService');
+    // securityService (usado pelo restore) lê localStorage; jsdom aqui não o expõe.
+    const mem = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => { mem.set(k, String(v)); },
+      removeItem: (k: string) => { mem.delete(k); },
+      clear: () => mem.clear(),
+      key: (i: number) => Array.from(mem.keys())[i] ?? null,
+      length: 0
+    });
 
+    // Se a invalidação sair do restore, o marcador continua e o teste falha.
     await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
     expect(await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)).toBeTruthy();
 
