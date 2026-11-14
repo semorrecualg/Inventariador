@@ -17,7 +17,7 @@ PWA mobile-first para **auditoria física de ativos imobilizados em campo** (con
 | Estado | React local no `App.tsx` (máquina de telas) + Zustand (`stores/`) |
 | Persistência local | **Dexie.js (IndexedDB)** — banco `InventoryLocalStore` (tabelas em §7) |
 | Nuvem (híbrida) | **Supabase** (Postgres multi-tenant, schema padronizado `tenantid` + `filial`) + Gemini (`@google/genai`) — ver §10 |
-| Testes | Vitest (94 arquivos / 844 testes) — ver §13 |
+| Testes | Vitest (95 arquivos / 850 testes) — ver §13 |
 | CI | GitHub Actions (APK Android) + PWA |
 
 **Localização:** o app vive em `Inventariador-main/` (subdiretório do workspace; raiz do repo GitHub `semorrecualg/Inventariador`).
@@ -522,7 +522,7 @@ emissão posterior à rotação), sem revelar o valor.
    isolamento por tenant (`[tenantid+filial]` — helpers em `utils/tenantUtils.ts`);
    alterações de schema local = nova `version(n)` no Dexie; alterações no Supabase via
    `scripts/migrate-*-supabase.sql`.
-5. **Valide**: `npx tsc --noEmit` (zero erros em `src/`) + `npx vitest run` (844 testes).
+5. **Valide**: `npx tsc --noEmit` (zero erros em `src/`) + `npx vitest run` (850 testes).
 6. **Reproduza** no navegador (Playwright headless) quando o bug for de fluxo/UI.
 
 ---
@@ -571,7 +571,7 @@ emissão posterior à rotação), sem revelar o valor.
 `tenantUtils`, `navigationMap`, `virtualSnapshot`, `schemaBaseline`, `securityExport`,
 `rbacService`, `tenantProvisioning`, `passwordPolicy`, `workContextUtils`,
 `routingTenantIsolation`, `postSelectionRouting`, `tenantContext`, `loadHistoryUtils`,
-`countAtivosByTenant` (30 arquivos / 295 testes).
+`countAtivosByTenant` (95 arquivos / 850 testes).
 - Ambiente `node` default; arquivos com `@vitest-environment jsdom` usam jsdom.
 - E2E: `npm run test:e2e` (Playwright) — ainda não configurado com browsers neste workspace.
 

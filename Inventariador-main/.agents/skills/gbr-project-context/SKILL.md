@@ -72,7 +72,7 @@ Antes de propor, gerar ou alterar qualquer código, **leia integralmente**:
 
 1. `npx tsc -b --noEmit` → **zero erros em `src/`** (erros em
    `node_modules`/config de terceiros são pré-existentes — não produzir novos).
-2. `npx vitest run` → **94 arquivos / 844 testes verdes**.
+2. `npx vitest run` → **95 arquivos / 850 testes verdes**.
 3. Bugs de fluxo/UI → reproduzir em navegador (Playwright headless) e/ou `freebuff-preview`.
 4. Atualizar **`docs/ARCHITECTURE.md`** sempre que a arquitetura mudar (novas telas, fluxos,
    tabelas ou schema).

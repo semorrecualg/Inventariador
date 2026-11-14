@@ -125,7 +125,7 @@ Obrigatório estar verde **localmente e no CI** antes de abrir PR:
 |---|---|
 | `npm run lint` | 0 erros, 0 warnings (`--max-warnings 0`) |
 | `npx tsc --noEmit` | 0 erros |
-| `npm test` | **844 testes / 94 arquivos** verdes |
+| `npm test` | **850 testes / 95 arquivos** verdes |
 | `npm run build` | `dist/` gerado, PWA com 28 entradas de precache |
 
 ### Suíte hermética (importante)
@@ -270,6 +270,14 @@ relativo ou referência de ficheiro que não exista. Referências declaradas com
 planeadas («a criar», «Criar» em checklist, «planejada», «nunca foi criado») são
 aceites **só quando o marcador está colado à referência** (antes ou depois dela):
 a palavra solta noutro ponto da linha não isenta nada.
+
+`check:docs` encadeia duas verificações: `check-docs.cjs` (links e referências) e
+`check-test-counts.cjs`, que compara a contagem real do Vitest (`vitest list
+--json`, sem executar a suíte) com a que os documentos de estado atual afirmam —
+README, SKILL, SPEC, ARCHITECTURE, esta governança e a skill de contexto. Um
+teste novo que deixe os números velhos faz o CI falhar com ficheiro e linha.
+Documentos de HISTÓRICO (CHANGELOG, planos de fase datados) ficam fora por
+desenho: lá o número é o retrato de uma entrega, não uma afirmação do presente.
 
 `verify:governanca` checa, em sequência: estrutura do repo → branch/limpeza/fast-forward vs `origin/main`
 → presença das variáveis → REST + AUTH do Supabase → tabelas essenciais.
