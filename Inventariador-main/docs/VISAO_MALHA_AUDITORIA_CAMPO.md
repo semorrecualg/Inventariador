@@ -308,8 +308,10 @@ ganhou o cartão **Linha de Base (F0)**, com p50/p95 por métrica e os botões
 pull completo** — depois da persistência, para a contagem por espelho já
 refletir a base nova. A contagem dos três espelhos roda em **momento ocioso**
 (`requestIdleCallback`, com `setTimeout` de fallback) para não pesar no boot, e
-também há o botão Registrar. Snapshots antigos sem `trigger` são lidos como
-`manual`.
+também há o botão Registrar. Boot com base vazia **não** grava retrato: preserva
+o último útil em vez de o sobrescrever com zeros. Snapshots antigos sem
+`trigger` são lidos como `manual`, com métricas ausentes preenchidas como "sem
+amostra".
 
 **Falta para fechar F0:** medir em aparelho real (abertura a frio, delta de 1
 filial, push de 500 eventos) e preencher a tabela abaixo. Este ambiente não tem

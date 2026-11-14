@@ -49,6 +49,8 @@ export interface PerfBaseline {
 const SAMPLES_KEY = 'gbr_perf_samples_v1';
 const BASELINE_KEY = 'gbr_perf_baseline_v1';
 const MAX_SAMPLES = 200;
+const PERF_TRIGGERS: PerfBaseline['trigger'][] = ['boot', 'pull.full', 'manual'];
+const EMPTY_SUMMARY: PerfSummary = { samples: 0, p50: null, p95: null, last: null };
 
 /** `performance.now()` quando existe; `Date.now()` como fallback (testes/SSR). */
 const now = (): number =>
@@ -142,17 +144,16 @@ export const recordPerf = (
 
 /** p50/p95 por posto (nearest-rank) — sem dependências. */
 export const summarizeSamples = (samples: PerfSample[], name: PerfMetricName): PerfSummary => {
-  const values = samples
-    .filter(s => s.name === name)
-    .map(s => s.ms)
-    .sort((a, b) => a - b);
-  if (values.length === 0) return { samples: 0, p50: null, p95: null, last: null };
+  const own = samples.filter(s => s.name === name);
+  if (own.length === 0) return { samples: 0, p50: null, p95: null, last: null };
+  const values = own.map(s => s.ms).sort((a, b) => a - b);
   const at = (p: number): number => values[Math.min(values.length - 1, Math.ceil((p / 100) * values.length) - 1)];
   return {
     samples: values.length,
     p50: at(50),
     p95: at(95),
-    last: values[values.length - 1]
+    // Ordem de gravação, não de grandeza: é a amostra mais recente.
+    last: own[own.length - 1].ms
   };
 };
 
@@ -192,8 +193,8 @@ export const savePerfBaseline = (input: {
     /* ignore */
   }
   logger.info(
-    `>>> [PERF] Linha de base registrada (${baseline.trigger})${input.tenantid ? ` (${input.tenantid})` : ''}: ` +
-      `mirrors=${input.mirrors ? `${input.mirrors.local_assets}/${input.mirrors.ativos}/${input.mirrors.assets}` : 'n/d'} · ` +
+    `>>> [PERF] Linha de base registrada (${baseline.trigger})${baseline.tenantid ? ` (${baseline.tenantid})` : ''}: ` +
+      `mirrors=${baseline.mirrors ? `${baseline.mirrors.local_assets}/${baseline.mirrors.ativos}/${baseline.mirrors.assets}` : 'n/d'} · ` +
       PERF_METRICS.map(name => {
         const s = baseline.metrics[name];
         return `${name}=${s.samples > 0 ? `${s.p50}ms(p50)/${s.p95}ms(p95) n=${s.samples}` : 'sem amostra'}`;
@@ -216,10 +217,15 @@ export const normalizePerfBaseline = (raw: unknown): PerfBaseline | null => {
   if (typeof candidate.at !== 'string' || !candidate.metrics || typeof candidate.metrics !== 'object') {
     return null;
   }
-  const TRIGGERS: PerfBaseline['trigger'][] = ['boot', 'pull.full', 'manual'];
-  const trigger = TRIGGERS.includes(candidate.trigger as PerfBaseline['trigger'])
+  const trigger = PERF_TRIGGERS.includes(candidate.trigger as PerfBaseline['trigger'])
     ? (candidate.trigger as PerfBaseline['trigger'])
     : 'manual';
+  const rawMetrics = candidate.metrics as Partial<Record<PerfMetricName, PerfSummary>>;
+  const metrics = PERF_METRICS.reduce((acc, name) => {
+    const summary = rawMetrics[name];
+    acc[name] = summary && typeof summary === 'object' ? summary : EMPTY_SUMMARY;
+    return acc;
+  }, {} as Record<PerfMetricName, PerfSummary>);
   return {
     at: candidate.at,
     trigger,
@@ -227,7 +233,7 @@ export const normalizePerfBaseline = (raw: unknown): PerfBaseline | null => {
     mirrors: candidate.mirrors && typeof candidate.mirrors === 'object'
       ? (candidate.mirrors as MirrorCounts)
       : null,
-    metrics: candidate.metrics as Record<PerfMetricName, PerfSummary>
+    metrics
   };
 };
 

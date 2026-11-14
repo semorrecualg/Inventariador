@@ -9,7 +9,7 @@ import { isAdminUser } from '../utils/authUtils';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
-import { collectPerfSummary, formatPerfBaseline, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfSummary } from '../utils/perfMetrics';
+import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
 import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -22,7 +22,7 @@ export async function processAndInjectSpreadsheetData(file: File, onProgress: (p
 }
 
 /** Rótulos das métricas de F0 no cartão do Gestor. */
-const PERF_LABELS: Record<string, string> = {
+const PERF_LABELS: Record<PerfMetricName, string> = {
   boot: 'Boot',
   'pull.full': 'Pull completo',
   'pull.delta': 'Delta',
@@ -70,7 +70,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   // explicar uma diferença em vez de a esconder num único número.
   const [mirrors, setMirrors] = useState<{ local_assets: number; ativos: number; assets: number }>({ local_assets: 0, ativos: 0, assets: 0 });
   // F0: resumo das amostras locais (boot/delta/push) + último retrato registrado.
-  const [perfSummaries, setPerfSummaries] = useState<Record<string, PerfSummary>>({});
+  const [perfSummaries, setPerfSummaries] = useState<Partial<Record<PerfMetricName, PerfSummary>>>({});
   const [baseline, setBaseline] = useState<PerfBaseline | null>(() => readPerfBaseline());
   // Espelho virtual (sandbox/iframe): é o que a Unidade Operacional lê quando o
   // banco local está vazio. Só é lido quando o banco está vazio (diagnóstico).
@@ -753,7 +753,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 mt-3">
-          {(['boot', 'pull.full', 'pull.delta', 'push'] as const).map(name => (
+          {PERF_METRICS.map(name => (
             <div key={name} className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
               <div className="text-[8px] font-bold text-slate-500 uppercase tracking-wider">{PERF_LABELS[name]}</div>
               <div className="text-[10px] font-mono font-black text-emerald-300 mt-0.5">{fmtPerf(perfSummaries[name])}</div>

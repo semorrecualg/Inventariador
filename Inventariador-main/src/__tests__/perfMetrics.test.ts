@@ -22,6 +22,14 @@ describe('summarizeSamples', () => {
     expect(summary.last).toBe(500);
   });
 
+  it('last é a amostra mais recente gravada, não a maior', () => {
+    const samples = [900, 120, 400].map(ms => sample('boot', ms));
+    const summary = summarizeSamples(samples, 'boot');
+    expect(summary.p50).toBe(400);
+    expect(summary.p95).toBe(900);
+    expect(summary.last).toBe(400);
+  });
+
   it('mantém as quatro métricas de F0 no contrato', () => {
     expect(PERF_METRICS).toEqual(['boot', 'pull.full', 'pull.delta', 'push']);
   });
@@ -60,6 +68,7 @@ describe('summarizeSamples', () => {
     const normalized = normalizePerfBaseline(legacy);
     expect(normalized?.trigger).toBe('manual');
     expect(normalized?.mirrors?.total).toBe(12636);
+    expect(normalized?.metrics.push).toEqual({ samples: 0, p50: null, p95: null, last: null });
   });
 
   it('normaliza trigger desconhecido e rejeita snapshot sem forma válida', () => {

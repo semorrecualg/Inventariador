@@ -153,6 +153,9 @@ const autoRegisterPerfBaseline = (
   scheduleIdle(async () => {
     try {
       const mirrors = await sqliteService.countAssetMirrors(tenantid || null);
+      // Base vazia (boot sem dados/login) não é linha de base: preserva o último
+      // retrato útil em vez de o sobrescrever com zeros.
+      if (mirrors.total === 0) return;
       savePerfBaseline({ tenantid: tenantid || null, mirrors, trigger });
     } catch (err) {
       logger.warn('>>> [PERF] Falha ao registrar linha de base automática:', err);
