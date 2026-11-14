@@ -3788,13 +3788,16 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
           // Nunca sobrescreve uma config mais rica (local/nuvem): era isso que
           // apagava a proveniência `source` da âncora a cada leitura de sessão.
           if (unit && hasRealAnchor(lat, lng) && !configs[unit]) {
-            // Proveniência vem do config gravado no salvamento; rascunho sem
-            // config salva é posicionamento manual (não é leitura de sensor).
+            // Proveniência vem do config gravado no salvamento.
+            // Se houver rascunho salvo, usa-se a proveniência armazenada;
+            // senão, só usa 'manual' para unidades verdadeiramente novas (sem config prévio).
             const savedRaw = sessionStorage.getItem(`unit_gps_config_${unit}`);
             let source: UnitConfig['source'];
             try {
               const saved = savedRaw ? (JSON.parse(savedRaw) as { source?: UnitConfig['source'] }) : null;
-              source = saved ? saved.source : 'manual';
+              // Sempre que houver chave de config salva, respeita-se a proveniência.
+              // Isso evita que trocar de unidade e voltar rebaixe sensor para manual.
+              source = saved ? (saved.source || 'manual') : 'manual';
             } catch {
               source = 'manual';
             }
