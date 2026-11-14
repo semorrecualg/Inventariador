@@ -832,7 +832,19 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
     });
 
     if (fileContent.data) {
-      const restoredAssets = JSON.parse(fileContent.data as string);
+      const backup = JSON.parse(fileContent.data as string);
+      if (!Array.isArray(backup) || backup.length === 0) return false;
+
+      // Mesma regra da carga e do restauro legado: `tenantid` canónico (UPPER) e,
+      // quando vem vazio, o contrato da sessão. Sem isto as linhas entravam como
+      // `['cicopal', pk]` (chave que não casa com o contrato activo) ou como
+      // `['', primarykey]` — e a migração de case ignora tenant vazio, deixando-as
+      // órfãs para sempre.
+      const restoredAssets = (backup as DexieAsset[]).map(asset => ({
+        ...asset,
+        tenantid: resolveTenantKey(asset.tenantid)
+      }));
+
       // Só invalida quando há mesmo restauro: este caminho corre em todo boot.
       await invalidateTenantCaseMarker();
       // Alimenta atomicamente o Dexie.js para restabelecer os 12.636 ativos sem Race Conditions.

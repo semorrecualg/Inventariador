@@ -163,9 +163,9 @@ describe('countAssetMirrors (F0)', () => {
     await expect(db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)).resolves.toBeUndefined();
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
 
-    // O restauro repõe os três espelhos: a linha legada em minúsculas existe
-    // nos três e é reparada em cada um.
-    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 3, skipped: 0 });
+    // O restauro já canoniza o tenantid (mesma regra da carga): não sobra
+    // resíduo de case para a migração reparar.
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
   });
 
@@ -185,6 +185,27 @@ describe('countAssetMirrors (F0)', () => {
     });
     // A linha velha do espelho não sobrevive ao restauro integral.
     await expect(db.ativos.get(['CICOPAL', 'VELHO'])).resolves.toBeUndefined();
+  });
+
+  it('verifyAndRestorePhysicalBackup grava o tenantid canónico (sem chave vazia)', async () => {
+    sessionStorage.setItem('app_current_user', JSON.stringify({ tenantid: 'cicopal' }));
+
+    physicalBackup.data = JSON.stringify([
+      row('cicopal', 'a'),   // case legado
+      row('', 'b'),          // sem tenant: adopta o da sessão
+      row('CICOPAL', 'c')    // já canónico
+    ]);
+    await expect(verifyAndRestorePhysicalBackup()).resolves.toBe(true);
+
+    for (const table of ['local_assets', 'ativos', 'assets'] as const) {
+      expect(await db[table].get(['CICOPAL', 'a'])).toBeDefined();
+      expect(await db[table].get(['CICOPAL', 'b'])).toBeDefined();
+      expect(await db[table].get(['CICOPAL', 'c'])).toBeDefined();
+      // Nenhuma variante de case nem chave vazia sobrevive ao restauro.
+      expect(await db[table].get(['cicopal', 'a'])).toBeUndefined();
+      expect(await db[table].get(['', 'b'])).toBeUndefined();
+    }
+    expect(await db.local_assets.count()).toBe(3);
   });
 
   it('a importação invalida o marcador antes de gravar', async () => {
