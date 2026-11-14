@@ -835,10 +835,17 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
       const restoredAssets = JSON.parse(fileContent.data as string);
       // Só invalida quando há mesmo restauro: este caminho corre em todo boot.
       await invalidateTenantCaseMarker();
-      // Alimenta atomicamente o Dexie.js para restabelecer os 12.636 ativos sem Race Conditions
-      await db.transaction('rw', [db.local_assets], async () => {
+      // Alimenta atomicamente o Dexie.js para restabelecer os 12.636 ativos sem Race Conditions.
+      // O backup é uma cópia integral de `local_assets`: repô-lo só nesse espelho
+      // deixava `ativos`/`assets` vazios ou desactualizados (dashboards, mapa e
+      // sync leem esses espelhos), por isso os três recebem a mesma cópia.
+      await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
         await db.local_assets.clear();
         await db.local_assets.bulkAdd(restoredAssets);
+        await db.ativos.clear();
+        await db.ativos.bulkAdd(restoredAssets);
+        await db.assets.clear();
+        await db.assets.bulkAdd(restoredAssets);
       });
       return true;
     }

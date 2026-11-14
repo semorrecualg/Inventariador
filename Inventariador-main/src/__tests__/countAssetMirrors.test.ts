@@ -163,8 +163,28 @@ describe('countAssetMirrors (F0)', () => {
     await expect(db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)).resolves.toBeUndefined();
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
 
-    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 1, skipped: 0 });
+    // O restauro repõe os três espelhos: a linha legada em minúsculas existe
+    // nos três e é reparada em cada um.
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 3, skipped: 0 });
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
+  });
+
+  it('verifyAndRestorePhysicalBackup repõe os três espelhos (não deixa ativos/assets vazios)', async () => {
+    // Base apagada por desastre: local_assets vazio, mas o espelho operacional
+    // ainda guarda uma linha velha de outro estado.
+    await db.ativos.bulkPut([row('CICOPAL', 'VELHO')]);
+
+    physicalBackup.data = JSON.stringify([row('CICOPAL', 'a'), row('CICOPAL', 'b')]);
+    await expect(verifyAndRestorePhysicalBackup()).resolves.toBe(true);
+
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
+      local_assets: 2,
+      ativos: 2,
+      assets: 2,
+      total: 2
+    });
+    // A linha velha do espelho não sobrevive ao restauro integral.
+    await expect(db.ativos.get(['CICOPAL', 'VELHO'])).resolves.toBeUndefined();
   });
 
   it('a importação invalida o marcador antes de gravar', async () => {
