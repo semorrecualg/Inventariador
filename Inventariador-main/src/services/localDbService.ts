@@ -211,9 +211,13 @@ export const localDb = {
 
     getMapData: async (campaignId: string): Promise<Asset[]> => {
       const tenant = getCurrentTenantid().trim().toUpperCase();
+      // `currentCampaignId` NÃO é índice no schema Dexie (v7 só indexa
+      // [tenantid+primarykey], primarykey, filial, [tenantid+filial]); usar
+      // `where('currentCampaignId')` lança SchemaError e derrubava o fluxo
+      // de exclusão de campanha antes do refresh do App.
+      const target = String(campaignId || '').trim();
       const results = await db.assets
-        .where('currentCampaignId')
-        .equals(campaignId)
+        .filter(a => String(a.currentCampaignId || '').trim() === target)
         .toArray();
 
       return results
@@ -521,7 +525,11 @@ export const localDb = {
     },
 
     removeCampaignFromAssets: async (campaignId: string): Promise<void> => {
-      const allAtivos = await db.ativos.where('currentCampaignId').equals(campaignId).toArray();
+      const target = String(campaignId || '').trim();
+      // Mesma razão do getMapData: filtro em memória porque a coluna não é indexada.
+      const allAtivos = await db.ativos
+        .filter(a => String(a.currentCampaignId || '').trim() === target)
+        .toArray();
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
         for (const asset of allAtivos) {
           asset.currentCampaignId = null;

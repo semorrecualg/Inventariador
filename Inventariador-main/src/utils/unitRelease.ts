@@ -223,6 +223,73 @@ export const clearActiveCampaignCacheForUnit = (
   }
 };
 
+/**
+ * Ponteiros de "campanha corrente" espalhados pelo app.
+ *
+ * Nenhum deles é fonte de verdade: todos apontam para uma linha da tabela
+ * `campaigns` por id. Quando essa linha desaparece (exclusão, base trocada), o
+ * ponteiro fica órfão e a unidade continuava "liberada" sem campanha nenhuma.
+ */
+export interface CampaignPointerSnapshot {
+  /** `localStorage.app_current_campaign` */
+  appCurrentCampaign?: string | null;
+  /** `sessionStorage.activeCampaignId` */
+  sessionCampaignId?: string | null;
+  /** `SYSTEM_CONTEXT.active_campaign` */
+  contextCampaignId?: string | null;
+}
+
+export interface ActiveCampaignReconciliation {
+  /** Ids referenciados que NÃO existem em `campaigns`. */
+  orphanCampaignIds: string[];
+  /** Unidades marcadas no cache local sem campanha ACTIVE no banco. */
+  staleCacheUnits: string[];
+}
+
+/**
+ * Reconcilia o estado derivado da campanha activa com a tabela `campaigns`.
+ *
+ * - Um id referenciado que não existe na tabela é órfão (o chip CAMPANHA e a
+ *   campanha corrente passam a mentir sobre uma campanha inexistente).
+ * - Uma marca de cache (`kardek_campanha_ativa_*`) só é válida se a unidade
+ *   tiver campanha ACTIVE persistida — o cache é espelho, não fonte.
+ */
+export const reconcileActiveCampaignState = (
+  campaigns: ReadonlyArray<{ id?: unknown; status?: unknown; filial?: unknown; unit_id?: unknown; _unitid?: unknown }> | null | undefined,
+  pointers: CampaignPointerSnapshot | null | undefined,
+  cachedUnits?: ReadonlySet<string> | null
+): ActiveCampaignReconciliation => {
+  const ids = new Set<string>();
+  for (const campaign of campaigns || []) {
+    const id = String(campaign?.id ?? '').trim();
+    if (id) ids.add(id);
+  }
+
+  const orphanCampaignIds: string[] = [];
+  const seen = new Set<string>();
+  [pointers?.contextCampaignId, pointers?.appCurrentCampaign, pointers?.sessionCampaignId].forEach(pointer => {
+    const id = String(pointer ?? '').trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    if (!ids.has(id)) orphanCampaignIds.push(id);
+  });
+
+  const activeUnits = collectActiveCampaignUnits(campaigns);
+  const staleCacheUnits: string[] = [];
+  for (const unit of cachedUnits || []) {
+    if (!isUnitInReleaseSet(activeUnits, unit)) staleCacheUnits.push(unit);
+  }
+
+  return { orphanCampaignIds, staleCacheUnits };
+};
+
+/**
+ * Texto do rodapé de campanhas. Sempre derivado da leitura persistida: o
+ * contador não pode ficar preso no valor anterior depois de uma exclusão.
+ */
+export const formatCampaignCount = (campaigns: ReadonlyArray<unknown> | null | undefined): string =>
+  `Campanhas encontradas: ${campaigns?.length ?? 0}`;
+
 /** Rótulo curto do que falta para liberar a unidade. */
 export const describeUnitReleaseMissing = (status: UnitReleaseStatus | null): string => {
   if (!status || status.released) return '';

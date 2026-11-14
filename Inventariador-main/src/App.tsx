@@ -63,7 +63,7 @@ import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, SupabaseUser
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, isValidLastContext } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
-import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
+import { buildUnitReleaseMap, clearActiveCampaignCacheForUnit, collectActiveCampaignUnits, describeUnitReleaseMissing, formatCampaignCount, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, reconcileActiveCampaignState, type UnitReleaseMap } from './utils/unitRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
 import {
   readCheckpointForDelta,
@@ -2266,12 +2266,48 @@ useEffect(() => {
    * que a lista visível não a inclua. Lê já o registro persistido — mesma
    * regra para administrador e auditor.
    */
-  const loadActiveCampaignUnits = useCallback(async () => {
+  const loadActiveCampaignUnits = useCallback(async (): Promise<Record<string, unknown>[]> => {
     try {
       const rows = await sqliteService.getCampaigns();
+
+      // Estado derivado (ponteiro de campanha corrente + cache por unidade) só
+      // vale se a campanha existir de facto na tabela. Um `active_campaign`
+      // órfão mantinha a unidade LIBERADA com CAMPANHAS ENCONTRADAS: 0.
+      const ls = typeof localStorage !== 'undefined' ? localStorage : null;
+      const ss = typeof sessionStorage !== 'undefined' ? sessionStorage : null;
+      const contextCampaignId = await sqliteService.getContextValue('active_campaign');
+      const reconciliation = reconcileActiveCampaignState(
+        rows,
+        {
+          appCurrentCampaign: ls?.getItem('app_current_campaign'),
+          sessionCampaignId: ss?.getItem('activeCampaignId'),
+          contextCampaignId
+        },
+        readActiveCampaignCache(ls)
+      );
+
+      if (reconciliation.orphanCampaignIds.length > 0) {
+        const orphanIds = new Set(reconciliation.orphanCampaignIds);
+        logger.warn(`>>> [Governance] Ponteiro de campanha órfão (sem linha em campaigns): ${reconciliation.orphanCampaignIds.join(', ')}. Limpando.`);
+        if (orphanIds.has(String(ls?.getItem('app_current_campaign') || ''))) {
+          ls?.removeItem('app_current_campaign');
+        }
+        if (orphanIds.has(String(ss?.getItem('activeCampaignId') || ''))) {
+          ss?.removeItem('activeCampaignId');
+          ss?.removeItem('activeCampaignStatus');
+        }
+        if (contextCampaignId && orphanIds.has(String(contextCampaignId))) {
+          await sqliteService.setContextValue('active_campaign', '');
+        }
+      }
+
+      reconciliation.staleCacheUnits.forEach(unit => clearActiveCampaignCacheForUnit(ls, unit));
+
       setActiveCampaignUnits(collectActiveCampaignUnits(rows));
+      return rows;
     } catch (err) {
       logger.warn('>>> [Governance] Falha ao ler campanhas persistidas para a liberação:', err);
+      return [];
     }
   }, []);
 
@@ -2284,7 +2320,10 @@ useEffect(() => {
   const refreshCampaigns = useCallback(async () => {
     // Antes de qualquer guarda: a liberação da unidade tem de reflectir o que
     // está gravado no banco, não o que o ecrã actual decidiu carregar.
-    await loadActiveCampaignUnits();
+    const persistedCampaigns = await loadActiveCampaignUnits();
+    // Contador do rodapé: assenta na leitura persistida ANTES da guarda de
+    // bootstrap, para não ficar preso no número anterior após uma exclusão.
+    setLastQueryLog(formatCampaignCount(persistedCampaigns));
     if (!dbInitialized || sqliteStatus.loading || !sqliteService.getIsInitialized()) {
       logger.info("⏸️ [Bootstrap Guard] Aguardando inicialização física do banco antes de buscar dados...");
       return;

@@ -270,6 +270,22 @@ describe('CampaignManager — exclusão de campanha', () => {
     expect(setContextValueMock).toHaveBeenCalledWith('active_campaign', '');
   });
 
+  it('segue para o refresh mesmo quando o desvínculo dos ativos falha', async () => {
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    removeCampaignFromAssetsMock.mockRejectedValueOnce(new Error('SchemaError: currentCampaignId'));
+    render(renderManager(campaigns, onRefresh));
+
+    expect(await screen.findByText('Inventário nov 2026')).toBeTruthy();
+    fireEvent.click(screen.getAllByText('Excluir')[0]);
+    fireEvent.click(await screen.findByText('Confirmar Exclusão'));
+
+    await waitFor(() => expect(screen.queryByText('Inventário nov 2026')).toBeNull());
+    expect(localDeleteMock).toHaveBeenCalledWith('camp-a');
+    // O App tem de ser avisado mesmo com a limpeza de ativos a falhar.
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    expect(screen.getByText('Nova campanha nov 2026')).toBeTruthy();
+  });
+
   it('cancelar mantém a campanha na lista e não apaga nada', async () => {
     render(renderManager(campaigns));
 

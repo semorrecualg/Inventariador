@@ -10,10 +10,12 @@ import {
   campaignUnitOf,
   collectActiveCampaignUnits,
   describeUnitReleaseMissing,
+  formatCampaignCount,
   isActiveCampaign,
   isUnitInReleaseSet,
   readActiveCampaignCache,
   readUnitRelease,
+  reconcileActiveCampaignState,
   resolveUnitReleaseStatus,
   unitReleaseKey
 } from '../utils/unitRelease';
@@ -139,5 +141,40 @@ describe('unitRelease · campanha lida do banco persistido', () => {
     const units = readActiveCampaignCache(storage);
     expect(Array.from(units)).toEqual(['010101 CICOPAL GO']);
     expect(readActiveCampaignCache(null).size).toBe(0);
+  });
+});
+
+describe('unitRelease · reconciliação da campanha activa com a tabela', () => {
+  const rows = [
+    { id: 'camp-1', status: 'ACTIVE', filial: 'MATRIZ' },
+    { id: 'camp-2', status: 'CREATED', filial: 'MATRIZ' }
+  ];
+
+  it('aponta como órfão o id referenciado que não existe em campaigns', () => {
+    const result = reconcileActiveCampaignState(rows, {
+      appCurrentCampaign: 'nao-existe',
+      sessionCampaignId: 'tambem-nao',
+      contextCampaignId: 'camp-1'
+    });
+    expect(result.orphanCampaignIds).toEqual(['tambem-nao', 'nao-existe'].sort());
+    expect(result.orphanCampaignIds).not.toContain('camp-1');
+  });
+
+  it('não marca cache válido e marca a unidade sem campanha ACTIVE', () => {
+    const cached = new Set(['MATRIZ', 'OUTRA UNIDADE']);
+    const result = reconcileActiveCampaignState(rows, null, cached);
+    expect(result.staleCacheUnits).toEqual(['OUTRA UNIDADE']);
+  });
+
+  it('sem campanhas persistidas, todo o cache é obsoleto e todo o ponteiro é órfão', () => {
+    const result = reconcileActiveCampaignState([], { appCurrentCampaign: 'x' }, new Set(['MATRIZ']));
+    expect(result.orphanCampaignIds).toEqual(['x']);
+    expect(result.staleCacheUnits).toEqual(['MATRIZ']);
+  });
+
+  it('conta as campanhas persistidas para o rodapé (0 quando a tabela fica vazia)', () => {
+    expect(formatCampaignCount([])).toBe('Campanhas encontradas: 0');
+    expect(formatCampaignCount(null)).toBe('Campanhas encontradas: 0');
+    expect(formatCampaignCount(rows)).toBe('Campanhas encontradas: 2');
   });
 });

@@ -372,8 +372,13 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       // Estado derivado da campanha (cache por unidade / contexto / sessão).
       await clearDeletedCampaignSelection(String(campaignId), deletedUnit);
 
-      // Limpeza de ativos relacionados vinculados a essa campanha
-      await localDb.assets.removeCampaignFromAssets(String(campaignId));
+      // Limpeza de ativos relacionados vinculados a essa campanha. Falha aqui
+      // não pode abortar o pós-exclusão (refresh/contador): a campanha já saiu.
+      try {
+        await localDb.assets.removeCampaignFromAssets(String(campaignId));
+      } catch (unlinkErr) {
+        logger.warn('>>> [Governance] Campanha excluída, mas o desvínculo dos ativos falhou:', unlinkErr);
+      }
       
       // Também deleta no Supabase em background para continuar funcionando sincronizado se online
       try {
