@@ -8,6 +8,7 @@ import { logger } from '../utils/logger';
 import { normalizeFieldValue, normalizeDateISO, normalizeNumeric } from '../utils/normalize';
 import { contentFingerprint, createFallbackKeyAllocator, resolveAssetKey, sanitizeAssetKey } from '../utils/assetKey';
 import { reportRecnoCollisions } from './recnoGuardService';
+import { resolveTenantKey } from '../utils/tenantSession';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -845,6 +846,39 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
     // Arquivo ainda não criado no primeiro boot limpo (Comportamento Esperado)
   }
   return false;
+}
+
+/**
+ * Restauro do inventário legado lido do FileSystem físico (`GBR_Inventario`).
+ *
+ * Grava as linhas em `local_assets` e concilia o espelho operacional `ativos`
+ * pela chave composta `[tenantid+primarykey]` — com chave simples o `update`
+ * não encontra a linha e o registo restaurado ficaria por conferir. Devolve
+ * quantas linhas foram restauradas (0 quando o backup está vazio).
+ */
+export async function restoreLegacyPhysicalInventory(rows: unknown[]): Promise<number> {
+  // Tenant vazio adopta o contrato da sessão: `['', primarykey]` nunca coincide
+  // com a linha operacional e o restauro ficaria órfão.
+  const data = ((rows || []) as DexieAsset[]).map(asset => ({
+    ...asset,
+    tenantid: resolveTenantKey(asset.tenantid)
+  }));
+  if (data.length === 0) return 0;
+
+  await db.transaction('rw', [db.local_assets, db.ativos], async () => {
+    // Restaura estritamente o inventário coletado pelo usuário (coletas locais).
+    await db.local_assets.bulkPut(data);
+
+    for (const asset of data) {
+      if (!asset.primarykey) continue;
+      await db.ativos.update(
+        [resolveTenantKey(asset.tenantid), String(asset.primarykey)],
+        { _conferido: 1, _is_synced: 0 }
+      );
+    }
+  });
+
+  return data.length;
 }
 
 export async function initializeLocalLoaderPipeline(): Promise<void> {

@@ -15,7 +15,6 @@ import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './uti
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
-import { resolveTenantKey } from './utils/tenantSession';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, isAuditorUser, userHasPermission } from './services/rbacService';
 
@@ -89,7 +88,7 @@ import SyncBadge from './components/SyncBadge';
 import UnitConfigurator from './components/UnitConfigurator';
 import StressTestManager from './components/StressTestManager';
 
-import { sqliteService, db, DexieAsset } from './services/sqliteService';
+import { sqliteService, db } from './services/sqliteService';
 import { auditService } from './services/auditService';
 import { telemetryService } from './services/telemetryService';
 import AIAssistant from './components/AIAssistant';
@@ -122,7 +121,7 @@ import { determineAssetTag } from './services/tagService';
 import { requestPersistentStorage, localDb } from './services/localDbService';
 import { demoService } from './services/demoService';
 import { FileSystemStorageService } from './services/FileSystemStorageService';
-import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
+import { verifyAndRestorePhysicalBackup, restoreLegacyPhysicalInventory } from './services/DatabaseLoaderService';
 import { logger } from './utils/logger';
 import pkg from '../package.json';
 
@@ -611,23 +610,9 @@ useEffect(() => {
             logger.info("[SRE_BOOT] Recuperação de desastre física (Capacitor FileSystem) restaurada com sucesso.");
           } else {
             const dadosFisicos = await FileSystemStorageService.carregarDeDiretorioLocal();
-            if (dadosFisicos && dadosFisicos.length > 0) {
-              logger.info(`[SRE_BOOT] Recuperação física legada ativada. Restaurando ${dadosFisicos.length} registros...`);
-              await db.transaction('rw', [db.local_assets, db.ativos], async () => {
-                // Restaura estritamente o inventário coletado pelo usuário (coletas locais)
-                await db.local_assets.bulkPut(dadosFisicos as DexieAsset[]);
-                
-                // Sincroniza e marca o flag de conferido na tabela operacional ativa mapeando as chaves primárias
-                for (const asset of (dadosFisicos as DexieAsset[])) {
-                  if (asset.primarykey) {
-                    // Chave composta [tenantid+primarykey] (v6).
-                    await db.ativos.update(
-                      [resolveTenantKey(asset.tenantid), String(asset.primarykey || '')],
-                      { _conferido: 1, _is_synced: 0 }
-                    );
-                  }
-                }
-              });
+            const restaurados = await restoreLegacyPhysicalInventory(dadosFisicos || []);
+            if (restaurados > 0) {
+              logger.info(`[SRE_BOOT] Recuperação física legada ativada. Restaurados ${restaurados} registros.`);
               logger.info("[SRE_BOOT] Restauração e conciliação lógica legada concluídas com sucesso.");
             } else {
               logger.info("[SRE_BOOT] Nenhum backup físico encontrado ou arquivo vazio.");
