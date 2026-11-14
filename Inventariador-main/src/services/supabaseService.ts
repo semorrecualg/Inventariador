@@ -2026,6 +2026,9 @@ export const fetchFullInventory = async (
   onComplete?: (config: Partial<InventoryState>) => void,
   options?: FetchInventoryOptions
 ): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
+  // Blindagem em tempo real: modo INTERNAL não fala com a nuvem (nem com o
+  // cliente placeholder). Sem isto o pull tentava rede mesmo offline-first.
+  if (getDatabaseMode() === 'INTERNAL') return null;
   if (!supabase || !navigator.onLine) return null;
 
   let resolvedTenantid: string | string[] | undefined = tenantid;
