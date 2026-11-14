@@ -11,6 +11,7 @@ import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagI
 import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
+import { recordPerf, startPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -132,6 +133,11 @@ export class AppBootstrapError extends Error {
 }
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "";
+
+// F0 (Malha de Auditoria): cronômetro do boot — começa no import do módulo e
+// fecha quando o carregamento de dados termina (isDataLoaded -> true).
+const APP_BOOT_STARTED_AT = startPerf();
+let bootPerfRecorded = false;
 const MAX_SYNC_QUEUE_SIZE = 5000; // Limite de segurança para fila de sincronização (Carga em Massa)
 
 // Helper para verificar se um usuário é admin
@@ -3470,6 +3476,10 @@ useEffect(() => {
         logger.info("App init - Finalizando carregamento de dados. isDataLoaded -> true");
         setIsDataLoaded(true);
         const checkCount = savedInventory?.assets?.length || 0;
+        if (!bootPerfRecorded) {
+          bootPerfRecorded = true;
+          recordPerf('boot', APP_BOOT_STARTED_AT, { count: checkCount });
+        }
         if (checkCount > 0) {
           sessionStorage.setItem('isDatabaseLoaded', 'true');
           localStorage.setItem('isDatabaseLoaded', 'true');

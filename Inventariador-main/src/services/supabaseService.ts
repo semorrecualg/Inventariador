@@ -7,6 +7,7 @@ import { localDb } from './localDbService';
 import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
+import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { buildUnitFlags, mergeUnitFlags, pickUnitFlags } from '../utils/unitConfigFlags';
@@ -1215,6 +1216,11 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   );
 
   const elapsedMs = Date.now() - startedAt;
+  // F0: push — duração total e volume aceito (base para p50/p95 no Gestor).
+  recordPerfSample('push', elapsedMs, {
+    count: successfullySyncedIds.length,
+    meta: { total, batches: totalBatches, rejected: failedRows.length }
+  });
   logger.info(
     `>>> [Supabase] Espelhamento: ${successfullySyncedIds.length}/${total} ativos em ` +
     `${totalBatches} lote(s) de ${CHUNK_SIZE} · ${Math.round(elapsedMs / 100) / 10}s ` +
@@ -2172,6 +2178,8 @@ const fetchFullInventoryImpl = async (
   options?: FetchInventoryOptions
 ): Promise<{ assets: Asset[], config: Partial<InventoryState> } | null> => {
   if (!supabase) return null;
+  // F0: pull completo × delta — nome da métrica pela opção `since`.
+  const pullStartedAt = startPerf();
 
   logger.info(`>>> [Supabase] fetchFullInventory para tenantid: ${JSON.stringify(resolvedTenantid)}, unitid: ${unitid || 'GERAL'}`);
 
@@ -2308,6 +2316,14 @@ const fetchFullInventoryImpl = async (
       advanceSyncCheckpoint(pullDedupKey(firstTenant, unitid), computeMaxUpdatedAt(assets));
       logger.info(`>>> [Supabase] Checkpoint ${pullDedupKey(firstTenant, unitid)} avançado (delta ativo para a próxima sincronização).`);
     }
+
+    recordPerf(options?.since ? 'pull.delta' : 'pull.full', pullStartedAt, {
+      count: assets.length,
+      meta: {
+        tenantid: Array.isArray(resolvedTenantid) ? resolvedTenantid.join(',') : String(resolvedTenantid || ''),
+        unitid: String(unitid || '')
+      }
+    });
 
     return {
       assets: assets,
