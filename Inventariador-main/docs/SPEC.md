@@ -34,7 +34,7 @@ credenciais `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` estão presentes.
 | Nuvem (ativa) | Supabase (`@supabase/supabase-js`) + Gemini (`@google/genai`) | Multi-tenant (`tenantid` + `filial`); `isInternalMode = !(VITE_SUPABASE_URL && VITE_SUPABASE_ANON_KEY)` |
 | Mobile | Capacitor 6 (Android) | APK via GitHub Actions |
 | Banco nativo Android (fase 3) | `@capacitor-community/sqlite` + `jeep-sqlite` + `sql.js` | Instalados, ainda não usados |
-| Testes | Vitest (96 arquivos / 862 testes) + Playwright (E2E) | `npm test`, `npm run test:e2e` |
+| Testes | Vitest (96 arquivos / 863 testes) + Playwright (E2E) | `npm test`, `npm run test:e2e` |
 | Qualidade | ESLint + TypeScript + Husky | `npm run lint` |
 
 **Dependências principais:** react, react-dom, dexie, @supabase/supabase-js, @google/genai,
@@ -193,7 +193,7 @@ credenciais (Web/Desktop) · **INTERNAL** (sem rede) quando sem `VITE_SUPABASE_U
 | `npm install --legacy-peer-deps` | Instalar dependências (obrigatório o flag) |
 | `npm run dev` | Dev server Vite (porta 3000) |
 | `npm run build` | Build de produção (`dist/`) |
-| `npm test` | Vitest (862 testes) |
+| `npm test` | Vitest (863 testes) |
 | `npm run test:e2e` | Playwright E2E |
 | `npm run lint` | ESLint |
 | `npx tsc -b --noEmit` | Typecheck |
@@ -202,7 +202,7 @@ credenciais (Web/Desktop) · **INTERNAL** (sem rede) quando sem `VITE_SUPABASE_U
 
 ## 8. Testes e validação
 
-- **Vitest:** 862 testes / 96 arquivos em `src/__tests__/` (Login, localAuth, ErrorBoundary,
+- **Vitest:** 863 testes / 96 arquivos em `src/__tests__/` (Login, localAuth, ErrorBoundary,
   Modal, useBufferController, io_buffer, schemaBaseline, securityExport, rbacService,
   tenantProvisioning, passwordPolicy, workContextUtils, routingTenantIsolation,
   postSelectionRouting, tenantContext, loadHistoryUtils, countAtivosByTenant etc.) — verdes.

@@ -12,12 +12,17 @@
  * apenas quando o marcador está COLADO à referência (antes ou depois dela);
  * a palavra solta noutro ponto da linha já não isenta nada.
  *
- * Corre no CI (`npm run check:docs`). Uso local: `node scripts/check-docs.cjs`.
+ * O `--extra <caminho>` acrescenta documentos fora da árvore varrida — é assim
+ * que o `AGENTS.md` da raiz do repositório entra quando o script corre contra a
+ * pasta do app. Caminhos relativos resolvem-se a partir do app.
+ *
+ * Corre no CI (`npm run check:docs`). Uso local:
+ *   node scripts/check-docs.cjs [raiz] [--extra ../AGENTS.md]
  */
 'use strict';
 
 const { readdirSync, readFileSync, statSync, existsSync } = require('node:fs');
-const { join, dirname, resolve, basename } = require('node:path');
+const { join, dirname, resolve, basename, relative } = require('node:path');
 
 const IGNORE = new Set([
   'node_modules',
@@ -88,7 +93,14 @@ function walk(dir, out = []) {
 }
 
 const appRoot = resolve(__dirname, '..');
-const repoRoot = process.argv[2] ? resolve(process.argv[2]) : findRepoRoot(appRoot);
+const argv = process.argv.slice(2);
+const extras = [];
+let rootArg;
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === '--extra') extras.push(argv[++i]);
+  else rootArg = argv[i];
+}
+const repoRoot = rootArg ? resolve(rootArg) : findRepoRoot(appRoot);
 
 if (!existsSync(repoRoot)) {
   console.error(`[ERRO] raiz do repositório não encontrada: ${repoRoot}`);
@@ -97,8 +109,13 @@ if (!existsSync(repoRoot)) {
 
 const allFiles = walk(repoRoot);
 const mdFiles = allFiles.filter(file => file.toLowerCase().endsWith('.md'));
+
+for (const extra of extras) {
+  const full = resolve(appRoot, extra);
+  if (existsSync(full) && !mdFiles.includes(full)) mdFiles.push(full);
+}
 const basenames = new Set(allFiles.map(file => basename(file)));
-const rel = file => file.slice(repoRoot.length + 1);
+const rel = file => relative(repoRoot, file).split('\\').join('/');
 
 const broken = [];
 let linkCount = 0;

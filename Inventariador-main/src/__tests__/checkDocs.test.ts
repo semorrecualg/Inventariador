@@ -65,6 +65,21 @@ describe('check-docs — gate de referências dos docs', () => {
     expect(result.stderr).toContain('docs/nao-existe-abc.md');
   });
 
+  it('valida documentos fora da árvore indicados com --extra', () => {
+    // É assim que o AGENTS.md da raiz entra quando o gate corre contra o app.
+    const root = mkdtempSync(join(tmpdir(), 'check-docs-'));
+    writeFileSync(join(root, 'vazio.md'), '# Vazio\n', 'utf8');
+    const extraDir = mkdtempSync(join(tmpdir(), 'check-docs-extra-'));
+    const extra = join(extraDir, 'AGENTS.md');
+    writeFileSync(extra, 'Ver `src/nao-existe-xyz.ts`.\n', 'utf8');
+
+    const result = spawnSync(process.execPath, [scriptPath, root, '--extra', extra], { encoding: 'utf8' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/nao-existe-xyz.ts');
+    expect(result.stderr).toContain('AGENTS.md');
+  });
+
   it('doc sem referências passa', () => {
     const result = runAgainst('# Título\n\nTexto simples, sem caminhos.\n');
 
