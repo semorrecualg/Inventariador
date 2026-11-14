@@ -313,7 +313,7 @@ export const runMigrationV5DryRun = (): Promise<V5DryRunReport> =>
 export const db = new InventoryDexieDatabase();
 
 /** Marcador da migração única de `tenantid` para UPPER (ver migrateLegacyTenantids). */
-const TENANT_CASE_MARKER = 'f0_tenant_case_canonical_v1';
+export const TENANT_CASE_MARKER = 'f0_tenant_case_canonical_v1';
 
 /**
  * Restore/importação podem trazer `tenantid` fora do UPPER: o marcador deixa de

@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach } from 'vitest';
-import { db, sqliteService, invalidateTenantCaseMarker, type DexieAsset } from '../services/sqliteService';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { db, sqliteService, invalidateTenantCaseMarker, TENANT_CASE_MARKER, type DexieAsset } from '../services/sqliteService';
+import { DatabaseMode } from '../types';
+
+// persistenceService importa o cliente Supabase; o restore não o usa.
+vi.mock('../services/supabaseService', () => ({
+  syncAssetsToCloudAndMark: vi.fn(),
+  syncConfigToCloud: vi.fn()
+}));
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 
 /** Linha mínima: a contagem só lê `tenantid`; o resto não influencia. */
@@ -103,6 +110,41 @@ describe('countAssetMirrors (F0)', () => {
     // A migração volta a correr e o índice fica exato outra vez.
     await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 1, skipped: 0 });
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 2 });
+  });
+
+  it('restoreInventory (caminho real) invalida o marcador', async () => {
+    // persistenceService lê localStorage no import; jsdom sem URL não o expõe.
+    if (!globalThis.localStorage) {
+      const mem = new Map<string, string>();
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        value: {
+          getItem: (k: string) => mem.get(k) ?? null,
+          setItem: (k: string, v: string) => { mem.set(k, String(v)); },
+          removeItem: (k: string) => { mem.delete(k); },
+          clear: () => mem.clear(),
+          key: (i: number) => Array.from(mem.keys())[i] ?? null,
+          get length() { return mem.size; }
+        }
+      });
+    }
+    const { restoreInventory } = await import('../services/persistenceService');
+
+    await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
+    expect(await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)).toBeTruthy();
+
+    const backup = new File(
+      [JSON.stringify({ assets: [row('cicopal', 'b')], config: {} })],
+      'backup.json',
+      { type: 'application/json' }
+    );
+    await expect(restoreInventory(backup, DatabaseMode.INTERNAL)).resolves.not.toBeNull();
+
+    await expect(db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)).resolves.toBeUndefined();
+
+    // Base restaurada: a linha em minúsculas volta a ser contada pela varredura.
+    await db.local_assets.bulkPut([row('cicopal', 'b')]);
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
   });
 
   it('a importação invalida o marcador antes de gravar', async () => {
