@@ -309,8 +309,11 @@ ganhou o cartão **Linha de Base (F0)**, com p50/p95 por métrica e os botões
 pull completo** — depois da persistência, para a contagem por espelho já
 refletir a base nova. A contagem dos três espelhos roda em **momento ocioso**
 (`requestIdleCallback`, com `setTimeout` de fallback) para não pesar no boot e
-usa o índice `[tenantid+primarykey]` (prefixo), sem varrer a tabela; a varredura
-só existe como fallback de linha legada. Também há o botão Registrar. Boot com base vazia **não** grava retrato: preserva
+usa o índice `[tenantid+primarykey]` (prefixo), sem varrer a tabela. Resíduos com
+`tenantid` fora do UPPER canónico são normalizados **uma única vez por base**
+(marcador em `SYSTEM_CONTEXT`), o que mantém o índice exato mesmo quando havia
+linhas legadas em minúsculas; só se essa normalização falhar é que a contagem
+cai na varredura antiga. Também há o botão Registrar. Boot com base vazia **não** grava retrato: preserva
 o último útil em vez de o sobrescrever com zeros. Snapshots antigos sem
 `trigger` são lidos como `manual`, com métricas ausentes preenchidas como "sem
 amostra".

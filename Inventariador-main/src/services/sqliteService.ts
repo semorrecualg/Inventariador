@@ -1031,6 +1031,56 @@ export class SqliteService {
    * mostrava milhares. Devolver cada espelho permite explicar a diferença em
    * vez de escondê-la.
    */
+  /**
+   * F0: resíduos anteriores à v7 podem ter `tenantid` fora do UPPER canónico e,
+   * como o índice `[tenantid+primarykey]` é sensível a maiúsculas, ficariam
+   * fora da contagem. Esta normalização corre UMA vez por base (marcador em
+   * SYSTEM_CONTEXT) em vez de varrer as tabelas a cada contagem: depois dela, o
+   * índice é exato para qualquer tenant.
+   */
+  private canonicalizeInFlight: Promise<void> | null = null;
+
+  private canonicalizeLegacyTenantids(): Promise<void> {
+    // As três tabelas são contadas em paralelo: sem partilhar a promessa, cada
+    // uma varreria a base ao mesmo tempo (e repetiria a normalização).
+    if (!this.canonicalizeInFlight) {
+      this.canonicalizeInFlight = this.runCanonicalizeLegacyTenantids().finally(() => {
+        this.canonicalizeInFlight = null;
+      });
+    }
+    return this.canonicalizeInFlight;
+  }
+
+  private async runCanonicalizeLegacyTenantids(): Promise<void> {
+    const MARKER = 'f0_tenant_case_canonical_v1';
+    if (await db.SYSTEM_CONTEXT.get(MARKER)) return;
+    const tables: Array<'local_assets' | 'ativos' | 'assets'> = ['local_assets', 'ativos', 'assets'];
+    for (const table of tables) {
+      const rows = (await db[table].toArray()) as Array<{ tenantid?: unknown; primarykey?: unknown; id?: unknown }>;
+      const legacy = rows.filter(row => {
+        const raw = String(row.tenantid ?? '');
+        const canonical = raw.trim().toUpperCase();
+        return canonical !== '' && raw !== canonical;
+      });
+      if (legacy.length === 0) continue;
+      // Muda a chave composta: apaga a chave antiga antes de gravar a canónica.
+      await db[table].bulkDelete(legacy.map(row => [
+        String(row.tenantid ?? ''),
+        String(row.primarykey ?? row.id ?? '')
+      ] as [string, string]));
+      await db[table].bulkPut(legacy.map(row => ({
+        ...row,
+        tenantid: String(row.tenantid ?? '').trim().toUpperCase()
+      })) as never[]);
+      logger.warn(`[SRE] ${legacy.length} linha(s) de ${table} com tenantid fora do formato canónico foram normalizadas.`);
+    }
+    await db.SYSTEM_CONTEXT.put({
+      key: MARKER,
+      value: '1',
+      updated_at: new Date().toISOString()
+    });
+  }
+
   public async countAssetMirrors(
     tenantid?: string | null
   ): Promise<{ local_assets: number; ativos: number; assets: number; total: number }> {
@@ -1038,19 +1088,22 @@ export class SqliteService {
     const countTable = async (table: 'local_assets' | 'ativos' | 'assets'): Promise<number> => {
       try {
         if (!t) return await db[table].count();
-        // v7 indexa [tenantid+primarykey] e grava `tenantid` em UPPER: o prefixo
-        // resolve o count sem materializar as linhas (antes: toArray + filter ×3).
-        const indexed = await db[table]
+        // O resíduo de casing é normalizado uma única vez por base (ver
+        // canonicalizeLegacyTenantids), então o índice passa a ser exato para o
+        // tenant — sem toArray/filter aqui.
+        await this.canonicalizeLegacyTenantids();
+        return await db[table]
           .where('[tenantid+primarykey]')
           .between([t, Dexie.minKey], [t, Dexie.maxKey])
           .count();
-        if (indexed > 0) return indexed;
-        // Nenhum resultado no índice: pode haver linha antiga fora do formato
-        // canónico — aí sim vale a varredura única, só para este caso.
-        const rows = (await db[table].toArray()) as { tenantid?: unknown }[];
-        return rows.filter(a => String(a.tenantid || '').trim().toUpperCase() === t).length;
       } catch {
-        return 0;
+        // Normalização indisponível: mantém o contrato com a varredura antiga.
+        try {
+          const rows = (await db[table].toArray()) as { tenantid?: unknown }[];
+          return rows.filter(a => String(a.tenantid || '').trim().toUpperCase() === t).length;
+        } catch {
+          return 0;
+        }
       }
     };
     const [local_assets, ativos, assets] = await Promise.all([
