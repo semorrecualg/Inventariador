@@ -59,24 +59,30 @@ const evento = (over: Partial<FieldEvent> = {}): FieldEvent => ({
   ...over,
 });
 
-/** Cliente falso: regista as chamadas e devolve o erro que o teste mandar. */
-const clienteFalso = (falharNoLote?: number) => {
+/**
+ * Cliente falso: regista as chamadas e responde com o erro que a regra mandar.
+ *
+ * A regra recebe as linhas enviadas — é assim que se simula a violação da chave
+ * única `(tenantid, device_id, lamport)`: o statement inteiro falha quando o
+ * evento envenenado vai no lote, e falha sozinho quando vai só ele.
+ */
+const clienteFalso = (falhar?: (linhas: Record<string, unknown>[]) => string | null) => {
   const chamadas: { tabela: string; linhas: Record<string, unknown>[]; opcoes: Record<string, unknown> }[] = [];
   const client: FieldEventClient = {
     from(tabela: string) {
       return {
         upsert: async (linhas, opcoes) => {
           chamadas.push({ tabela, linhas, opcoes });
-          if (falharNoLote !== undefined && chamadas.length === falharNoLote) {
-            return { error: { message: 'permission denied for table field_events' } };
-          }
-          return { error: null };
+          const motivo = falhar?.(linhas) ?? null;
+          return motivo ? { error: { message: motivo } } : { error: null };
         },
       };
     },
   };
   return { chamadas, client };
 };
+
+const VIOLACAO_UNICA = 'duplicate key value violates unique constraint "field_events_device_lamport_unico"';
 
 beforeAll(async () => {
   await db.open();
@@ -106,16 +112,56 @@ describe('syncFieldEventsCore — upsert idempotente', () => {
     expect(failures).toEqual([]);
   });
 
-  it('um lote recusado não invalida os lotes aceites antes dele', async () => {
-    const eventos = Array.from({ length: FIELD_EVENTS_CHUNK_SIZE + 10 }, () => evento());
-    const { client } = clienteFalso(2);
+  it('um evento que viola a chave única não prende o lote inteiro', async () => {
+    const eventos = Array.from({ length: 10 }, () => evento());
+    const envenenado = eventos[4];
+    // O Postgres recusa o statement todo quando uma linha colide — mesmo que as
+    // outras 9 estivessem boas. Sem o recuo, este lote seria recusado para sempre.
+    const { client } = clienteFalso(linhas =>
+      linhas.some(linha => linha.event_id === envenenado.event_id) ? VIOLACAO_UNICA : null
+    );
 
     const { accepted, failures } = await syncFieldEventsCore(eventos, TENANT, client);
 
-    expect(accepted).toHaveLength(FIELD_EVENTS_CHUNK_SIZE);
-    expect(failures).toHaveLength(10);
-    expect(failures[0].key).toBe(`${TENANT}|${eventos[FIELD_EVENTS_CHUNK_SIZE].event_id}`);
-    expect(failures[0].reason).toContain('permission denied');
+    expect(accepted).toHaveLength(9);
+    expect(accepted).not.toContain(envenenado.event_id);
+    expect(failures).toEqual([
+      { key: `${TENANT}|${envenenado.event_id}`, reason: VIOLACAO_UNICA },
+    ]);
+  });
+
+  it('o recuo é um só nível: o lote falha e os 500 seguem um a um', async () => {
+    const eventos = Array.from({ length: FIELD_EVENTS_CHUNK_SIZE }, () => evento());
+    const { chamadas, client } = clienteFalso(() => VIOLACAO_UNICA);
+
+    const { accepted, failures } = await syncFieldEventsCore(eventos, TENANT, client);
+
+    // 1 tentativa em lote + 1 por evento: nada de reenviar o lote outra vez.
+    expect(chamadas).toHaveLength(1 + FIELD_EVENTS_CHUNK_SIZE);
+    expect(chamadas[0].linhas).toHaveLength(FIELD_EVENTS_CHUNK_SIZE);
+    expect(chamadas.slice(1).every(c => c.linhas.length === 1)).toBe(true);
+    expect(accepted).toEqual([]);
+    expect(failures).toHaveLength(FIELD_EVENTS_CHUNK_SIZE);
+  });
+
+  it('falha de transporte no lote também recai para evento a evento', async () => {
+    const eventos = Array.from({ length: 3 }, () => evento());
+    let chamadasFeitas = 0;
+    const client: FieldEventClient = {
+      from: () => ({
+        upsert: async linhas => {
+          chamadasFeitas += 1;
+          if (linhas.length > 1) throw new Error('fetch failed');
+          return { error: null };
+        },
+      }),
+    };
+
+    const { accepted, failures } = await syncFieldEventsCore(eventos, TENANT, client);
+
+    expect(chamadasFeitas).toBe(4);
+    expect(accepted).toEqual(eventos.map(e => e.event_id));
+    expect(failures).toEqual([]);
   });
 
   it('sem contrato não envia nada e diz porquê', async () => {

@@ -101,24 +101,46 @@ export const syncFieldEventsCore = async (
     throw new Error('Sessão Expirada: Contrato ausente para envio do log de campo.');
   }
 
+  const enviar = (rows: Record<string, unknown>[]) =>
+    client
+      .from(FIELD_EVENTS_TABLE)
+      .upsert(rows, { onConflict: 'event_id', ignoreDuplicates: true });
+
   for (let i = 0; i < events.length; i += FIELD_EVENTS_CHUNK_SIZE) {
     const chunk = events.slice(i, i + FIELD_EVENTS_CHUNK_SIZE);
-    const rows = chunk.map(event => fieldEventRow(event, tenant));
     try {
-      const { error } = await client
-        .from(FIELD_EVENTS_TABLE)
-        .upsert(rows, { onConflict: 'event_id', ignoreDuplicates: true });
-      if (error) {
-        const reason = String(error.message || DEFAULT_REJECTION_REASON);
-        chunk.forEach(event => failures.push({ key: fieldEventSyncKey(tenant, event.event_id), reason }));
-        logger.warn(`>>> [Field Events] Lote recusado pela nuvem: ${reason}`);
+      const { error } = await enviar(chunk.map(event => fieldEventRow(event, tenant)));
+      if (!error) {
+        accepted.push(...chunk.map(event => event.event_id));
         continue;
       }
-      accepted.push(...chunk.map(event => event.event_id));
+      const reason = String(error.message || DEFAULT_REJECTION_REASON);
+      logger.warn(
+        `>>> [Field Events] Lote de ${chunk.length} recusado (${reason}); ` +
+          'reenviando evento a evento para isolar o culpado.'
+      );
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      chunk.forEach(event => failures.push({ key: fieldEventSyncKey(tenant, event.event_id), reason }));
-      logger.warn('>>> [Field Events] Falha de transporte no lote:', err);
+      // Tudo o que é transport é tratado do mesmo jeito: o lote não provou nada,
+      // cai para evento a evento — cada um que passe fica aceito.
+      logger.warn('>>> [Field Events] Falha no lote; reenviando evento a evento:', err);
+    }
+
+    // UM evento mau (ex.: colisão em `(tenantid, device_id, lamport)`) reprovava
+    // o lote inteiro em todas as rodadas: 500 eventos presos para sempre por
+    // causa de um. Aqui o lote é desmontado: quem passa, passa; quem falha fica
+    // identificado com o motivo, e só ele volta na próxima.
+    for (const event of chunk) {
+      const key = fieldEventSyncKey(tenant, event.event_id);
+      try {
+        const { error } = await enviar([fieldEventRow(event, tenant)]);
+        if (error) {
+          failures.push({ key, reason: String(error.message || DEFAULT_REJECTION_REASON) });
+          continue;
+        }
+        accepted.push(event.event_id);
+      } catch (err) {
+        failures.push({ key, reason: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
 

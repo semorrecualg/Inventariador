@@ -369,7 +369,10 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
   servidor, com um índice único `(tenantid, device_id, lamport)` que apanha
   contador reutilizado. Os eventos viajam na MESMA sessão/recibo do ciclo, com
   contadores próprios (`recibo.fieldEvents`), para não poluir `accepted`/`missing`
-  dos ativos. Falta F1.6 (cadeia de hash) e o pull do log entre aparelhos.
+  dos ativos. Um lote recusado (ex.: um evento a colidir na chave única) recua
+  para envio evento-a-evento, um só nível: os 499 bons não ficam presos por
+  causa de um, e o culpado sai identificado com o motivo. Falta F1.6 (cadeia de
+  hash) e o pull do log entre aparelhos.
 - **F1 em curso** (v8 do schema local): `field_events` criada com escrita
   só-adição — hooks `updating`/`deleting` do Dexie recusam alterar ou apagar o
   evento (`AppendOnlyViolation`), e a única alteração aceite é `_synced` 0 → 1,
