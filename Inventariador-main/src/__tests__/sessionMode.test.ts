@@ -11,7 +11,8 @@ import { describe, it, expect } from 'vitest';
 import {
   avisoAposCargaLocal,
   deveEntrarEmModoNuvem,
-  deveEntrarEmModoNuvemNaSessaoGuardada
+  deveEntrarEmModoNuvemNaSessaoGuardada,
+  filtroDePullDoEscopo
 } from '../utils/sessionMode';
 
 describe('deveEntrarEmModoNuvem', () => {
@@ -73,5 +74,19 @@ describe('avisoAposCargaLocal', () => {
 
     expect(aviso.titulo).toBe('Base local carregada');
     expect(aviso.mensagem).toMatch(/Unidade Operacional/i);
+  });
+});
+
+describe('filtroDePullDoEscopo', () => {
+  it('TODAS e vazio puxam o contrato inteiro (sem filtro de filial)', () => {
+    expect(filtroDePullDoEscopo('TODAS')).toBe('');
+    expect(filtroDePullDoEscopo(' todas ')).toBe('');
+    expect(filtroDePullDoEscopo('')).toBe('');
+    expect(filtroDePullDoEscopo(undefined)).toBe('');
+    expect(filtroDePullDoEscopo(null)).toBe('');
+  });
+
+  it('filial concreta vira filtro em maiúsculas', () => {
+    expect(filtroDePullDoEscopo('010101 cicopal go')).toBe('010101 CICOPAL GO');
   });
 });

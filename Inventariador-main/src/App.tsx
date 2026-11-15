@@ -118,7 +118,7 @@ import { conferirAtivo, derivarAtualizacaoConferencia, reservarLamports, resolve
 import { flushFieldEvents } from './services/fieldEventSync';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
-import { deveEntrarEmModoNuvem, deveEntrarEmModoNuvemNaSessaoGuardada, avisoAposCargaLocal } from './utils/sessionMode';
+import { deveEntrarEmModoNuvem, deveEntrarEmModoNuvemNaSessaoGuardada, avisoAposCargaLocal, filtroDePullDoEscopo } from './utils/sessionMode';
 import { fundirPullComPendentes } from './services/pullMerge';
 import { determineAssetTag } from './services/tagService';
 
@@ -4579,14 +4579,19 @@ useEffect(() => {
           // Multi-contrato: o sync fica para a escolha no seletor pós-login,
           // evitando puxar dados de um contrato que o usuário não escolheu.
           const multiContextProfile = buildWorkContexts(loggedUser, undefined, workContextFiliais).length > 1;
-          if (!multiContextProfile) {
+          // Mesma regra do login: `TODAS` é o contrato inteiro, não "muitos
+          // contextos à espera de escolha".
+          const escopoContratoBoot = filtroDePullDoEscopo(resolvedUnitId) === '';
+          if (escopoContratoBoot || !multiContextProfile) {
             // ETAPA 1 (FLUXO_ACESSO_INICIAL): se o Boot Loader já baixou o
             // contrato inteiro nesta sessão, o auto-login não repete o pull.
             // ETAPA 2 (FLUXO_ACESSO_INICIAL): o auto-login respeita o filtro de
             // filial do perfil (auditor de filial única baixa só a filial dela).
             // ETAPA 5a: perfil TODAS (dono/admin) → usa a filial da última
             // escolha para não puxar o contrato inteiro de novo.
-            const unitFilter = resolveBootUnitFilter(resolvedUnitId, readLastWorkContext(), loggedUser.tenantid);
+            const unitFilter = escopoContratoBoot
+              ? ''
+              : resolveBootUnitFilter(resolvedUnitId, readLastWorkContext(), loggedUser.tenantid);
             const bootPulled = shouldSkipPull(
               wasPullCompleted(loggedUser.tenantid, unitFilter),
               hasLocalBaseData(inventoryRef.current?.assets?.length ?? 0)
@@ -7357,6 +7362,9 @@ useEffect(() => {
               const defaultTenant = String(u.tenantid || '').toUpperCase().trim();
               const defaultUnit = String(u.filial || u.unitid || u._unitid || '').toUpperCase().trim();
               const multiContextLogin = buildWorkContexts(u, users, workContextFiliais).length > 1;
+              // Escopo `TODAS` = contrato inteiro já escolhido: puxar agora, em
+              // vez de adiar até à escolha da filial (o seletor abria a zeros).
+              const escopoContratoLogin = filtroDePullDoEscopo(defaultUnit) === '';
               setSelectedUnit(defaultUnit);
               sessionStorage.setItem('tenantid', defaultTenant);
               sessionStorage.setItem('filial', defaultUnit);
@@ -7365,13 +7373,15 @@ useEffect(() => {
               // geraria erro de RLS. A base dele já está no dispositivo.
               if (!naNuvem) {
                 logger.info('[App] Sessão sem BASE OFICIAL (credencial local ou build offline): sincronização da nuvem adiada.');
-              } else if (!multiContextLogin) {
+              } else if (escopoContratoLogin || !multiContextLogin) {
                 // ETAPA 1/2 (FLUXO_ACESSO_INICIAL): o onLogin não repete o pull do
                 // Boot Loader para o mesmo contrato+filial, e o pull respeita o
                 // filtro de filial do perfil (dados sob demanda da filial).
                 // ETAPA 5a: perfil TODAS (dono/admin) → usa a filial da última
                 // escolha (app_last_work_context) para puxar só a filial.
-                const unitFilter = resolveBootUnitFilter(defaultUnit, readLastWorkContext(), defaultTenant);
+                const unitFilter = escopoContratoLogin
+                  ? ''
+                  : resolveBootUnitFilter(defaultUnit, readLastWorkContext(), defaultTenant);
                 const bootPulled = shouldSkipPull(
                   wasPullCompleted(defaultTenant, unitFilter),
                   hasLocalBaseData(inventoryRef.current?.assets?.length ?? 0)

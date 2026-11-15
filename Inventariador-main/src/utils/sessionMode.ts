@@ -64,3 +64,16 @@ export const avisoAposCargaLocal = (info: {
         : 'A Unidade Operacional e o Inventário leem esta base local.')
   };
 };
+
+/**
+ * Filtro de filial a passar ao pull, a partir do escopo do perfil.
+ *
+ * `TODAS` (ADMIN/MASTER do contrato) e vazio não são filiais: significam o
+ * contrato inteiro. Antes o login adiava o pull por o perfil ter "muitos
+ * contextos" e a tela de unidades abria com 0 ativos em todas as filiais —
+ * apesar de o contrato já estar escolhido no próprio perfil.
+ */
+export const filtroDePullDoEscopo = (unidade?: string | null): string => {
+  const texto = (unidade ?? '').trim().toUpperCase();
+  return !texto || texto === 'TODAS' ? '' : texto;
+};
