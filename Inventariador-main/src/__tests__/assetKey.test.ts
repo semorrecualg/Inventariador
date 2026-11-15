@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  contractAssetKey,
   createFallbackKeyAllocator,
   contentFingerprint,
   fallbackAssetKey,
@@ -76,13 +77,38 @@ describe('assetKey · chave derivada (fim do ALT- aleatório)', () => {
   });
 });
 
+describe('assetKey · chave do contrato (tenantid + filial + registro + subreg)', () => {
+  it('monta a chave com os quatro campos, saneados', () => {
+    expect(contractAssetKey({ tenantid: 'cicopal', filial: '010101 cicopal go', registro: ' 123 ', subreg: '2' }))
+      .toBe('CICOPAL-010101CICOPALGO-123-2');
+  });
+
+  it('usa os campos que existirem, sem separadores a mais', () => {
+    expect(contractAssetKey({ tenantid: 'CICOPAL', filial: '010101', registro: '123' }))
+      .toBe('CICOPAL-010101-123');
+    expect(contractAssetKey({ tenantid: 'CICOPAL', filial: '010101', subreg: '003' }))
+      .toBe('CICOPAL-010101-003');
+  });
+
+  it('sem registro nem subreg não há identidade de contrato', () => {
+    expect(contractAssetKey({ tenantid: 'CICOPAL', filial: '010101', etiqueta: 'ETQ-1' })).toBe('');
+  });
+});
+
 describe('assetKey · resolução da chave de um ativo', () => {
-  it('segue a ordem primarykey → etiqueta → tag → derivada', () => {
+  it('segue a ordem primarykey → tenantid+filial+registro+subreg → derivada', () => {
     const fallback = () => 'SEM-ETIQUETA-FALLBACK';
-    expect(resolveAssetKey({ primarykey: 'pk-1', etiqueta: 'etq', tag: 'tag' }, fallback)).toBe('PK-1');
-    expect(resolveAssetKey({ primarykey: '  ', etiqueta: 'etq 2', tag: 'tag' }, fallback)).toBe('ETQ2');
-    expect(resolveAssetKey({ etiqueta: '', tag: 'tag 3' }, fallback)).toBe('TAG3');
+    const contrato = { tenantid: 'CICOPAL', filial: '010101', registro: '123', subreg: '2' };
+    expect(resolveAssetKey({ primarykey: 'pk-1', ...contrato }, fallback)).toBe('PK-1');
+    expect(resolveAssetKey({ primarykey: '  ', ...contrato }, fallback)).toBe('CICOPAL-010101-123-2');
+    expect(resolveAssetKey({ ...contrato, subreg: '' }, fallback)).toBe('CICOPAL-010101-123');
     expect(resolveAssetKey({}, fallback)).toBe('SEM-ETIQUETA-FALLBACK');
+  });
+
+  it('nunca usa a etiqueta como chave: ela repete-se entre linhas', () => {
+    const fallback = () => 'SEM-ETIQUETA-FALLBACK';
+    expect(resolveAssetKey({ etiqueta: 'ETQ 1' }, fallback)).toBe('SEM-ETIQUETA-FALLBACK');
+    expect(resolveAssetKey({ tag: 'TAG-3' }, fallback)).toBe('SEM-ETIQUETA-FALLBACK');
   });
 
   it('só chama a derivada quando não há nenhuma identidade', () => {
@@ -93,7 +119,9 @@ describe('assetKey · resolução da chave de um ativo', () => {
     };
     resolveAssetKey({ primarykey: 'pk-1' }, fallback);
     expect(calls).toBe(0);
-    resolveAssetKey({ etiqueta: '  ' }, fallback);
+    resolveAssetKey({ tenantid: 'CICOPAL', filial: '010101', registro: 'R-1' }, fallback);
+    expect(calls).toBe(0);
+    resolveAssetKey({ etiqueta: 'ETQ-1' }, fallback);
     expect(calls).toBe(1);
   });
 });

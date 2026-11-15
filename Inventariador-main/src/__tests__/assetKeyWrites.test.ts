@@ -18,8 +18,8 @@ import { isFallbackAssetKey } from '../utils/assetKey';
 const LOTE = [
   // Chave com minúsculas, espaços e barra — o caso que divergia entre caminhos.
   { tenantid: 'CICOPAL', filial: '010101 CICOPAL GO', primarykey: ' abc-1/001 ', etiqueta: 'etq-1', descricaodoativo: 'CADEIRA', qt: 1 },
-  // Sem coluna primarykey: a etiqueta é a identidade.
-  { tenantid: 'CICOPAL', filial: '010101 CICOPAL GO', etiqueta: 'etq 2', descricaodoativo: 'MESA', qt: 1 },
+  // Sem coluna primarykey, mas com registro: a identidade é do contrato.
+  { tenantid: 'CICOPAL', filial: '010101 CICOPAL GO', etiqueta: 'etq 2', registro: 'REG-7', descricaodoativo: 'MESA', qt: 1 },
   // Sem primarykey, etiqueta e tag: chave derivada do conteúdo (nunca aleatória).
   { tenantid: 'CICOPAL', filial: '010101 CICOPAL GO', descricaodoativo: 'ARMARIO', serial: 'SN-9', qt: 1 }
 ];
@@ -45,7 +45,7 @@ describe('assetKey · caminhos de escrita gravam a mesma chave', () => {
       expect(row.primarykey).toBe(row.primarykey.toUpperCase());
     });
     expect(stored.map((row) => row.primarykey)).toEqual(
-      expect.arrayContaining(['ABC-1001', 'ETQ2'])
+      expect.arrayContaining(['ABC-1001', 'CICOPAL-010101CICOPALGO-REG-7'])
     );
   });
 

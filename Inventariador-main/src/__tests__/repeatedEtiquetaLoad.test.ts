@@ -1,17 +1,19 @@
 // @vitest-environment jsdom
 // ============================================================================
-// repeatedEtiquetaLoad.test.ts — etiqueta repetida sem primarykey na carga
+// repeatedEtiquetaLoad.test.ts — etiqueta repetida e chave do contrato na carga
 //
-// A chave primária local é `[tenantid + primarykey]`. Sem `primarykey`, a
-// etiqueta passa a ser a chave, e duas linhas com a mesma etiqueta no mesmo
-// contrato colidiam: o `bulkPut` da segunda sobrescrevia a primeira e a
-// planilha com N linhas deixava uma na base.
+// A etiqueta NÃO identifica um ativo: a planilha contábil repete-a entre linhas
+// (contas, sub-registros, baixas). A chave primária local é
+// `[tenantid + primarykey]`, e usar a etiqueta como `primarykey` fazia o
+// `bulkPut` da segunda linha sobrescrever a primeira.
+//
+// A identidade passa a ser `tenantid + filial + registro + subreg`.
 // ============================================================================
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { db } from '../services/sqliteService';
-import { createAssetKeyAllocator } from '../utils/assetKey';
+import { createAssetKeyAllocator, contractAssetKey, isFallbackAssetKey } from '../utils/assetKey';
 
 const row = (over: Record<string, unknown> = {}) => ({
   tenantid: 'CICOPAL',
@@ -27,31 +29,47 @@ const keysIn = async (tenantid = 'CICOPAL') => {
   return rows.map((r) => String(r.primarykey)).sort();
 };
 
-describe('carga de linhas com etiqueta repetida e sem primarykey', () => {
+describe('carga de linhas com etiqueta repetida', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
     await db.assets.clear();
   });
 
-  it('guarda as três linhas da planilha em vez de a segunda sobrescrever a primeira', async () => {
+  it('a etiqueta repetida com registros diferentes dá uma linha por registo', async () => {
     await DatabaseLoaderService.injetarDadosEmLotes([
-      row({ etiqueta: '000420', descricaodoativo: 'CADEIRA' }),
-      row({ etiqueta: '000420', descricaodoativo: 'MESA' }),
-      row({ etiqueta: '000420', descricaodoativo: 'ARMARIO' })
+      row({ etiqueta: '000420', registro: '1001', subreg: '1', descricaodoativo: 'CADEIRA' }),
+      row({ etiqueta: '000420', registro: '1002', subreg: '1', descricaodoativo: 'MESA' }),
+      row({ etiqueta: '000420', registro: '1003', subreg: '1', descricaodoativo: 'ARMARIO' })
     ]);
 
-    expect(await keysIn()).toEqual(['000420', '000420-2', '000420-3']);
+    const chaves = await keysIn();
+    expect(chaves).toEqual([
+      'CICOPAL-010101-1001-1',
+      'CICOPAL-010101-1002-1',
+      'CICOPAL-010101-1003-1'
+    ]);
+    // A etiqueta não entra na chave.
+    chaves.forEach((chave) => expect(chave).not.toContain('000420'));
 
-    // Nenhuma descrição se perdeu no caminho.
     const descricoes = (await db.local_assets.toArray()).map((r) => String(r.descricaodoativo)).sort();
     expect(descricoes).toEqual(['ARMARIO', 'CADEIRA', 'MESA']);
   });
 
-  it('recarregar o mesmo ficheiro não duplica nem renomeia as linhas', async () => {
+  it('mesmo registro e subreg repetidos não se perdem: recebem sufixo de ocorrência', async () => {
+    await DatabaseLoaderService.injetarDadosEmLotes([
+      row({ etiqueta: '000420', registro: '1001', subreg: '1', descricaodoativo: 'CADEIRA' }),
+      row({ etiqueta: '000420', registro: '1001', subreg: '1', descricaodoativo: 'MESA' })
+    ]);
+
+    expect(await keysIn()).toEqual(['CICOPAL-010101-1001-1', 'CICOPAL-010101-1001-1-2']);
+    expect(await db.local_assets.count()).toBe(2);
+  });
+
+  it('recarregar o mesmo ficheiro não duplica nem renomeia', async () => {
     const linhas = [
-      row({ etiqueta: '000420', descricaodoativo: 'CADEIRA' }),
-      row({ etiqueta: '000420', descricaodoativo: 'MESA' })
+      row({ etiqueta: '000420', registro: '1001', subreg: '1', descricaodoativo: 'CADEIRA' }),
+      row({ etiqueta: '000420', registro: '1001', subreg: '1', descricaodoativo: 'MESA' })
     ];
 
     await DatabaseLoaderService.injetarDadosEmLotes(linhas);
@@ -62,49 +80,55 @@ describe('carga de linhas com etiqueta repetida e sem primarykey', () => {
     expect(await db.local_assets.count()).toBe(2);
   });
 
-  it('linha com primarykey mantém a chave do contrato, mesmo com etiqueta repetida', async () => {
+  it('linha com primarykey mantém a chave do contrato', async () => {
     await DatabaseLoaderService.injetarDadosEmLotes([
-      row({ primarykey: 'PK-1', etiqueta: '000420' }),
-      row({ primarykey: 'PK-2', etiqueta: '000420' })
+      row({ primarykey: 'PK-1', etiqueta: '000420', registro: '1001' }),
+      row({ primarykey: 'PK-2', etiqueta: '000420', registro: '1002' })
     ]);
 
     expect(await keysIn()).toEqual(['PK-1', 'PK-2']);
   });
 
-  it('a mesma etiqueta em contratos diferentes não recebe sufixo', async () => {
+  it('mesmo registro em contratos diferentes não colide', async () => {
     await DatabaseLoaderService.injetarDadosEmLotes([
-      row({ tenantid: 'CICOPAL', etiqueta: '000420' }),
-      row({ tenantid: 'OUTRO', etiqueta: '000420' })
+      row({ tenantid: 'CICOPAL', registro: '1001' }),
+      row({ tenantid: 'OUTRO', registro: '1001' })
     ]);
 
-    expect(await keysIn('CICOPAL')).toEqual(['000420']);
-    expect(await keysIn('OUTRO')).toEqual(['000420']);
+    expect(await keysIn('CICOPAL')).toEqual(['CICOPAL-010101-1001']);
+    expect(await keysIn('OUTRO')).toEqual(['OUTRO-010101-1001']);
   });
 
-  it('mantém a contagem por etiqueta repetida mesmo com 10 linhas iguais', async () => {
-    const linhas = Array.from({ length: 10 }, (_, i) => row({ etiqueta: '0042', descricaodoativo: `ITEM ${i}` }));
-
-    await DatabaseLoaderService.injetarDadosEmLotes(linhas);
+  it('sem registro nem subreg cai na chave derivada do conteúdo (nunca na etiqueta)', async () => {
+    await DatabaseLoaderService.injetarDadosEmLotes([
+      row({ etiqueta: '000420', descricaodoativo: 'CADEIRA' }),
+      row({ etiqueta: '000420', descricaodoativo: 'MESA' })
+    ]);
 
     const chaves = await keysIn();
-    expect(chaves).toHaveLength(10);
-    expect(new Set(chaves).size).toBe(10);
-    expect(chaves).toContain('0042');
-    expect(chaves).toContain('0042-10');
+    expect(chaves).toHaveLength(2);
+    expect(chaves.every((chave) => isFallbackAssetKey(chave))).toBe(true);
+    expect(chaves.some((chave) => chave === '000420')).toBe(false);
   });
 });
 
 describe('createAssetKeyAllocator', () => {
   const fallback = () => 'SEM-ETIQUETA-1';
 
-  it('deriva a chave do conteúdo quando não há identidade nenhuma', () => {
+  it('deriva a chave do conteúdo quando não há identidade de contrato', () => {
     const allocate = createAssetKeyAllocator(fallback);
-    expect(allocate({ tenantid: 'CICOPAL' })).toBe('SEM-ETIQUETA-1');
+    expect(allocate({ tenantid: 'CICOPAL', etiqueta: 'ETQ-1' })).toBe('SEM-ETIQUETA-1');
   });
 
-  it('normaliza a etiqueta antes de decidir a ocorrência', () => {
+  it('prefere a chave do contrato e sanea os campos', () => {
     const allocate = createAssetKeyAllocator(fallback);
-    expect(allocate({ tenantid: 'cicopal', etiqueta: ' sm-01 ' })).toBe('SM-01');
-    expect(allocate({ tenantid: 'CICOPAL', etiqueta: 'sm-01' })).toBe('SM-01-2');
+    expect(allocate({ tenantid: 'cicopal', filial: ' 010101 ', registro: 'r-9', subreg: '02' }))
+      .toBe('CICOPAL-010101-R-9-02');
+    expect(allocate({ tenantid: 'CICOPAL', filial: '010101', registro: 'r-9', subreg: '02' }))
+      .toBe('CICOPAL-010101-R-9-02-2');
+  });
+
+  it('nunca usa a etiqueta, mesmo quando ela é a única coisa preenchida', () => {
+    expect(contractAssetKey({ etiqueta: 'ETQ-1', tag: 'TAG-1' })).toBe('');
   });
 });

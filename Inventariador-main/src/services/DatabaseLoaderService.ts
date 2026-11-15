@@ -213,15 +213,16 @@ export class DatabaseLoaderService {
         // Ele vem EXCLUSIVAMENTE da coluna 'tenantid' (Índice 0) da planilha.
         const tenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
         const rawFilial = mirrorFilial(row.filial);
-        // Chave canônica única (utils/assetKey): primarykey → etiqueta → tag →
-        // derivada do conteúdo. Antes esta carga olhava só `primarykey` e caía num
-        // `ALT-<aleatório>`: cada importação criava linhas novas para o mesmo ativo.
+        // Chave canônica única (utils/assetKey): primarykey → tenantid + filial +
+        // registro + subreg → derivada do conteúdo. A etiqueta NÃO entra na chave:
+        // repete-se entre linhas da planilha e fazia uma sobrescrever a outra.
         const pk = allocateAssetKey({
           primarykey: row.primarykey,
-          etiqueta: row.etiqueta,
-          tag: row.tag,
+          // Identidade do contrato: tenantid + filial + registro + subreg.
           tenantid,
           filial: rawFilial,
+          registro: getRowValue(row, 'registro'),
+          subreg: getRowValue(row, 'subreg'),
           fingerprint: contentFingerprint(row)
         });
         // Coluna canônica da planilha: 'endereco' (posição 11 do contrato). O nome 'codigo_endereco'
@@ -389,12 +390,15 @@ export class DatabaseLoaderService {
           // Chave canônica única (utils/assetKey) — a mesma de todos os caminhos.
           const primarykeyVal = sanitizeAssetKey(getRowValue(row, 'primarykey'));
           const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
+          const registroBruto = getRowValue(row, 'registro');
+          const subregBruto = getRowValue(row, 'subreg');
           const finalId = allocateAssetKey({
             primarykey: primarykeyVal,
-            etiqueta: tagSanitizada,
-            tag: tagSanitizada,
+            // Identidade do contrato: tenantid + filial + registro + subreg.
             tenantid: finalTenantid,
             filial: finalFilial,
+            registro: registroBruto,
+            subreg: subregBruto,
             fingerprint: contentFingerprint(row as Record<string, unknown>)
           });
           const itemDesc = normalizeFieldValue(
@@ -672,12 +676,15 @@ export class DatabaseLoaderService {
           // Chave canônica única (utils/assetKey) — a mesma de todos os caminhos.
           const primarykeyVal = sanitizeAssetKey(getRowValue(row, 'primarykey'));
           const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
+          const registroBruto = getRowValue(row, 'registro');
+          const subregBruto = getRowValue(row, 'subreg');
           const finalId = allocateAssetKey({
             primarykey: primarykeyVal,
-            etiqueta: tagSanitizada,
-            tag: tagSanitizada,
+            // Identidade do contrato: tenantid + filial + registro + subreg.
             tenantid: finalTenantid,
             filial: finalFilial,
+            registro: registroBruto,
+            subreg: subregBruto,
             fingerprint: contentFingerprint(row as Record<string, unknown>)
           });
           const itemDesc = normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${finalId}`;

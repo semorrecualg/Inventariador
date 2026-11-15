@@ -117,11 +117,37 @@ export interface AssetKeySources {
   tag?: unknown;
   /** Contrato; a chave primária local é composta `[tenantid+primarykey]`. */
   tenantid?: unknown;
-  /** Unidade, só para a chave derivada de conteúdo. */
+  /** Unidade, parte da chave do contrato. */
   filial?: unknown;
+  /** Registro contábil, parte da chave do contrato. */
+  registro?: unknown;
+  /** Sub-registro contábil, parte da chave do contrato. */
+  subreg?: unknown;
   /** Impressão digital da linha, quando já calculada (ver `contentFingerprint`). */
   fingerprint?: string;
 }
+
+/**
+ * CHAVE DO CONTRATO — `tenantid + filial + registro + subreg`
+ * ============================================================================
+ * A etiqueta NÃO identifica um ativo: uma planilha contábil tem várias linhas
+ * com a mesma etiqueta (contas, sub-registros e baixas repetem-na de propósito).
+ * Usá-la como chave fazia a segunda linha sobrescrever a primeira no `bulkPut`.
+ *
+ * A identidade vem dos campos do contrato: `tenantid + filial + registro +
+ * subreg`, saneados e ligados por `-` (campos vazios não entram). Sem
+ * `registro` nem `subreg` não há identidade de contrato e devolve `''` — quem
+ * chama decide a derivação por conteúdo.
+ */
+export const contractAssetKey = (sources: AssetKeySources): string => {
+  const registro = sanitizeAssetKey(sources.registro);
+  const subreg = sanitizeAssetKey(sources.subreg);
+  if (!registro && !subreg) return '';
+  return [sources.tenantid, sources.filial, registro, subreg]
+    .map((value) => sanitizeAssetKey(value))
+    .filter((value) => value !== '')
+    .join('-');
+};
 
 /**
  * Alocador com estado para uma carga inteira, para linhas SEM `primarykey`.
@@ -135,6 +161,8 @@ export interface AssetKeySources {
  * produzir as mesmas chaves (sem duplicar a cada importação).
  *
  * Linha com `primarykey` nunca recebe sufixo: é a chave do contrato.
+ * A identidade vem de `tenantid + filial + registro + subreg` (ver
+ * `contractAssetKey`) — nunca da etiqueta, que se repete entre linhas.
  * A derivação por conteúdo (`allocateFallback`) fica para linhas sem identidade.
  */
 export const createAssetKeyAllocator = (
@@ -145,25 +173,24 @@ export const createAssetKeyAllocator = (
     const primary = sanitizeAssetKey(sources.primarykey);
     if (primary) return primary;
 
-    const base = sanitizeAssetKey(sources.etiqueta) || sanitizeAssetKey(sources.tag);
+    const base = contractAssetKey(sources);
     if (!base) return allocateFallback(sources);
 
-    const scope = `${sanitizeAssetKey(sources.tenantid)}|${base}`;
-    const occurrence = (seen.get(scope) ?? 0) + 1;
-    seen.set(scope, occurrence);
+    const occurrence = (seen.get(base) ?? 0) + 1;
+    seen.set(base, occurrence);
     return occurrence === 1 ? base : `${base}-${occurrence}`;
   };
 };
 
 /**
  * Resolve a chave de um ativo na ordem do contrato:
- * `primarykey` → `etiqueta` → `tag` → chave derivada do conteúdo.
+ * `primarykey` → `tenantid + filial + registro + subreg` → derivada do conteúdo.
+ * A etiqueta fica de fora de propósito: repete-se entre linhas da planilha.
  */
 export const resolveAssetKey = (
   sources: AssetKeySources,
   allocateFallback: () => string
 ): string =>
   sanitizeAssetKey(sources.primarykey) ||
-  sanitizeAssetKey(sources.etiqueta) ||
-  sanitizeAssetKey(sources.tag) ||
+  contractAssetKey(sources) ||
   allocateFallback();
