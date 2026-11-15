@@ -12,6 +12,8 @@
  *   logger.error('❌ [Service] Erro:', err);
  */
 
+import { publicarLinhaSre } from '../services/sreMonitor';
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const LOG_LEVELS: Record<LogLevel, number> = {
@@ -51,18 +53,23 @@ function shouldLog(level: LogLevel): boolean {
  * Aceita múltiplos argumentos (mesma assinatura de console.log).
  */
 function info(...args: unknown[]): void {
+  // O SRE Monitor do Gestor de Base lê daqui as linhas [App]/[Sync]: em
+  // produção a consola está muda e a validação do login/pull fazia-se às cegas.
+  publicarLinhaSre(args);
   if (shouldLog('info')) {
     console.log(...args);
   }
 }
 
 function warn(...args: unknown[]): void {
+  publicarLinhaSre(args);
   if (shouldLog('warn')) {
     console.warn(...args);
   }
 }
 
 function error(...args: unknown[]): void {
+  publicarLinhaSre(args);
   if (shouldLog('error')) {
     console.error(...args);
   }

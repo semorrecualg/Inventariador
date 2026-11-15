@@ -8,6 +8,7 @@ import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/su
 import { isAdminUser } from '../utils/authUtils';
 import { resolverEscopoEspelhamento } from '../services/mirrorScope';
 import { lerBaseLocalUnificada } from '../services/localBaseSource';
+import { assinarLinhasSre, lerLinhasSre } from '../services/sreMonitor';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
@@ -73,6 +74,19 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const addLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('pt-BR');
     setConsoleLogs(prev => [...prev, `>> [${time}] ${msg}`].slice(-15));
+  }, []);
+
+  // SRE MONITOR: além do que esta tela faz, mostra as linhas [App]/[Sync] do
+  // resto da app (login, modo, pull). Antes só existiam na consola do browser.
+  useEffect(() => {
+    const formatar = (linha: { hora: string; mensagem: string }) => `>> [${linha.hora}] ${linha.mensagem}`;
+    // Substitui (não acumula): em StrictMode o efeito corre duas vezes e o
+    // histórico aparecia duplicado no painel.
+    setConsoleLogs(lerLinhasSre().map(formatar).slice(-15));
+    const acrescentar = (linha: { hora: string; mensagem: string }) => {
+      setConsoleLogs((prev) => [...prev, formatar(linha)].slice(-15));
+    };
+    return assinarLinhasSre(acrescentar);
   }, []);
 
   const handleBackupButtonClick = (e: React.MouseEvent) => {
