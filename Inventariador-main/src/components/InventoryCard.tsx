@@ -302,9 +302,6 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
     }
 
     try {
-      // 2. Isolamento de Contrato Contábil para conta de eliminação fiscal 131105001
-      const isEliminacaoFiscal = ativoDetalhado.contacontabil === '131105001';
-      
       // Definir metadados e status
       const updatedItem: DexieAsset & Record<string, unknown> = {
         ...ativoDetalhado,
@@ -320,8 +317,9 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
             obs: novaObservacao
           }
         ]),
-        // Se pertencer à conta 131105001, manter _is_synced = 0 de forma perpétua localmente
-        _is_synced: isEliminacaoFiscal ? 0 : 0, // Por padrão local, marcamos como pendente de sincronização (0)
+        // Por padrão local, marcamos como pendente de sincronização (0) — para
+        // todos os ativos, incluindo a conta `131105001`, que deixou de ser travada.
+        _is_synced: 0,
         _auditor: userEmail,
         _dataLeitura: new Date().toISOString()
       };
@@ -366,11 +364,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       setAtivoDetalhado(null);
       setNovaObservacao('');
       
-      if (isEliminacaoFiscal) {
-        triggerNotification('warning', `Conferência gravada localmente! Conta de Eliminação Contábil '131105001' detectada. Sincronização em nuvem bloqueada para este item.`);
-      } else {
-        triggerNotification('success', `Ativo ${ativoDetalhado.etiqueta} conferido com sucesso.`);
-      }
+      triggerNotification('success', `Ativo ${ativoDetalhado.etiqueta} conferido com sucesso.`);
 
     } catch (err) {
       console.error('>>> [Dexie v4.00-PROD] Erro ao gravar status do ativo:', err);
@@ -1015,19 +1009,6 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
             {/* Conteúdo Físico */}
             <div className="p-5 overflow-y-auto space-y-6 flex-1">
               
-              {/* Alerta de Conta Especial de Eliminação */}
-              {ativoDetalhado.contacontabil === '131105001' && (
-                <div className="p-4 rounded-2xl bg-red-950/30 border border-red-900/50 flex space-x-3 text-red-400">
-                  <AlertTriangle className="shrink-0" size={18} />
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-black uppercase tracking-wider block">CONTA DE ELIMINAÇÃO DETECTADA</span>
-                    <p className="text-[11px] leading-relaxed">
-                      Este ativo belongs à conta de eliminação fiscal <strong>131105001</strong>. De acordo com as diretrizes SRE (GBR v3.70), as modificações feitas aqui serão travadas localmente com <code>_is_synced = 0</code> para evitar inconsistências nos livros consolidados de nuvem.
-                    </p>
-                  </div>
-                </div>
-              )}
-
               {/* Grid de Informações dos 21 índices */}
               <div className="bg-slate-950 p-4 rounded-2xl border border-slate-850 space-y-3">
                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block border-b border-slate-900 pb-2">

@@ -537,13 +537,9 @@ const _syncService = {
           continue;
         }
 
-        const contaValue = String(record.contacontabil || (record as unknown as Record<string, unknown>).conta_contabil || '').trim();
-        if (contaValue === '131105001') {
-          // Marcar como sincronizado para pular a repetição na fila sem enviar ao Supabase (Regra Fiscal)
-          syncedPrimaryKeys.push(String(pKey));
-          await markRecordSynced(String(pKey));
-          continue;
-        }
+        // A conta `131105001` deixou de ser travada: sobe para a nuvem como
+        // qualquer outro ativo. Antes era marcada como sincronizada sem envio,
+        // e o registo ficava para sempre fora do Supabase sem nunca falhar.
 
         // 3. ISOLAMENTO EM CASO DE FALHA DE REDE OU RLS (401/403) COM TRATAMENTO RESILIENTE
         try {

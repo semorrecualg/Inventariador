@@ -115,6 +115,21 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     expect(envelopes[1]).toMatchObject({ auditor: 'semorr@gmail.com' });
   });
 
+  it('envia a conta 131105001 em vez de a dar por sincronizada sem envio', async () => {
+    await db.local_assets.put(asset({ contacontabil: '131105001' }) as never);
+
+    const result = await processDataSyncQueue();
+
+    // A regra fiscal antiga marcava o registo como sincronizado e seguia sem
+    // upsert: a conta 131105001 nunca chegava à nuvem e não havia erro nenhum.
+    expect(result.processedCount).toBe(1);
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect((upsert.mock.calls[0][0] as Record<string, unknown>).contacontabil).toBe('131105001');
+
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    expect(Number(local?._is_synced)).toBe(1);
+  });
+
   it('não envia nada quando o ativo pertence a outro contrato', async () => {
     await db.local_assets.put(asset({ tenantid: 'OUTRO', filial: '010101 CICOPAL GO' }) as never);
 

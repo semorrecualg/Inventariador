@@ -1445,10 +1445,9 @@ O **Inventariador GBR v2.6** é uma solução avançada para gestão de inventá
 - **Protocolo de Importação**: Suporta arquivos \`.xlsx\` e \`.csv\`.
 - **Mapeamento v24**: Identifica automaticamente 18 colunas críticas (Empresa, Status, Etiqueta, etc.).
 - **Sn1_recno**: Captura obrigatória do identificador do Protheus para integração.
-- **Regras de Eliminação**:
-  - Itens baixados com contas contábeis específicas (definidas nos filtros) são eliminados.
-  - Itens baixados sem etiqueta são eliminados.
-  - Itens baixados cuja etiqueta já existe em um registro ativo são eliminados para evitar duplicidade.
+- **Sem eliminação na carga**: todas as linhas da planilha são importadas — inclusive a
+  conta contábil 131105001 (eliminação fiscal) e os itens baixados, sem filtro por
+  conta ou por etiqueta repetida.
 
 ### 4.2. Inventário Físico
 - **Seleção de Local**: O auditor seleciona a unidade e o endereço antes de iniciar.

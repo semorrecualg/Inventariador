@@ -160,7 +160,9 @@ encadeados.
 ## 4. O que **não** mudou
 
 - Contratos de isolamento por `tenantid` (chave composta e `onConflict`).
-- Regra fiscal da conta `131105001`.
+- **Conta `131105001`**: deixou de ser travada. A regra fiscal foi revertida por
+  decisão posterior — os registos desta conta são importados e sincronizados como
+  quaisquer outros.
 - Formato dos ficheiros de backup e chaves de `localStorage`.
 - Fluxo de confirmação, unitização, adoção e exclusão.
 - Nenhuma dependência nova, nenhum `eslint-disable`, nenhum `@ts-ignore`.
