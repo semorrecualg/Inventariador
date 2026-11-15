@@ -116,3 +116,10 @@ describe('SRE Monitor — páginas do pull', () => {
     expect(interessaAoSreMonitor('>>> [Supabase] Buscando config para ID: config_CICOPAL')).toBe(true);
   });
 });
+
+describe('SRE Monitor — fail-safe de sessão', () => {
+  it('mostra as linhas [Auth] do boot e do fail-safe', () => {
+    expect(interessaAoSreMonitor('[Auth] Perfil carregado para master@x: { finalTenant: CICOPAL }')).toBe(true);
+    expect(interessaAoSreMonitor('[Auth Fail-Safe] Perfil indisponível (leitura não concluída) para master@x: sessão MANTIDA, sem signOut.')).toBe(true);
+  });
+});

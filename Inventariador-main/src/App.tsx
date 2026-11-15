@@ -128,6 +128,7 @@ import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
 import { logger } from './utils/logger';
 import { mensagemDeErroDeSync } from './utils/syncError';
+import { decidirEscopoDeSessao } from './utils/sessionScope';
 import pkg from '../package.json';
 
 export class AppBootstrapError extends Error {
@@ -4434,29 +4435,55 @@ useEffect(() => {
         }
 
         const isOwnerAccount = session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-        if ((!resolvedTenantid || resolvedTenantid === 'NULL' || resolvedTenantid === 'UNDEFINED' || !resolvedUnitId || resolvedUnitId === 'NULL' || resolvedUnitId === 'UNDEFINED') && !isOwnerAccount) {
-          if (isAppManagedSession()) {
-            // Quem entrou por credencial local continua dentro: o fail-safe da
-            // nuvem não pode encerrar uma sessão que ele próprio abriu.
-            logger.info('[Auth Fail-Safe] Perfil sem escopo na nuvem, mas sessão local do app ativa — mantendo acesso.');
-            setIsLoading(false);
-            return;
-          }
-          logger.warn(`[Auth Fail-Safe] Usuário logado sem tenantid ou filial associado: ${session.user.email}`);
+        // Três desfechos, que antes eram um só: perfil NÃO LIDO (timeout), sessão
+        // local do app, e perfil LIDO sem contrato/filial. Só o terceiro encerra.
+        const perfilIndisponivel =
+          (permissions as { perfilIndisponivel?: unknown } | null)?.perfilIndisponivel === true;
+        const decisaoEscopo = decidirEscopoDeSessao({
+          tenantid: resolvedTenantid,
+          filial: resolvedUnitId,
+          ehDono: isOwnerAccount,
+          sessaoLocalDoApp: isAppManagedSession(),
+          perfilIndisponivel
+        });
+
+        if (decisaoEscopo === 'LER_PERFIL_FALHOU') {
+          logger.warn(`[Auth Fail-Safe] Perfil indisponível (leitura não concluída) para ${session.user.email}: sessão MANTIDA, sem signOut.`);
+          setModalConfig({
+            isOpen: true,
+            title: 'Perfil Indisponível',
+            message: 'A nuvem não respondeu a tempo de ler o seu perfil. A sessão foi mantida e nenhum dado local foi apagado. Toque em CONFIRMAR para tentar novamente.',
+            type: 'warning',
+            onConfirm: () => { window.location.reload(); }
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        if (decisaoEscopo === 'SESSAO_LOCAL') {
+          // Quem entrou por credencial local continua dentro: o fail-safe da
+          // nuvem não pode encerrar uma sessão que ele próprio abriu.
+          logger.info('[Auth Fail-Safe] Perfil sem escopo na nuvem, mas sessão local do app ativa — mantendo acesso.');
+          setIsLoading(false);
+          return;
+        }
+
+        if (decisaoEscopo === 'SEM_ESCOPO') {
+          logger.warn(`[Auth Fail-Safe] Perfil lido sem contrato/filial: ${session.user.email}`);
           setIsSessionValid(false);
           setUser(null);
           sessionStorage.removeItem('app_current_user');
           sessionStorage.clear();
           setHistory([AppScreen.LOGIN]);
-          
+
           if (supabase) {
             await supabase.auth.signOut();
           }
 
           setModalConfig({
             isOpen: true,
-            title: 'Sessão Expirada',
-            message: 'Identificador de Contrato ou Filial ausente para isolamento do banco RLS. Por favor, reautentique.',
+            title: 'Conta sem Contrato',
+            message: 'A sua conta não tem Contrato nem Filial atribuídos na base de permissões. Peça ao administrador para atribuir o contrato e a filial — reautenticar sozinho não resolve.',
             type: 'error',
             onConfirm: () => {}
           });

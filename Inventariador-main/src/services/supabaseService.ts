@@ -740,6 +740,14 @@ export const signUp = async (email: string, password: string, username: string, 
  * Garante que o usuário tenha um perfil na tabela user_permissions.
  * Se não existir, cria um perfil padrão.
  */
+/**
+ * Prazo para ler `user_permissions`. Os 3 s anteriores derrubavam sessões
+ * válidas em rede lenta: o timeout devolvia um perfil vazio e o boot lia isso
+ * como "conta sem contrato", com `signOut` incluído.
+ */
+export const PROFILE_FETCH_TIMEOUT_MS = 10_000;
+export const PROFILE_UPSERT_TIMEOUT_MS = 10_000;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ensureUserProfile = async (email: string, metadata?: Record<string, any>, userId?: string): Promise<any> => {
   // Só o build SEM credenciais é local. Um `app_database_mode: INTERNAL` herdado
@@ -776,7 +784,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
 
   const result = await Promise.race([
     fetchPromise,
-    new Promise<null>((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), 3000))
+    new Promise<null>((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), PROFILE_FETCH_TIMEOUT_MS))
   ]).catch(err => {
     logger.warn('[Supabase] Timeout ou erro na busca de perfil:', err.message);
     return { data: null, error: { message: err.message } };
@@ -868,7 +876,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
 
   const upsertResult = await Promise.race([
     upsertPromise,
-    new Promise<null>((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), 5000))
+    new Promise<null>((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), PROFILE_UPSERT_TIMEOUT_MS))
   ]).catch(() => null) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
   if (upsertResult && !upsertResult.error && upsertResult.data) {
@@ -881,8 +889,10 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     };
   }
 
-  // 3. Fallback Final: Retorna dados locais para não travar o login
-  logger.warn('[Supabase] Usando perfil local (Fallback Total)');
+  // 3. Fallback Final: retorna dados locais para não travar o login, mas MARCA
+  // que o perfil não foi lido. Sem o marcador, o boot lê `tenantid` vazio como
+  // "conta sem contrato" e encerra uma sessão que só estava lenta.
+  logger.warn('[Supabase] Perfil não pôde ser lido (Fallback Total): devolvendo dados locais com perfilIndisponivel=true.');
   return {
     email: lowerEmail,
     username: lowerEmail.split('@')[0],
@@ -892,6 +902,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     tenantid: fallbackTenant,
     filial: '',
     units: [],
+    perfilIndisponivel: true,
   };
 };
 

@@ -17,7 +17,7 @@ export interface LinhaSre {
 }
 
 /** Prefixos que interessam ao operador. O resto do log fica só na consola. */
-const PREFIXOS = ['[App]', '[Sync]', '[Supabase]', '[SRE', '[ModeSwitch]', '[Login]'];
+const PREFIXOS = ['[App]', '[Sync]', '[Supabase]', '[Auth', '[SRE', '[ModeSwitch]', '[Login]'];
 
 /**
  * Ruído de alta frequência: repetia-se a cada render e enchia as 15 linhas do
