@@ -6,6 +6,7 @@ import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot, setUserWorkspaceHandle, persistWorkspaceHandle, restoreWorkspaceHandle, saveBaseToWorkspace, readBaseFromWorkspace, type WorkspaceBaseSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
+import { resolverEscopoEspelhamento } from '../services/mirrorScope';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
@@ -188,34 +189,29 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         return;
       }
 
-      // SRE ISOLAMENTO: o espelhamento é escopado pelo tenant ATIVO do usuário
-      // logado. O cache local pode conter dados de OUTROS contratos (ex.:
-      // CICOPAL de sessão anterior) — um MASTER jamais pode enviá-los.
-      // Sem tenant ativo (dono/global), espelha a base completa.
-      const baseParaEspelhar = activeTenantid
-        ? ativos.filter((a) => String(a.tenantid || '').trim().toUpperCase() === activeTenantid)
-        : ativos;
-
-      if (baseParaEspelhar.length === 0) {
-        addLog(`[SRE_CLOUD] Nenhum ativo do contrato ${activeTenantid || 'global'} para espelhar. Nada enviado.`);
+      // SRE ISOLAMENTO: só sobe o que tem UM contrato identificado. O cache
+      // local pode conter dados de OUTROS contratos (ex.: CICOPAL de sessão
+      // anterior) e a nuvem não é lugar para descobrir isso por tentativa.
+      const escopo = resolverEscopoEspelhamento(
+        ativos as unknown as Record<string, unknown>[],
+        activeTenantid
+      );
+      if (!escopo.ok) {
+        addLog(`[SRE_CLOUD] Espelhamento recusado (${escopo.reason}): ${escopo.message}`);
+        showRecoveryToast(`⛔ ${escopo.message}`, 'red');
         return;
       }
 
-      // REGRA DE CONTRATO (tenant 100% da base): os tenantids vêm EXCLUSIVAMENTE
-      // da própria base carregada (zero valor fixo / zero fallback hard-coded).
-      const tenantsDaBase = Array.from(
-        new Set(
-          baseParaEspelhar
-            .map((a) => (a.tenantid || '').trim().toUpperCase())
-            .filter((t) => t && t !== 'UNDEFINED' && t !== 'NULL')
-        )
-      );
-      addLog(`[SRE_CLOUD] Contratos detectados na base: ${tenantsDaBase.length ? tenantsDaBase.join(' | ') : '(nenhum — Global)'}`);
-      addLog(`[SRE_CLOUD] Enviando ${baseParaEspelhar.length} ativos do contrato ${activeTenantid || 'global'} em lotes de 500 (4 lotes em paralelo)...`);
+      const baseParaEspelhar = escopo.rows;
+      if (escopo.ignoradas > 0) {
+        addLog(`[SRE_CLOUD] ${escopo.ignoradas} linha(s) sem contrato ficaram fora do envio.`);
+      }
+      addLog(`[SRE_CLOUD] Enviando ${baseParaEspelhar.length} ativos do contrato ${escopo.tenant} em lotes de 500 (4 lotes em paralelo)...`);
 
+      // O upsert fica preso a este contrato: (tenantid, id) em `assets`.
       const syncedIds = await syncAssetsToCloud(
         baseParaEspelhar as unknown as Asset[],
-        tenantsDaBase.length > 0 ? tenantsDaBase : undefined,
+        [escopo.tenant],
         (processed, total) => {
           const pct = total > 0 ? Math.round((processed / total) * 100) : 100;
           setMirrorProgress(Math.min(pct, 100));
