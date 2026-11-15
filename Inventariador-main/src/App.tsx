@@ -128,7 +128,7 @@ import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
 import { logger } from './utils/logger';
 import { mensagemDeErroDeSync } from './utils/syncError';
-import { decidirEscopoDeSessao } from './utils/sessionScope';
+import { decidirEscopoDeSessao, perfilNaoLido } from './utils/sessionScope';
 import pkg from '../package.json';
 
 export class AppBootstrapError extends Error {
@@ -883,6 +883,9 @@ useEffect(() => {
     });
   }, []);
 
+  // Nova tentativa de ler o perfil SEM recarregar a página: o boot guarda aqui
+  // a repetição do processamento da sessão atual.
+  const retrySessionProcessingRef = useRef<(() => Promise<void>) | null>(null);
   const userRef = useRef<User | null>(user);
   // SINCRONIZA userRef com o usuário logado atual. Sem isso, o guard anti-loop
   // do processSession (que compara userRef.current) nunca retorna cedo, e cada
@@ -4437,8 +4440,7 @@ useEffect(() => {
         const isOwnerAccount = session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
         // Três desfechos, que antes eram um só: perfil NÃO LIDO (timeout), sessão
         // local do app, e perfil LIDO sem contrato/filial. Só o terceiro encerra.
-        const perfilIndisponivel =
-          (permissions as { perfilIndisponivel?: unknown } | null)?.perfilIndisponivel === true;
+        const perfilIndisponivel = perfilNaoLido(permissions);
         const decisaoEscopo = decidirEscopoDeSessao({
           tenantid: resolvedTenantid,
           filial: resolvedUnitId,
@@ -4449,12 +4451,18 @@ useEffect(() => {
 
         if (decisaoEscopo === 'LER_PERFIL_FALHOU') {
           logger.warn(`[Auth Fail-Safe] Perfil indisponível (leitura não concluída) para ${session.user.email}: sessão MANTIDA, sem signOut.`);
+          retrySessionProcessingRef.current = () => processSession(session);
           setModalConfig({
             isOpen: true,
             title: 'Perfil Indisponível',
             message: 'A nuvem não respondeu a tempo de ler o seu perfil. A sessão foi mantida e nenhum dado local foi apagado. Toque em CONFIRMAR para tentar novamente.',
             type: 'warning',
-            onConfirm: () => { window.location.reload(); }
+            onConfirm: () => {
+              // Nova tentativa dentro da app: recarregar a página perdia o
+              // estado e repetia o boot inteiro para reler o mesmo perfil.
+              setModalConfig(prev => ({ ...prev, isOpen: false }));
+              void retrySessionProcessingRef.current?.();
+            }
           });
           setIsLoading(false);
           return;

@@ -36,3 +36,12 @@ export const decidirEscopoDeSessao = (entrada: EntradaEscopo): DecisaoDeEscopo =
   if (entrada.sessaoLocalDoApp) return 'SESSAO_LOCAL';
   return 'SEM_ESCOPO';
 };
+
+/**
+ * `true` quando o perfil devolvido é o fallback de leitura FALHADA
+ * (`perfilIndisponivel`), e não um perfil realmente sem contrato.
+ */
+export const perfilNaoLido = (perfil: unknown): boolean =>
+  typeof perfil === 'object' &&
+  perfil !== null &&
+  (perfil as { perfilIndisponivel?: unknown }).perfilIndisponivel === true;

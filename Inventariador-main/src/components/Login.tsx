@@ -13,6 +13,7 @@ import pkg from '../../package.json';
 import { logger } from '../utils/logger';
 import { readSessionTenantId, readLocalTenantId } from '../utils/tenantUtils';
 import type { LoginOrigin } from '../utils/sessionMode';
+import { perfilNaoLido } from '../utils/sessionScope';
 
 interface LoginProps {
   onLogin: (user: User, origem?: LoginOrigin) => void;
@@ -597,6 +598,12 @@ const Login: React.FC<LoginProps> = ({
           origemSessao = 'SUPABASE';
 
           if (!tenantid && !is_master) {
+            // Perfil NÃO LIDO (timeout/ligação lenta) não é perfil sem contrato:
+            // encerrar a sessão aqui destruía um login válido.
+            if (perfilNaoLido(cloudUser)) {
+              logger.warn('[Login] Perfil não lido a tempo (perfilIndisponivel). Sessão MANTIDA; nova tentativa cabe ao utilizador.');
+              throw new Error("A nuvem não respondeu a tempo de ler o seu perfil. A sessão foi mantida — toque em ACESSAR SISTEMA para tentar novamente.");
+            }
             logger.warn('[Login] Bloqueando login pois tenantid está nulo ou vazio no perfil.');
             if (supabase) {
               await supabase.auth.signOut();

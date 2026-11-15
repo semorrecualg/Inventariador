@@ -3,7 +3,7 @@
 // sessionScope.test.ts — não derrubar sessão válida por leitura falhada.
 // ============================================================================
 import { describe, it, expect } from 'vitest';
-import { decidirEscopoDeSessao, type EntradaEscopo } from '../utils/sessionScope';
+import { decidirEscopoDeSessao, perfilNaoLido, type EntradaEscopo } from '../utils/sessionScope';
 
 const base: EntradaEscopo = {
   tenantid: 'CICOPAL',
@@ -61,5 +61,19 @@ describe('decidirEscopoDeSessao', () => {
     expect(decidirEscopoDeSessao({ ...base, tenantid: 'null' })).toBe('SEM_ESCOPO');
     expect(decidirEscopoDeSessao({ ...base, filial: 'UNDEFINED' })).toBe('SEM_ESCOPO');
     expect(decidirEscopoDeSessao({ ...base, tenantid: '  ' })).toBe('SEM_ESCOPO');
+  });
+});
+
+describe('perfilNaoLido', () => {
+  it('reconhece o fallback de leitura falhada', () => {
+    expect(perfilNaoLido({ tenantid: '', filial: '', perfilIndisponivel: true })).toBe(true);
+  });
+
+  it('um perfil lido sem contrato não é "não lido"', () => {
+    expect(perfilNaoLido({ tenantid: '', filial: '' })).toBe(false);
+    expect(perfilNaoLido({ perfilIndisponivel: 'true' })).toBe(false);
+    expect(perfilNaoLido(null)).toBe(false);
+    expect(perfilNaoLido(undefined)).toBe(false);
+    expect(perfilNaoLido('perfilIndisponivel')).toBe(false);
   });
 });
