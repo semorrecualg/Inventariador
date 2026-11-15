@@ -2,6 +2,7 @@ import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
 import { DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
+import type { FieldEvent } from '../types/fieldEvent';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { unitContextKey, splitUnitContextKey } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
@@ -124,6 +125,14 @@ export interface DexieAddress {
   _is_synced: number;
 }
 
+/** Escrita fora do contrato numa tabela só-adição (`field_events`). */
+export class AppendOnlyViolation extends Error {
+  constructor(message: string) {
+    super(`[AppendOnlyViolation] ${message}`);
+    this.name = 'AppendOnlyViolation';
+  }
+}
+
 class InventoryDexieDatabase extends Dexie {
   // v6: chave primária composta [tenantid+primarykey] — o tenantid é o muro que
   // separa os mundos de cada cliente (mesma regra da nuvem com PK (tenantid, id)).
@@ -137,6 +146,8 @@ class InventoryDexieDatabase extends Dexie {
   unit_configs!: Dexie.Table<DexieUnitConfig, string>;
   campaign_snapshots!: Dexie.Table<DexieCampaignSnapshot, string>;
   addresses!: Dexie.Table<DexieAddress, number>;
+  /** F1 — log de eventos de campo: só-adição, chave `event_id`. */
+  field_events!: Dexie.Table<FieldEvent, string>;
 
   constructor() {
     super('InventoryLocalStore');
@@ -289,6 +300,36 @@ class InventoryDexieDatabase extends Dexie {
         await tx.table(dst).bulkAdd(normalized as never[]);
         logger.info(`[MigrationV7] ${dst}: ${rows.length} registros restaurados com chave composta [tenantid+primarykey].`);
       }
+    });
+    // v8 — F1 da malha de auditoria (docs/VISAO_MALHA_AUDITORIA_CAMPO.md §6.4):
+    // `field_events` nasce aqui, só-adição, para que o estado do ativo passe a
+    // ser projetado a partir dos eventos. Nenhuma tabela existente muda de
+    // assinatura — o upgrade não toca em dados.
+    this.version(8).stores({
+      local_assets: '[tenantid+primarykey], primarykey, filial, _is_synced, [tenantid+filial]',
+      ativos: '[tenantid+primarykey], primarykey, filial, _is_synced, [tenantid+filial]',
+      assets: '[tenantid+primarykey], primarykey, filial, _is_synced, [tenantid+filial]',
+      audit_logs: 'id, updated_at',
+      campaigns: 'id, tenantid',
+      SYSTEM_CONTEXT: 'key',
+      unit_configs: 'id, filial',
+      campaign_snapshots: 'id, campaign_id',
+      addresses: '++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced',
+      field_events: 'event_id, [tenantid+filial], [tenantid+asset_key], _synced, [tenantid+asset_key+lamport]'
+    });
+
+    // Escrita SÓ de adição: um evento que entra nunca muda nem sai. O Dexie
+    // chama estes hooks dentro da transação, portanto o abort é do banco — não
+    // depende de a aplicação "prometer" que não escreve por cima.
+    // A única exceção é o estado de transporte `_synced` (0 → 1): o evento em
+    // si — payload, autor, hora, chave — continua imutável.
+    this.table('field_events').hook('updating', (mods: Partial<FieldEvent>) => {
+      const campos = Object.keys(mods ?? {});
+      if (campos.length === 1 && campos[0] === '_synced') return;
+      throw new AppendOnlyViolation('field_events: evento existente não pode ser alterado');
+    });
+    this.table('field_events').hook('deleting', () => {
+      throw new AppendOnlyViolation('field_events: evento não pode ser apagado');
     });
   }
 }

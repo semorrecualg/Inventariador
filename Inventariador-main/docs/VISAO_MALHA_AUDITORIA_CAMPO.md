@@ -348,6 +348,15 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
 - **Push parcial no ciclo**: `syncSession.test.ts` cobre push com aceite +
   recusa, `pullIntoSession` no mesmo ciclo e recibo coerente
   (`enviados = aceitos + recusados`, `recebidos` do pull, `faltantes` > 0).
+- **F1 em curso** (v8 do schema local): `field_events` criada com escrita
+  só-adição — hooks `updating`/`deleting` do Dexie recusam alterar ou apagar o
+  evento (`AppendOnlyViolation`), e a única alteração aceite é `_synced` 0 → 1,
+  que é estado de transporte e não do evento. O projetor puro
+  (`src/services/fieldProjection.ts`) reconstrói o estado na ordem
+  `(lamport, device_id, event_id)`; cobre-se com 10 casos e um teste de
+  propriedade de 10 mil eventos embaralhados em duas ordens (mesmo estado, sem
+  perder eventos). Falta F1.3 (emissão nas telas), F1.4 (projeção escrever
+  `local_assets`) e F1.6 (cadeia de hash).
 - **Recusa com motivo real**: `syncAssetsToCloudAndMarkDetailed` devolve
   `failures: { key, reason }` do próprio Postgres (o erro por linha do
   isolamento), e o push com recibo grava cada motivo na sessão — a tela e o
