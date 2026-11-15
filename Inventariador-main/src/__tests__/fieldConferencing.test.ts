@@ -11,13 +11,12 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
 import { db } from '../services/sqliteService';
 import {
-  applyProjectionToState,
   conferirAtivo,
   derivarAtualizacaoConferencia,
   nextDeviceLamport,
   resolveDeviceId,
 } from '../services/fieldConferencing';
-import type { ProjectedAsset } from '../services/fieldProjection';
+import { getDeviceId } from '../services/syncSessionService';
 
 // Cada teste usa um contrato próprio: o banco é o mesmo ficheiro e a tabela de
 // eventos não pode ser limpa (só-adição), portanto isolar por tenantid evita
@@ -109,15 +108,16 @@ describe('conferência → evento (F1.3)', () => {
     expect(event.payload.local).toBe('BLOCO C');
   });
 
-  it('o aparelho é estável entre chamadas e vem do localStorage', async () => {
+  it('o aparelho dos eventos é o MESMO do recibo de sync', async () => {
     await criarAtivo('AT-C1');
-    localStorage.clear();
 
-    const id = resolveDeviceId();
+    const id = await resolveDeviceId();
+    expect(id).toBe(await getDeviceId());
     await conferir();
     await conferir();
 
-    expect(resolveDeviceId()).toBe(id);
+    expect(await resolveDeviceId()).toBe(id);
+    expect(await getDeviceId()).toBe(id);
     const eventos = await db.field_events.where('[tenantid+asset_key]').equals([TENANT, 'AT-C1']).toArray();
     expect(new Set(eventos.map(e => e.device_id))).toEqual(new Set([id]));
   });
@@ -132,31 +132,28 @@ describe('conferência → evento (F1.3)', () => {
 });
 
 describe('projeção → estado do ativo (F1.4)', () => {
-  it('grava `local_assets` com os campos derivados do evento', async () => {
+  it('devolve o estado projetado e NÃO escreve a linha do ativo (escrita única no commit)', async () => {
     await criarAtivo('AT-C1');
 
     const { estado } = await conferir({ device_id: DEVICE });
 
     expect(estado).toMatchObject({ _conferido: true, _version: 1, _localMaster: 'BLOCO A / SALA 12' });
-    expect(await lerAtivo('AT-C1')).toMatchObject({
-      _conferido: true,
-      _auditor: 'ana@empresa.com',
-      _dataLeitura: estado._dataLeitura,
-      _localMaster: 'BLOCO A / SALA 12',
-      gps_lat: -16.6,
-      gps_lng: -49.2,
-      _versionEventos: 1,
-    });
+    // A persistência é do commit do ativo, já com este patch: aqui a linha
+    // continua intacta, provando que não há segunda escrita da mesma linha.
+    expect(await lerAtivo('AT-C1')).toMatchObject({ _conferido: false });
   });
 
-  it('os espelhos `ativos` e `assets` recebem a mesma projeção até F5', async () => {
+  it('o patch derivado limpa a divergência antiga do TAG_INVENTARIO', async () => {
     await criarAtivo('AT-C1');
 
-    await conferir({ device_id: DEVICE });
+    const divergente = await conferir({ device_id: DEVICE, tipo: 'DIVERGENCIA', local: 'BLOCO C' });
+    expect(derivarAtualizacaoConferencia(divergente.estado).TAG_INVENTARIO).toBe('DIVERGÊNCIA');
 
-    for (const tabela of ['ativos', 'assets'] as const) {
-      expect(await db.table(tabela).get([TENANT, 'AT-C1'])).toMatchObject({ _conferido: true, gps_lat: -16.6 });
-    }
+    const normal = await conferir({ device_id: DEVICE, tipo: 'LEITURA', local: 'BLOCO A' });
+
+    expect(normal.estado._divergencia).toBe(false);
+    expect(normal.estado._version).toBe(2);
+    expect(derivarAtualizacaoConferencia(normal.estado).TAG_INVENTARIO).toBe('CONFERIDO');
   });
 
   it('a segunda leitura reescreve o estado a partir dos dois eventos', async () => {
@@ -166,33 +163,6 @@ describe('projeção → estado do ativo (F1.4)', () => {
     const { estado } = await conferir({ device_id: DEVICE, tipo: 'DIVERGENCIA', local: 'BLOCO C' });
 
     expect(estado).toMatchObject({ _version: 2, _divergencia: true, _localMaster: 'BLOCO C' });
-    expect(await lerAtivo('AT-C1')).toMatchObject({
-      _localMaster: 'BLOCO C',
-      TAG_INVENTARIO: 'DIVERGÊNCIA',
-      _versionEventos: 2,
-    });
-  });
-
-  it('corrige um estado adulterado à mão: quem manda é o log', async () => {
-    await criarAtivo('AT-C1');
-    await db.local_assets.update([TENANT, 'AT-C1'], { _conferido: 0, _auditor: 'intruso' });
-
-    await conferir({ device_id: DEVICE, local: 'BLOCO B' });
-
-    expect(await lerAtivo('AT-C1')).toMatchObject({ _conferido: true, _auditor: 'ana@empresa.com' });
-  });
-
-  it('applyProjectionToState não rebenta quando o ativo ainda não está nas tabelas', async () => {
-    const estado: ProjectedAsset = {
-      tenantid: TENANT,
-      asset_key: 'AT-SEM-REGISTO',
-      _conferido: true,
-      _divergencia: false,
-      _correcoes: {},
-      _version: 1,
-    };
-
-    await expect(applyProjectionToState(TENANT, 'AT-SEM-REGISTO', estado)).resolves.toBeUndefined();
   });
 });
 
@@ -207,8 +177,7 @@ describe('derivarAtualizacaoConferencia — mapeamento puro', () => {
       _version: 3,
     });
 
-    expect(patch).toEqual({ _conferido: true, _versionEventos: 3 });
-    expect(patch).not.toHaveProperty('TAG_INVENTARIO');
+    expect(patch).toEqual({ _conferido: true, _versionEventos: 3, TAG_INVENTARIO: 'CONFERIDO' });
   });
 
   it('marca TAG_INVENTARIO quando o ativo está divergente', () => {

@@ -13,10 +13,11 @@
  * repetida, o resultado é o mesmo — não há contador a "andar para trás".
  */
 import { db } from './sqliteService';
+import { getDeviceId } from './syncSessionService';
+import { TagInventario } from '../types';
 import { appendFieldEvent, eventsForAsset } from './fieldEventStore';
 import { projectAsset, type ProjectedAsset } from './fieldProjection';
 import type { FieldEvent, FieldEventPayload } from '../types/fieldEvent';
-import { logger } from '../utils/logger';
 
 export type TipoConferencia = 'LEITURA' | 'DIVERGENCIA';
 
@@ -41,22 +42,14 @@ export interface ConferenciaResultado {
   estado: ProjectedAsset;
 }
 
-const DEVICE_KEY = 'gbr_field_device_id';
-
-/** Identificador estável do aparelho (sobrevive ao reinício do app). */
-export const resolveDeviceId = (): string => {
-  if (typeof localStorage !== 'undefined') {
-    const guardado = localStorage.getItem(DEVICE_KEY);
-    if (guardado) return guardado;
-    const novo =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `dev_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem(DEVICE_KEY, novo);
-    return novo;
-  }
-  return 'dispositivo-desconhecido';
-};
+/**
+ * Identificador do aparelho — o MESMO do recibo de sincronização.
+ *
+ * Antes havia dois: um em `localStorage` para os eventos e outro no store do
+ * sync. Dois nomes para o mesmo telemóvel estragam a rastreabilidade (o recibo
+ * dizia um aparelho, a trilha de eventos outro). Quem manda é `getDeviceId`.
+ */
+export const resolveDeviceId = (): Promise<string> => getDeviceId();
 
 /**
  * Contador lógico do aparelho: guardado em `SYSTEM_CONTEXT` para ser monotónico
@@ -95,28 +88,12 @@ export const derivarAtualizacaoConferencia = (
   if (estado._localMaster !== undefined) patch._localMaster = estado._localMaster;
   if (estado.gps_lat !== undefined) patch.gps_lat = estado.gps_lat;
   if (estado.gps_lng !== undefined) patch.gps_lng = estado.gps_lng;
-  if (estado._divergencia) patch.TAG_INVENTARIO = 'DIVERGÊNCIA';
+  // Tag sempre reescrita: sem isto, um ativo que ficou `DIVERGÊNCIA` continuava
+  // marcado como divergente depois de uma leitura normal.
+  patch.TAG_INVENTARIO = estado._divergencia
+    ? TagInventario.DIVERGENCIA
+    : TagInventario.CONFERIDO;
   return patch;
-};
-
-/** Persiste o estado projetado nas tabelas de estado (idempotente). */
-export const applyProjectionToState = async (
-  tenantid: string,
-  assetKey: string,
-  estado: ProjectedAsset
-): Promise<void> => {
-  const tenant = String(tenantid || '').trim().toUpperCase();
-  const key = String(assetKey || '').trim();
-  const patch = derivarAtualizacaoConferencia(estado);
-  // `local_assets` é a tabela canónica; os espelhos seguem até F5 (redução das
-  // três cópias) para as telas e relatórios que ainda os leem.
-  for (const tabela of ['local_assets', 'ativos', 'assets'] as const) {
-    try {
-      await db.table(tabela).update([tenant, key], patch);
-    } catch (err) {
-      logger.warn(`>>> [FieldProjection] Falha ao gravar projeção em ${tabela}:`, err);
-    }
-  }
 };
 
 /**
@@ -126,7 +103,7 @@ export const applyProjectionToState = async (
  * `derivarAtualizacaoConferencia(estado)` no objeto que mostra/guarda.
  */
 export const conferirAtivo = async (input: ConferenciaInput): Promise<ConferenciaResultado> => {
-  const deviceId = input.device_id || resolveDeviceId();
+  const deviceId = input.device_id || (await resolveDeviceId());
   const lamport = input.lamport ?? (await nextDeviceLamport(deviceId));
   const payload: FieldEventPayload = {
     local: input.local,
@@ -152,6 +129,8 @@ export const conferirAtivo = async (input: ConferenciaInput): Promise<Conferenci
     throw new Error('[FieldProjection] Evento gravado mas projeção vazia.');
   }
 
-  await applyProjectionToState(input.tenantid, input.asset_key, estado);
+  // NÃO se grava aqui: quem persiste o ativo é o commit único da tela
+  // (`commitAssetUpdate`), já com este patch — gravar também aqui duplicava a
+  // escrita da mesma linha.
   return { event, estado };
 };
