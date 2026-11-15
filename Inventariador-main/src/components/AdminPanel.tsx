@@ -95,7 +95,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Users size={16} /></div>
             <div className="flex-1">
               <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Acessos</h4>
-              <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Gerir Usuários</p>
+              <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Usuários deste contrato</p>
             </div>
           </button>
 
