@@ -605,7 +605,11 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
             </span>
             <div className="flex items-center space-x-1 mt-1">
               <div className={`w-1.5 h-1.5 rounded-full ${displayTotalAssets > 0 ? 'bg-success' : 'bg-slate-300'}`} />
-              <span className="text-[8px] font-medium text-ink-muted uppercase">Base Local</span>
+              {/* O rótulo seguia fixo em "Base Local" mesmo em modo nuvem, o que
+                  fazia uma base oficial vazia parecer falta de ligação. */}
+              <span className="text-[8px] font-medium text-ink-muted uppercase">
+                {databaseMode === DatabaseMode.INTERNAL ? 'Base Local' : 'Base Oficial'}
+              </span>
             </div>
           </div>
         </div>
