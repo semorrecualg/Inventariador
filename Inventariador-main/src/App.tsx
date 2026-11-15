@@ -1260,28 +1260,36 @@ useEffect(() => {
     // Sem este listener o link abria a app e nada acontecia — os tokens ficavam
     // por trocar e a senha continuava a antiga.
     let appUrlHandle: { remove: () => Promise<void> } | null = null;
+    const abrirRecuperacaoDeSenha = async (url?: string | null) => {
+      const tokens = tokensDoLinkDeRecuperacao(url);
+      if (!tokens || !supabase) return;
+      logger.info('[Auth] Link de recuperação recebido no app: trocando tokens por sessão.');
+      const { error } = await supabase.auth.setSession({
+        access_token: tokens.accessToken,
+        refresh_token: tokens.refreshToken
+      });
+      if (error) {
+        logger.warn('[Auth] Não foi possível abrir a sessão do link de recuperação:', error.message);
+        return;
+      }
+      setIsPasswordRecovery(true);
+    };
     const registerAppUrlListener = async () => {
       try {
         const { App: CapacitorApp } = await import('@capacitor/app');
-        const handle = await CapacitorApp.addListener('appUrlOpen', async ({ url }) => {
-          const tokens = tokensDoLinkDeRecuperacao(url);
-          if (!tokens || !supabase) return;
-          logger.info('[Auth] Link de recuperação recebido no app: trocando tokens por sessão.');
-          const { error } = await supabase.auth.setSession({
-            access_token: tokens.accessToken,
-            refresh_token: tokens.refreshToken
-          });
-          if (error) {
-            logger.warn('[Auth] Não foi possível abrir a sessão do link de recuperação:', error.message);
-            return;
-          }
-          setIsPasswordRecovery(true);
+        const handle = await CapacitorApp.addListener('appUrlOpen', ({ url }) => {
+          void abrirRecuperacaoDeSenha(url);
         });
         if (disposed) {
           void handle.remove();
         } else {
           appUrlHandle = handle;
         }
+        // Partida a frio: o link que LANÇOU a app não passa pelo evento acima
+        // (`appUrlOpen` só dispara quando o app já está vivo). Sem esta leitura,
+        // tocar no e-mail com a app fechada abria a app e nada acontecia.
+        const launch = await CapacitorApp.getLaunchUrl();
+        if (launch?.url) await abrirRecuperacaoDeSenha(launch.url);
       } catch (err) {
         // Browser/PWA: não há deep link nativo, o fluxo web continua.
         logger.warn('[Auth] appUrlOpen indisponível nesta plataforma:', err);
