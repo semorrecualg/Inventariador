@@ -24,7 +24,8 @@ describe('mapCloudConfigRow — a identidade da linha não entra no estado', () 
     expect('tenantId' in mapped).toBe(false);
     expect(mapped.lastUpdated).toBe('2026-11-12T02:59:07.536Z');
     expect(mapped.companies).toEqual(['010101 CICOPAL GO']);
-    expect(mapped.darkMode).toBe(true);
+    // Linha antiga com dark_mode não injeta preferência de dispositivo no estado.
+    expect('darkMode' in mapped).toBe(false);
   });
 
   it('descarta filial, data, metadata, created_at e updated_at da linha', () => {

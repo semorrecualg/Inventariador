@@ -70,7 +70,10 @@ describe('buildConfigCloudPayload — a config do tenant vai para config_<TENANT
     expect(keys).not.toContain('updated_at');
     expect(keys).not.toContain('metadata');
     expect(keys).not.toContain('battery_saver');
-    expect(built?.payload.dark_mode).toBe(true);
+    // Preferências de dispositivo não viajam: fonte única é o localStorage.
+    expect(keys).not.toContain('dark_mode');
+    expect(keys).not.toContain('scanner_mode');
+    expect(keys).not.toContain('scan_feedback_mode');
   });
 
   it('devolve null quando não há tenant em lado nenhum (não inventa destino)', () => {

@@ -74,7 +74,10 @@ describe('syncConfigToCloud — modo nuvem', () => {
     expect(payload.tenantid).toBe('CICOPAL');
     expect(payload.status).toBe('IN_USE');
     expect(payload.last_updated).toBe('2026-11-12T02:59:07.536Z');
-    expect(payload.dark_mode).toBe(true);
+    // Tema/leitura/energia pertencem ao dispositivo e não sobem para a nuvem.
+    expect(payload).not.toHaveProperty('dark_mode');
+    expect(payload).not.toHaveProperty('scanner_mode');
+    expect(payload).not.toHaveProperty('scan_feedback_mode');
     expect(options).toEqual({ onConflict: 'id' });
   });
 

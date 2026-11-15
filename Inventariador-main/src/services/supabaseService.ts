@@ -1428,8 +1428,11 @@ export const buildConfigCloudPayload = (
   config: Omit<InventoryState, 'assets'> | Record<string, unknown>,
   tenantid?: string | string[]
 ): { configId: string; tenantid: string; payload: Record<string, unknown> } | null => {
-  // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
-  // IMPORTANTE: battery_saver é omitido para garantir compatibilidade estrita até que o backend processe a nova estrutura
+  // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente.
+  // Preferências de DISPOSITIVO (scanner_mode, scan_feedback_mode, dark_mode,
+  // battery_saver) ficam de fora de propósito: a fonte única delas é o
+  // localStorage do aparelho (utils/fieldPreferences). Enquanto viajavam aqui,
+  // a configuração descia no login seguinte e desfazia o ajuste.
   const allowedKeys = [
     'id',
     'companies',
@@ -1437,11 +1440,8 @@ export const buildConfigCloudPayload = (
     'status',
     'editable_fields',
     'qr_code_fields',
-    'scanner_mode',
-    'scan_feedback_mode',
     'inventory_search_mode',
     'immersive_mode',
-    'dark_mode',
     'protheus_integration_enabled',
     'protheus_api_url',
     'mandatory_photo_on_divergence',
@@ -1455,11 +1455,8 @@ export const buildConfigCloudPayload = (
     'lastUpdated': 'last_updated',
     'editableFields': 'editable_fields',
     'qrCodeFields': 'qr_code_fields',
-    'scannerMode': 'scanner_mode',
-    'scanFeedbackMode': 'scan_feedback_mode',
     'inventorySearchMode': 'inventory_search_mode',
     'immersiveMode': 'immersive_mode',
-    'darkMode': 'dark_mode',
     'protheusIntegrationEnabled': 'protheus_integration_enabled',
     'protheusApiUrl': 'protheus_api_url',
     'mandatoryPhotoOnDivergence': 'mandatory_photo_on_divergence',
@@ -2180,12 +2177,8 @@ const CONFIG_REVERSE_MAPPING: Record<string, string> = {
   'last_updated': 'lastUpdated',
   'editable_fields': 'editableFields',
   'qr_code_fields': 'qrCodeFields',
-  'scanner_mode': 'scannerMode',
-  'scan_feedback_mode': 'scanFeedbackMode',
   'inventory_search_mode': 'inventorySearchMode',
   'immersive_mode': 'immersiveMode',
-  'dark_mode': 'darkMode',
-  'battery_saver': 'batterySaver',
   'protheus_integration_enabled': 'protheusIntegrationEnabled',
   'protheus_api_url': 'protheusApiUrl',
   'mandatory_photo_on_divergence': 'mandatoryPhotoOnDivergence',
