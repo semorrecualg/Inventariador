@@ -964,6 +964,94 @@ export async function persistWorkspaceHandle(handle: unknown): Promise<boolean> 
   }
 }
 
+/** Ficheiro da base local dentro da pasta vinculada. */
+export const WORKSPACE_BASE_FILE = 'gbr_base_local.json';
+
+export interface WorkspaceBaseSnapshot {
+  saved_at: string;
+  count: number;
+  assets: Record<string, unknown>[];
+}
+
+type DirHandleLike = {
+  name?: string;
+  queryPermission?: (o: { mode: string }) => Promise<string>;
+  requestPermission?: (o: { mode: string }) => Promise<string>;
+  getFileHandle: (name: string, opts?: { create?: boolean }) => Promise<{
+    createWritable: () => Promise<{ write: (data: string) => Promise<void>; close: () => Promise<void> }>;
+    getFile: () => Promise<File>;
+  }>;
+};
+
+const resolverHandle = (handle?: unknown): DirHandleLike | null =>
+  ((handle as DirHandleLike | undefined) ?? (userWorkspaceHandle as DirHandleLike | null)) ?? null;
+
+/**
+ * Grava a base local (ativos) dentro da pasta vinculada.
+ *
+ * É escrita explícita, no gesto do utilizador: o navegador não pede permissão
+ * sozinho e um prompt fora de gesto é simplesmente recusado. Se a pasta foi
+ * escolhida com `mode: 'readwrite'`, a permissão já vem concedida daí.
+ */
+export async function saveBaseToWorkspace(
+  assets: Record<string, unknown>[],
+  handle?: unknown
+): Promise<WorkspaceBaseSnapshot | null> {
+  const dir = resolverHandle(handle);
+  if (!dir) return null;
+  try {
+    // `queryPermission` só existe em handles de pasta escolhida pelo utilizador
+    // (File System Access). Em handle vindo de OPFS não existe — e aí a escrita
+    // está sempre autorizada — por isso a ausência conta como granted.
+    let permissao: string = dir.queryPermission ? await dir.queryPermission({ mode: 'readwrite' }) : 'granted';
+    if (permissao === 'prompt') permissao = (await dir.requestPermission?.({ mode: 'readwrite' })) ?? 'denied';
+    if (permissao !== 'granted') {
+      logger.warn('[SRE] Sem permissão de escrita na pasta vinculada; base não gravada.');
+      return null;
+    }
+    const snapshot: WorkspaceBaseSnapshot = {
+      saved_at: new Date().toISOString(),
+      count: assets.length,
+      assets,
+    };
+    const fileHandle = await dir.getFileHandle(WORKSPACE_BASE_FILE, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(snapshot));
+    await writable.close();
+    logger.info(`[SRE] Base local gravada na pasta (${assets.length} ativos).`);
+    return snapshot;
+  } catch (err) {
+    logger.error('[SRE] Falha ao gravar a base local na pasta vinculada:', err);
+    return null;
+  }
+}
+
+/**
+ * Lê a base gravada na pasta. NUNCA pede permissão: no arranque não há gesto, e
+ * pedir aqui bloquearia a abertura da app. Sem permissão devolve `null`.
+ */
+export async function readBaseFromWorkspace(handle?: unknown): Promise<WorkspaceBaseSnapshot | null> {
+  const dir = resolverHandle(handle);
+  if (!dir) return null;
+  try {
+    const permissao = dir.queryPermission ? await dir.queryPermission({ mode: 'readwrite' }) : 'granted';
+    if (permissao !== 'granted') return null;
+    const fileHandle = await dir.getFileHandle(WORKSPACE_BASE_FILE, { create: false });
+    const file = await fileHandle.getFile();
+    const parsed = JSON.parse(await file.text()) as Partial<WorkspaceBaseSnapshot>;
+    if (!Array.isArray(parsed.assets)) return null;
+    return {
+      saved_at: String(parsed.saved_at ?? ''),
+      count: Number(parsed.count ?? parsed.assets.length) || parsed.assets.length,
+      assets: parsed.assets,
+    };
+  } catch (err) {
+    // Ficheiro inexistente é o caso normal na primeira vinculação.
+    logger.info('[SRE] Sem base gravada na pasta (ou ilegível):', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 /** Recupera a pasta vinculada num arranque novo e devolve o nome dela. */
 export async function restoreWorkspaceHandle(): Promise<string | null> {
   try {

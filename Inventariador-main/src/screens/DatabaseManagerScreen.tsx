@@ -3,7 +3,7 @@ import { db, sqliteService } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
-import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot, setUserWorkspaceHandle, persistWorkspaceHandle, restoreWorkspaceHandle } from '../services/localDbService';
+import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot, setUserWorkspaceHandle, persistWorkspaceHandle, restoreWorkspaceHandle, saveBaseToWorkspace, readBaseFromWorkspace, type WorkspaceBaseSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
@@ -31,6 +31,11 @@ interface DatabaseManagerScreenProps {
   onLocalBaseLoaded?: (info: { count: number; tenantids: string[] }) => void;
 }
 
+/** Contratos presentes num conjunto de linhas (para avisar o App da base carregada). */
+const restoreTenants = (rows: unknown[]): string[] => [...new Set(rows
+  .map((r) => String((r as { tenantid?: unknown })?.tenantid ?? '').trim().toUpperCase())
+  .filter(Boolean))];
+
 export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ onBack, onLocalBaseLoaded }) => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isPurging, setIsPurging] = useState<boolean>(false);
@@ -46,10 +51,10 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     }
   };
 
-  const showRecoveryToast = (message: string, type: string = 'blue') => {
+  const showRecoveryToast = useCallback((message: string, type: string = 'blue') => {
     if (window.self !== window.top) return; // PROIBIDO DISPARAR MODAL DE ERRO DE BACKUP FÍSICO NO IFRAME
     originalShowRecoveryToast(message, type);
-  };
+  }, []);
   const [assetCount, setAssetCount] = useState<number>(0);
   // Contra-prova física: cada espelho é contado em separado, para o painel poder
   // explicar uma diferença em vez de a esconder num único número.
@@ -79,10 +84,6 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const handleBackupFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const restoreTenants = (rows: unknown[]) => [...new Set(rows
-      .map((r) => String((r as { tenantid?: unknown })?.tenantid ?? '').trim().toUpperCase())
-      .filter(Boolean))];
-
     addLog(`[SRE_BACKUP] Arquivo de backup selecionado: ${file.name}`);
     setIsUploading(true);
     setProgress(10);
@@ -367,21 +368,6 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     addLog("[SRE BOOT] Inicializando painel de gestão de base de dados...");
   }, [addLog]);
 
-  // Pasta vinculada em sessões anteriores: o handle vive em IndexedDB. Sem esta
-  // recuperação, o cartão dizia "NENHUM DIRETÓRIO VINCULADO" depois de reiniciar
-  // mesmo com a pasta escolhida antes.
-  useEffect(() => {
-    let activo = true;
-    void (async () => {
-      const nome = await restoreWorkspaceHandle();
-      if (!activo || !nome) return;
-      setWorkspaceFolderName(nome);
-      setActivePathName(nome);
-      localStorage.setItem('gbr_physical_folder_name', nome);
-      addLog(`[SRE_LOADER] Pasta vinculada recordada: ${nome}. Use VINCULAR PASTA para trocar.`);
-    })();
-    return () => { activo = false; };
-  }, [addLog]);
 
   // Carga central de planilha (usada pelo input de arquivo E pela listagem de
   // planilhas da pasta vinculada). O parser XLSX (SheetJS) suporta .xls/.xlsx/.csv.
@@ -441,6 +427,10 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       } catch (auditErr) {
         logger.warn('[SRE_LOADER] Falha ao registrar carga no audit_logs:', auditErr);
       }
+      // A pasta vinculada passa a receber a base depois de cada carga: é o
+      // endereço de trabalho que o utilizador escolheu.
+      if (workspaceFolderName) await gravarBaseNaPasta();
+
       addLog("[SRE_LOADER] Gerando backup físico na sandbox...");
       try {
         const isFileSaved = await saveSnapshotToWorkspace(assetsInjected);
@@ -520,6 +510,94 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     sessionStorage.setItem('gbr_physical_folder_name', nome);
   };
 
+  const [baseNaPasta, setBaseNaPasta] = useState<{ savedAt: string; count: number } | null>(null);
+
+  /** Grava a base local (ativos) dentro da pasta vinculada, no gesto actual. */
+  const gravarBaseNaPasta = async (handle?: unknown): Promise<boolean> => {
+    const assets = (await db.local_assets.toArray()) as unknown as Record<string, unknown>[];
+    const snapshot = await saveBaseToWorkspace(assets, handle);
+    if (!snapshot) {
+      addLog('[SRE_BASE] Pasta vinculada sem permissão de escrita: base local não foi gravada nela.');
+      return false;
+    }
+    setBaseNaPasta({ savedAt: snapshot.saved_at, count: snapshot.count });
+    addLog(`[SRE_BASE] Base local gravada na pasta: ${snapshot.count} ativo(s).`);
+    return true;
+  };
+
+  /** Carrega a base da pasta para o banco local (substitui o que lá está). */
+  const restaurarBaseDaPasta = useCallback(async (remota: WorkspaceBaseSnapshot): Promise<void> => {
+    const parsed = remota.assets as unknown as Record<string, unknown>[];
+    await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
+      await db.local_assets.clear();
+      await db.ativos.clear();
+      await db.assets.clear();
+      await db.local_assets.bulkPut(parsed as never[]);
+      await db.ativos.bulkPut(parsed as never[]);
+      await db.assets.bulkPut(parsed as never[]);
+    });
+    await saveVirtualSnapshot(parsed);
+    setBaseNaPasta({ savedAt: remota.saved_at, count: remota.assets.length });
+    addLog(`[SRE_BASE] Base recuperada da pasta: ${remota.assets.length} ativo(s).`);
+    showRecoveryToast(`📂 Base carregada da pasta: ${remota.assets.length} ativo(s).`, 'blue');
+    await loadStats();
+    onLocalBaseLoaded?.({ count: remota.assets.length, tenantids: restoreTenants(parsed) });
+  }, [addLog, loadStats, onLocalBaseLoaded, showRecoveryToast]);
+
+  /**
+   * Regra de convivência entre a pasta e o banco local, decidida ANTES de
+   * escrever: pasta com base e banco vazio → recupera; ambos com dados →
+   * pergunta; senão grava o que está local. Sem isto, vincular a pasta podia
+   * apagar a base que o utilizador tem no aparelho.
+   */
+  const sincronizarBaseComPasta = async (handle?: unknown): Promise<void> => {
+    const remota = await readBaseFromWorkspace(handle);
+    const locais = await db.local_assets.count();
+
+    if (remota && remota.assets.length > 0 && locais === 0) {
+      await restaurarBaseDaPasta(remota);
+      return;
+    }
+    if (remota && remota.assets.length > 0 && locais > 0 && remota.assets.length !== locais) {
+      const usarPasta = window.confirm(
+        `A pasta já tem uma base com ${remota.assets.length} ativo(s) e este aparelho tem ${locais}.\n\n` +
+        'OK = carregar a base da PASTA (substitui a do aparelho).\n' +
+        'Cancelar = gravar a base DESTE APARELHO na pasta.'
+      );
+      if (usarPasta) {
+        await restaurarBaseDaPasta(remota);
+        return;
+      }
+    }
+    if (!(await gravarBaseNaPasta(handle))) {
+      if (remota) setBaseNaPasta({ savedAt: remota.saved_at, count: remota.assets.length });
+    }
+  };
+
+  // Pasta vinculada em sessões anteriores: o handle vive em IndexedDB. Sem esta
+  // recuperação, o cartão dizia "NENHUM DIRETÓRIO VINCULADO" depois de reiniciar
+  // mesmo com a pasta escolhida antes.
+  useEffect(() => {
+    let activo = true;
+    void (async () => {
+      const nome = await restoreWorkspaceHandle();
+      if (!activo || !nome) return;
+      setWorkspaceFolderName(nome);
+      setActivePathName(nome);
+      localStorage.setItem('gbr_physical_folder_name', nome);
+      addLog(`[SRE_LOADER] Pasta vinculada recordada: ${nome}. Use VINCULAR PASTA para trocar.`);
+
+      // Base da pasta no arranque: só se o aparelho estiver vazio (sem gesto não
+      // se pede permissão, e substituir dados locais sem perguntar seria pior).
+      const remota = await readBaseFromWorkspace();
+      if (remota) setBaseNaPasta({ savedAt: remota.saved_at, count: remota.assets.length });
+      if (remota && remota.assets.length > 0 && (await db.local_assets.count()) === 0) {
+        await restaurarBaseDaPasta(remota);
+      }
+    })();
+    return () => { activo = false; };
+  }, [addLog, restaurarBaseDaPasta]);
+
   const listarPlanilhasDoHandle = async (handle: FileSystemDirectoryHandle): Promise<WorkspaceSheet[]> => {
     const sheets: WorkspaceSheet[] = [];
     const entradas = (handle as unknown as { values: () => AsyncIterable<FileSystemHandle> }).values();
@@ -543,6 +621,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         setWorkspaceSheets(sheets);
         registrarPasta(handle.name);
         addLog(`[SRE_LOADER] Pasta vinculada: ${handle.name} — ${sheets.length} planilha(s) encontrada(s).`);
+        await sincronizarBaseComPasta(handle);
         showRecoveryToast(`📁 Pasta vinculada: ${handle.name}`, 'blue');
         return;
       } catch (err) {
@@ -581,7 +660,10 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     setWorkspaceSheets(sheets);
     registrarPasta(nomePasta);
     addLog(`[SRE_LOADER] Pasta vinculada: ${nomePasta} — ${sheets.length} planilha(s) encontrada(s).`);
-    showRecoveryToast(`📁 Pasta vinculada: ${nomePasta}`, 'blue');
+    // Este caminho (webkitdirectory) dá leitura, não escrita: o navegador não
+    // entrega handle para gravar. Diz-se isso em vez de fingir que gravou.
+    addLog('[SRE_BASE] Navegador sem File System Access: a pasta serve para ler planilhas, a base continua apenas no aparelho.');
+    showRecoveryToast(`📁 Pasta vinculada: ${nomePasta} (só leitura)`, 'blue');
   };
 
   const handleLoadWorkspaceSheet = async (sheet: WorkspaceSheet) => {
@@ -674,6 +756,11 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         <div className="mt-1.5 font-mono text-xs font-black uppercase text-slate-200 tracking-wide break-all">
           {activePathName}
         </div>
+        {workspaceFolderName && (
+          <div className="mt-2 text-[10px] font-mono uppercase tracking-wider text-emerald-300">
+            💾 Base local na pasta: {baseNaPasta ? `${baseNaPasta.count} ativo(s) · ${new Date(baseNaPasta.savedAt).toLocaleString('pt-BR')}` : 'sem ficheiro de base (será criado na próxima carga)'}
+          </div>
+        )}
         <div className="mt-2 flex items-center space-x-2 text-[10px] font-mono text-indigo-300 uppercase tracking-wider">
           <span className="text-indigo-400">🏷️</span>
           <span>Contrato Ativo (tenantid):</span>
