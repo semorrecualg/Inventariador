@@ -26,6 +26,51 @@ const markRecordSynced = async (primaryKey: string): Promise<void> => {
   });
 };
 
+// ============================================================================
+// REPARACAO UNICA — conta fiscal 131105001 dada por sincronizada sem envio
+// ----------------------------------------------------------------------------
+// O corte na sincronizacao marcava estes registos com `_is_synced = 1` e seguia
+// sem upsert. Retirar o corte NAO os recupera: a fila so olha para
+// `_is_synced = 0`, e estes ficaram marcados como enviados para sempre.
+// Esta reparacao devolve-os a fila uma vez por instalacao (flag persistida).
+// ============================================================================
+export const FISCAL_ACCOUNT_REPAIR_FLAG = 'app_repair_fiscal_account_resync_v1';
+export const FISCAL_ACCOUNT = '131105001';
+
+/**
+ * Reabre uma unica vez os registos da conta `131105001` que o corte antigo deu
+ * por sincronizados. Devolve quantos registos voltaram a fila (0 se ja correu).
+ */
+export async function requeueFiscalAccountRecordsOnce(): Promise<number> {
+  if (typeof localStorage === 'undefined') return 0;
+  try {
+    if (localStorage.getItem(FISCAL_ACCOUNT_REPAIR_FLAG) === 'done') return 0;
+  } catch {
+    return 0;
+  }
+
+  const rows = await db.local_assets.toArray();
+  const primaryKeys = Array.from(new Set(rows
+    .filter((row) => String(row.contacontabil ?? '').trim() === FISCAL_ACCOUNT)
+    .filter((row) => Number(row._is_synced) === 1 && !row._is_deleted)
+    .map((row) => String(row.primarykey || '').trim())
+    .filter(Boolean)));
+
+  if (primaryKeys.length > 0) {
+    // Mesmo conjunto de tabelas que `markRecordSynced` toca, para a etiqueta
+    // PENDENTE NUVEM reaparecer onde o operador a ve.
+    await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
+      await db.local_assets.where('primarykey').anyOf(primaryKeys).modify({ _is_synced: 0 });
+      await db.ativos.where('primarykey').anyOf(primaryKeys).modify({ _is_synced: 0 });
+      await db.assets.where('primarykey').anyOf(primaryKeys).modify({ _is_synced: 0 });
+    });
+    logger.warn(`>>> [Sync Repair] ${primaryKeys.length} registo(s) da conta ${FISCAL_ACCOUNT} devolvido(s) a fila (marcados como sincronizados sem envio).`);
+  }
+
+  localStorage.setItem(FISCAL_ACCOUNT_REPAIR_FLAG, 'done');
+  return primaryKeys.length;
+}
+
 export interface UserSessionData {
   id: string;
   email: string;
@@ -499,6 +544,12 @@ const _syncService = {
     const filialClean = String(rawFilial).trim();
 
     try {
+      // REPARACAO UNICA: registos que o corte fiscal deu por sincronizados sem
+      // envio voltam a fila antes de a ler (uma vez por instalacao).
+      await requeueFiscalAccountRecordsOnce().catch((repairErr) => {
+        logger.warn('>>> [Sync Repair] Falha ao reparar a conta fiscal; segue sem reparação:', repairErr);
+      });
+
       // 1. ANTI-DUPLICATION FILTER: Ler única e exclusivamente a tabela 'local_assets' buscando registros onde '_is_synced = 0' via Dexie API
       const pendingRecords = await db.local_assets.where('_is_synced').equals(0).toArray();
 
