@@ -213,12 +213,12 @@ export class DatabaseLoaderService {
         // Ele vem EXCLUSIVAMENTE da coluna 'tenantid' (Índice 0) da planilha.
         const tenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
         const rawFilial = mirrorFilial(row.filial);
-        // Chave canônica única (utils/assetKey): primarykey → tenantid + filial +
-        // registro + subreg → derivada do conteúdo. A etiqueta NÃO entra na chave:
-        // repete-se entre linhas da planilha e fazia uma sobrescrever a outra.
+        // Chave canônica única (utils/assetKey): primarykey → código da filial +
+        // registro + subreg (formato do ERP) → derivada do conteúdo. A etiqueta
+        // NÃO entra: repete-se entre linhas e fazia uma sobrescrever a outra.
         const pk = allocateAssetKey({
           primarykey: row.primarykey,
-          // Identidade do contrato: tenantid + filial + registro + subreg.
+          // Identidade do ERP: código da filial + registro + subreg.
           tenantid,
           filial: rawFilial,
           registro: getRowValue(row, 'registro'),

@@ -113,6 +113,21 @@ describe('reparação única da conta fiscal 131105001', () => {
     expect(depois).toHaveLength(1);
   });
 
+  it('deteta a conta mesmo quando o ERP a entrega concatenada com o nome', async () => {
+    await db.local_assets.bulkPut([
+      asset({ primarykey: 'PK-CONC', id: 'PK-CONC', contacontabil: '131105001PROJETOSEMANDAMENTO' }) as never,
+      asset({ primarykey: 'PK-OUTRA', id: 'PK-OUTRA', contacontabil: '131102001EQUIPAMENTOSDETELEFONIA' }) as never
+    ]);
+
+    const requeued = await requeueFiscalAccountRecordsOnce();
+
+    expect(requeued).toBe(1);
+    const conc = await db.local_assets.where('primarykey').equals('PK-CONC').first();
+    const outra = await db.local_assets.where('primarykey').equals('PK-OUTRA').first();
+    expect(Number(conc?._is_synced)).toBe(0);
+    expect(Number(outra?._is_synced)).toBe(1);
+  });
+
   it('não mexe noutras contas nem em registos apagados', async () => {
     await db.local_assets.bulkPut([
       asset({ primarykey: 'PK-OUTRA', id: 'PK-OUTRA', contacontabil: '131101001' }) as never,

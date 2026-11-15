@@ -4,6 +4,7 @@ import { SyncQueueItem } from '../types';
 import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode } from './supabaseService';
 import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
+import { FISCAL_ACCOUNT_PREFIX, isFiscalAccount } from '../utils/fiscalAccount';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { matchUnitKeys } from '../utils/schema';
@@ -35,7 +36,7 @@ const markRecordSynced = async (primaryKey: string): Promise<void> => {
 // Esta reparacao devolve-os a fila uma vez por instalacao (flag persistida).
 // ============================================================================
 export const FISCAL_ACCOUNT_REPAIR_FLAG = 'app_repair_fiscal_account_resync_v1';
-export const FISCAL_ACCOUNT = '131105001';
+export const FISCAL_ACCOUNT = FISCAL_ACCOUNT_PREFIX;
 
 /**
  * Reabre uma unica vez os registos da conta `131105001` que o corte antigo deu
@@ -71,7 +72,9 @@ async function runFiscalAccountRepair(origin: 'startup' | 'sync'): Promise<numbe
   // vez de ler a base inteira.
   const rows = await db.local_assets.where('_is_synced').equals(1).toArray();
   const primaryKeys = Array.from(new Set(rows
-    .filter((row) => String(row.contacontabil ?? '').trim() === FISCAL_ACCOUNT)
+    // O ERP concatena a conta com o nome (`131105001PROJETOSEMANDAMENTO`):
+    // a comparação é por prefixo, senão não encontra uma única linha real.
+    .filter((row) => isFiscalAccount(row.contacontabil))
     .filter((row) => !row._is_deleted)
     .map((row) => String(row.primarykey || '').trim())
     .filter(Boolean)));

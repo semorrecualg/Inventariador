@@ -45,9 +45,9 @@ describe('carga de linhas com etiqueta repetida', () => {
 
     const chaves = await keysIn();
     expect(chaves).toEqual([
-      'CICOPAL-010101-1001-1',
-      'CICOPAL-010101-1002-1',
-      'CICOPAL-010101-1003-1'
+      '01010110011',
+      '01010110021',
+      '01010110031'
     ]);
     // A etiqueta não entra na chave.
     chaves.forEach((chave) => expect(chave).not.toContain('000420'));
@@ -62,7 +62,7 @@ describe('carga de linhas com etiqueta repetida', () => {
       row({ etiqueta: '000420', registro: '1001', subreg: '1', descricaodoativo: 'MESA' })
     ]);
 
-    expect(await keysIn()).toEqual(['CICOPAL-010101-1001-1', 'CICOPAL-010101-1001-1-2']);
+    expect(await keysIn()).toEqual(['01010110011', '01010110011-2']);
     expect(await db.local_assets.count()).toBe(2);
   });
 
@@ -95,8 +95,9 @@ describe('carga de linhas com etiqueta repetida', () => {
       row({ tenantid: 'OUTRO', registro: '1001' })
     ]);
 
-    expect(await keysIn('CICOPAL')).toEqual(['CICOPAL-010101-1001']);
-    expect(await keysIn('OUTRO')).toEqual(['OUTRO-010101-1001']);
+    // A chave é a do ERP e não traz o contrato; o `tenantid` é o prefixo da PK.
+    expect(await keysIn('CICOPAL')).toEqual(['0101011001']);
+    expect(await keysIn('OUTRO')).toEqual(['0101011001']);
   });
 
   it('sem registro nem subreg cai na chave derivada do conteúdo (nunca na etiqueta)', async () => {
@@ -123,9 +124,12 @@ describe('createAssetKeyAllocator', () => {
   it('prefere a chave do contrato e sanea os campos', () => {
     const allocate = createAssetKeyAllocator(fallback);
     expect(allocate({ tenantid: 'cicopal', filial: ' 010101 ', registro: 'r-9', subreg: '02' }))
-      .toBe('CICOPAL-010101-R-9-02');
+      .toBe('010101R-902');
     expect(allocate({ tenantid: 'CICOPAL', filial: '010101', registro: 'r-9', subreg: '02' }))
-      .toBe('CICOPAL-010101-R-9-02-2');
+      .toBe('010101R-902-2');
+    // Mesma chave noutro contrato não é repetição: o `tenantid` separa.
+    expect(allocate({ tenantid: 'OUTRO', filial: '010101', registro: 'r-9', subreg: '02' }))
+      .toBe('010101R-902');
   });
 
   it('nunca usa a etiqueta, mesmo quando ela é a única coisa preenchida', () => {

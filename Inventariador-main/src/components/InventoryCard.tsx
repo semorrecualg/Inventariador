@@ -4,6 +4,7 @@ import { getCurrentTenantid } from '../services/localDbService';
 import { Asset } from '../types';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
 import { showRecoveryToast } from '../services/NavigationGuardService';
+import { isFiscalAccount } from '../utils/fiscalAccount';
 import { 
   ArrowLeft, 
   MapPin, 
@@ -254,7 +255,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         (filterConferido === 'pendente' && !isConferido);
 
       // Filtro de conta de eliminação fiscal (131105001)
-      const isContaEspecial = ativo.contacontabil === '131105001';
+      const isContaEspecial = isFiscalAccount(ativo.contacontabil);
       const matchConta = !filterContaEspecial || isContaEspecial;
 
       return matchText && matchConferido && matchConta;
@@ -268,7 +269,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
     const conferidos = list.filter(a => a._conferido === 1).length;
     const pendentes = total - conferidos;
     const somaFinanceira = list.reduce((acc, curr) => acc + (curr.vlraquisic || 0), 0);
-    const contaEspecialContagem = list.filter(a => a.contacontabil === '131105001').length;
+    const contaEspecialContagem = list.filter(a => isFiscalAccount(a.contacontabil)).length;
 
     return {
       total,
@@ -892,7 +893,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
             <div className="divide-y divide-slate-900">
               {paginatedAtivos.map((ativo) => {
                 const isConferido = ativo._conferido === 1;
-                const isSpecial = ativo.contacontabil === '131105001';
+                const isSpecial = isFiscalAccount(ativo.contacontabil);
 
                 return (
                   <div 

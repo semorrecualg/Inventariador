@@ -128,25 +128,39 @@ export interface AssetKeySources {
 }
 
 /**
- * CHAVE DO CONTRATO — `tenantid + filial + registro + subreg`
+ * Código da filial: os dígitos iniciais de `filial`.
+ *
+ * A planilha traz `010101 CICOPAL GO` (código + nome) e às vezes só `010101`.
+ * Usar o texto inteiro dava chaves diferentes para a mesma unidade, e o mesmo
+ * ativo entrava duas vezes. O código é `010101` nos dois casos.
+ */
+export const filialCode = (value: unknown): string => {
+  const raw = String(value ?? '').trim();
+  const digits = raw.match(/^\d+/);
+  return digits ? digits[0] : sanitizeAssetKey(raw);
+};
+
+/**
+ * CHAVE DO CONTRATO — formato do `primarykey` do ERP
  * ============================================================================
  * A etiqueta NÃO identifica um ativo: uma planilha contábil tem várias linhas
  * com a mesma etiqueta (contas, sub-registros e baixas repetem-na de propósito).
  * Usá-la como chave fazia a segunda linha sobrescrever a primeira no `bulkPut`.
  *
- * A identidade vem dos campos do contrato: `tenantid + filial + registro +
- * subreg`, saneados e ligados por `-` (campos vazios não entram). Sem
- * `registro` nem `subreg` não há identidade de contrato e devolve `''` — quem
- * chama decide a derivação por conteúdo.
+ * A identidade é a do ERP: `código da filial + registro + subreg`, sem
+ * separadores — `010101OBRA102840007`. É exactamente o `primarykey` que o
+ * Protheus devolve, portanto a chave derivada coincide com a do contrato quando
+ * a planilha não traz a coluna. O `tenantid` não entra na string: ele já é o
+ * prefixo da chave primária local (`[tenantid + primarykey]`).
+ *
+ * Sem `registro` nem `subreg` não há identidade de contrato e devolve `''` —
+ * quem chama decide a derivação por conteúdo.
  */
 export const contractAssetKey = (sources: AssetKeySources): string => {
   const registro = sanitizeAssetKey(sources.registro);
   const subreg = sanitizeAssetKey(sources.subreg);
   if (!registro && !subreg) return '';
-  return [sources.tenantid, sources.filial, registro, subreg]
-    .map((value) => sanitizeAssetKey(value))
-    .filter((value) => value !== '')
-    .join('-');
+  return `${filialCode(sources.filial)}${registro}${subreg}`;
 };
 
 /**
@@ -161,7 +175,7 @@ export const contractAssetKey = (sources: AssetKeySources): string => {
  * produzir as mesmas chaves (sem duplicar a cada importação).
  *
  * Linha com `primarykey` nunca recebe sufixo: é a chave do contrato.
- * A identidade vem de `tenantid + filial + registro + subreg` (ver
+ * A identidade vem do `código da filial + registro + subreg` (ver
  * `contractAssetKey`) — nunca da etiqueta, que se repete entre linhas.
  * A derivação por conteúdo (`allocateFallback`) fica para linhas sem identidade.
  */
@@ -176,15 +190,18 @@ export const createAssetKeyAllocator = (
     const base = contractAssetKey(sources);
     if (!base) return allocateFallback(sources);
 
-    const occurrence = (seen.get(base) ?? 0) + 1;
-    seen.set(base, occurrence);
+    // A chave não traz o contrato, mas os contratos são independentes:
+    // a mesma chave em contratos diferentes não é repetição.
+    const scope = `${sanitizeAssetKey(sources.tenantid)}|${base}`;
+    const occurrence = (seen.get(scope) ?? 0) + 1;
+    seen.set(scope, occurrence);
     return occurrence === 1 ? base : `${base}-${occurrence}`;
   };
 };
 
 /**
  * Resolve a chave de um ativo na ordem do contrato:
- * `primarykey` → `tenantid + filial + registro + subreg` → derivada do conteúdo.
+ * `primarykey` → `código da filial + registro + subreg` → derivada do conteúdo.
  * A etiqueta fica de fora de propósito: repete-se entre linhas da planilha.
  */
 export const resolveAssetKey = (

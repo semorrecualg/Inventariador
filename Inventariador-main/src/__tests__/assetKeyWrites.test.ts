@@ -45,7 +45,7 @@ describe('assetKey · caminhos de escrita gravam a mesma chave', () => {
       expect(row.primarykey).toBe(row.primarykey.toUpperCase());
     });
     expect(stored.map((row) => row.primarykey)).toEqual(
-      expect.arrayContaining(['ABC-1001', 'CICOPAL-010101CICOPALGO-REG-7'])
+      expect.arrayContaining(['ABC-1001', '010101REG-7'])
     );
   });
 

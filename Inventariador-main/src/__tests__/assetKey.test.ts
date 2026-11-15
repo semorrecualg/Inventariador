@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   contractAssetKey,
+  filialCode,
   createFallbackKeyAllocator,
   contentFingerprint,
   fallbackAssetKey,
@@ -77,21 +78,30 @@ describe('assetKey · chave derivada (fim do ALT- aleatório)', () => {
   });
 });
 
-describe('assetKey · chave do contrato (tenantid + filial + registro + subreg)', () => {
-  it('monta a chave com os quatro campos, saneados', () => {
-    expect(contractAssetKey({ tenantid: 'cicopal', filial: '010101 cicopal go', registro: ' 123 ', subreg: '2' }))
-      .toBe('CICOPAL-010101CICOPALGO-123-2');
+describe('assetKey · chave do contrato no formato do ERP', () => {
+  it('usa o código da filial + registro + subreg, como o primarykey do Protheus', () => {
+    expect(contractAssetKey({ tenantid: 'CICOPAL', filial: '010101 CICOPAL GO', registro: 'OBRA10284', subreg: '0007' }))
+      .toBe('010101OBRA102840007');
+    // A linha real do ERP confirma o formato:
+    expect(contractAssetKey({ filial: '010101', registro: '0000004907', subreg: '0001' }))
+      .toBe('01010100000049070001');
   });
 
-  it('usa os campos que existirem, sem separadores a mais', () => {
-    expect(contractAssetKey({ tenantid: 'CICOPAL', filial: '010101', registro: '123' }))
-      .toBe('CICOPAL-010101-123');
-    expect(contractAssetKey({ tenantid: 'CICOPAL', filial: '010101', subreg: '003' }))
-      .toBe('CICOPAL-010101-003');
+  it('a filial escrita com ou sem nome dá a MESMA chave', () => {
+    const comNome = contractAssetKey({ filial: '010101 CICOPAL GO', registro: '1001', subreg: '2' });
+    const soCodigo = contractAssetKey({ filial: ' 010101 ', registro: '1001', subreg: '2' });
+    expect(comNome).toBe(soCodigo);
+    expect(comNome).toBe('01010110012');
   });
 
   it('sem registro nem subreg não há identidade de contrato', () => {
     expect(contractAssetKey({ tenantid: 'CICOPAL', filial: '010101', etiqueta: 'ETQ-1' })).toBe('');
+  });
+
+  it('filial sem código usa o texto saneado', () => {
+    expect(filialCode('MATRIZ')).toBe('MATRIZ');
+    expect(filialCode(' matriz ')).toBe('MATRIZ');
+    expect(filialCode('010101 CICOPAL GO')).toBe('010101');
   });
 });
 
@@ -100,8 +110,8 @@ describe('assetKey · resolução da chave de um ativo', () => {
     const fallback = () => 'SEM-ETIQUETA-FALLBACK';
     const contrato = { tenantid: 'CICOPAL', filial: '010101', registro: '123', subreg: '2' };
     expect(resolveAssetKey({ primarykey: 'pk-1', ...contrato }, fallback)).toBe('PK-1');
-    expect(resolveAssetKey({ primarykey: '  ', ...contrato }, fallback)).toBe('CICOPAL-010101-123-2');
-    expect(resolveAssetKey({ ...contrato, subreg: '' }, fallback)).toBe('CICOPAL-010101-123');
+    expect(resolveAssetKey({ primarykey: '  ', ...contrato }, fallback)).toBe('0101011232');
+    expect(resolveAssetKey({ ...contrato, subreg: '' }, fallback)).toBe('010101123');
     expect(resolveAssetKey({}, fallback)).toBe('SEM-ETIQUETA-FALLBACK');
   });
 
