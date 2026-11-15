@@ -110,7 +110,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode } from './services/supabaseService';
+import { getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMarkDetailed, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { beginSyncCycle, endSyncCycle, pullIntoSession, pushAssetsWithReceipt, type SyncSession } from './services/syncSessionService';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
@@ -2494,7 +2494,7 @@ useEffect(() => {
         const { synced: syncedIds } = await pushAssetsWithReceipt(dirtyAssets, effectiveTenantid, {
           auditor: user?.email,
           session: cycleSession,
-          sync: (batch, tenant) => syncAssetsToCloudAndMark(batch, tenant),
+          sync: (batch, tenant) => syncAssetsToCloudAndMarkDetailed(batch, tenant),
         });
         
         // Sincroniza a config também para garantir que o timestamp suba
@@ -5045,7 +5045,7 @@ useEffect(() => {
       // F2 — mesmo recibo/idempotência do push principal, na fila de nuvem.
       const { synced } = await pushAssetsWithReceipt(pending, user?.tenantid, {
         auditor: user?.email,
-        sync: (batch, tenant) => syncAssetsToCloudAndMark(batch, tenant),
+        sync: (batch, tenant) => syncAssetsToCloudAndMarkDetailed(batch, tenant),
       });
       const syncedSet = new Set(synced.map(String));
       if (syncedSet.size > 0) {

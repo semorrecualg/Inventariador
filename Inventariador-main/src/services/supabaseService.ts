@@ -932,7 +932,20 @@ export const signInWithMagicLink = async (email: string) => {
  */
 let assetsIdMode: 'key' | 'uuid' = 'key';
 
-export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<string[]> => {
+/** Recusa de um ativo no transporte, com o motivo que o Postgres devolveu. */
+export interface AssetSyncFailure {
+  /** Chave de origem (`primarykey`) do ativo recusado. */
+  key: string;
+  reason: string;
+}
+
+/**
+ * Núcleo do espelhamento: devolve o que entrou e o que foi recusado, com motivo.
+ *
+ * Não lança por recusa parcial — quem decide o que fazer com as recusas é o
+ * chamador (o push com recibo grava-as na sessão; a API antiga lança).
+ */
+const syncAssetsCore = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<{ synced: string[]; failures: AssetSyncFailure[] }> => {
   if (!assets || assets.length === 0) {
     logger.error('>>> [Supabase] Fluxo Bloqueado: Ação explícita de sincronia abortada. Array de ativos nulo ou vazio detectado.');
     throw new SupabaseNetworkException('Ação Bloqueada: Não há ativos gravados no disco local para espelhamento Delta.');
@@ -940,7 +953,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
 
   if (!supabase || !navigator.onLine) {
     logger.warn('>>> [Supabase] Sincronização ignorada: Sem conexão ou Supabase não configurado.');
-    return [];
+    return { synced: [], failures: [] };
   }
 
   const isBatteryCritical = await sqliteService.isBatteryCritical?.() ?? false;
@@ -962,7 +975,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   const MAX_PARALLEL_BATCHES = 4;
   const total = assets.length;
   const successfullySyncedIds: string[] = [];
-  const failedRows: string[] = []; // Isolamento de registros rejeitados (diagnóstico por id)
+  // Isolamento de registros rejeitados: chave + motivo real do Postgres.
+  const failures: AssetSyncFailure[] = [];
   let processedRows = 0;
   const startedAt = Date.now();
   // Formato de `id` aceito pelo schema remoto ('key' = chave de origem;
@@ -1145,7 +1159,10 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
               successfullySyncedIds.push(localKey);
               return;
             }
-            failedRows.push(`${row.primarykey ?? localKey}: ${describeSupabaseError(rowErr)}`);
+            failures.push({
+              key: String(row.primarykey ?? localKey ?? ''),
+              reason: describeSupabaseError(rowErr),
+            });
           }
         }));
       }
@@ -1182,14 +1199,32 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     `(${total > 0 ? Math.round(total / Math.max(elapsedMs, 1) * 1000) : 0} ativos/s)`
   );
 
-  if (failedRows.length > 0) {
-    logger.error(`>>> [Supabase] Espelhamento concluído com ${failedRows.length} registro(s) rejeitado(s) por esquema/dados.`);
-    throw new SupabaseNetworkException(
-      `Espelhamento parcial: ${successfullySyncedIds.length} ativos sincronizados, ${failedRows.length} rejeitados (ex.: ${failedRows.slice(0, 3).join(' | ')})`
-    );
+  if (failures.length > 0) {
+    logger.error(`>>> [Supabase] Espelhamento concluído com ${failures.length} registro(s) rejeitado(s) por esquema/dados.`);
+    const amostra = failures.slice(0, 3).map(f => `${f.key}: ${f.reason}`).join(' | ');
+    logger.warn(`>>> [Supabase] Amostra de recusas: ${amostra}`);
   }
 
-  return successfullySyncedIds;
+  return { synced: successfullySyncedIds, failures };
+};
+
+/**
+ * Espelhamento no contrato antigo: devolve os ids aceites e lança se houver
+ * recusa — quem precisa das razões usa `syncAssetsToCloudAndMarkDetailed`.
+ */
+export const syncAssetsToCloud = async (
+  assets: Asset[],
+  tenantid?: string | string[],
+  onProgress?: (processed: number, total: number) => void
+): Promise<string[]> => {
+  const { synced, failures } = await syncAssetsCore(assets, tenantid, onProgress);
+  if (failures.length > 0) {
+    const amostra = failures.slice(0, 3).map(f => `${f.key}: ${f.reason}`).join(' | ');
+    throw new SupabaseNetworkException(
+      `Espelhamento parcial: ${synced.length} ativos sincronizados, ${failures.length} rejeitados (ex.: ${amostra})`
+    );
+  }
+  return synced;
 };
 
 /**
@@ -1197,12 +1232,12 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
  * os ids aceites são marcados `_is_synced = 1` numa única transação. É o único
  * ponto que apaga a etiqueta “PENDENTE NUVEM” sem esperar um novo download.
  */
-export const syncAssetsToCloudAndMark = async (
+export const syncAssetsToCloudAndMarkDetailed = async (
   assets: Asset[],
   tenantid?: string | string[],
   onProgress?: (processed: number, total: number) => void
-): Promise<string[]> => {
-  const synced = await syncAssetsToCloud(assets, tenantid, onProgress);
+): Promise<{ synced: string[]; failures: AssetSyncFailure[] }> => {
+  const { synced, failures } = await syncAssetsCore(assets, tenantid, onProgress);
   if (synced.length > 0) {
     // `syncAssetsToCloud` devolve ids locais, mas o índice `primarykey` é a chave
     // de origem — nos ativos em que `id !== primarykey`, marcar pelo id não
@@ -1217,6 +1252,21 @@ export const syncAssetsToCloudAndMark = async (
     } catch (markErr) {
       logger.warn('>>> [Supabase] Ativos enviados mas falhou a marcação local de sincronizado:', markErr);
     }
+  }
+  return { synced, failures };
+};
+
+export const syncAssetsToCloudAndMark = async (
+  assets: Asset[],
+  tenantid?: string | string[],
+  onProgress?: (processed: number, total: number) => void
+): Promise<string[]> => {
+  const { synced, failures } = await syncAssetsToCloudAndMarkDetailed(assets, tenantid, onProgress);
+  if (failures.length > 0) {
+    const amostra = failures.slice(0, 3).map(f => `${f.key}: ${f.reason}`).join(' | ');
+    throw new SupabaseNetworkException(
+      `Espelhamento parcial: ${synced.length} ativos sincronizados, ${failures.length} rejeitados (ex.: ${amostra})`
+    );
   }
   return synced;
 };

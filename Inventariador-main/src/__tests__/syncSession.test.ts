@@ -484,3 +484,63 @@ describe('syncSession — recusa com motivo (F2.5)', () => {
     expect(session.rejections).toEqual([]);
   });
 });
+
+describe('syncSession — motivo real do transporte (F2.5)', () => {
+  let store: ReturnType<typeof makeStore>;
+  beforeEach(() => {
+    store = makeStore();
+  });
+
+  it('o recibo mostra a razão que o Postgres devolveu, não a constante padrão', async () => {
+    const session = await openSyncSession({ tenantid: 'CICOPAL', auditor: 'a@b.com', store, now: T0 });
+
+    const { session: after } = await pushAssetsWithReceipt([asset('AT-9')], 'CICOPAL', {
+      session,
+      store,
+      now: T0,
+      // Transporte detalhado: aceitou nada e explicou por quê.
+      sync: async () => ({
+        synced: [],
+        failures: [{ key: 'AT-9', reason: '23503: filial 010101 não existe no contrato' }],
+      }),
+    });
+
+    expect(describeRejections(after)).toEqual([
+      { key: 'AT-9', reason: '23503: filial 010101 não existe no contrato' },
+    ]);
+
+    await finalizeSyncSession(after, store);
+    expect(after.status).toBe('PARTIAL');
+    expect(formatReceipt(after)).toContain('recusados 1 (23503: filial 010101 não existe no contrato)');
+  });
+
+  it('recusa que o transporte não nomeia fica com o motivo padrão', async () => {
+    const session = await openSyncSession({ tenantid: 'CICOPAL', auditor: 'a@b.com', store, now: T0 });
+
+    await pushAssetsWithReceipt([asset('AT-10')], 'CICOPAL', {
+      session,
+      store,
+      now: T0,
+      // Contrato antigo: só a lista de aceites, sem razões.
+      sync: async () => [],
+    });
+
+    expect(session.rejections?.[0]?.reason).toBe(DEFAULT_REJECTION_REASON);
+  });
+
+  it('aceite continua a limpar a recusa anterior do mesmo ativo', async () => {
+    const session = await openSyncSession({ tenantid: 'CICOPAL', auditor: 'a@b.com', store, now: T0 });
+
+    await pushAssetsWithReceipt([asset('AT-11')], 'CICOPAL', {
+      session, store, now: T0,
+      sync: async () => ({ synced: [], failures: [{ key: 'AT-11', reason: 'timeout' }] }),
+    });
+    await pushAssetsWithReceipt([asset('AT-11')], 'CICOPAL', {
+      session, store, now: T0,
+      sync: async () => ({ synced: ['AT-11'], failures: [] }),
+    });
+
+    expect(session.rejections).toEqual([]);
+    expect(session.acceptedKeys).toEqual(['CICOPAL|AT-11']);
+  });
+});

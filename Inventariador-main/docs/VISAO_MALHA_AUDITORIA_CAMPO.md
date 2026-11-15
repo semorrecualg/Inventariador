@@ -330,13 +330,17 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
 
 ### Status
 
-- **F2 — concluída** em `src/services/syncSessionService.ts`, com 24 casos em
+- **F2 — concluída** em `src/services/syncSessionService.ts`, com 27 casos em
   `src/__tests__/syncSession.test.ts`. O recibo (enviados, aceitos, recusados com
   motivo, recebidos, faltantes e checksum) fica persistido em `gbr_sync_sessions`
   e aparece na tela **Gestão de Sincronização**. Ao fechar, as listas de chaves
   são liberadas de facto (`persistSession` com `replace`) — antes a união com o
   gravado mantinha milhares de chaves numa sessão já concluída. Falta o aceite
   formal do dono.
+- **Recusa com motivo real**: `syncAssetsToCloudAndMarkDetailed` devolve
+  `failures: { key, reason }` do próprio Postgres (o erro por linha do
+  isolamento), e o push com recibo grava cada motivo na sessão — a tela e o
+  recibo mostram a razão verdadeira, não a constante de recurso.
 
 ## 11. Próximo passo
 

@@ -360,21 +360,28 @@ export const registerAccepted = async (
 };
 
 /** Registra o que a nuvem recusou nesta tentativa (fica para a próxima). */
+export const registerRejections = async (
+  session: SyncSession,
+  items: { key: string; reason: string }[],
+  store?: SyncSessionStore
+): Promise<SyncSession> => {
+  const merged = new Set([...session.rejectedKeys, ...items.map(item => item.key)]);
+  session.rejectedKeys = [...merged];
+  const at = new Date().toISOString();
+  const known = new Map((session.rejections ?? []).map(item => [item.key, item]));
+  for (const item of items) known.set(item.key, { key: item.key, reason: item.reason, at });
+  session.rejections = [...known.values()].slice(-MAX_REJECTIONS_KEPT);
+  await persistSession(session, store);
+  return session;
+};
+
 export const registerRejected = async (
   session: SyncSession,
   keys: string[],
   store?: SyncSessionStore,
   reason: string = DEFAULT_REJECTION_REASON
-): Promise<SyncSession> => {
-  const merged = new Set([...session.rejectedKeys, ...keys]);
-  session.rejectedKeys = [...merged];
-  const at = new Date().toISOString();
-  const known = new Map((session.rejections ?? []).map(item => [item.key, item]));
-  for (const key of keys) known.set(key, { key, reason, at });
-  session.rejections = [...known.values()].slice(-MAX_REJECTIONS_KEPT);
-  await persistSession(session, store);
-  return session;
-};
+): Promise<SyncSession> =>
+  registerRejections(session, keys.map(key => ({ key, reason })), store);
 
 /** Recusas prontas para a tela: chave sem o contrato repetido, com o motivo. */
 export const describeRejections = (
@@ -540,8 +547,15 @@ export interface PushWithReceiptOptions {
   auditor?: string;
   filial?: string;
   store?: SyncSessionStore;
-  /** Transporte: por padrão o envio real; os testes injetam um dublê. */
-  sync?: (assets: Asset[], tenantid?: string) => Promise<string[]>;
+  /**
+   * Transporte de envio. Pode devolver só os ids aceites (contrato antigo) ou
+   * `{ synced, failures }` — o detalhado é o que traz o motivo real da recusa
+   * do Postgres até ao recibo e à tela.
+   */
+  sync?: (
+    assets: Asset[],
+    tenantid?: string
+  ) => Promise<string[] | { synced: string[]; failures: { key: string; reason: string }[] }>;
   now?: number;
   /** Sessão explícita (usada quando já existe um ciclo aberto). */
   session?: SyncSession;
@@ -602,8 +616,15 @@ export const pushAssetsWithReceipt = async (
   }
 
   let acceptedLocalIds: string[] = [];
+  let failures: { key: string; reason: string }[] = [];
   try {
-    acceptedLocalIds = await sync(pending, tenantid);
+    const result = await sync(pending, tenantid);
+    if (Array.isArray(result)) {
+      acceptedLocalIds = result;
+    } else {
+      acceptedLocalIds = result.synced;
+      failures = result.failures;
+    }
   } catch (err) {
     // Sessão fica ABERTA de propósito: a próxima rodada retoma e não reenvia
     // o que já foi aceito antes da falha. Relê o persistido para não apagar
@@ -628,9 +649,19 @@ export const pushAssetsWithReceipt = async (
     .map(assetSyncKey)
     .filter(k => !acceptedSet.has(k));
 
+  // Motivo real por chave: o transporte diz o que o Postgres respondeu; o que
+  // ele não nomeou (recusa silenciosa) fica com o motivo padrão.
+  const reasonByKey = new Map(
+    failures.map(item => [`${tenant}|${String(item.key).trim()}`, item.reason])
+  );
+
   session.failed = false;
   await registerAccepted(session, acceptedKeys, store);
-  await registerRejected(session, rejectedKeys, store);
+  await registerRejections(
+    session,
+    rejectedKeys.map(key => ({ key, reason: reasonByKey.get(key) ?? DEFAULT_REJECTION_REASON })),
+    store
+  );
 
   if (!inCycle) await finalizeSyncSession(session, store);
 
