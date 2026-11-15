@@ -140,6 +140,7 @@ import {
   limparRecuperacaoDeSenha,
   marcarRecuperacaoDeSenha
 } from './utils/passwordRecovery';
+import { tokensDoLinkDeRecuperacao } from './utils/recoveryLink';
 import pkg from '../package.json';
 
 export class AppBootstrapError extends Error {
@@ -1255,12 +1256,46 @@ useEffect(() => {
     };
     void registerAppStateListener();
 
+    // Deep link de recuperação (APK): `com.gbr.kardek://recovery#access_token=…`.
+    // Sem este listener o link abria a app e nada acontecia — os tokens ficavam
+    // por trocar e a senha continuava a antiga.
+    let appUrlHandle: { remove: () => Promise<void> } | null = null;
+    const registerAppUrlListener = async () => {
+      try {
+        const { App: CapacitorApp } = await import('@capacitor/app');
+        const handle = await CapacitorApp.addListener('appUrlOpen', async ({ url }) => {
+          const tokens = tokensDoLinkDeRecuperacao(url);
+          if (!tokens || !supabase) return;
+          logger.info('[Auth] Link de recuperação recebido no app: trocando tokens por sessão.');
+          const { error } = await supabase.auth.setSession({
+            access_token: tokens.accessToken,
+            refresh_token: tokens.refreshToken
+          });
+          if (error) {
+            logger.warn('[Auth] Não foi possível abrir a sessão do link de recuperação:', error.message);
+            return;
+          }
+          setIsPasswordRecovery(true);
+        });
+        if (disposed) {
+          void handle.remove();
+        } else {
+          appUrlHandle = handle;
+        }
+      } catch (err) {
+        // Browser/PWA: não há deep link nativo, o fluxo web continua.
+        logger.warn('[Auth] appUrlOpen indisponível nesta plataforma:', err);
+      }
+    };
+    void registerAppUrlListener();
+
     // Limpeza de memória ao desmontar o ecossistema do App
     return () => {
       disposed = true;
       clearInterval(syncIntervalId);
       window.removeEventListener('online', handleNetworkReconnection);
       if (appStateHandle) void appStateHandle.remove();
+      if (appUrlHandle) void appUrlHandle.remove();
     };
   }, [user]);
 
