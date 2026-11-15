@@ -673,7 +673,11 @@ const Login: React.FC<LoginProps> = ({
               filial: loggedUser.filial
             };
             logger.info('[Login] Gravando perfil nas credenciais locais do SQLite para uso offline...', userToPersist.email);
-            await localDb.users.add(userToPersist as unknown as User);
+            // O registo local é indexado pelo e-mail: `add` substitui a linha
+            // inteira e perdia senha local, `units` e `mustChangePassword` de um
+            // perfil já existente. Mescla-se o que já estava guardado.
+            const existente = await localDb.users.get({ email: String(userToPersist.email || '') });
+            await localDb.users.add({ ...(existente || {}), ...userToPersist } as unknown as User);
           } catch (dbPersistErr) {
             logger.warn('[Login] Falha ao persistir perfil de usuário no SQLite local:', dbPersistErr);
           }

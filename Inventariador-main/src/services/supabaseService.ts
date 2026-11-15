@@ -8,6 +8,7 @@ import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
 import { comTimeout, PULL_PAGE_TIMEOUT_MS } from '../utils/pullTimeout';
+import { podeCriarPerfilNaNuvem } from '../utils/sessionScope';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { buildUnitFlags, mergeUnitFlags, pickUnitFlags } from '../utils/unitConfigFlags';
@@ -868,16 +869,24 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   // uma linha existente com tenantid vazio (o perfil real já foi resolvido no
   // caminho 'found' acima; aqui apenas CRIAMOS quando não existe). Sem isso, um
   // timeout no fetch + fallbackTenant vazio apagaria a atribuição usuário×contrato.
-  const upsertPromise = supabase
-    .from('user_permissions')
-    .upsert([insertData], { onConflict: 'email', ignoreDuplicates: true })
-    .select()
-    .single();
+  //
+  // E sem contrato conhecido NÃO se cria nada: era assim que apareciam registos
+  // fantasmas ("S/ GRUPO · GLOBAL") na lista de Acessos, um por leitura falhada.
+  let upsertResult: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (podeCriarPerfilNaNuvem(fallbackTenant)) {
+    const upsertPromise = supabase
+      .from('user_permissions')
+      .upsert([insertData], { onConflict: 'email', ignoreDuplicates: true })
+      .select()
+      .single();
 
-  const upsertResult = await Promise.race([
-    upsertPromise,
-    new Promise<null>((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), PROFILE_UPSERT_TIMEOUT_MS))
-  ]).catch(() => null) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    upsertResult = await Promise.race([
+      upsertPromise,
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), PROFILE_UPSERT_TIMEOUT_MS))
+    ]).catch(() => null) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  } else {
+    logger.warn('[Supabase] Perfil ausente e sem contrato conhecido: NÃO criando registo incompleto em user_permissions.');
+  }
 
   if (upsertResult && !upsertResult.error && upsertResult.data) {
     const d = upsertResult.data;

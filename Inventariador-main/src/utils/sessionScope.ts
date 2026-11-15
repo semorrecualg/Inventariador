@@ -80,3 +80,13 @@ export const mensagemContaSemContrato = (
   };
   return `A conta ${email} não tem Contrato nem Filial atribuídos na base de permissões (lido: contrato ${lido(tenantid)}, filial ${lido(filial)}). Peça ao administrador para atribuir o contrato e a filial em user_permissions — reautenticar sozinho não resolve.`;
 };
+
+/**
+ * Só se cria um perfil em `user_permissions` quando há contrato para atribuir.
+ *
+ * O fallback do `ensureUserProfile` fazia upsert mesmo com `tenantid` vazio: cada
+ * leitura de perfil que falhava podia deixar um registo fantasma — daí a linha
+ * "S/ GRUPO · ADMIN · GLOBAL" aparecer em Acessos, sem contrato nem filial.
+ */
+export const podeCriarPerfilNaNuvem = (tenantid?: string | null): boolean =>
+  (tenantid ?? '').trim().length > 0;

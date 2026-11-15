@@ -120,7 +120,9 @@ describe('syncUsersToCloud — nunca apaga o tenantid atribuído na nuvem', () =
 
 describe('ensureUserProfile — upsert de fallback não sobrescreve linha existente', () => {
   it('usa ignoreDuplicates no upsert para proteger a atribuição existente', async () => {
-    const profile = await ensureUserProfile('auditor@example.com');
+    // Com contrato conhecido (metadata), o fallback ainda cria a linha quando
+    // ela não existe — e continua a não a sobrescrever.
+    const profile = await ensureUserProfile('auditor@example.com', { tenantid: 'CICOPAL' });
 
     // Caminho: fetch não encontrou → upsert com ignoreDuplicates
     expect(upsertCalls.length).toBe(1);
@@ -129,5 +131,14 @@ describe('ensureUserProfile — upsert de fallback não sobrescreve linha existe
     // Perfil devolvido para o login
     expect(profile.email).toBe('auditor@example.com');
     expect(profile.role).toBe('AUDITOR');
+  });
+
+  it('sem contrato para atribuir, NÃO cria registo fantasma em user_permissions', async () => {
+    // Era assim que aparecia a linha "S/ GRUPO · ADMIN · GLOBAL" em Acessos.
+    const profile = await ensureUserProfile('fantasma@example.com');
+
+    expect(upsertCalls.length).toBe(0);
+    expect(profile.email).toBe('fantasma@example.com');
+    expect(profile.perfilIndisponivel).toBe(true);
   });
 });

@@ -8,6 +8,7 @@ import {
   mensagemContaSemContrato,
   perfilAdministrativo,
   perfilNaoLido,
+  podeCriarPerfilNaNuvem,
   type EntradaEscopo
 } from '../utils/sessionScope';
 
@@ -126,5 +127,19 @@ describe('perfilAdministrativo', () => {
     };
     expect(decidirEscopoDeSessao(adminContrato)).toBe('SEGUIR');
     expect(decidirEscopoDeSessao({ ...adminContrato, filial: '' })).toBe('SEM_ESCOPO');
+  });
+});
+
+describe('podeCriarPerfilNaNuvem', () => {
+  it('não cria perfil sem contrato (registo fantasma em Acessos)', () => {
+    expect(podeCriarPerfilNaNuvem('')).toBe(false);
+    expect(podeCriarPerfilNaNuvem('   ')).toBe(false);
+    expect(podeCriarPerfilNaNuvem(undefined)).toBe(false);
+    expect(podeCriarPerfilNaNuvem(null)).toBe(false);
+  });
+
+  it('cria quando há contrato para atribuir', () => {
+    expect(podeCriarPerfilNaNuvem('CICOPAL')).toBe(true);
+    expect(podeCriarPerfilNaNuvem(' cicopal ')).toBe(true);
   });
 });
