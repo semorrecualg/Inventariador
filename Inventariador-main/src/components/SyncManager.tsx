@@ -11,11 +11,13 @@ import {
   Image as ImageIcon,
   Loader2,
   Wifi,
-  WifiOff
+  WifiOff,
+  ShieldCheck
 } from 'lucide-react';
 import BackButton from './BackButton';
 import { SyncQueueItem } from '../types';
 import { getPendingSyncItems, processSyncQueue, removeItemFromQueue, clearSyncQueue, getUnsyncedAssetsCount, processDataSyncQueue } from '../services/syncService';
+import { getLastSyncSession, describeRejections, type SyncSession } from '../services/syncSessionService';
 import Modal from './Modal';
 
 interface SyncManagerProps {
@@ -37,6 +39,7 @@ const SyncManager: React.FC<SyncManagerProps> = ({
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [receiptSession, setReceiptSession] = useState<SyncSession | null>(null);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -63,7 +66,10 @@ const SyncManager: React.FC<SyncManagerProps> = ({
     
     const unsyncedCount = await getUnsyncedAssetsCount();
     setUnsyncedAssets(unsyncedCount);
-    
+
+    // F2.4 — recibo do último ciclo, persistido pelo serviço de sessão.
+    setReceiptSession(await getLastSyncSession());
+
     setLoading(false);
   };
 
@@ -171,6 +177,56 @@ const SyncManager: React.FC<SyncManagerProps> = ({
             <p className="text-2xl font-bold text-ink">{unsyncedAssets}</p>
           </div>
         </div>
+
+        {receiptSession?.receipt && (
+          <div className="bg-bg-main p-4 rounded-2xl border border-border space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">Recibo do Último Sync</p>
+              <span className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest border ${
+                receiptSession.status === 'COMPLETED'
+                  ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                  : receiptSession.status === 'PARTIAL'
+                    ? 'bg-amber-50 text-amber-600 border-amber-100'
+                    : 'bg-rose-50 text-rose-600 border-rose-100'
+              }`}>
+                {receiptSession.status}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Enviados</p>
+                <p className="text-lg font-bold text-ink">{receiptSession.receipt.sent}</p>
+              </div>
+              <div>
+                <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Aceitos</p>
+                <p className="text-lg font-bold text-emerald-600">{receiptSession.receipt.accepted}</p>
+              </div>
+              <div>
+                <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">Faltam</p>
+                <p className={`text-lg font-bold ${receiptSession.receipt.missing > 0 ? 'text-rose-600' : 'text-ink'}`}>
+                  {receiptSession.receipt.missing}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-[8px] font-bold text-ink-muted uppercase tracking-widest">
+              <ShieldCheck size={10} className="text-emerald-600 shrink-0" />
+              <span>
+                conferência {receiptSession.receipt.checksum}
+                {receiptSession.pull ? ` · recebidos ${receiptSession.receipt.received}` : ''}
+              </span>
+            </div>
+
+            {describeRejections(receiptSession).map(item => (
+              <div key={item.key} className="p-2 bg-rose-50 border border-rose-100 rounded-lg">
+                <p className="text-[7px] font-black text-rose-900 uppercase tracking-widest leading-tight">
+                  {item.key} — {item.reason}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="flex gap-2">
           <button 

@@ -10,6 +10,10 @@ import {
   formatReceipt,
   openSyncSession,
   pruneSessions,
+  registerRejected,
+  finalizeSyncSession,
+  describeRejections,
+  DEFAULT_REJECTION_REASON,
   pushAssetsWithReceipt,
   registerAccepted,
   registerPull,
@@ -417,5 +421,66 @@ describe('syncSession — ciclo real (push + pull no mesmo recibo)', () => {
     // Sem nada aceito/recebido o ciclo fecha como ABORTED, mas com finishedAt.
     expect(encerrada.status).toBe('ABORTED');
     expect(encerrada.finishedAt).toBeTruthy();
+  });
+});
+
+describe('syncSession — recusa com motivo (F2.5)', () => {
+  let store: ReturnType<typeof makeStore>;
+  beforeEach(() => {
+    store = makeStore();
+  });
+
+  it('guarda a razão explícita de cada recusa, sem repetir o contrato na tela', async () => {
+    const session = await openSyncSession({ tenantid: 'CICOPAL', auditor: 'a@b.com', store, now: T0 });
+
+    await registerRejected(session, ['CICOPAL|AT-1'], store, 'território de outro contrato');
+
+    expect(describeRejections(session)).toEqual([
+      { key: 'AT-1', reason: 'território de outro contrato' },
+    ]);
+  });
+
+  it('usa o motivo padrão quando o chamador não diz por quê', async () => {
+    const session = await openSyncSession({ tenantid: 'CICOPAL', auditor: 'a@b.com', store, now: T0 });
+
+    await registerRejected(session, ['CICOPAL|AT-2'], store);
+
+    expect(session.rejections?.[0]?.reason).toBe(DEFAULT_REJECTION_REASON);
+  });
+
+  it('aceitar depois apaga a recusa: o recibo não guarda motivo de item que subiu', async () => {
+    const session = await openSyncSession({ tenantid: 'CICOPAL', auditor: 'a@b.com', store, now: T0 });
+    await registerRejected(session, ['CICOPAL|AT-3'], store, 'falha temporária');
+
+    await registerAccepted(session, ['CICOPAL|AT-3'], store);
+
+    expect(session.rejections).toEqual([]);
+    expect(session.rejectedKeys).toEqual([]);
+  });
+
+  it('o recibo em uma linha diz quantos e por quê', async () => {
+    const session = await openSyncSession({ tenantid: 'CICOPAL', auditor: 'a@b.com', store, now: T0 });
+    await registerRejected(session, ['CICOPAL|AT-4'], store, 'contrato diferente');
+
+    expect(formatReceipt(session)).toContain('recusados 1 (contrato diferente)');
+  });
+
+  it('fechar a sessão mantém os motivos e libera as chaves', async () => {
+    const session = await openSyncSession({ tenantid: 'CICOPAL', auditor: 'a@b.com', store, now: T0 });
+    await registerRejected(session, ['CICOPAL|AT-5'], store, 'contrato diferente');
+    await registerAccepted(session, ['CICOPAL|AT-6'], store);
+
+    // Ainda faltam itens: a sessão continua viva e nada é apagado.
+    await finalizeSyncSession(session, store);
+    expect(session.status).toBe('PARTIAL');
+    expect(session.rejections).toHaveLength(1);
+
+    // A rodada seguinte aceita o que faltava: fecha e limpa as chaves, mas a
+    // razão antiga não sobrevive presa a um item já aceito.
+    await registerAccepted(session, ['CICOPAL|AT-5'], store);
+    await finalizeSyncSession(session, store);
+    expect(session.status).toBe('COMPLETED');
+    expect(session.acceptedKeys).toEqual([]);
+    expect(session.rejections).toEqual([]);
   });
 });

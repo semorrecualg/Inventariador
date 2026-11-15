@@ -330,10 +330,16 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
 
 ### Status
 
-- **F2 — em implementação** em `src/services/syncSessionService.ts`.
+- **F2 — concluída** em `src/services/syncSessionService.ts`, com 24 casos em
+  `src/__tests__/syncSession.test.ts`. O recibo (enviados, aceitos, recusados com
+  motivo, recebidos, faltantes e checksum) fica persistido em `gbr_sync_sessions`
+  e aparece na tela **Gestão de Sincronização**. Ao fechar, as listas de chaves
+  são liberadas de facto (`persistSession` com `replace`) — antes a união com o
+  gravado mantinha milhares de chaves numa sessão já concluída. Falta o aceite
+  formal do dono.
 
 ## 11. Próximo passo
 
-F2 em curso (ver § 10). Depois dela: F0 (medir abertura, delta e push no celular
-usando o monitor SRE) e então F1 (projeção por eventos), que é a mudança mais
+F2 fechada (ver § 10). A seguir: F0 — medir abertura, delta e push no celular
+usando o monitor SRE — e então F1 (projeção por eventos), que é a mudança mais
 profunda e pode entrar por baixo, sem trocar a tela do auditor.

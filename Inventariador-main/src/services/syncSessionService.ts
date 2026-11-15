@@ -75,6 +75,14 @@ export interface SyncSessionReceipt {
   durationMs: number;
 }
 
+export interface SyncRejection {
+  /** Chave estável do ativo (`assetSyncKey`). */
+  key: string;
+  /** Razão legível para a tela — nunca um erro genérico. */
+  reason: string;
+  at: string;
+}
+
 export interface SyncSession {
   id: string;
   tenantid: string;
@@ -89,6 +97,8 @@ export interface SyncSession {
   attempts: number;
   acceptedKeys: string[];
   rejectedKeys: string[];
+  /** Motivo de cada recusa, para a tela e para o suporte. */
+  rejections?: SyncRejection[];
   pull?: SyncSessionPull;
   receipt?: SyncSessionReceipt;
   /** A rodada falhou no meio (rede/erro): a sessão NÃO deve fechar como concluída. */
@@ -108,6 +118,13 @@ const MAX_KEPT_SESSIONS = 20;
 
 /** Janela de retomada: um turno noturno de 12 h com virada de dia (decisão: 16 h). */
 export const SYNC_SESSION_RESUME_WINDOW_MS = 16 * 60 * 60 * 1000;
+
+/** Motivo padrão de recusa: a nuvem respondeu sem aceitar a chave. */
+export const DEFAULT_REJECTION_REASON =
+  'não aceito pela nuvem (permissão/RLS ou contrato diferente)';
+
+/** Teto de recusas guardadas por sessão (a contagem do recibo é independente). */
+const MAX_REJECTIONS_KEPT = 50;
 
 /** Retenção de sessões fechadas (decisão de produto: 90 dias). */
 export const SYNC_SESSION_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
@@ -274,7 +291,11 @@ export const filterNotAccepted = <T extends Pick<Asset, 'tenantid' | 'primarykey
  * Sem isto, push e pull do mesmo ciclo se sobrescreveriam: quem gravasse por
  * último apagaria as chaves/pull do outro (objetos em memória diferentes).
  */
-const persistSession = async (session: SyncSession, store?: SyncSessionStore): Promise<void> => {
+const persistSession = async (
+  session: SyncSession,
+  store?: SyncSessionStore,
+  replace = false
+): Promise<void> => {
   const s = resolveStore(store);
   const sessions = await readSessions(s);
   const index = sessions.findIndex(item => item.id === session.id);
@@ -282,7 +303,12 @@ const persistSession = async (session: SyncSession, store?: SyncSessionStore): P
 
   const merged: SyncSession = {
     ...session,
-    acceptedKeys: [...new Set([...(stored?.acceptedKeys ?? []), ...session.acceptedKeys])],
+    // União por padrão (outra etapa do ciclo pode ter registrado chaves), mas
+    // `replace` é obrigatório ao FECHAR: sem ele, limpar as listas não pegava e
+    // a sessão concluída guardava todas as chaves que o recibo já resumia.
+    acceptedKeys: replace
+      ? [...new Set(session.acceptedKeys)]
+      : [...new Set([...(stored?.acceptedKeys ?? []), ...session.acceptedKeys])],
     // Não é união: um ativo rejeitado numa rodada e aceito na seguinte precisa
     // sair da lista de faltantes (quem chama manda o estado atual).
     rejectedKeys: [...new Set(session.rejectedKeys)],
@@ -326,6 +352,9 @@ export const registerAccepted = async (
   session.acceptedKeys = [...merged];
   // Aceito agora deixa de ser faltante.
   session.rejectedKeys = session.rejectedKeys.filter(k => !merged.has(k));
+  if (session.rejections) {
+    session.rejections = session.rejections.filter(item => !merged.has(item.key));
+  }
   await persistSession(session, store);
   return session;
 };
@@ -334,13 +363,28 @@ export const registerAccepted = async (
 export const registerRejected = async (
   session: SyncSession,
   keys: string[],
-  store?: SyncSessionStore
+  store?: SyncSessionStore,
+  reason: string = DEFAULT_REJECTION_REASON
 ): Promise<SyncSession> => {
   const merged = new Set([...session.rejectedKeys, ...keys]);
   session.rejectedKeys = [...merged];
+  const at = new Date().toISOString();
+  const known = new Map((session.rejections ?? []).map(item => [item.key, item]));
+  for (const key of keys) known.set(key, { key, reason, at });
+  session.rejections = [...known.values()].slice(-MAX_REJECTIONS_KEPT);
   await persistSession(session, store);
   return session;
 };
+
+/** Recusas prontas para a tela: chave sem o contrato repetido, com o motivo. */
+export const describeRejections = (
+  session: SyncSession,
+  limit: number = 5
+): { key: string; reason: string }[] =>
+  (session.rejections ?? []).slice(0, limit).map(item => ({
+    key: item.key.includes('|') ? item.key.split('|')[1] : item.key,
+    reason: item.reason,
+  }));
 
 /**
  * Registra o pull do ciclo.
@@ -438,9 +482,10 @@ export const finalizeSyncSession = async (
   session.finishedAt = new Date(now).toISOString();
   session.acceptedKeys = [];
   session.rejectedKeys = [];
+  session.rejections = [];
   if (session.pull?.receivedKeys) session.pull.receivedKeys = [];
 
-  await persistSession(session, store);
+  await persistSession(session, store, true);
   logger.info(formatReceipt(session));
   return session;
 };
@@ -456,17 +501,21 @@ export const closeSyncSession = async (
   session.receipt = buildReceipt(session);
   session.acceptedKeys = [];
   session.rejectedKeys = [];
-  await persistSession(session, store);
+  session.rejections = [];
+  await persistSession(session, store, true);
   return session;
 };
 
 /** Recibo em uma linha, para o monitor SRE. */
 export const formatReceipt = (session: SyncSession): string => {
   const r = session.receipt ?? buildReceipt(session);
+  const reasons = [...new Set((session.rejections ?? []).map(item => item.reason))];
   const parts = [
     `enviei ${r.sent}`,
     `aceitos ${r.accepted}`,
-    r.rejected > 0 ? `recusados ${r.rejected}` : null,
+    r.rejected > 0
+      ? `recusados ${r.rejected}${reasons.length > 0 ? ` (${reasons.join('; ')})` : ''}`
+      : null,
     // Só fala em "recebi" quando o ciclo teve pull registrado.
     session.pull ? `recebi ${r.received}` : null,
     r.missing > 0 ? `FALTAM ${r.missing}` : 'faltam 0',
