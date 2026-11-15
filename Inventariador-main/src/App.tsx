@@ -276,9 +276,13 @@ const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({
   status: DatabaseStatus.EMPTY,
   editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'],
   qrCodeFields: ['ETIQUETA'],
-  scannerMode: ScannerMode.BARCODE,
-  autoConfirmOnScan: true,
-  scanFeedbackMode: ScanFeedbackMode.BOTH,
+  // Preferências de campo (Ajustes de Campo) — vivem por DISPOSITIVO: são
+  // hidratadas do localStorage para sobreviverem a reload/logout, não só à
+  // sessão em curso.
+  scannerMode: (localStorage.getItem('app_scanner_mode') as ScannerMode) || ScannerMode.BARCODE,
+  autoConfirmOnScan: localStorage.getItem('app_auto_confirm_on_scan') !== 'false',
+  scanFeedbackMode:
+    (localStorage.getItem('app_scan_feedback_mode') as ScanFeedbackMode) || ScanFeedbackMode.BOTH,
   inventorySearchMode: InventorySearchMode.MANUAL,
   immersiveMode: false,
   darkMode: localStorage.getItem('app_dark_mode') === 'true',
@@ -4181,6 +4185,11 @@ useEffect(() => {
         localStorage.setItem('app_committed_consultation_filters', safeStringify(committedConsultationFilters));
         localStorage.setItem('app_dark_mode', String(inventory.darkMode || false));
         localStorage.setItem('app_battery_saver', String(inventory.batterySaver || false));
+        // Ajustes de Campo: sem estas três linhas o painel salvava só na sessão
+        // e, ao recarregar, tudo voltava ao padrão — parecia "não funcional".
+        localStorage.setItem('app_scanner_mode', String(inventory.scannerMode || ScannerMode.BARCODE));
+        localStorage.setItem('app_auto_confirm_on_scan', String(inventory.autoConfirmOnScan !== false));
+        localStorage.setItem('app_scan_feedback_mode', String(inventory.scanFeedbackMode || ScanFeedbackMode.BOTH));
         localStorage.setItem('app_mandatory_photo_divergence', String(inventory.mandatoryPhotoOnDivergence || false));
         localStorage.setItem('app_mandatory_photo_new', String(inventory.mandatoryPhotoOnNewItem || false));
       } catch { logger.warn("Storage cap reached"); }
