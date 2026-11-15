@@ -75,9 +75,16 @@ export const nextDeviceLamport = async (deviceId: string): Promise<number> => {
   return proximo;
 };
 
-/** Campos que a projeção governa no estado do ativo. */
+/**
+ * Campos que a projeção governa no estado do ativo.
+ *
+ * `tagAtual` é a `TAG_INVENTARIO` que o ativo já tem: a projeção só pode
+ * retirar a marca de divergência, nunca apagar marcas legítimas (`BAIXADO`,
+ * `ADOTADO`, `ETIQUETADO`...) que não são dela.
+ */
 export const derivarAtualizacaoConferencia = (
-  estado: ProjectedAsset
+  estado: ProjectedAsset,
+  tagAtual?: string | null
 ): Record<string, unknown> => {
   const patch: Record<string, unknown> = {
     _conferido: estado._conferido,
@@ -88,11 +95,16 @@ export const derivarAtualizacaoConferencia = (
   if (estado._localMaster !== undefined) patch._localMaster = estado._localMaster;
   if (estado.gps_lat !== undefined) patch.gps_lat = estado.gps_lat;
   if (estado.gps_lng !== undefined) patch.gps_lng = estado.gps_lng;
-  // Tag sempre reescrita: sem isto, um ativo que ficou `DIVERGÊNCIA` continuava
-  // marcado como divergente depois de uma leitura normal.
-  patch.TAG_INVENTARIO = estado._divergencia
-    ? TagInventario.DIVERGENCIA
-    : TagInventario.CONFERIDO;
+  const tag = String(tagAtual || '').toUpperCase().trim();
+  const tagDivergente = tag.includes('DIVERG');
+  if (estado._divergencia) {
+    // Divergência nova manda sobre a marca anterior.
+    patch.TAG_INVENTARIO = TagInventario.DIVERGENCIA;
+  } else if (tagDivergente) {
+    // Só se desfaz a divergência: uma leitura normal num ativo `BAIXADO` deixa-o
+    // `BAIXADO`, e um ativo sem tag continua sem tag.
+    patch.TAG_INVENTARIO = TagInventario.CONFERIDO;
+  }
   return patch;
 };
 

@@ -5238,7 +5238,7 @@ useEffect(() => {
           gps_lat: (updates as unknown as { gps_lat?: number | null }).gps_lat ?? null,
           gps_lng: (updates as unknown as { gps_lng?: number | null }).gps_lng ?? null,
         });
-        Object.assign(updates, derivarAtualizacaoConferencia(estado));
+        Object.assign(updates, derivarAtualizacaoConferencia(estado, updates.TAG_INVENTARIO));
       } catch (err) {
         // A conferência não pode falhar por causa do log: cai na escrita direta
         // (comportamento anterior) e deixa rasto para o suporte.

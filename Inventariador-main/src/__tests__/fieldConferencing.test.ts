@@ -153,7 +153,7 @@ describe('projeção → estado do ativo (F1.4)', () => {
 
     expect(normal.estado._divergencia).toBe(false);
     expect(normal.estado._version).toBe(2);
-    expect(derivarAtualizacaoConferencia(normal.estado).TAG_INVENTARIO).toBe('CONFERIDO');
+    expect(derivarAtualizacaoConferencia(normal.estado, 'DIVERGÊNCIA').TAG_INVENTARIO).toBe('CONFERIDO');
   });
 
   it('a segunda leitura reescreve o estado a partir dos dois eventos', async () => {
@@ -164,6 +164,15 @@ describe('projeção → estado do ativo (F1.4)', () => {
 
     expect(estado).toMatchObject({ _version: 2, _divergencia: true, _localMaster: 'BLOCO C' });
   });
+});
+
+const estadoBase = () => ({
+  tenantid: TENANT,
+  asset_key: 'AT-C1',
+  _conferido: true,
+  _divergencia: false,
+  _correcoes: {},
+  _version: 1,
 });
 
 describe('derivarAtualizacaoConferencia — mapeamento puro', () => {
@@ -177,7 +186,46 @@ describe('derivarAtualizacaoConferencia — mapeamento puro', () => {
       _version: 3,
     });
 
-    expect(patch).toEqual({ _conferido: true, _versionEventos: 3, TAG_INVENTARIO: 'CONFERIDO' });
+    // Sem tag anterior, a projeção não inventa uma.
+    expect(patch).toEqual({ _conferido: true, _versionEventos: 3 });
+    expect(patch).not.toHaveProperty('TAG_INVENTARIO');
+  });
+
+  it('não apaga marcas alheias: BAIXADO continua BAIXADO numa leitura normal', () => {
+    const patch = derivarAtualizacaoConferencia(
+      {
+        tenantid: TENANT,
+        asset_key: 'AT-C1',
+        _conferido: true,
+        _divergencia: false,
+        _correcoes: {},
+        _version: 2,
+      },
+      'BAIXADO'
+    );
+
+    expect(patch).not.toHaveProperty('TAG_INVENTARIO');
+
+    for (const tag of ['ADOTADO', 'ADOTADO EXTERNO', 'ETIQUETADO', 'NOVO ITEM', 'FALTA ETIQUETAR']) {
+      expect(
+        derivarAtualizacaoConferencia(
+          { ...estadoBase(), _divergencia: false },
+          tag
+        )
+      ).not.toHaveProperty('TAG_INVENTARIO');
+    }
+  });
+
+  it('troca DIVERGÊNCIA por CONFERIDO numa leitura normal', () => {
+    const patch = derivarAtualizacaoConferencia({ ...estadoBase(), _divergencia: false }, 'DIVERGÊNCIA');
+
+    expect(patch.TAG_INVENTARIO).toBe('CONFERIDO');
+  });
+
+  it('a divergência nova sobrepõe-se à marca anterior', () => {
+    const patch = derivarAtualizacaoConferencia({ ...estadoBase(), _divergencia: true }, 'BAIXADO');
+
+    expect(patch.TAG_INVENTARIO).toBe('DIVERGÊNCIA');
   });
 
   it('marca TAG_INVENTARIO quando o ativo está divergente', () => {

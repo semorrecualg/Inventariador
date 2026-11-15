@@ -354,9 +354,10 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
   e aplicado ao ativo que o commit único da tela persiste (uma só escrita por
   linha: a projeção não grava à parte) — deixou de se escrever
   `_conferido`/`_dataLeitura`/`_auditor`/`_localMaster` à mão nesse caminho. O
-  `TAG_INVENTARIO` é sempre reescrito (`DIVERGÊNCIA` ou `CONFERIDO`), para não
-  ficar preso depois de uma leitura normal, e o `device_id` dos eventos é o
-  mesmo `getDeviceId` do recibo de sync. Falta estender a ficha/etiqueta/conciliação e a edição em
+  `TAG_INVENTARIO` só é tocado nos dois sentidos que pertencem à projeção:
+  divergência nova marca `DIVERGÊNCIA`, e uma leitura normal desfaz `DIVERGÊNCIA`
+  em `CONFERIDO` — marcas alheias (`BAIXADO`, `ADOTADO`, `ETIQUETADO`…) ficam
+  intactas. O `device_id` dos eventos é o mesmo `getDeviceId` do recibo de sync. Falta estender a ficha/etiqueta/conciliação e a edição em
   lote (`bulkUpdateAssets`), que continuam com escrita direta até F1 fechar em
   todas as telas, e F1.6 (cadeia de hash).
 - **F1 em curso** (v8 do schema local): `field_events` criada com escrita
