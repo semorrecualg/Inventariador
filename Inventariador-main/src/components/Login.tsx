@@ -4,6 +4,7 @@ import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint
 import { isAdminEmail, markAppManagedSession, clearAppManagedSession, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode, resetPassword } from '../services/supabaseService';
+import { refDoProjetoSupabase } from '../utils/supabaseProjectRef';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { safeStringify } from '../services/utils';
@@ -54,6 +55,9 @@ const Login: React.FC<LoginProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [clickCount, setClickCount] = useState(0);
   const [isSendingReset, setIsSendingReset] = useState(false);
+  // Ref do projeto em uso: o badge de ambiente dizia só «SUPABASE (WEB)» e um
+  // VITE_SUPABASE_URL trocado no ambiente dava o mesmo erro de senha errada.
+  const projectRef = refDoProjetoSupabase(import.meta.env.VITE_SUPABASE_URL);
 
   // FLUXO ÚNICO DE ACESSO: a tela de login apenas AUTENTICA. Contrato, filial
   // (unidade operacional) e módulo são escolhidos na tela de contrato de
@@ -825,6 +829,14 @@ const Login: React.FC<LoginProps> = ({
             <span className="text-[7px] font-black text-slate-900 uppercase tracking-wider">
               AMBIENTE: {isInternalMode ? 'MOBILE (LOCAL)' : 'SUPABASE (WEB)'}
             </span>
+            {!isInternalMode && projectRef && (
+              <span
+                className="text-[7px] font-black text-slate-500 uppercase tracking-wider pl-1.5 border-l border-accent/20"
+                title={`Projeto Supabase em uso: ${projectRef}`}
+              >
+                PROJETO: {projectRef}
+              </span>
+            )}
           </div>
 
           <div 

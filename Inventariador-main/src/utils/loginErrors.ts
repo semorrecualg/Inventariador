@@ -39,10 +39,12 @@ const EMAIL_NAO_CONFIRMADO = [
 
 /**
  * O Supabase devolve a MESMA resposta para senha errada e conta inexistente
- * (não revela qual dos dois). A mensagem tem de dizer as duas hipóteses.
+ * (não revela qual dos dois). A mensagem tem de dizer as duas hipóteses — e a
+ * dica do autofill, porque o preenchimento automático do navegador repõe a
+ * senha antiga depois de um reset e o 400 parece um problema de conta.
  */
 export const MENSAGEM_CREDENCIAL_INVALIDA =
-  'E-mail/senha incorretos, ou a conta ainda não existe neste ambiente. Verifique os dados ou peça ao administrador para criar o acesso.';
+  'E-mail/senha incorretos, ou a conta ainda não existe neste ambiente. Se a senha foi alterada há pouco, escreva-a à mão no campo (sem autofill do navegador — ele costuma repor a senha antiga). Verifique os dados ou peça ao administrador para criar o acesso.';
 
 export const MENSAGEM_EMAIL_NAO_CONFIRMADO =
   'E-mail ainda não confirmado. Abra o link do convite enviado para a sua caixa de entrada e tente novamente.';

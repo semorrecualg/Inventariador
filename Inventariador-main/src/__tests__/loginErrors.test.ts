@@ -36,6 +36,11 @@ describe('ehCredencialInvalida', () => {
     expect(MENSAGEM_CREDENCIAL_INVALIDA).toContain('conta ainda não existe');
     expect(MENSAGEM_CREDENCIAL_INVALIDA.toLowerCase()).not.toContain('invalid');
   });
+
+  it('a mensagem ensina a escrever a senha sem autofill', () => {
+    expect(MENSAGEM_CREDENCIAL_INVALIDA.toLowerCase()).toContain('autofill');
+    expect(MENSAGEM_CREDENCIAL_INVALIDA.toLowerCase()).toContain('à mão');
+  });
 });
 
 describe('emailNaoConfirmado', () => {
