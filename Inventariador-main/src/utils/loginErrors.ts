@@ -52,3 +52,17 @@ export const ehCredencialInvalida = (mensagem: string): boolean =>
 
 export const emailNaoConfirmado = (mensagem: string): boolean =>
   EMAIL_NAO_CONFIRMADO.some((termo) => normalizar(mensagem).includes(termo));
+
+/**
+ * Acrescenta o código/estado devolvido pelo Auth, entre parênteses rectos.
+ *
+ * Sem isto, "credenciais inválidas" é indistinguível de conta banida, conta
+ * apagada, e-mail por confirmar ou limite de pedidos — todas chegam ao ecrã como
+ * a mesma frase, e o diagnóstico fica a adivinhar.
+ */
+export const comCodigoTecnico = (mensagem: string, codigo?: unknown): string => {
+  const texto = typeof codigo === 'string' || typeof codigo === 'number'
+    ? String(codigo).trim()
+    : '';
+  return texto ? `${mensagem} [${texto}]` : mensagem;
+};

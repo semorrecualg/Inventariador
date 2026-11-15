@@ -4,6 +4,7 @@
 // ============================================================================
 import { describe, it, expect } from 'vitest';
 import {
+  comCodigoTecnico,
   ehCredencialInvalida,
   emailNaoConfirmado,
   MENSAGEM_CREDENCIAL_INVALIDA
@@ -46,5 +47,18 @@ describe('emailNaoConfirmado', () => {
   it('não confunde com credencial inválida', () => {
     expect(emailNaoConfirmado('Invalid login credentials')).toBe(false);
     expect(emailNaoConfirmado('Failed to fetch')).toBe(false);
+  });
+});
+
+describe('comCodigoTecnico', () => {
+  it('acrescenta o código devolvido pelo Auth', () => {
+    expect(comCodigoTecnico('Falhou', 'invalid_credentials')).toBe('Falhou [invalid_credentials]');
+    expect(comCodigoTecnico('Falhou', 400)).toBe('Falhou [400]');
+  });
+
+  it('sem código, a mensagem fica como está', () => {
+    expect(comCodigoTecnico('Falhou')).toBe('Falhou');
+    expect(comCodigoTecnico('Falhou', '')).toBe('Falhou');
+    expect(comCodigoTecnico('Falhou', null)).toBe('Falhou');
   });
 });

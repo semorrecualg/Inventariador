@@ -15,6 +15,7 @@ import { readSessionTenantId, readLocalTenantId } from '../utils/tenantUtils';
 import type { LoginOrigin } from '../utils/sessionMode';
 import { perfilNaoLido } from '../utils/sessionScope';
 import {
+  comCodigoTecnico,
   ehCredencialInvalida,
   emailNaoConfirmado,
   MENSAGEM_CREDENCIAL_INVALIDA,
@@ -673,7 +674,10 @@ const Login: React.FC<LoginProps> = ({
             }
 
             if (ehCredencialInvalida(rawMessage)) {
-              throw new Error(MENSAGEM_CREDENCIAL_INVALIDA);
+              throw new Error(comCodigoTecnico(
+                MENSAGEM_CREDENCIAL_INVALIDA,
+                supErr?.code || supErr?.status
+              ));
             }
 
             throw new Error(rawMessage || "Erro ao autenticar. Verifique seus dados.");
