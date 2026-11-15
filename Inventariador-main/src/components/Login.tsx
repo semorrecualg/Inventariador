@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { isAdminEmail, markAppManagedSession, clearAppManagedSession, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
-import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode } from '../services/supabaseService';
+import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode, resetPassword } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { safeStringify } from '../services/utils';
@@ -53,6 +53,7 @@ const Login: React.FC<LoginProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clickCount, setClickCount] = useState(0);
+  const [isSendingReset, setIsSendingReset] = useState(false);
 
   // FLUXO ÚNICO DE ACESSO: a tela de login apenas AUTENTICA. Contrato, filial
   // (unidade operacional) e módulo são escolhidos na tela de contrato de
@@ -134,6 +135,42 @@ const Login: React.FC<LoginProps> = ({
       setError("Falha na autenticação biométrica.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  /**
+   * "Esqueci a senha": pede ao Supabase o e-mail de redefinição do endereço que
+   * está no campo. O Auth não revela se a conta existe (devolve sucesso nos dois
+   * casos), por isso a confirmação diz o que é verdade: o pedido foi aceite e o
+   * e-mail segue se a conta existir.
+   */
+  const handleForgotPassword = async () => {
+    const alvo = username.trim().toLowerCase();
+    if (!alvo.includes('@')) {
+      setError('Escreve o teu e-mail no campo acima para receber o link de redefinição de senha.');
+      return;
+    }
+    if (!supabase) {
+      setError('Este build não tem ligação ao Supabase: não é possível enviar o e-mail de redefinição.');
+      return;
+    }
+
+    setError(null);
+    setIsSendingReset(true);
+    try {
+      await resetPassword(alvo);
+      logger.info(`[Login] Pedido de redefinição de senha aceite para ${alvo}.`);
+      onShowModal({
+        title: 'E-mail Enviado',
+        message: `O pedido de redefinição para ${alvo} foi aceite pela nuvem. Se existir uma conta com este endereço, o link chega em instantes — confirma também a pasta de spam. O Supabase não revela se o endereço está registado, por isso a app não pode afirmar isso.`,
+        type: 'info'
+      });
+    } catch (err) {
+      const detalhe = err instanceof Error ? err.message : String(err);
+      logger.warn('[Login] Falha ao pedir redefinição de senha:', detalhe);
+      setError(`Não foi possível enviar o e-mail de redefinição: ${detalhe}`);
+    } finally {
+      setIsSendingReset(false);
     }
   };
 
@@ -867,6 +904,17 @@ const Login: React.FC<LoginProps> = ({
               {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
           </div>
+        </div>
+
+        <div className="flex justify-end -mt-1">
+          <button
+            type="button"
+            onClick={handleForgotPassword}
+            disabled={isSendingReset || isLoading}
+            className="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-accent transition-colors disabled:opacity-60 cursor-pointer"
+          >
+            {isSendingReset ? 'A enviar...' : 'Esqueci a senha'}
+          </button>
         </div>
 
         <button 
