@@ -71,6 +71,18 @@ export const quarantinedFieldEvents = async (): Promise<QuarantinedFieldEvent[]>
   db.field_event_quarantine.toArray();
 
 /**
+ * Devolve um evento à fila: sai da quarentena e volta a aparecer em
+ * `unsyncedFieldEvents`. Quem decide é a pessoa — o evento continua a colidir
+ * até alguém corrigir a causa, por isso a libertação tem de ser explícita.
+ */
+export const releaseQuarantinedFieldEvent = async (eventId: string): Promise<boolean> => {
+  await db.field_event_quarantine.delete(String(eventId));
+  // A tabela não é só-adição (é uma lista de parte, não o log): o delete é
+  // definitivo e o evento volta a `unsyncedFieldEvents` se ainda tiver `_synced = 0`.
+  return (await db.field_event_quarantine.get(String(eventId))) === undefined;
+};
+
+/**
  * Põe eventos em quarentena. Idempotente: reencaminhar o mesmo evento não
  * duplica nem reescreve o motivo original (fica o primeiro — foi ele que
  * justificou a saída da fila).

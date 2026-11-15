@@ -12,12 +12,16 @@ import {
   Loader2,
   Wifi,
   WifiOff,
-  ShieldCheck
+  ShieldCheck,
+  Archive,
+  RotateCcw
 } from 'lucide-react';
 import BackButton from './BackButton';
 import { SyncQueueItem } from '../types';
 import { getPendingSyncItems, processSyncQueue, removeItemFromQueue, clearSyncQueue, getUnsyncedAssetsCount, processDataSyncQueue } from '../services/syncService';
 import { getLastSyncSession, describeRejections, type SyncSession } from '../services/syncSessionService';
+import { quarantinedFieldEvents, releaseQuarantinedFieldEvent } from '../services/fieldEventStore';
+import type { QuarantinedFieldEvent } from '../types/fieldEvent';
 import Modal from './Modal';
 
 interface SyncManagerProps {
@@ -40,6 +44,8 @@ const SyncManager: React.FC<SyncManagerProps> = ({
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [receiptSession, setReceiptSession] = useState<SyncSession | null>(null);
+  const [quarantine, setQuarantine] = useState<QuarantinedFieldEvent[]>([]);
+  const [releasingId, setReleasingId] = useState<string | null>(null);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -70,6 +76,10 @@ const SyncManager: React.FC<SyncManagerProps> = ({
     // F2.4 — recibo do último ciclo, persistido pelo serviço de sessão.
     setReceiptSession(await getLastSyncSession());
 
+    // Log de campo posto de parte: recusado pela chave única da nuvem e fora da
+    // fila até alguém decidir devolvê-lo.
+    setQuarantine(await quarantinedFieldEvents());
+
     setLoading(false);
   };
 
@@ -88,6 +98,18 @@ const SyncManager: React.FC<SyncManagerProps> = ({
       console.error('Erro ao processar sincronização:', error);
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleReleaseQuarantined = async (eventId: string) => {
+    setReleasingId(eventId);
+    try {
+      await releaseQuarantinedFieldEvent(eventId);
+      await loadItems();
+    } catch (error) {
+      console.error('Erro ao devolver evento à fila:', error);
+    } finally {
+      setReleasingId(null);
     }
   };
 
@@ -222,6 +244,50 @@ const SyncManager: React.FC<SyncManagerProps> = ({
               <div key={item.key} className="p-2 bg-rose-50 border border-rose-100 rounded-lg">
                 <p className="text-[7px] font-black text-rose-900 uppercase tracking-widest leading-tight">
                   {item.key} — {item.reason}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {quarantine.length > 0 && (
+          <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[8px] font-bold text-amber-900 uppercase tracking-widest flex items-center gap-1.5">
+                <Archive size={10} /> Log de Campo em Quarentena
+              </p>
+              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[7px] font-black uppercase tracking-widest">
+                {quarantine.length}
+              </span>
+            </div>
+            <p className="text-[8px] font-bold text-amber-800 uppercase tracking-widest leading-snug">
+              Recusados pela chave única da nuvem. Ficam fora da fila até serem devolvidos.
+            </p>
+
+            {quarantine.map(item => (
+              <div key={item.event_id} className="bg-white/70 p-2 rounded-xl border border-amber-100 space-y-1.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[8px] font-black text-ink uppercase tracking-widest truncate">
+                      {item.asset_key || item.event_id}
+                    </p>
+                    <p className="text-[7px] font-bold text-ink-muted uppercase tracking-widest">
+                      {item.event_type} · lamport {item.lamport}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleReleaseQuarantined(item.event_id)}
+                    disabled={releasingId === item.event_id}
+                    className="shrink-0 px-2 py-1 bg-white border border-amber-200 text-amber-800 rounded-lg text-[7px] font-black uppercase tracking-widest active:scale-95 transition-all disabled:opacity-40 flex items-center gap-1"
+                  >
+                    {releasingId === item.event_id
+                      ? <Loader2 size={9} className="animate-spin" />
+                      : <RotateCcw size={9} />}
+                    Devolver à fila
+                  </button>
+                </div>
+                <p className="text-[7px] font-bold text-rose-700 uppercase tracking-widest leading-tight break-words">
+                  {item.reason}
                 </p>
               </div>
             ))}

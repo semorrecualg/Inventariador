@@ -54,13 +54,27 @@ export interface FieldEventSyncResult {
 }
 
 /**
- * Falha de transporte, não de conteúdo. Num aparelho offline, insistir nos 500
- * eventos é acumular timeouts para receber sempre o mesmo erro de rede.
+ * Falha de transporte, classificada pela FORMA do erro — não pelo texto.
+ *
+ * Classificar por mensagem tratava `canceling statement due to statement
+ * timeout` (o Postgres a desistir de uma query) como aparelho offline e parava
+ * o envio à toa. O que é de rede tem forma própria:
+ *
+ *   - `navigator.onLine === false` — o aparelho sabe que está offline;
+ *   - `TypeError` — é o que o `fetch` lança quando não há transporte;
+ *   - `DOMException` com `name` de `AbortError`/`TimeoutError`/`NetworkError`.
+ *
+ * Um `error` DEVOLVIDO pelo PostgREST nunca é rede: é o servidor a responder
+ * (permissão, chave única, timeout de statement). Esse segue para o recuo
+ * evento-a-evento, que é onde se descobre se o problema é do evento ou do lote.
  */
-export const ehFalhaDeRede = (reason: string): boolean =>
-  /fetch failed|failed to fetch|load failed|network|networkerror|net::|econn|timed? ?out|abort|offline|internet/i.test(
-    String(reason || '')
-  );
+export const ehFalhaDeRede = (erro: unknown): boolean => {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  if (erro === null || erro === undefined) return false;
+  if (erro instanceof TypeError) return true;
+  const nome = (erro as { name?: unknown }).name;
+  return nome === 'AbortError' || nome === 'TimeoutError' || nome === 'NetworkError';
+};
 
 /** Colisão na chave única do Postgres (evento que já existe noutro estado). */
 export const ehViolacaoDeChaveUnica = (reason: string): boolean =>
@@ -142,18 +156,14 @@ export const syncFieldEventsCore = async (
         continue;
       }
       const reason = String(error.message || DEFAULT_REJECTION_REASON);
-      // Lote sem rede: não há culpado a isolar, há um aparelho sem sinal.
-      if (ehFalhaDeRede(reason)) {
-        logger.warn(`>>> [Field Events] Lote sem rede (${reason}); restam ${chunk.length} pendentes.`);
-        return { accepted, failures, interrupted: 'rede' };
-      }
+      // Erro devolvido pelo PostgREST é resposta do servidor, não falta de rede:
+      // há que descobrir QUAL evento o servidor recusa, evento a evento.
       logger.warn(
         `>>> [Field Events] Lote de ${chunk.length} recusado (${reason}); ` +
           'reenviando evento a evento para isolar o culpado.'
       );
     } catch (err) {
-      const motivo = err instanceof Error ? err.message : String(err);
-      if (ehFalhaDeRede(motivo)) {
+      if (ehFalhaDeRede(err)) {
         logger.warn('>>> [Field Events] Transporte caiu no lote; nada foi provado, parando aqui.');
         return { accepted, failures, interrupted: 'rede' };
       }
@@ -169,24 +179,18 @@ export const syncFieldEventsCore = async (
       try {
         const { error } = await enviar([fieldEventRow(event, tenant)]);
         if (error) {
-          const motivo = String(error.message || DEFAULT_REJECTION_REASON);
-          if (ehFalhaDeRede(motivo)) {
-            // A rede caiu no meio: os que ainda não foram tentados continuam
-            // pendentes (não são recusas) e o resto do lote não é tentado.
-            logger.warn('>>> [Field Events] Rede caiu no envio individual; parando o recuo.');
-            return { accepted, failures, interrupted: 'rede' };
-          }
-          failures.push({ key, reason: motivo });
+          failures.push({ key, reason: String(error.message || DEFAULT_REJECTION_REASON) });
           continue;
         }
         accepted.push(event.event_id);
       } catch (err) {
-        const motivo = err instanceof Error ? err.message : String(err);
-        if (ehFalhaDeRede(motivo)) {
-          logger.warn('>>> [Field Events] Transporte caiu no envio individual:', err);
+        if (ehFalhaDeRede(err)) {
+          // A rede caiu no meio: o que ainda não foi tentado continua pendente
+          // (não é recusa) e o resto do lote não é tentado.
+          logger.warn('>>> [Field Events] Transporte caiu no envio individual; parando o recuo.');
           return { accepted, failures, interrupted: 'rede' };
         }
-        failures.push({ key, reason: motivo });
+        failures.push({ key, reason: err instanceof Error ? err.message : String(err) });
       }
     }
   }

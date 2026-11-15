@@ -12,10 +12,12 @@ import { db } from '../services/sqliteService';
 import {
   appendFieldEvent,
   quarantinedFieldEvents,
+  releaseQuarantinedFieldEvent,
   unsyncedFieldEvents,
 } from '../services/fieldEventStore';
 import {
   FIELD_EVENTS_CHUNK_SIZE,
+  ehFalhaDeRede,
   fieldEventRow,
   flushFieldEvents,
   pushFieldEventsWithReceipt,
@@ -174,12 +176,22 @@ describe('syncFieldEventsCore — upsert idempotente', () => {
 
   it('sem rede no lote não tenta os 500 um a um', async () => {
     const eventos = Array.from({ length: FIELD_EVENTS_CHUNK_SIZE }, () => evento());
-    const { chamadas, client } = clienteFalso(() => 'TypeError: Failed to fetch');
+    let chamadas = 0;
+    const client: FieldEventClient = {
+      from: () => ({
+        upsert: async () => {
+          chamadas += 1;
+          // O `fetch` sem transporte rejeita com TypeError — é a forma que
+          // identifica rede, não a mensagem.
+          throw new TypeError('Failed to fetch');
+        },
+      }),
+    };
 
     const { accepted, failures, interrupted } = await syncFieldEventsCore(eventos, TENANT, client);
 
     // 1 pedido e ponto: insistir nos 500 só acumulava timeouts no aparelho.
-    expect(chamadas).toHaveLength(1);
+    expect(chamadas).toBe(1);
     expect(accepted).toEqual([]);
     expect(failures).toEqual([]);
     expect(interrupted).toBe('rede');
@@ -193,7 +205,7 @@ describe('syncFieldEventsCore — upsert idempotente', () => {
         upsert: async linhas => {
           chamadasFeitas += 1;
           if (linhas.length > 1) return { error: { message: 'permission denied' } };
-          if (chamadasFeitas >= 4) throw new Error('fetch failed');
+          if (chamadasFeitas >= 4) throw new TypeError('Failed to fetch');
           return { error: null };
         },
       }),
@@ -245,7 +257,9 @@ describe('syncFieldEventsCore — upsert idempotente', () => {
     expect(posto?.event.payload.local).toBe('BLOCO A');
 
     // Não volta a ser enviado no ciclo seguinte.
-    expect(await unsyncedFieldEvents()).toEqual([]);
+    const filaDoContrato = async () =>
+      (await unsyncedFieldEvents()).filter(e => e.tenantid === TENANT).map(e => e.event_id);
+    expect(await filaDoContrato()).toEqual([]);
     let enviadosNoCicloSeguinte: string[] = [];
     await flushFieldEvents(TENANT, {
       store,
@@ -255,6 +269,12 @@ describe('syncFieldEventsCore — upsert idempotente', () => {
       },
     });
     expect(enviadosNoCicloSeguinte).toEqual([]);
+
+    // Devolver à fila é explícito: o evento volta a ser candidato ao envio.
+    expect(await releaseQuarantinedFieldEvent(envenenado.event_id)).toBe(true);
+    expect(await filaDoContrato()).toEqual([envenenado.event_id]);
+    expect(await quarantinedFieldEvents()).toEqual([]);
+    expect(await releaseQuarantinedFieldEvent('nao-existe')).toBe(true);
   });
 
   it('sem contrato não envia nada e diz porquê', async () => {
@@ -272,12 +292,56 @@ describe('syncFieldEventsCore — upsert idempotente', () => {
   });
 });
 
+describe('ehFalhaDeRede — classificação estrutural', () => {
+  it('reconhece o que É rede', () => {
+    expect(ehFalhaDeRede(new TypeError('Failed to fetch'))).toBe(true);
+    expect(ehFalhaDeRede({ name: 'AbortError' })).toBe(true);
+    expect(ehFalhaDeRede({ name: 'TimeoutError' })).toBe(true);
+  });
+
+  it('um timeout do Postgres não é aparelho offline', () => {
+    // O Postgres desistir da query chega como ERRO DEVOLVIDO, com mensagem que
+    // fala em timeout — o que a heurística antiga lia como rede.
+    expect(
+      ehFalhaDeRede({ message: 'canceling statement due to statement timeout', code: '57014' })
+    ).toBe(false);
+    expect(ehFalhaDeRede(new Error('canceling statement due to statement timeout'))).toBe(false);
+  });
+
+  it('erros sem forma de transporte ficam como conteúdo', () => {
+    expect(ehFalhaDeRede(new Error('permission denied'))).toBe(false);
+    expect(ehFalhaDeRede(null)).toBe(false);
+    expect(ehFalhaDeRede(undefined)).toBe(false);
+  });
+});
+
+describe('recuo e rede — detalhe do desfecho', () => {
+  it('timeout do Postgres não interrompe: o lote é desmontado e cada evento fica recusado', async () => {
+    const eventos = Array.from({ length: 3 }, () => evento());
+    const { chamadas, client } = clienteFalso(() => 'canceling statement due to statement timeout');
+
+    const { accepted, failures, interrupted } = await syncFieldEventsCore(eventos, TENANT, client);
+
+    expect(interrupted).toBeUndefined();
+    expect(chamadas).toHaveLength(4); // 1 lote + 3 individuais
+    expect(accepted).toEqual([]);
+    expect(failures).toHaveLength(3);
+    expect(failures[0].reason).toContain('statement timeout');
+  });
+});
+
 describe('pushFieldEventsWithReceipt — confirmação antes da marca', () => {
   it('sem rede devolve interrupção e deixa a sessão aberta', async () => {
     const store = memoria();
     await appendFieldEvent({ ...evento(), event_id: `${TENANT}-net`, lamport: 1 });
 
-    const { client } = clienteFalso(() => 'Failed to fetch');
+    const client: FieldEventClient = {
+      from: () => ({
+        upsert: async () => {
+          throw new TypeError('Failed to fetch');
+        },
+      }),
+    };
     const resultado = await pushFieldEventsWithReceipt(await unsyncedFieldEvents(), TENANT, {
       store,
       run: (events, tenant) => syncFieldEventsCore(events, tenant, client),
@@ -287,8 +351,10 @@ describe('pushFieldEventsWithReceipt — confirmação antes da marca', () => {
     expect(resultado.synced).toEqual([]);
     expect(resultado.session.failed).toBe(true);
     expect((await db.field_events.get(`${TENANT}-net`))?._synced).toBe(0);
-    // O evento continua na fila: falta de rede não é recusa.
-    expect((await unsyncedFieldEvents()).map(e => e.event_id)).toEqual([`${TENANT}-net`]);
+    // O evento continua na fila: falta de rede não é recusa. (A fila é global;
+    // filtrar pelo contrato do teste evita ler sobras de casos anteriores.)
+    const fila = await unsyncedFieldEvents();
+    expect(fila.filter(e => e.tenantid === TENANT).map(e => e.event_id)).toEqual([`${TENANT}-net`]);
   });
 
   it('marca `_synced = 1` só nos eventos que a nuvem aceitou', async () => {
