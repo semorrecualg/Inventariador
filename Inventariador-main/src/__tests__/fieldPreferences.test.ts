@@ -3,10 +3,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   readFieldPreferences,
   writeFieldPreferences,
-  stripDevicePreferences
+  stripDevicePreferences,
+  migrateDevicePreferencesFromSnapshot
 } from '../utils/fieldPreferences';
 import { DEVICE_CONFIG_KEYS } from '../utils/configScope';
-import { ScannerMode, ScanFeedbackMode } from '../types';
+import { ScannerMode, ScanFeedbackMode, InventorySearchMode } from '../types';
 
 /**
  * Ajustes de Campo têm UMA fonte de verdade: o localStorage do dispositivo.
@@ -23,7 +24,9 @@ describe('fieldPreferences — fonte única do dispositivo', () => {
       autoConfirmOnScan: true,
       scanFeedbackMode: ScanFeedbackMode.BOTH,
       darkMode: false,
-      batterySaver: false
+      batterySaver: false,
+      inventorySearchMode: InventorySearchMode.MANUAL,
+      immersiveMode: false
     });
   });
 
@@ -33,7 +36,9 @@ describe('fieldPreferences — fonte única do dispositivo', () => {
       autoConfirmOnScan: false,
       scanFeedbackMode: ScanFeedbackMode.NONE,
       darkMode: true,
-      batterySaver: true
+      batterySaver: true,
+      inventorySearchMode: InventorySearchMode.SCANNER,
+      immersiveMode: true
     });
 
     expect(readFieldPreferences()).toEqual({
@@ -41,7 +46,9 @@ describe('fieldPreferences — fonte única do dispositivo', () => {
       autoConfirmOnScan: false,
       scanFeedbackMode: ScanFeedbackMode.NONE,
       darkMode: true,
-      batterySaver: true
+      batterySaver: true,
+      inventorySearchMode: InventorySearchMode.SCANNER,
+      immersiveMode: true
     });
   });
 
@@ -70,5 +77,50 @@ describe('fieldPreferences — fonte única do dispositivo', () => {
     DEVICE_CONFIG_KEYS.forEach((field) => expect(stripped).not.toHaveProperty(field));
     expect(stripped.editableFields).toEqual(['SERIAL']);
     expect(stripped.lastUpdated).toBe('2026-11-15T00:00:00.000Z');
+  });
+});
+
+describe('migração do snapshot para o dispositivo', () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it('adopta as preferências de um snapshot antigo quando o aparelho não as tem', () => {
+    migrateDevicePreferencesFromSnapshot({
+      scannerMode: ScannerMode.QRCODE,
+      autoConfirmOnScan: false,
+      scanFeedbackMode: ScanFeedbackMode.SOUND,
+      darkMode: true,
+      inventorySearchMode: InventorySearchMode.SCANNER,
+      immersiveMode: true
+    });
+
+    const prefs = readFieldPreferences();
+    expect(prefs.scannerMode).toBe(ScannerMode.QRCODE);
+    expect(prefs.autoConfirmOnScan).toBe(false);
+    expect(prefs.scanFeedbackMode).toBe(ScanFeedbackMode.SOUND);
+    expect(prefs.darkMode).toBe(true);
+    expect(prefs.inventorySearchMode).toBe(InventorySearchMode.SCANNER);
+    expect(prefs.immersiveMode).toBe(true);
+  });
+
+  it('não sobrepõe o que o aparelho já tem guardado', () => {
+    writeFieldPreferences({ darkMode: true, scannerMode: ScannerMode.QRCODE });
+
+    migrateDevicePreferencesFromSnapshot({ darkMode: false, scannerMode: ScannerMode.BARCODE });
+
+    const prefs = readFieldPreferences();
+    expect(prefs.darkMode).toBe(true);
+    expect(prefs.scannerMode).toBe(ScannerMode.QRCODE);
+  });
+
+  it('ignora valores inválidos vindos do snapshot', () => {
+    migrateDevicePreferencesFromSnapshot({
+      scannerMode: 'LASER' as unknown as ScannerMode,
+      inventorySearchMode: 'NADA' as unknown as InventorySearchMode
+    });
+
+    const prefs = readFieldPreferences();
+    expect(prefs.scannerMode).toBe(ScannerMode.BARCODE);
+    expect(prefs.inventorySearchMode).toBe(InventorySearchMode.MANUAL);
   });
 });

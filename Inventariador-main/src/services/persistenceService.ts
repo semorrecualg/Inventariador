@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import localforage from 'localforage';
 import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
-import { syncAssetsToCloudAndMark, syncConfigToCloud } from './supabaseService';
+import { syncAssetsToCloudAndMark, syncConfigToCloud, getInitialDatabaseMode } from './supabaseService';
 import { encryption } from './securityService';
 import { localDb, backupDatabaseToPhysicalStorage } from './localDbService';
 import { sqliteService, db, DexieAsset } from './sqliteService';
@@ -142,9 +142,13 @@ export const restoreInventory = async (file: File, mode: DatabaseMode): Promise<
  */
 export const saveConfigOnly = async (data: Partial<InventoryState>): Promise<void> => {
   try {
-    const mode = data.databaseMode || DatabaseMode.INTERNAL;
+    // `databaseMode` é escopo de DISPOSITIVO e já não vem no snapshot: o modo
+    // desta sessão é a fonte para escolher o namespace do cache.
+    const mode = data.databaseMode || getInitialDatabaseMode() || DatabaseMode.INTERNAL;
     const keys = getInventoryKeys(mode);
-    const encryptedConfig = await encryption.encrypt(data);
+    // Esta config vem da NUVEM e ia direto para o cache: sem o strip, uma linha
+    // antiga reintroduzia preferências de dispositivo no aparelho.
+    const encryptedConfig = await encryption.encrypt(stripDevicePreferences({ ...data }));
     await localforage.setItem(keys.config, encryptedConfig);
     logger.info('>>> [Persistence] Configurações salvas (Fast Path).');
   } catch (error) {

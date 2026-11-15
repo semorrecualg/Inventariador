@@ -63,6 +63,10 @@ describe('configScope — contrato vs. dispositivo', () => {
 
     const sent = Object.keys(full!.payload).filter((key) => key !== 'id' && key !== 'tenantid');
     expect(sent.sort()).toEqual(Object.values(CONTRACT_CONFIG_COLUMNS).sort());
+    // Passaram a ser de dispositivo nesta revisão.
+    expect(sent).not.toContain('database_mode');
+    expect(sent).not.toContain('inventory_search_mode');
+    expect(sent).not.toContain('immersive_mode');
   });
 
   it('nenhuma preferência de dispositivo sobe, mesmo com o estado completo', () => {

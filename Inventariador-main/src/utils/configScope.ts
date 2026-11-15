@@ -29,7 +29,13 @@ export const DEVICE_CONFIG_KEYS = [
   'autoConfirmOnScan',
   'scanFeedbackMode',
   'darkMode',
-  'batterySaver'
+  'batterySaver',
+  // Mudam por aparelho e não podem ser impostos por outro:
+  //  • inventorySearchMode/immersiveMode: como este operador procura e vê o ecrã;
+  //  • databaseMode: INTERNAL (base no aparelho) vs SUPABASE não é decisão do contrato.
+  'inventorySearchMode',
+  'immersiveMode',
+  'databaseMode'
 ] as const;
 
 export type DeviceConfigKey = (typeof DEVICE_CONFIG_KEYS)[number];
@@ -44,13 +50,10 @@ export const CONTRACT_CONFIG_COLUMNS = {
   status: 'status',
   editableFields: 'editable_fields',
   qrCodeFields: 'qr_code_fields',
-  inventorySearchMode: 'inventory_search_mode',
-  immersiveMode: 'immersive_mode',
   protheusIntegrationEnabled: 'protheus_integration_enabled',
   protheusApiUrl: 'protheus_api_url',
   mandatoryPhotoOnDivergence: 'mandatory_photo_on_divergence',
-  mandatoryPhotoOnNewItem: 'mandatory_photo_on_new_item',
-  databaseMode: 'database_mode'
+  mandatoryPhotoOnNewItem: 'mandatory_photo_on_new_item'
 } as const;
 
 export type ContractConfigKey = keyof typeof CONTRACT_CONFIG_COLUMNS;
@@ -71,7 +74,19 @@ export const DEVICE_CONFIG_COLUMNS: ReadonlySet<string> = new Set([
   'auto_confirm_on_scan',
   'scan_feedback_mode',
   'dark_mode',
-  'battery_saver'
+  'battery_saver',
+  'inventory_search_mode',
+  'immersive_mode',
+  'database_mode'
 ]);
 
 export const DEVICE_CONFIG_KEY_SET: ReadonlySet<string> = new Set(DEVICE_CONFIG_KEYS);
+
+/**
+ * Preferências de dispositivo guardadas em `utils/fieldPreferences` (localStorage).
+ * `databaseMode` fica de fora: o modo de base tem ciclo de vida próprio e é
+ * persistido em `app_database_mode` — duplicá-lo aqui recriaria duas verdades.
+ */
+export const DEVICE_PREFERENCE_KEYS = DEVICE_CONFIG_KEYS.filter(
+  (key) => key !== 'databaseMode'
+) as Exclude<(typeof DEVICE_CONFIG_KEYS)[number], 'databaseMode'>[];

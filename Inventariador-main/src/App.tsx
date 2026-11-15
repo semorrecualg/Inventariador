@@ -61,7 +61,7 @@ import TenantWorkSelector from './components/TenantWorkSelector';
 import WorkContextSelector from './components/WorkContextSelector';
 import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, SupabaseUserProfile } from './utils/routingUtils';
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
-import { readFieldPreferences, writeFieldPreferences } from './utils/fieldPreferences';
+import { migrateDevicePreferencesFromSnapshot, readFieldPreferences, writeFieldPreferences } from './utils/fieldPreferences';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
@@ -279,8 +279,6 @@ const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({
   qrCodeFields: ['ETIQUETA'],
   // Preferências de campo: fonte única no localStorage (utils/fieldPreferences).
   ...readFieldPreferences(),
-  inventorySearchMode: InventorySearchMode.MANUAL,
-  immersiveMode: false,
   protheusIntegrationEnabled: localStorage.getItem('app_protheus_enabled') === 'true',
   protheusApiUrl: localStorage.getItem('app_protheus_url') || '',
   mandatoryPhotoOnDivergence: localStorage.getItem('app_mandatory_photo_divergence') === 'true',
@@ -3408,15 +3406,15 @@ useEffect(() => {
             await saveInventory(saved);
           }
 
+          migrateDevicePreferencesFromSnapshot(saved);
           setInventory(prev => ({
             ...prev,
             ...saved,
             editableFields: saved.editableFields || prev.editableFields,
             qrCodeFields: saved.qrCodeFields || prev.qrCodeFields,
-            inventorySearchMode: saved.inventorySearchMode || prev.inventorySearchMode,
-            immersiveMode: saved.immersiveMode ?? prev.immersiveMode,
-            // Preferências de campo são do DISPOSITIVO: snapshots antigos ainda
-            // trazem uma cópia e ela não pode desfazer o ajuste actual.
+            // Preferências de campo são do DISPOSITIVO. Snapshots antigos ainda
+            // trazem uma cópia: migra-se o que o aparelho não tem (uma vez) e
+            // depois o localStorage manda, para o ajuste actual prevalecer.
             ...readFieldPreferences()
           }));
           
