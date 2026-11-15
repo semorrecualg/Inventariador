@@ -544,3 +544,79 @@ describe('syncSession — motivo real do transporte (F2.5)', () => {
     expect(session.acceptedKeys).toEqual(['CICOPAL|AT-11']);
   });
 });
+
+describe('syncSession — push parcial dentro do ciclo com pull', () => {
+  let store: ReturnType<typeof makeStore>;
+  beforeEach(() => {
+    store = makeStore();
+  });
+
+  it('recibo fecha coerente: enviados = aceitos + recusados, recebidos vêm do pull', async () => {
+    const session = await openSyncSession({ tenantid: 'CICOPAL', auditor: 'a@b.com', store, now: T0 });
+
+    // Ciclo aberto: push aceita um e recusa outro, com o motivo do banco.
+    const { session: afterPush } = await pushAssetsWithReceipt(
+      [asset('AT-1'), asset('AT-2')],
+      'CICOPAL',
+      {
+        session,
+        store,
+        now: T0,
+        sync: async () => ({
+          synced: ['AT-1'],
+          failures: [{ key: 'AT-2', reason: '[23503] contrato ausente' }],
+        }),
+      }
+    );
+    // Sessão de ciclo não fecha no push: quem fecha é o fim do ciclo.
+    expect(afterPush.status).toBe('OPEN');
+
+    await pullIntoSession(
+      afterPush,
+      { since: '2026-11-13T00:00:00.000Z', assets: [asset('AT-1'), asset('AT-7')] },
+      store
+    );
+    await finalizeSyncSession(afterPush, store);
+
+    const r = afterPush.receipt;
+    expect(r).toMatchObject({ sent: 2, accepted: 1, rejected: 1, received: 2, applied: 2, missing: 1 });
+    expect(afterPush.status).toBe('PARTIAL');
+    expect(describeRejections(afterPush)).toEqual([
+      { key: 'AT-2', reason: '[23503] contrato ausente' },
+    ]);
+    const linha = formatReceipt(afterPush);
+    expect(linha).toContain('enviei 2');
+    expect(linha).toContain('aceitos 1');
+    expect(linha).toContain('recebi 2');
+    expect(linha).toContain('[23503] contrato ausente');
+  });
+
+  it('retomar depois do parcial não reenvia o aceite e mantém a razão do recusado', async () => {
+    const session = await openSyncSession({ tenantid: 'CICOPAL', auditor: 'a@b.com', store, now: T0 });
+    const sync = async (lote: { primarykey?: string }[]) => {
+      const keys = lote.map(a => String(a.primarykey));
+      return keys.includes('AT-1')
+        ? { synced: ['AT-1'], failures: [{ key: 'AT-2', reason: '[23503] contrato ausente' }] }
+        : { synced: ['AT-2'], failures: [] };
+    };
+
+    await pushAssetsWithReceipt([asset('AT-1'), asset('AT-2')], 'CICOPAL', { session, store, sync });
+    await finalizeSyncSession(session, store);
+    expect(session.status).toBe('PARTIAL');
+
+    // A rodada seguinte só tenta o que faltava.
+    let tentados: string[] = [];
+    await pushAssetsWithReceipt([asset('AT-1'), asset('AT-2')], 'CICOPAL', {
+      session,
+      store,
+      sync: async lote => {
+        tentados = lote.map(a => String(a.primarykey));
+        return sync(lote);
+      },
+    });
+
+    expect(tentados).toEqual(['AT-2']);
+    expect(session.acceptedKeys).toEqual(['CICOPAL|AT-1', 'CICOPAL|AT-2']);
+    expect(session.rejections).toEqual([]);
+  });
+});

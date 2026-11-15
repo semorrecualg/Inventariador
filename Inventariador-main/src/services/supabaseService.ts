@@ -17,6 +17,7 @@ import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpo
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
+import { isolateBatchRows, describeSyncError } from './batchIsolation';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -44,23 +45,9 @@ export class SupabaseAuthException extends Error {
  * `String(err)` devolvia `[object Object]` e escondia a causa real (código,
  * detalhe e dica do Postgres).
  */
-const describeSupabaseError = (err: unknown): string => {
-  if (!err) return 'erro desconhecido';
-  if (err instanceof Error) return err.message;
-  const e = err as { code?: string; message?: string; details?: string; hint?: string };
-  const parts = [
-    e.code ? `[${e.code}]` : '',
-    e.message || '',
-    e.details ? `detalhe: ${e.details}` : '',
-    e.hint ? `dica: ${e.hint}` : ''
-  ].filter(Boolean);
-  if (parts.length > 0) return parts.join(' · ');
-  try {
-    return JSON.stringify(err);
-  } catch {
-    return 'erro sem detalhe legível';
-  }
-};
+// O tradutor de erros e o isolamento de lote vivem em `batchIsolation`
+// (módulo puro, testado sem rede). Aqui só se usa.
+const describeSupabaseError = describeSyncError;
 
 export interface ProvisionResult {
   user?: unknown;
@@ -1178,33 +1165,18 @@ const syncAssetsCore = async (assets: Asset[], tenantid?: string | string[], onP
       await sendBatch(rows);
       successfullySyncedIds.push(...keys);
     } catch (err: unknown) {
-      // ISOLAMENTO POR ATIVO: se o lote falhar (ex.: schema incompatível em uma coluna),
-      // tenta cada linha individualmente para sincronizar o que é válido e identificar
-      // exatamente os registros rejeitados (id + motivo) — sem derrubar a esteira inteira.
-      // O fallback só corre para um lote que falhou: 8 linhas em voo em vez de
-      // 500 idas sequenciais (o caminho normal nunca paga este custo).
-      const ROW_PARALLEL = 8;
-      for (let r = 0; r < rows.length; r += ROW_PARALLEL) {
-        const rowSlice = rows.slice(r, r + ROW_PARALLEL);
-        await Promise.all(rowSlice.map(async (row, i) => {
-          const localKey = keys[r + i];
-          try {
-            await sendBatch([row]);
-            successfullySyncedIds.push(localKey);
-          } catch (rowErr: unknown) {
-            // 23505 em `assets_tenant_primarykey_key`: a chave de origem já está
-            // na nuvem (com id anterior) — o ativo está sincronizado, não rejeitado.
-            if ((rowErr as { code?: string }).code === '23505') {
-              successfullySyncedIds.push(localKey);
-              return;
-            }
-            failures.push({
-              key: String(row.primarykey ?? localKey ?? ''),
-              reason: describeSupabaseError(rowErr),
-            });
-          }
-        }));
-      }
+      // ISOLAMENTO POR ATIVO: se o lote falhar (ex.: schema incompatível em uma
+      // coluna), cada linha é reenviada sozinha (8 em voo, em vez de 500 idas
+      // sequenciais) para separar o válido do recusado — com motivo real.
+      const isolated = await isolateBatchRows({
+        rows,
+        keys,
+        send: async ([row]) => {
+          await sendBatch([row]);
+        },
+      });
+      successfullySyncedIds.push(...isolated.accepted);
+      failures.push(...isolated.failures);
       logger.error(
         `>>> [Supabase] Lote ${lote} falhou; ${rows.length} linha(s) reenviadas em isolamento. Causa: ${describeSupabaseError(err)}`,
         err
