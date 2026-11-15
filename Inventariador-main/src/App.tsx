@@ -61,7 +61,7 @@ import TenantWorkSelector from './components/TenantWorkSelector';
 import WorkContextSelector from './components/WorkContextSelector';
 import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, SupabaseUserProfile } from './utils/routingUtils';
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
-import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, isValidLastContext } from './utils/workContextUtils';
+import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
@@ -3826,29 +3826,11 @@ useEffect(() => {
       // contrato selecionado (isolamento SRE por contrato).
       const workContexts = buildWorkContexts(user, users, workContextFiliais);
 
-      // ETAPA 4 (FLUXO_ACESSO_INICIAL): "lembrar escolha" — se o usuário já
-      // escolheu contrato+filial+módulo numa sessão anterior e a escolha
-      // continua autorizada (valida contra a lista atual de contextos e o
-      // papel), pula o seletor e vai direto para o módulo daquela filial.
-      // A troca fica disponível pelo botão "Trocar" no hub (MainMenu).
-      const lastCtx = readLastWorkContext();
-      if (workContexts.length > 0 && isValidLastContext(lastCtx, workContexts, user)) {
-        logger.info(`>>> [SRE_NAV] Etapa 4: última escolha válida (${String(lastCtx?.tenantid)}/${String(lastCtx?.filial || 'TODAS')} · ${String(lastCtx?.module)}). Pulando seletor de contexto.`);
-        if (applyWorkContextRef.current) {
-          await applyWorkContextRef.current(
-            { tenantid: String(lastCtx?.tenantid), filial: String(lastCtx?.filial || '') },
-            lastCtx?.module as AppModule
-          );
-        } else {
-          // Sem handler pronto (borda rara) → mantém o seletor como fallback seguro.
-          await pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
-        }
-        return;
-      }
-
-      // FLUXO ÚNICO DE ACESSO: a autenticação não escolhe mais filial — a tela
-      // de contrato de trabalho (/contexto) faz contrato + filial + módulo para
-      // todo perfil com contrato autorizado.
+      // PADRÃO DE ENTRADA: TODO acesso passa pelo CONTRATO DE TRABALHO.
+      // Existia aqui uma "Etapa 4" que reaproveitava a última escolha do
+      // usuário e pulava o seletor — quem entrava caía direto no módulo da
+      // filial antiga e só via a tela de contrato ao apertar VOLTAR. A escolha
+      // de contrato/filial/módulo é agora obrigatória em cada login.
       if (workContexts.length > 0) {
         logger.info(`>>> [SRE_NAV] Usuário autorizado em ${workContexts.length} contexto(s). Exigindo seleção de contrato/filial/módulo.`);
         await pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
