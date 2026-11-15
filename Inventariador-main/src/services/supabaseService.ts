@@ -850,9 +850,8 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
   // 2. Se não encontrou ou deu timeout, tenta criar/atualizar (Upsert) com timeout
   logger.info('[Supabase] Perfil não encontrado ou lento, tentando upsert...');
   
-  const defaultTenant = (metadata?.tenantid || readLocalTenantId() || readSessionTenantId() || '').trim();
+  const fallbackTenant = (metadata?.tenantid || readLocalTenantId() || readSessionTenantId() || '').trim();
   const is_admin_new = isAdminEmail(lowerEmail);
-  const fallbackTenant = defaultTenant;
   
   const insertData = {
     email: lowerEmail,
@@ -893,7 +892,7 @@ export const ensureUserProfile = async (email: string, metadata?: Record<string,
     return {
       ...d,
       isAdmin: d.is_admin,
-      tenantid: d.tenantid || d.tenantid || fallbackTenant,
+      tenantid: d.tenantid || fallbackTenant,
       filial: d.filial || d._unitid || ''
     };
   }

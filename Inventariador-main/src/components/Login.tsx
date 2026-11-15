@@ -703,7 +703,6 @@ const Login: React.FC<LoginProps> = ({
           if (isNetError) {
             logger.info('[Login] Erro de rede legítimo detectado. Executando login via SQLite local.');
             loggedUser = doLocalAuthFallback();
-          origemSessao = 'LOCAL';
             origemSessao = 'LOCAL';
           } else {
             // Se for erro de credenciais (ou qualquer coisa diferente de timeout/falha de rede), NÃO mascara com o SQLite!

@@ -136,7 +136,6 @@ import {
   perfilNaoLido
 } from './utils/sessionScope';
 import {
-  ehLinkDeRecuperacao,
   emRecuperacaoDeSenha,
   limparRecuperacaoDeSenha,
   marcarRecuperacaoDeSenha
@@ -761,15 +760,10 @@ useEffect(() => {
   const [syncBaixados, setSyncBaixados] = useState<number | null>(null);
   // Link de recuperação do Supabase: a app mostra o ecrã de nova senha em vez
   // de deixar entrar com a sessão temporária que o link cria.
-  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(() => {
-    // A marca é posta na avaliação de `passwordRecovery` (importado primeiro em
-    // index.tsx) ou no evento PASSWORD_RECOVERY. O hash já pode estar limpo
-    // aqui, por isso a leitura do URL é só um reforço.
-    const doLink = typeof window !== 'undefined'
-      && ehLinkDeRecuperacao(window.location.hash, window.location.search);
-    if (doLink) marcarRecuperacaoDeSenha();
-    return emRecuperacaoDeSenha() || doLink;
-  });
+  // A marca é posta na avaliação de `passwordRecovery` (importado primeiro em
+  // index.tsx, antes de o cliente Supabase limpar o hash) ou no evento
+  // PASSWORD_RECOVERY — aqui basta ler a marca.
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(emRecuperacaoDeSenha);
   const isSyncingRef = useRef(false);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
@@ -4442,13 +4436,14 @@ useEffect(() => {
         const permissions = await ensureUserProfile(session.user.email!, unifiedMetadata, session.user.id);
         const permissionsObj = permissions as unknown as Record<string, unknown>;
         const unifiedMetadataObj = unifiedMetadata as unknown as Record<string, unknown>;
+        const dbTenant = String(permissions.tenantid ?? '');
         logger.info(`[Auth] Perfil carregado para ${session.user.email}:`, { 
-          dbTenant: permissions.tenantid || (permissionsObj.tenantid as string), 
+          dbTenant, 
           metaTenant: unifiedMetadata.tenantid || (unifiedMetadataObj.tenantid as string),
-          finalTenant: permissions.tenantid || (permissionsObj.tenantid as string) || ''
+          finalTenant: dbTenant
         });
         
-        let resolvedTenantid = (resolveTenantId(permissions) || resolveTenantId(permissionsObj) || resolveTenantId(unifiedMetadataObj) || readLocalTenantId() || readSessionTenantId() || '').trim().toUpperCase();
+        let resolvedTenantid = (resolveTenantId(permissionsObj) || resolveTenantId(unifiedMetadataObj) || readLocalTenantId() || readSessionTenantId() || '').trim().toUpperCase();
         // A filial pode estar gravada como `filial` (provisionamento em
         // Acessos) ou `unitid/_unitid` (perfis antigos) — ler as duas grafias
         // evita declarar o auditor "sem filial" e derrubar a sessão dele.
@@ -4463,7 +4458,7 @@ useEffect(() => {
           // DONO GLOBAL: o tenant vem EXCLUSIVAMENTE da base (user_permissions).
           // NUNCA de storage/cache de sessão anterior — evita que o dono herde o
           // contrato de uma sessão velha (ex.: CLIENTETESTE após purga/logout).
-          const baseTenant = resolveTenantId(permissions) || resolveTenantId(permissionsObj) || '';
+          const baseTenant = resolveTenantId(permissionsObj) || '';
           resolvedTenantid = baseTenant.trim().toUpperCase() === 'GBR_SUPER_ADMIN_CORINGA' ? '' : baseTenant;
           resolvedUnitId = 'TODAS';
         }
@@ -7430,7 +7425,7 @@ useEffect(() => {
                     logger.warn('[Sync] Sincronizacao em background falhou:', err);
                   });
                 }
-              } else if (multiContextLogin) {
+              } else {
                 logger.info(">>> [SRE_NAV] Login multi-contrato: sync adiado até a escolha do contrato/filial no seletor.");
               }
               // A biometria NÃO é mais disparada por timer depois do login: ela
