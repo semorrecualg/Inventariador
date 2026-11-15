@@ -14,6 +14,7 @@ import {
   conferirAtivo,
   derivarAtualizacaoConferencia,
   nextDeviceLamport,
+  reservarLamports,
   resolveDeviceId,
 } from '../services/fieldConferencing';
 import { getDeviceId } from '../services/syncSessionService';
@@ -128,6 +129,34 @@ describe('conferência → evento (F1.3)', () => {
 
     // Contexto apagado (restore antigo): o próximo lamport não pode repetir 7.
     expect(await nextDeviceLamport(DEVICE)).toBe(8);
+  });
+});
+
+describe('reservarLamports — bloco para a edição em lote', () => {
+  it('devolve números contíguos e não os repete depois', async () => {
+    const bloco = await reservarLamports(DEVICE, 3);
+
+    expect(bloco).toEqual([1, 2, 3]);
+    expect(await nextDeviceLamport(DEVICE)).toBe(4);
+  });
+
+  it('quantidade zero não gasta número', async () => {
+    await reservarLamports(DEVICE, 2);
+
+    expect(await reservarLamports(DEVICE, 0)).toEqual([]);
+    expect(await nextDeviceLamport(DEVICE)).toBe(3);
+  });
+
+  it('cada ativo do lote fica com o seu lamport no log', async () => {
+    await criarAtivo('AT-C1');
+    await criarAtivo('AT-C2');
+    const [l1, l2] = await reservarLamports(DEVICE, 2);
+
+    const primeiro = await conferir({ device_id: DEVICE, asset_key: 'AT-C1', lamport: l1 });
+    const segundo = await conferir({ device_id: DEVICE, asset_key: 'AT-C2', lamport: l2 });
+
+    expect([primeiro.event.lamport, segundo.event.lamport]).toEqual([l1, l2]);
+    expect(new Set([l1, l2]).size).toBe(2);
   });
 });
 

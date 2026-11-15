@@ -357,9 +357,11 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
   `TAG_INVENTARIO` só é tocado nos dois sentidos que pertencem à projeção:
   divergência nova marca `DIVERGÊNCIA`, e uma leitura normal desfaz `DIVERGÊNCIA`
   em `CONFERIDO` — marcas alheias (`BAIXADO`, `ADOTADO`, `ETIQUETADO`…) ficam
-  intactas. O `device_id` dos eventos é o mesmo `getDeviceId` do recibo de sync. Falta estender a ficha/etiqueta/conciliação e a edição em
-  lote (`bulkUpdateAssets`), que continuam com escrita direta até F1 fechar em
-  todas as telas, e F1.6 (cadeia de hash).
+  intactas. O `device_id` dos eventos é o mesmo `getDeviceId` do recibo de sync.
+  A ficha do ativo, a etiqueta e a conciliação já não escrevem nada disso à mão
+  (passam pelo mesmo `commitAssetUpdate`), e a edição em lote emite um evento por
+  ativo com o bloco de lamports reservado de uma vez (`reservarLamports`), para
+  não repetir números entre os eventos paralelos. Falta F1.6 (cadeia de hash).
 - **F1 em curso** (v8 do schema local): `field_events` criada com escrita
   só-adição — hooks `updating`/`deleting` do Dexie recusam alterar ou apagar o
   evento (`AppendOnlyViolation`), e a única alteração aceite é `_synced` 0 → 1,

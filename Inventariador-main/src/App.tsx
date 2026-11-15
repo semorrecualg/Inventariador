@@ -114,7 +114,7 @@ import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudI
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isSyncLockStuck } from './services/syncQueueGuards';
 import { beginSyncCycle, endSyncCycle, pullIntoSession, pushAssetsWithReceipt, type SyncSession } from './services/syncSessionService';
-import { conferirAtivo, derivarAtualizacaoConferencia } from './services/fieldConferencing';
+import { conferirAtivo, derivarAtualizacaoConferencia, reservarLamports, resolveDeviceId } from './services/fieldConferencing';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 import { determineAssetTag } from './services/tagService';
@@ -5219,12 +5219,12 @@ useEffect(() => {
     }
 
     const auditor = user?.name || user?.username || user?.email || 'SISTEMA';
-    // F1.3/F1.4 — na tela de conferência o estado vem da PROJEÇÃO: a leitura
-    // nasce como evento (com lamport, GPS e aparelho) e os campos derivados
-    // (`_conferido`, `_dataLeitura`, `_auditor`, `_localMaster`) são calculados
-    // a partir do log. Desmarcar (`_conferido === false`) não gere evento.
-    const emConferencia = origin === TransactionOrigin.INVENTORY && updates._conferido !== false;
-    if (emConferencia) {
+    // F1.3/F1.4 — o estado do ativo vem da PROJEÇÃO, em qualquer tela: ficha,
+    // etiqueta, conciliação e conferência passam todas por aqui. A leitura nasce
+    // como evento (com lamport, GPS e aparelho) e os campos derivados
+    // (`_conferido`, `_dataLeitura`, `_auditor`, `_localMaster`) são calculados a
+    // partir do log. Desmarcar (`_conferido === false`) não gere evento.
+    if (updates._conferido !== false) {
       try {
         const { estado } = await conferirAtivo({
           tenantid: updates.tenantid,
@@ -5247,12 +5247,6 @@ useEffect(() => {
         if (!updates._dataLeitura) updates._dataLeitura = new Date().toISOString();
         updates._auditor = auditor;
       }
-    } else if (updates._conferido !== false) {
-      // Fora da conferência (ficha, etiqueta, conciliação) mantém-se o
-      // comportamento anterior até F1 chegar a essas telas.
-      if (updates._conferido === undefined) updates._conferido = true;
-      if (!updates._dataLeitura) updates._dataLeitura = new Date().toISOString();
-      updates._auditor = auditor;
     }
     
     // Log de Auditoria
@@ -5550,9 +5544,8 @@ useEffect(() => {
       _is_synced: 0,
       currentCampaignId: inventory.currentCampaignId || assetWithGps.currentCampaignId,
       _version: nextVersion,
-      _history: [...(assetWithGps._history || []), auditEntry],
-      _auditor: user?.email || assetWithGps._auditor,
-      _dataLeitura: new Date().toISOString()
+      _history: [...(assetWithGps._history || []), auditEntry]
+      // `_auditor`/`_dataLeitura` vêm da projeção no commit, não daqui.
     };
 
     // Commit local + estado visual imediatamente; GPS e nuvem não bloqueiam o
@@ -5880,9 +5873,17 @@ useEffect(() => {
     }
 
     // 1. CALCULAMOS OS NOVOS OBJETOS (MERGE NÃO DESTRUTIVO)
+    // Os lamports do lote são reservados de uma vez: pedir o contador por item
+    // dentro do `Promise.all` devolveria o mesmo número a vários eventos.
+    const alvoLote = inventory.assets.filter(a => idSet.has(String(a.id)));
+    const deviceIdLote = await resolveDeviceId();
+    const lamportsLote = await reservarLamports(deviceIdLote, alvoLote.length);
+    let indiceLamport = 0;
+
     const updatedAssetsList: Asset[] = [];
-    const allAssets = inventory.assets.map(a => {
+    const allAssets = await Promise.all(inventory.assets.map(async a => {
       if (idSet.has(String(a.id))) {
+        const lamportDeste = lamportsLote[indiceLamport++];
         const updates: Asset & Record<string, unknown> = { 
           ...a, 
           ...(manualUpdates || {}), 
@@ -5917,10 +5918,6 @@ useEffect(() => {
               ? inventoryLocation.toUpperCase().trim() 
               : (updates.endereco || "").toString().toUpperCase().trim());
 
-        updates._conferido = true;
-        updates._dataLeitura = new Date().toISOString();
-        updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
-        
         const wasLabelingCandidate = 
           String(a.etiqueta || '').toUpperCase().includes('ETIQUETAR') || 
           String(a._plaquetaMaster || '').toUpperCase() === 'ETIQUETAR' ||
@@ -5953,7 +5950,6 @@ useEffect(() => {
             originalValues['endereco'] = a.endereco;
           }
         }
-        updates._localMaster = targetLoc;
         // Alteração deste aparelho = pendente de nuvem. Sem este reset, um item
         // que veio do pull (_is_synced = 1) ficava marcado como "Sincronizado"
         // no cartão assim que fosse conferido — e continuava a mentir enquanto
@@ -5965,6 +5961,37 @@ useEffect(() => {
         updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
         
         updates.TAG_INVENTARIO = determineTag({ ...a, ...updates }, targetLoc);
+
+        // F1.3/F1.4 — o lote também nasce como evento: um por ativo, com o
+        // lamport reservado, o GPS do lote e o local alvo. O patch da projeção
+        // traz `_conferido`, `_dataLeitura`, `_auditor` e `_localMaster`; a TAG
+        // só é trocada se for divergência (ou se desfizer uma).
+        try {
+          const { estado } = await conferirAtivo({
+            tenantid: updates.tenantid,
+            filial: updates.filial,
+            asset_key: String(updates.primarykey || updates.id || ''),
+            auditor: user?.name || user?.username || user?.email || 'SISTEMA',
+            tipo: String(updates.TAG_INVENTARIO || '').toUpperCase().includes('DIVERG')
+              ? 'DIVERGENCIA'
+              : 'LEITURA',
+            local: targetLoc,
+            gps_lat: gpsCoords.lat ?? null,
+            gps_lng: gpsCoords.lng ?? null,
+            device_id: deviceIdLote,
+            lamport: lamportDeste,
+          });
+          Object.assign(updates, derivarAtualizacaoConferencia(estado, updates.TAG_INVENTARIO));
+        } catch (err) {
+          // O lote não pode falhar por causa da instrumentação: escrita direta
+          // (comportamento anterior) e rasto para o suporte.
+          logger.warn('>>> [Lote] Falha ao registar conferência; escrita direta:', err);
+          updates._conferido = true;
+          updates._dataLeitura = new Date().toISOString();
+          updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
+          updates._localMaster = targetLoc;
+        }
+
         updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
         updates._camposAlterados = Array.from(alteredFields);
         updates._valoresOriginais = originalValues;
@@ -5973,7 +6000,7 @@ useEffect(() => {
         return updates;
       }
       return a;
-    });
+    }));
 
     // 2. PESIMISMO SAUDÁVEL: PERSISTÊNCIA ANTES DA UI
     setIsProcessing(true);

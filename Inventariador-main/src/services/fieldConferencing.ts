@@ -1,13 +1,13 @@
 /**
  * Conferência de campo → evento → projeção (F1.3/F1.4).
  *
- * A tela de conferência deixa de escrever `_conferido`, `_dataLeitura`,
- * `_auditor`, `_localMaster` e GPS à mão. Em vez disso:
+ * Nenhuma tela escreve `_conferido`, `_dataLeitura`, `_auditor`, `_localMaster`
+ * à mão (conferência, ficha, etiqueta, conciliação e lote). Em vez disso:
  *
  *   1. emite `LEITURA` ou `DIVERGENCIA` com `lamport`, GPS e aparelho;
  *   2. projeta o estado a partir dos eventos do ativo (ordem determinística);
- *   3. grava os campos derivados nas tabelas de estado (`local_assets` e os
- *      espelhos que ainda existem até F5).
+ *   3. devolve o patch derivado, que o commit único da tela persiste — não há
+ *      segunda escrita da mesma linha.
  *
  * O evento é a fonte da verdade; o estado é consequência. Se a projeção for
  * repetida, o resultado é o mesmo — não há contador a "andar para trás".
@@ -57,6 +57,19 @@ export const resolveDeviceId = (): Promise<string> => getDeviceId();
  * do próprio log evita reutilizar números já usados.
  */
 export const nextDeviceLamport = async (deviceId: string): Promise<number> => {
+  const [proximo] = await reservarLamports(deviceId, 1);
+  return proximo;
+};
+
+/**
+ * Reserva N lamports de uma vez, em bloco contíguo.
+ *
+ * A edição em lote emite um evento por ativo em paralelo; pedir o contador N
+ * vezes em paralelo devolveria o mesmo número a vários eventos. Reservar o bloco
+ * lê e grava o contador uma só vez e distribui os números pela ordem do lote.
+ */
+export const reservarLamports = async (deviceId: string, quantidade: number): Promise<number[]> => {
+  if (quantidade <= 0) return [];
   const key = `field_lamport_${deviceId}`;
   const contexto = await db.SYSTEM_CONTEXT.get(key);
   const doContexto = Number(contexto?.value ?? 0) || 0;
@@ -70,9 +83,14 @@ export const nextDeviceLamport = async (deviceId: string): Promise<number> => {
     );
   }
 
-  const proximo = Math.max(doContexto, doLog) + 1;
-  await db.SYSTEM_CONTEXT.put({ key, value: String(proximo), updated_at: new Date().toISOString() });
-  return proximo;
+  const base = Math.max(doContexto, doLog);
+  const reservados = Array.from({ length: quantidade }, (_, i) => base + i + 1);
+  await db.SYSTEM_CONTEXT.put({
+    key,
+    value: String(reservados[reservados.length - 1]),
+    updated_at: new Date().toISOString(),
+  });
+  return reservados;
 };
 
 /**
