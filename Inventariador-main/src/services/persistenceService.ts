@@ -6,6 +6,7 @@ import { encryption } from './securityService';
 import { localDb, backupDatabaseToPhysicalStorage } from './localDbService';
 import { sqliteService, db, DexieAsset } from './sqliteService';
 import { generateChecksum } from './utils';
+import { stripDevicePreferences } from '../utils/fieldPreferences';
 import { normalizeAssetContract } from '../utils/schema';
 import { FileSystemStorageService } from './FileSystemStorageService';
 import { logger } from '../utils/logger';
@@ -341,7 +342,9 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     logger.info(`>>> [Persistence] Iniciando salvamento do inventário (Modo: ${mode}, skipSqlAssetsInsert: ${skipSqlAssetsInsert})...`);
     
     // 1. Salva localmente primeiro (Offline-First)
-    const config = { ...data } as Record<string, unknown>;
+    // Preferências de campo (tema, leitura, energia) são do DISPOSITIVO e vivem
+    // só no localStorage: saem do snapshot para não existirem duas verdades.
+    const config = stripDevicePreferences({ ...data } as Record<string, unknown>);
     const assets = data.assets;
     
     // Remove campos de estado da UI e assets para o hash da config

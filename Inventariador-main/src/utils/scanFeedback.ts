@@ -75,14 +75,9 @@ export const playScanFeedback = (
       }
     }
 
-    if (shouldVibrate) {
-      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-        navigator.vibrate(batterySaver ? 50 : 100);
-      } else {
-        // Sem motor de vibração (desktop, iframe): registra para diagnóstico em
-        // vez de falhar em silêncio absoluto.
-        logger.info('[scanFeedback] Dispositivo sem vibração — apenas o som é possível.');
-      }
+    if (shouldVibrate && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      // Sem motor de vibração (desktop, iframe) simplesmente não há o que fazer.
+      navigator.vibrate(batterySaver ? 50 : 100);
     }
   } catch (e) {
     logger.error('Feedback failed', e);

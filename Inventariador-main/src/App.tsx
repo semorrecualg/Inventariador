@@ -61,6 +61,7 @@ import TenantWorkSelector from './components/TenantWorkSelector';
 import WorkContextSelector from './components/WorkContextSelector';
 import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, SupabaseUserProfile } from './utils/routingUtils';
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
+import { readFieldPreferences, writeFieldPreferences } from './utils/fieldPreferences';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
@@ -276,17 +277,10 @@ const getInitialInventoryState = (mode: DatabaseMode): InventoryState => ({
   status: DatabaseStatus.EMPTY,
   editableFields: ['DESCRICAODOATIVO', 'SERIAL', 'ENDERECO'],
   qrCodeFields: ['ETIQUETA'],
-  // Preferências de campo (Ajustes de Campo) — vivem por DISPOSITIVO: são
-  // hidratadas do localStorage para sobreviverem a reload/logout, não só à
-  // sessão em curso.
-  scannerMode: (localStorage.getItem('app_scanner_mode') as ScannerMode) || ScannerMode.BARCODE,
-  autoConfirmOnScan: localStorage.getItem('app_auto_confirm_on_scan') !== 'false',
-  scanFeedbackMode:
-    (localStorage.getItem('app_scan_feedback_mode') as ScanFeedbackMode) || ScanFeedbackMode.BOTH,
+  // Preferências de campo: fonte única no localStorage (utils/fieldPreferences).
+  ...readFieldPreferences(),
   inventorySearchMode: InventorySearchMode.MANUAL,
   immersiveMode: false,
-  darkMode: localStorage.getItem('app_dark_mode') === 'true',
-  batterySaver: localStorage.getItem('app_battery_saver') === 'true',
   protheusIntegrationEnabled: localStorage.getItem('app_protheus_enabled') === 'true',
   protheusApiUrl: localStorage.getItem('app_protheus_url') || '',
   mandatoryPhotoOnDivergence: localStorage.getItem('app_mandatory_photo_divergence') === 'true',
@@ -3419,10 +3413,11 @@ useEffect(() => {
             ...saved,
             editableFields: saved.editableFields || prev.editableFields,
             qrCodeFields: saved.qrCodeFields || prev.qrCodeFields,
-            autoConfirmOnScan: saved.autoConfirmOnScan ?? prev.autoConfirmOnScan,
-            scanFeedbackMode: saved.scanFeedbackMode || prev.scanFeedbackMode,
             inventorySearchMode: saved.inventorySearchMode || prev.inventorySearchMode,
-            immersiveMode: saved.immersiveMode ?? prev.immersiveMode
+            immersiveMode: saved.immersiveMode ?? prev.immersiveMode,
+            // Preferências de campo são do DISPOSITIVO: snapshots antigos ainda
+            // trazem uma cópia e ela não pode desfazer o ajuste actual.
+            ...readFieldPreferences()
           }));
           
           // Se for modo nuvem ou se não definimos source ainda, definimos como CACHED por padrão
@@ -4183,13 +4178,8 @@ useEffect(() => {
         localStorage.setItem('app_is_inventorying', String(isInventorying));
         localStorage.setItem('app_consultation_filters', safeStringify(consultationFilters));
         localStorage.setItem('app_committed_consultation_filters', safeStringify(committedConsultationFilters));
-        localStorage.setItem('app_dark_mode', String(inventory.darkMode || false));
-        localStorage.setItem('app_battery_saver', String(inventory.batterySaver || false));
-        // Ajustes de Campo: sem estas três linhas o painel salvava só na sessão
-        // e, ao recarregar, tudo voltava ao padrão — parecia "não funcional".
-        localStorage.setItem('app_scanner_mode', String(inventory.scannerMode || ScannerMode.BARCODE));
-        localStorage.setItem('app_auto_confirm_on_scan', String(inventory.autoConfirmOnScan !== false));
-        localStorage.setItem('app_scan_feedback_mode', String(inventory.scanFeedbackMode || ScanFeedbackMode.BOTH));
+        // Ajustes de Campo: um único ponto de gravação (ver utils/fieldPreferences).
+        writeFieldPreferences(inventory);
         localStorage.setItem('app_mandatory_photo_divergence', String(inventory.mandatoryPhotoOnDivergence || false));
         localStorage.setItem('app_mandatory_photo_new', String(inventory.mandatoryPhotoOnNewItem || false));
       } catch { logger.warn("Storage cap reached"); }
