@@ -118,7 +118,7 @@ import { conferirAtivo, derivarAtualizacaoConferencia, reservarLamports, resolve
 import { flushFieldEvents } from './services/fieldEventSync';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
-import { deveEntrarEmModoNuvem } from './utils/sessionMode';
+import { deveEntrarEmModoNuvem, origemDaSessaoGuardada, avisoAposCargaLocal } from './utils/sessionMode';
 import { determineAssetTag } from './services/tagService';
 
 import { requestPersistentStorage, localDb } from './services/localDbService';
@@ -4484,8 +4484,15 @@ useEffect(() => {
           logger.warn('[SRE Failsafe] Falha ao registrar log de auditoria na inicialização:', logErr);
         }
         
-        // Se logou via Supabase, garante que o modo está correto
-        if (!isInternalMode) {
+        // MESMA REGRA DO LOGIN: o modo segue a origem da sessão recuperada, não
+        // o facto de o build ter credenciais. Credencial local do app (marcada
+        // em `gbr_session_origin`) fica em BASE LOCAL; sessão Supabase entra em
+        // BASE OFICIAL e puxa o contrato.
+        const naNuvemReload = deveEntrarEmModoNuvem(
+          origemDaSessaoGuardada(isAppManagedSession()),
+          !isInternalMode
+        );
+        if (naNuvemReload) {
           if (databaseMode !== DatabaseMode.SUPABASE) {
             setDatabaseMode(DatabaseMode.SUPABASE);
             localStorage.setItem('app_database_mode', DatabaseMode.SUPABASE);
@@ -4533,7 +4540,8 @@ useEffect(() => {
         };
         setUser(fallbackUser);
         sessionStorage.setItem('app_current_user', safeStringify(fallbackUser));
-        if (!isInternalMode) {
+        // Mesma regra da origem: fallback de uma sessão local não pode virar nuvem.
+        if (!isInternalMode && !isAppManagedSession()) {
           setDatabaseMode(DatabaseMode.SUPABASE);
         } else {
           setDatabaseMode(DatabaseMode.INTERNAL);
@@ -4947,12 +4955,11 @@ useEffect(() => {
    * hora, sem reload do app.
    */
   const handleLocalBaseLoaded = async (info: { count: number; tenantids: string[] }) => {
-    const switched = databaseMode !== DatabaseMode.INTERNAL;
-    if (switched) {
-      logger.info('>>> [ModeSwitch] Carga na base local detectada. Alternando para BASE LOCAL.');
-      setDatabaseMode(DatabaseMode.INTERNAL);
-      localStorage.setItem('app_database_mode', DatabaseMode.INTERNAL);
-    }
+    // A carga grava a base local e o painel passa a LÊ-LA (é isso que o
+    // utilizador quer ver), mas o MODO GLOBAL não muda: mudá-lo para INTERNAL e
+    // persistir derrubava o sync do contrato que o login Supabase tinha
+    // acabado de activar, e a app ficava em BASE LOCAL sem ninguém pedir.
+    logger.info('>>> [ModeSwitch] Carga na base local detectada. Modo global mantido: ' + databaseMode + '.');
 
     const loaded = await loadInventory(DatabaseMode.INTERNAL);
     if (loaded && loaded.assets.length > 0) {
@@ -4978,17 +4985,12 @@ useEffect(() => {
     setSqliteStatus('ACTIVE');
     setRefreshVersion(prev => prev + 1);
 
-    if (switched) {
-      setModalConfig({
-        isOpen: true,
-        title: 'Operando na Base Local',
-        message: `A carga de ${info.count.toLocaleString('pt-BR')} ativos foi gravada na base deste dispositivo` +
-          `${info.tenantids[0] ? ` (contrato ${info.tenantids[0]})` : ''}. ` +
-          'O sistema passou para o modo BASE LOCAL para que a Unidade Operacional e o Inventário leiam esses ativos. ' +
-          'Para operar na Base Oficial, espelhe a base para a nuvem e troque o modo em Gestão e Manutenção.',
-        type: 'success'
-      });
-    }
+    const aviso = avisoAposCargaLocal({
+      count: info.count,
+      tenantids: info.tenantids,
+      modoActual: databaseMode
+    });
+    setModalConfig({ isOpen: true, title: aviso.titulo, message: aviso.mensagem, type: 'success' });
   };
 
   /**

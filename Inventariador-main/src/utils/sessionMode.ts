@@ -23,3 +23,43 @@ export const deveEntrarEmModoNuvem = (
   origem: LoginOrigin | undefined | null,
   credenciaisNuvem: boolean
 ): boolean => credenciaisNuvem && origem !== 'LOCAL';
+
+/**
+ * Origem de uma sessão que o app encontrou já aberta (reload / auto-login).
+ *
+ * Sem login a acontecer não há como perguntar ao formulário: usa-se a marca que
+ * o login deixou. Sessão marcada como do app (`markAppManagedSession`, gravada
+ * nos logins por credencial local) é LOCAL; qualquer outra é a nuvem, porque só
+ * chega aqui quem tem sessão Supabase guardada.
+ */
+export const origemDaSessaoGuardada = (sessaoDoApp: boolean): LoginOrigin =>
+  (sessaoDoApp ? 'LOCAL' : 'SUPABASE');
+
+export interface AvisoCargaLocal {
+  titulo: string;
+  mensagem: string;
+}
+
+/**
+ * Texto mostrado depois de uma carga de planilha.
+ *
+ * A carga NÃO troca o modo global de base — antes mudava para INTERNAL e
+ * persistia, o que devolvia a app a BASE LOCAL e derrubava o sync do contrato
+ * que o login Supabase tinha acabado de activar. A mensagem tem de dizer isso,
+ * em vez de anunciar uma troca de modo que já não acontece.
+ */
+export const avisoAposCargaLocal = (info: {
+  count: number;
+  tenantids: string[];
+  modoActual: string;
+}): AvisoCargaLocal => {
+  const contrato = info.tenantids[0] ? ` (contrato ${info.tenantids[0]})` : '';
+  const naNuvem = String(info.modoActual ?? '').toUpperCase().startsWith('SUPABASE');
+  return {
+    titulo: naNuvem ? 'Base local carregada — modo mantido' : 'Base local carregada',
+    mensagem: `A carga de ${info.count.toLocaleString('pt-BR')} ativos foi gravada na base deste dispositivo${contrato}. ` +
+      (naNuvem
+        ? 'O modo de base NÃO foi alterado: a app continua em BASE OFICIAL. Espelhe esta base para a nuvem em Gestão e Manutenção quando quiser publicá-la.'
+        : 'A Unidade Operacional e o Inventário leem esta base local.')
+  };
+};
