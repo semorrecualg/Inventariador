@@ -128,7 +128,12 @@ import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
 import { logger } from './utils/logger';
 import { mensagemDeErroDeSync } from './utils/syncError';
-import { decidirEscopoDeSessao, mensagemContaSemContrato, perfilNaoLido } from './utils/sessionScope';
+import {
+  decidirEscopoDeSessao,
+  mensagemContaSemContrato,
+  perfilAdministrativo,
+  perfilNaoLido
+} from './utils/sessionScope';
 import pkg from '../package.json';
 
 export class AppBootstrapError extends Error {
@@ -4438,6 +4443,12 @@ useEffect(() => {
         }
 
         const isOwnerAccount = session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+        // ADMIN/MASTER do contrato sem filial fixa opera em `TODAS` (escolhe a
+        // filial no seletor de contexto). Antes ficava com filial vazia e o
+        // fail-safe o tratava como conta sem contrato.
+        if (!resolvedUnitId && perfilAdministrativo(permissions)) {
+          resolvedUnitId = 'TODAS';
+        }
         // Três desfechos, que antes eram um só: perfil NÃO LIDO (timeout), sessão
         // local do app, e perfil LIDO sem contrato/filial. Só o terceiro encerra.
         const perfilIndisponivel = perfilNaoLido(permissions);

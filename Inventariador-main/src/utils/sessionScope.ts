@@ -27,6 +27,24 @@ export interface EntradaEscopo {
   perfilIndisponivel: boolean;
 }
 
+/**
+ * ADMIN/MASTER do contrato: quando o perfil não fixa filial, o escopo é `TODAS`
+ * (o mesmo que `buildWorkContexts` e o seletor de contexto esperam). Sem esta
+ * normalização, o login do dono global aplicava `TODAS` mas um ADMIN de contrato
+ * ficava com filial vazia e o boot o bloqueava como "conta sem contrato".
+ */
+export const perfilAdministrativo = (perfil: unknown): boolean => {
+  if (typeof perfil !== 'object' || perfil === null) return false;
+  const campo = perfil as { role?: unknown; is_admin?: unknown; isAdmin?: unknown };
+  const papel = String(campo.role ?? '').trim().toUpperCase();
+  return (
+    papel === 'ADMIN' ||
+    papel === 'MASTER' ||
+    campo.is_admin === true ||
+    campo.isAdmin === true
+  );
+};
+
 export const decidirEscopoDeSessao = (entrada: EntradaEscopo): DecisaoDeEscopo => {
   const semEscopo = ausente(entrada.tenantid) || ausente(entrada.filial);
 

@@ -573,6 +573,11 @@ const Login: React.FC<LoginProps> = ({
             // contrato é escolhido no seletor pós-login (multi-contrato).
             tenantid = normalizeValue(cloudUser.tenantid || '');
             unitId = 'TODAS';
+          } else if (!unitId && is_admin) {
+            // ADMIN/MASTER do contrato sem filial fixa: escopo `TODAS`, como no
+            // boot. Sem isto o login passava e o reload seguinte bloqueava a
+            // conta por "falta de filial".
+            unitId = 'TODAS';
           }
 
           // Filiais AUTORIZADAS do perfil: o administrador libera o auditor em

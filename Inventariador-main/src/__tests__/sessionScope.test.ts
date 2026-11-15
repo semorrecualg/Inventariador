@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   decidirEscopoDeSessao,
   mensagemContaSemContrato,
+  perfilAdministrativo,
   perfilNaoLido,
   type EntradaEscopo
 } from '../utils/sessionScope';
@@ -97,5 +98,33 @@ describe('mensagemContaSemContrato', () => {
       .toContain('contrato "NULL"');
     expect(mensagemContaSemContrato('a@b.c', 'CICOPAL', 'MATRIZ'))
       .toContain('filial "MATRIZ"');
+  });
+});
+
+describe('perfilAdministrativo', () => {
+  it('reconhece ADMIN/MASTER e a flag is_admin', () => {
+    expect(perfilAdministrativo({ role: 'ADMIN' })).toBe(true);
+    expect(perfilAdministrativo({ role: ' master ' })).toBe(true);
+    expect(perfilAdministrativo({ role: 'AUDITOR', is_admin: true })).toBe(true);
+    expect(perfilAdministrativo({ role: 'AUDITOR', isAdmin: true })).toBe(true);
+  });
+
+  it('auditor sem flag não é administrativo', () => {
+    expect(perfilAdministrativo({ role: 'AUDITOR' })).toBe(false);
+    expect(perfilAdministrativo({ role: 'AUDITOR', is_admin: false })).toBe(false);
+    expect(perfilAdministrativo(null)).toBe(false);
+    expect(perfilAdministrativo('ADMIN')).toBe(false);
+  });
+
+  it('ADMIN do contrato com filial TODAS segue; auditor sem filial não', () => {
+    const adminContrato: EntradaEscopo = {
+      tenantid: 'CICOPAL',
+      filial: 'TODAS',
+      ehDono: false,
+      sessaoLocalDoApp: false,
+      perfilIndisponivel: false
+    };
+    expect(decidirEscopoDeSessao(adminContrato)).toBe('SEGUIR');
+    expect(decidirEscopoDeSessao({ ...adminContrato, filial: '' })).toBe('SEM_ESCOPO');
   });
 });
