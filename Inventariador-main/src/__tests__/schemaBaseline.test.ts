@@ -1,13 +1,13 @@
 // src/__tests__/schemaBaseline.test.ts
 // CONTRATO DE CONGELAMENTO DO SCHEMA LOCAL (Fase 0 — docs/MIGRACAO_HIBRIDA.md).
 //
-// Trava o baseline canônico `InventoryLocalStore` v8:
-//  - `db.verno === 8`
+// Trava o baseline canônico `InventoryLocalStore` v9:
+//  - `db.verno === 9`
 //
 // A chave composta `[tenantid+primarykey]` foi aplicada na cadeia v6→v7
 // (v6: DROP + backup; v7: RECREATE + restauração — o Dexie não permite trocar
 // a chave primária num único upgrade).
-//  - conjunto exato das 10 tabelas Dexie
+//  - conjunto exato das 11 tabelas Dexie
 //  - assinatura de chave primária + índices de cada tabela (order-insensitive)
 //  - os 21 canônicos do contrato de carga presentes em DB_ASSET_COLUMNS
 //
@@ -54,6 +54,8 @@ function normalize(sig: string): string {
 const BASELINE: Record<string, string> = {
   // v8 (F1 da malha de auditoria): log de eventos só-adição.
   field_events: 'event_id, [tenantid+filial], [tenantid+asset_key], _synced, [tenantid+asset_key+lamport]',
+  // v9: quarentena do log (eventos recusados por chave única).
+  field_event_quarantine: 'event_id, [tenantid+quarantined_at], reason',
   local_assets: '[tenantid+primarykey], primarykey, [tenantid+filial], filial, _is_synced',
   ativos: '[tenantid+primarykey], primarykey, [tenantid+filial], filial, _is_synced',
   assets: '[tenantid+primarykey], primarykey, [tenantid+filial], filial, _is_synced',
@@ -75,12 +77,12 @@ const LOADER_CONTRACT_21 = [
 ];
 
 describe('schemaBaseline — congelamento do InventoryLocalStore (Fase 0)', () => {
-  it('banco canônico `InventoryLocalStore` na versão de schema v8', () => {
+  it('banco canônico `InventoryLocalStore` na versão de schema v9', () => {
     expect(db.name).toBe('InventoryLocalStore');
-    expect(db.verno).toBe(8);
+    expect(db.verno).toBe(9);
   });
 
-  it('conjunto exato de 10 tabelas (sem tabelas órfãs nem faltantes)', () => {
+  it('conjunto exato de 11 tabelas (sem tabelas órfãs nem faltantes)', () => {
     const names = db.tables.map((t) => t.name).sort();
     expect(names).toEqual(Object.keys(BASELINE).sort());
   });

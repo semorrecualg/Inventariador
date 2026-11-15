@@ -371,8 +371,12 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
   contadores próprios (`recibo.fieldEvents`), para não poluir `accepted`/`missing`
   dos ativos. Um lote recusado (ex.: um evento a colidir na chave única) recua
   para envio evento-a-evento, um só nível: os 499 bons não ficam presos por
-  causa de um, e o culpado sai identificado com o motivo. Falta F1.6 (cadeia de
-  hash) e o pull do log entre aparelhos.
+  causa de um, e o culpado sai identificado com o motivo. O recuo não acontece
+  quando a falha é de rede (nem offline conhecido): sem sinal, 500 timeouts não
+  provam nada sobre os eventos e o resto fica pendente. O evento que colide na
+  chave única da nuvem vai para `field_event_quarantine` (v9 do schema local),
+  com o evento inteiro e o motivo, e deixa de ser reenviado em cada ciclo.
+  Falta F1.6 (cadeia de hash) e o pull do log entre aparelhos.
 - **F1 em curso** (v8 do schema local): `field_events` criada com escrita
   só-adição — hooks `updating`/`deleting` do Dexie recusam alterar ou apagar o
   evento (`AppendOnlyViolation`), e a única alteração aceite é `_synced` 0 → 1,

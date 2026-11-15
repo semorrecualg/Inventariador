@@ -34,6 +34,27 @@ export interface FieldEventPayload {
   [extra: string]: unknown;
 }
 
+/**
+ * Evento posto de parte: a nuvem recusou-o por colidir na chave única
+ * `(tenantid, device_id, lamport)` e reenviá-lo em cada ciclo só gasta rede.
+ *
+ * Guarda o evento COMPLETO, não um resumo: quem for corrigir a causa precisa do
+ * que foi recusado, e um registo de quarentena que não permite reconstruir o
+ * evento é só um aviso.
+ */
+export interface QuarantinedFieldEvent {
+  event_id: string;
+  tenantid: string;
+  filial: string;
+  asset_key?: string;
+  lamport: number;
+  event_type: FieldEventType;
+  occurred_at: string;
+  reason: string;
+  quarantined_at: string;
+  event: FieldEvent;
+}
+
 export interface FieldEvent {
   /** UUID gerado no aparelho — a chave de idempotência do sync. */
   event_id: string;

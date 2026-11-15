@@ -1,13 +1,13 @@
 # GBR KARDEK – Inventariador · Baseline de Schema (Fase 0)
 
-> **Status:** CONGELADO ✅ · **Data:** 2026-08-06 (v4) · **v5:** 2026-08-07 (Fase C4) · **v7:** 2026-08-12 (Muro multi-tenant) · **v8:** 2026-11-15 (F1 — eventos de campo)
-> **Banco:** `InventoryLocalStore` (`class InventoryDexieDatabase`) · **Versão atual:** **8**
+> **Status:** CONGELADO ✅ · **Data:** 2026-08-06 (v4) · **v5:** 2026-08-07 (Fase C4) · **v7:** 2026-08-12 (Muro multi-tenant) · **v8:** 2026-11-15 (F1 — eventos de campo) · **v9:** 2026-11-15 (quarentena do log)
+> **Banco:** `InventoryLocalStore` (`class InventoryDexieDatabase`) · **Versão atual:** **9**
 > **Fase:** 0 do plano `docs/MIGRACAO_HIBRIDA.md` (baseline estável) + Fase C4
 > (`docs/PLANO_FASE_C_HIGIENIZACAO.md` §6 — v5 = v4 **sem mudança estrutural**, apenas etapa de dados)
 > + Muro multi-tenant (v6→v7 — chave composta `[tenantid+primarykey]`, ver §1)
 > + F1 da malha de auditoria (v8 — `field_events`, só-adição).
 >
-> Este documento é o **snapshot canônico e congelado** do schema local (10 tabelas Dexie +
+> Este documento é o **snapshot canônico e congelado** do schema local (11 tabelas Dexie +
 > `src/constants/schema.ts`). A conformidade é garantida por contrato automatizado:
 > `src/__tests__/schemaBaseline.test.ts` — qualquer mudança não intencional no schema
 > **quebra o teste** e exige decisão explícita (documentar aqui + nova `version(n)`).
@@ -28,13 +28,15 @@
 
 | **v8** | **F1 da malha de auditoria** (`docs/VISAO_MALHA_AUDITORIA_CAMPO.md` §6.4) — nova tabela `field_events` (chave `event_id`; índices `[tenantid+filial]`, `[tenantid+asset_key]`, `_synced`, `[tenantid+asset_key+lamport]`). Escrita **só-adição**: hooks `updating`/`deleting` do Dexie recusam alterar ou apagar o evento (`AppendOnlyViolation`); a única alteração aceite é `_synced` 0 → 1. Nenhuma tabela existente muda de assinatura e o upgrade não toca em dados |
 
+| **v9** | **Quarentena do log** — nova tabela `field_event_quarantine` (chave `event_id`; índices `[tenantid+quarantined_at]`, `reason`). Um evento recusado pela chave única `(tenantid, device_id, lamport)` do Postgres é recusado em todas as rodadas; sem uma lista de parte, cada ciclo reenviava-o para sempre. Guarda o evento completo + motivo, e `unsyncedFieldEvents` exclui o que está aqui. Nenhuma tabela existente muda de assinatura |
+|
 **Regra de evolução:** alterar o schema local = **nova `version(n)`** no
 `InventoryDexieDatabase` (`src/services/sqliteService.ts`) com `upgrade` idempotente,
 atualização **deste** documento e do teste de contrato. Proibido editar `version(4)`/`version(5)`/`version(6)` retroativo.
 
 ---
 
-## 2. Tabelas — snapshot canônico v8 (10 tabelas + 3 backups transitórios descartados em v7)
+## 2. Tabelas — snapshot canônico v9 (11 tabelas + 3 backups transitórios descartados em v7)
 
 | Tabela | Chave primária | Índices | Tipo (fonte) |
 |---|---|---|---|
@@ -48,6 +50,7 @@ atualização **deste** documento e do teste de contrato. Proibido editar `versi
 | `campaign_snapshots` | `id` | `campaign_id` | `DexieCampaignSnapshot` |
 | `addresses` | `++id` (auto) | `[tenantid+filial]`, `codigo_endereco`, `setor`, `bloco`, `_is_synced` | `DexieAddress` |
 | `field_events` (**v8**) | `event_id` | `[tenantid+filial]`, `[tenantid+asset_key]`, `_synced`, `[tenantid+asset_key+lamport]` | `FieldEvent` (`src/types/fieldEvent.ts`) |
+| `field_event_quarantine` (**v9**) | `event_id` | `[tenantid+quarantined_at]`, `reason` | `QuarantinedFieldEvent` (`src/types/fieldEvent.ts`) |
 
 Fonte das definições: `src/services/sqliteService.ts` (interfaces exportadas;
 classe `InventoryDexieDatabase`). Declaração das tabelas no Dexie:
@@ -122,14 +125,15 @@ Indexação composta `[tenantid+filial]` → queries sub-12ms no `AddressSelecto
 ## 5. Garantias do congelamento
 
 1. **Contrato automatizado:** `src/__tests__/schemaBaseline.test.ts` (node) asserta
-   `db.verno === 8`, o conjunto exato das tabelas, a assinatura de chave/índices de cada
+   `db.verno === 9`, o conjunto exato das tabelas, a assinatura de chave/índices de cada
    tabela e a presença dos 21 canônicos em `DB_ASSET_COLUMNS`. Drift → teste vermelho.
-2. **Fingerprint de drift:** a assinatura canônica congelada das 10 tabelas é:
+2. **Fingerprint de drift:** a assinatura canônica congelada das 11 tabelas é:
    `local_assets: [tenantid+primarykey],primarykey,filial,_is_synced,[tenantid+filial]` ·
    `ativos: idem` · `assets: idem` · `audit_logs: id,updated_at` · `campaigns: id,tenantid` ·
    `SYSTEM_CONTEXT: key` · `unit_configs: id,filial` ·
    `campaign_snapshots: id,campaign_id` · `addresses: ++id,[tenantid+filial],codigo_endereco,setor,bloco,_is_synced` ·
-   `field_events: event_id,[tenantid+filial],[tenantid+asset_key],_synced,[tenantid+asset_key+lamport]`.
+   `field_events: event_id,[tenantid+filial],[tenantid+asset_key],_synced,[tenantid+asset_key+lamport]`;
+   `field_event_quarantine: event_id,[tenantid+quarantined_at],reason`.
 3. **Proibição:** editar `version(4)`/`version(5)`/`version(6)` retroativo; escrever colunas legadas (`_unitid`,
    `tenantId`, `tenant_id`, `_tenantid`); SQL raw (proibido pelo contrato SRE — só API Dexie).
 4. **Muro multi-tenant:** a chave composta `[tenantid+primarykey]` torna a colisão entre

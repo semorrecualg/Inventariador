@@ -6,7 +6,7 @@
  * reconstrói estado é o projetor puro (`fieldProjection`).
  */
 import { db } from './sqliteService';
-import type { FieldEvent, FieldEventInput } from '../types/fieldEvent';
+import type { FieldEvent, FieldEventInput, QuarantinedFieldEvent } from '../types/fieldEvent';
 import { projectAsset, type ProjectedAsset } from './fieldProjection';
 
 /** O evento a gravar: o `lamport` é do aparelho, por isso vem do chamador. */
@@ -50,9 +50,51 @@ export const eventsForAsset = async (tenantid: string, assetKey: string): Promis
     .equals([String(tenantid || '').trim().toUpperCase(), String(assetKey || '').trim()])
     .toArray();
 
-/** Eventos ainda não confirmados pela nuvem. */
-export const unsyncedFieldEvents = async (): Promise<FieldEvent[]> =>
-  db.field_events.where('_synced').equals(0).toArray();
+/**
+ * Eventos ainda não confirmados pela nuvem.
+ *
+ * Exclui os que estão em quarentena: um evento recusado por chave única é
+ * recusado em todas as rodadas, e reenviá-lo a cada ciclo é gastar rede (e, num
+ * aparelho offline, timeouts) para receber o mesmo erro.
+ */
+export const unsyncedFieldEvents = async (): Promise<FieldEvent[]> => {
+  const pendentes = await db.field_events.where('_synced').equals(0).toArray();
+  if (pendentes.length === 0) return pendentes;
+  const emQuarentena = new Set(
+    (await db.field_event_quarantine.toCollection().primaryKeys()).map(String)
+  );
+  return pendentes.filter(event => !emQuarentena.has(String(event.event_id)));
+};
+
+/** Eventos postos de parte, com o motivo real da recusa. */
+export const quarantinedFieldEvents = async (): Promise<QuarantinedFieldEvent[]> =>
+  db.field_event_quarantine.toArray();
+
+/**
+ * Põe eventos em quarentena. Idempotente: reencaminhar o mesmo evento não
+ * duplica nem reescreve o motivo original (fica o primeiro — foi ele que
+ * justificou a saída da fila).
+ */
+export const quarantineFieldEvents = async (
+  items: { event: FieldEvent; reason: string }[]
+): Promise<number> => {
+  if (items.length === 0) return 0;
+  const agora = new Date().toISOString();
+  const registos: QuarantinedFieldEvent[] = items.map(({ event, reason }) => ({
+    event_id: event.event_id,
+    tenantid: event.tenantid,
+    filial: event.filial,
+    asset_key: event.asset_key,
+    lamport: event.lamport,
+    event_type: event.event_type,
+    occurred_at: event.occurred_at,
+    reason,
+    quarantined_at: agora,
+    event,
+  }));
+  await db.field_event_quarantine.bulkPut(registos);
+  return registos.length;
+};
 
 /** Estado projetado de um ativo a partir do que está gravado. */
 export const projectStoredAsset = async (

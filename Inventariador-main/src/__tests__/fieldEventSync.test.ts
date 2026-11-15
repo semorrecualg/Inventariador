@@ -7,12 +7,17 @@
 // do ciclo — sem poluir os contadores de ativos.
 // ============================================================================
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
 import { db } from '../services/sqliteService';
-import { appendFieldEvent, unsyncedFieldEvents } from '../services/fieldEventStore';
+import {
+  appendFieldEvent,
+  quarantinedFieldEvents,
+  unsyncedFieldEvents,
+} from '../services/fieldEventStore';
 import {
   FIELD_EVENTS_CHUNK_SIZE,
   fieldEventRow,
+  flushFieldEvents,
   pushFieldEventsWithReceipt,
   syncFieldEventsCore,
   type FieldEventClient,
@@ -151,17 +156,105 @@ describe('syncFieldEventsCore — upsert idempotente', () => {
       from: () => ({
         upsert: async linhas => {
           chamadasFeitas += 1;
-          if (linhas.length > 1) throw new Error('fetch failed');
+          // 'upstream 502' não é falta de rede do aparelho: o lote falhou, mas
+          // os eventos individuais podem passar.
+          if (linhas.length > 1) throw new Error('upstream 502');
           return { error: null };
         },
       }),
     };
 
-    const { accepted, failures } = await syncFieldEventsCore(eventos, TENANT, client);
+    const { accepted, failures, interrupted } = await syncFieldEventsCore(eventos, TENANT, client);
 
     expect(chamadasFeitas).toBe(4);
     expect(accepted).toEqual(eventos.map(e => e.event_id));
     expect(failures).toEqual([]);
+    expect(interrupted).toBeUndefined();
+  });
+
+  it('sem rede no lote não tenta os 500 um a um', async () => {
+    const eventos = Array.from({ length: FIELD_EVENTS_CHUNK_SIZE }, () => evento());
+    const { chamadas, client } = clienteFalso(() => 'TypeError: Failed to fetch');
+
+    const { accepted, failures, interrupted } = await syncFieldEventsCore(eventos, TENANT, client);
+
+    // 1 pedido e ponto: insistir nos 500 só acumulava timeouts no aparelho.
+    expect(chamadas).toHaveLength(1);
+    expect(accepted).toEqual([]);
+    expect(failures).toEqual([]);
+    expect(interrupted).toBe('rede');
+  });
+
+  it('a rede a cair no meio do recuo para o resto do lote', async () => {
+    const eventos = Array.from({ length: 5 }, () => evento());
+    let chamadasFeitas = 0;
+    const client: FieldEventClient = {
+      from: () => ({
+        upsert: async linhas => {
+          chamadasFeitas += 1;
+          if (linhas.length > 1) return { error: { message: 'permission denied' } };
+          if (chamadasFeitas >= 4) throw new Error('fetch failed');
+          return { error: null };
+        },
+      }),
+    };
+
+    const { accepted, failures, interrupted } = await syncFieldEventsCore(eventos, TENANT, client);
+
+    // 1 lote + 3 individuais (o 3.º cai) e para: os 2 últimos nem são tentados.
+    expect(chamadasFeitas).toBe(4);
+    expect(accepted).toEqual(eventos.slice(0, 2).map(e => e.event_id));
+    expect(failures).toEqual([]);
+    expect(interrupted).toBe('rede');
+  });
+
+  it('aparelho offline não faz pedido nenhum', async () => {
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const { chamadas, client } = clienteFalso();
+
+    const { interrupted } = await syncFieldEventsCore([evento()], TENANT, client);
+
+    expect(chamadas).toHaveLength(0);
+    expect(interrupted).toBe('rede');
+    onLine.mockRestore();
+  });
+
+  it('evento em colisão de chave única sai da fila (quarentena)', async () => {
+    const store = memoria();
+    const envenenado = await appendFieldEvent({ ...evento(), event_id: `${TENANT}-poison`, lamport: 1 });
+    const bom = await appendFieldEvent({ ...evento(), event_id: `${TENANT}-bom`, lamport: 2 });
+    const { client } = clienteFalso(linhas =>
+      linhas.some(linha => linha.event_id === envenenado.event_id) ? VIOLACAO_UNICA : null
+    );
+    const run = (events: FieldEvent[], tenant?: string) => syncFieldEventsCore(events, tenant, client);
+
+    const { session } = await pushFieldEventsWithReceipt(await unsyncedFieldEvents(), TENANT, {
+      store,
+      run,
+    });
+
+    expect(session.receipt?.fieldEvents).toMatchObject({ sent: 2, accepted: 1, rejected: 1 });
+    // O bom ficou marcado; o envenenado não foi mentido como sincronizado.
+    expect((await db.field_events.get(bom.event_id))?._synced).toBe(1);
+    expect((await db.field_events.get(envenenado.event_id))?._synced).toBe(0);
+
+    const quarentena = await quarantinedFieldEvents();
+    const posto = quarentena.find(item => item.event_id === envenenado.event_id);
+    expect(posto).toMatchObject({ tenantid: TENANT, lamport: 1, reason: VIOLACAO_UNICA });
+    // O evento inteiro fica guardado, não só o id.
+    expect(posto?.event.payload.local).toBe('BLOCO A');
+
+    // Não volta a ser enviado no ciclo seguinte.
+    expect(await unsyncedFieldEvents()).toEqual([]);
+    let enviadosNoCicloSeguinte: string[] = [];
+    await flushFieldEvents(TENANT, {
+      store,
+      run: async (events: FieldEvent[]) => {
+        enviadosNoCicloSeguinte = events.map(e => e.event_id);
+        return { accepted: [], failures: [] };
+      },
+    });
+    expect(enviadosNoCicloSeguinte).toEqual([]);
   });
 
   it('sem contrato não envia nada e diz porquê', async () => {
@@ -180,6 +273,24 @@ describe('syncFieldEventsCore — upsert idempotente', () => {
 });
 
 describe('pushFieldEventsWithReceipt — confirmação antes da marca', () => {
+  it('sem rede devolve interrupção e deixa a sessão aberta', async () => {
+    const store = memoria();
+    await appendFieldEvent({ ...evento(), event_id: `${TENANT}-net`, lamport: 1 });
+
+    const { client } = clienteFalso(() => 'Failed to fetch');
+    const resultado = await pushFieldEventsWithReceipt(await unsyncedFieldEvents(), TENANT, {
+      store,
+      run: (events, tenant) => syncFieldEventsCore(events, tenant, client),
+    });
+
+    expect(resultado.interrupted).toBe('rede');
+    expect(resultado.synced).toEqual([]);
+    expect(resultado.session.failed).toBe(true);
+    expect((await db.field_events.get(`${TENANT}-net`))?._synced).toBe(0);
+    // O evento continua na fila: falta de rede não é recusa.
+    expect((await unsyncedFieldEvents()).map(e => e.event_id)).toEqual([`${TENANT}-net`]);
+  });
+
   it('marca `_synced = 1` só nos eventos que a nuvem aceitou', async () => {
     const store = memoria();
     const primeiro = await appendFieldEvent({ ...evento(), event_id: `${TENANT}-a`, lamport: 1 });

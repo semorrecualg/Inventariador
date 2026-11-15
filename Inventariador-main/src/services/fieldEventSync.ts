@@ -16,7 +16,11 @@
 import { logger } from '../utils/logger';
 import type { FieldEvent } from '../types/fieldEvent';
 import { supabase } from './supabaseService';
-import { markFieldEventsSynced, unsyncedFieldEvents } from './fieldEventStore';
+import {
+  markFieldEventsSynced,
+  quarantineFieldEvents,
+  unsyncedFieldEvents,
+} from './fieldEventStore';
 import {
   DEFAULT_REJECTION_REASON,
   finalizeSyncSession,
@@ -42,7 +46,25 @@ export interface FieldEventSyncFailure {
 export interface FieldEventSyncResult {
   accepted: string[];
   failures: FieldEventSyncFailure[];
+  /**
+   * A rodada parou por falta de rede. Os eventos que sobraram NÃO são recusas:
+   * continuam pendentes e voltam quando o aparelho tiver sinal.
+   */
+  interrupted?: 'rede';
 }
+
+/**
+ * Falha de transporte, não de conteúdo. Num aparelho offline, insistir nos 500
+ * eventos é acumular timeouts para receber sempre o mesmo erro de rede.
+ */
+export const ehFalhaDeRede = (reason: string): boolean =>
+  /fetch failed|failed to fetch|load failed|network|networkerror|net::|econn|timed? ?out|abort|offline|internet/i.test(
+    String(reason || '')
+  );
+
+/** Colisão na chave única do Postgres (evento que já existe noutro estado). */
+export const ehViolacaoDeChaveUnica = (reason: string): boolean =>
+  /duplicate key|unique constraint|23505/i.test(String(reason || ''));
 
 /**
  * Cliente mínimo (só o que é usado). Permite fixar desfechos nos testes sem
@@ -101,6 +123,11 @@ export const syncFieldEventsCore = async (
     throw new Error('Sessão Expirada: Contrato ausente para envio do log de campo.');
   }
 
+  // Offline conhecido: nem tenta. Cada pedido aqui seria um timeout.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { accepted, failures, interrupted: 'rede' };
+  }
+
   const enviar = (rows: Record<string, unknown>[]) =>
     client
       .from(FIELD_EVENTS_TABLE)
@@ -115,13 +142,21 @@ export const syncFieldEventsCore = async (
         continue;
       }
       const reason = String(error.message || DEFAULT_REJECTION_REASON);
+      // Lote sem rede: não há culpado a isolar, há um aparelho sem sinal.
+      if (ehFalhaDeRede(reason)) {
+        logger.warn(`>>> [Field Events] Lote sem rede (${reason}); restam ${chunk.length} pendentes.`);
+        return { accepted, failures, interrupted: 'rede' };
+      }
       logger.warn(
         `>>> [Field Events] Lote de ${chunk.length} recusado (${reason}); ` +
           'reenviando evento a evento para isolar o culpado.'
       );
     } catch (err) {
-      // Tudo o que é transport é tratado do mesmo jeito: o lote não provou nada,
-      // cai para evento a evento — cada um que passe fica aceito.
+      const motivo = err instanceof Error ? err.message : String(err);
+      if (ehFalhaDeRede(motivo)) {
+        logger.warn('>>> [Field Events] Transporte caiu no lote; nada foi provado, parando aqui.');
+        return { accepted, failures, interrupted: 'rede' };
+      }
       logger.warn('>>> [Field Events] Falha no lote; reenviando evento a evento:', err);
     }
 
@@ -134,12 +169,24 @@ export const syncFieldEventsCore = async (
       try {
         const { error } = await enviar([fieldEventRow(event, tenant)]);
         if (error) {
-          failures.push({ key, reason: String(error.message || DEFAULT_REJECTION_REASON) });
+          const motivo = String(error.message || DEFAULT_REJECTION_REASON);
+          if (ehFalhaDeRede(motivo)) {
+            // A rede caiu no meio: os que ainda não foram tentados continuam
+            // pendentes (não são recusas) e o resto do lote não é tentado.
+            logger.warn('>>> [Field Events] Rede caiu no envio individual; parando o recuo.');
+            return { accepted, failures, interrupted: 'rede' };
+          }
+          failures.push({ key, reason: motivo });
           continue;
         }
         accepted.push(event.event_id);
       } catch (err) {
-        failures.push({ key, reason: err instanceof Error ? err.message : String(err) });
+        const motivo = err instanceof Error ? err.message : String(err);
+        if (ehFalhaDeRede(motivo)) {
+          logger.warn('>>> [Field Events] Transporte caiu no envio individual:', err);
+          return { accepted, failures, interrupted: 'rede' };
+        }
+        failures.push({ key, reason: motivo });
       }
     }
   }
@@ -167,7 +214,7 @@ export const pushFieldEventsWithReceipt = async (
   events: FieldEvent[],
   tenantid: string | undefined,
   options: PushFieldEventsOptions = {}
-): Promise<{ synced: string[]; session: SyncSession }> => {
+): Promise<{ synced: string[]; session: SyncSession; interrupted?: 'rede' }> => {
   const store = options.store;
   const tenant = String(tenantid || events[0]?.tenantid || '').trim().toUpperCase();
   const filial =
@@ -223,6 +270,31 @@ export const pushFieldEventsWithReceipt = async (
     store
   );
 
+  // Um evento que colide na chave única é recusado em TODAS as rodadas: reenviá-lo
+  // a cada ciclo gasta rede e nunca muda o desfecho. Sai da fila, com o evento
+  // inteiro guardado para quem for corrigir a causa.
+  const porChave = new Map(pendentes.map(event => [fieldEventSyncKey(tenant, event.event_id), event]));
+  const paraQuarentena = result.failures
+    .filter(item => ehViolacaoDeChaveUnica(item.reason))
+    .map(item => ({ event: porChave.get(item.key), reason: item.reason }))
+    .filter((item): item is { event: FieldEvent; reason: string } => Boolean(item.event));
+  if (paraQuarentena.length > 0) {
+    try {
+      const postos = await quarantineFieldEvents(paraQuarentena);
+      logger.warn(`>>> [Field Events] ${postos} evento(s) em quarentena por chave única.`);
+    } catch (err) {
+      logger.warn('>>> [Field Events] Falha ao pôr eventos em quarentena:', err);
+    }
+  }
+
+  if (result.interrupted) {
+    // Sem rede a sessão fica ABERTA: o que faltou volta na próxima rodada.
+    // Devolve a versão persistida — é ela que carrega `failed`, e o chamador
+    // mostra o estado a partir do objecto devolvido, não do que ficou em disco.
+    const falhada = await markSyncSessionFailed(session, store);
+    return { synced: result.accepted, session: falhada, interrupted: 'rede' };
+  }
+
   if (!inCycle) await finalizeSyncSession(session, store);
   return { synced: result.accepted, session };
 };
@@ -234,9 +306,9 @@ export const pushFieldEventsWithReceipt = async (
 export const flushFieldEvents = async (
   tenantid: string | undefined,
   options: PushFieldEventsOptions = {}
-): Promise<{ synced: string[]; session: SyncSession | null; pending: number }> => {
+): Promise<{ synced: string[]; session: SyncSession | null; pending: number; interrupted?: 'rede' }> => {
   const pendentes = await unsyncedFieldEvents();
   if (pendentes.length === 0) return { synced: [], session: options.session ?? null, pending: 0 };
-  const { synced, session } = await pushFieldEventsWithReceipt(pendentes, tenantid, options);
-  return { synced, session, pending: pendentes.length };
+  const { synced, session, interrupted } = await pushFieldEventsWithReceipt(pendentes, tenantid, options);
+  return { synced, session, pending: pendentes.length, interrupted };
 };

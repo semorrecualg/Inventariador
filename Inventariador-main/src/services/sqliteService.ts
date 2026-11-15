@@ -2,7 +2,7 @@ import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
 import { DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
-import type { FieldEvent } from '../types/fieldEvent';
+import type { FieldEvent, QuarantinedFieldEvent } from '../types/fieldEvent';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { unitContextKey, splitUnitContextKey } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
@@ -148,6 +148,8 @@ class InventoryDexieDatabase extends Dexie {
   addresses!: Dexie.Table<DexieAddress, number>;
   /** F1 — log de eventos de campo: só-adição, chave `event_id`. */
   field_events!: Dexie.Table<FieldEvent, string>;
+  /** Eventos recusados por chave única: ficam fora da fila de envio. */
+  field_event_quarantine!: Dexie.Table<QuarantinedFieldEvent, string>;
 
   constructor() {
     super('InventoryLocalStore');
@@ -318,6 +320,28 @@ class InventoryDexieDatabase extends Dexie {
       field_events: 'event_id, [tenantid+filial], [tenantid+asset_key], _synced, [tenantid+asset_key+lamport]'
     });
 
+    // v9 — quarentena do log. Um evento que colide na chave única
+    // `(tenantid, device_id, lamport)` é recusado pelo Postgres em TODAS as
+    // rodadas: sem uma lista de parte, cada ciclo reenviava-o para sempre. A
+    // tabela guarda o evento completo e o motivo, e `unsyncedFieldEvents`
+    // exclui o que está aqui. Nenhuma tabela existente muda de assinatura.
+    this.version(9).stores({
+      local_assets: '[tenantid+primarykey], primarykey, filial, _is_synced, [tenantid+filial]',
+      ativos: '[tenantid+primarykey], primarykey, filial, _is_synced, [tenantid+filial]',
+      assets: '[tenantid+primarykey], primarykey, filial, _is_synced, [tenantid+filial]',
+      audit_logs: 'id, updated_at',
+      campaigns: 'id, tenantid',
+      SYSTEM_CONTEXT: 'key',
+      unit_configs: 'id, filial',
+      campaign_snapshots: 'id, campaign_id',
+      addresses: '++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced',
+      field_events: 'event_id, [tenantid+filial], [tenantid+asset_key], _synced, [tenantid+asset_key+lamport]',
+      field_event_quarantine: 'event_id, [tenantid+quarantined_at], reason'
+    });
+
+    // NOTA: os hooks ficam DEPOIS da última `version()`. Registados antes, o
+    // Dexie prendia-os à instância da tabela que a versão seguinte substituiu e
+    // a só-adição deixava de ser aplicada — os testes de hook apanharam isto.
     // Escrita SÓ de adição: um evento que entra nunca muda nem sai. O Dexie
     // chama estes hooks dentro da transação, portanto o abort é do banco — não
     // depende de a aplicação "prometer" que não escreve por cima.
@@ -331,6 +355,7 @@ class InventoryDexieDatabase extends Dexie {
     this.table('field_events').hook('deleting', () => {
       throw new AppendOnlyViolation('field_events: evento não pode ser apagado');
     });
+
   }
 }
 
