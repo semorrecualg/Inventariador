@@ -89,6 +89,28 @@ describe('reparação única da conta fiscal 131105001', () => {
     expect(Number(ativo?._is_synced)).toBe(0);
     expect(Number(espelho?._is_synced)).toBe(0);
     expect(localStorage.getItem(FISCAL_ACCOUNT_REPAIR_FLAG)).toBe('done');
+
+    // O resultado fica auditado com a origem e a contagem.
+    const logs = await db.audit_logs.filter((log) => log.acao === 'FISCAL_ACCOUNT_RESYNC').toArray();
+    expect(logs).toHaveLength(1);
+    expect(String(logs[0].details)).toContain('origem: sync');
+    expect(String(logs[0].details)).toContain('1 registo(s)');
+  });
+
+  it('no arranque usa a mesma flag: repara uma vez e regista a origem', async () => {
+    await db.local_assets.put(asset() as never);
+
+    expect(await requeueFiscalAccountRecordsOnce('startup')).toBe(1);
+
+    const logs = await db.audit_logs.filter((log) => log.acao === 'FISCAL_ACCOUNT_RESYNC').toArray();
+    expect(logs).toHaveLength(1);
+    expect(String(logs[0].details)).toContain('origem: startup');
+
+    // O ciclo de sincronização que corra depois não repete nem audita de novo.
+    await db.local_assets.where('primarykey').equals('01010100000005000001').modify({ _is_synced: 1 });
+    expect(await requeueFiscalAccountRecordsOnce('sync')).toBe(0);
+    const depois = await db.audit_logs.filter((log) => log.acao === 'FISCAL_ACCOUNT_RESYNC').toArray();
+    expect(depois).toHaveLength(1);
   });
 
   it('não mexe noutras contas nem em registos apagados', async () => {
@@ -117,6 +139,21 @@ describe('reparação única da conta fiscal 131105001', () => {
     expect(await requeueFiscalAccountRecordsOnce()).toBe(0);
     const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
     expect(Number(local?._is_synced)).toBe(1);
+  });
+
+  it('arranque e sincronização simultâneos não executam a reparação duas vezes', async () => {
+    await db.local_assets.put(asset() as never);
+
+    const [primeiro, segundo] = await Promise.all([
+      requeueFiscalAccountRecordsOnce('startup'),
+      requeueFiscalAccountRecordsOnce('sync')
+    ]);
+
+    // As duas chamadas partilham a mesma execução (mesmo resultado)...
+    expect(primeiro).toBe(1);
+    expect(segundo).toBe(1);
+    const logs = await db.audit_logs.filter((log) => log.acao === 'FISCAL_ACCOUNT_RESYNC').toArray();
+    expect(logs).toHaveLength(1);
   });
 
   it('na fila real: o registo reparado é enviado à nuvem', async () => {

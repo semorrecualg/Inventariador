@@ -40,8 +40,26 @@ export const FISCAL_ACCOUNT = '131105001';
 /**
  * Reabre uma unica vez os registos da conta `131105001` que o corte antigo deu
  * por sincronizados. Devolve quantos registos voltaram a fila (0 se ja correu).
+ *
+ * Corre no arranque (`startup`) e no ciclo de sincronizacao (`sync`); a flag e
+ * a mesma, portanto so a primeira destas origens executa de facto. O resultado
+ * fica em `audit_logs` para se saber quantos registos foram reabertos e onde.
  */
-export async function requeueFiscalAccountRecordsOnce(): Promise<number> {
+let repairInFlight: Promise<number> | null = null;
+
+export async function requeueFiscalAccountRecordsOnce(
+  origin: 'startup' | 'sync' = 'sync'
+): Promise<number> {
+  // Arranque e ciclo de sincronização podem cruzar-se no mesmo instante: a flag
+  // só é gravada no fim, por isso serve de segunda barreira contra execução dupla.
+  if (repairInFlight) return repairInFlight;
+  repairInFlight = runFiscalAccountRepair(origin).finally(() => {
+    repairInFlight = null;
+  });
+  return repairInFlight;
+}
+
+async function runFiscalAccountRepair(origin: 'startup' | 'sync'): Promise<number> {
   if (typeof localStorage === 'undefined') return 0;
   try {
     if (localStorage.getItem(FISCAL_ACCOUNT_REPAIR_FLAG) === 'done') return 0;
@@ -49,10 +67,12 @@ export async function requeueFiscalAccountRecordsOnce(): Promise<number> {
     return 0;
   }
 
-  const rows = await db.local_assets.toArray();
+  // Só os marcados como sincronizados interessam: usa o índice `_is_synced` em
+  // vez de ler a base inteira.
+  const rows = await db.local_assets.where('_is_synced').equals(1).toArray();
   const primaryKeys = Array.from(new Set(rows
     .filter((row) => String(row.contacontabil ?? '').trim() === FISCAL_ACCOUNT)
-    .filter((row) => Number(row._is_synced) === 1 && !row._is_deleted)
+    .filter((row) => !row._is_deleted)
     .map((row) => String(row.primarykey || '').trim())
     .filter(Boolean)));
 
@@ -65,6 +85,18 @@ export async function requeueFiscalAccountRecordsOnce(): Promise<number> {
       await db.assets.where('primarykey').anyOf(primaryKeys).modify({ _is_synced: 0 });
     });
     logger.warn(`>>> [Sync Repair] ${primaryKeys.length} registo(s) da conta ${FISCAL_ACCOUNT} devolvido(s) a fila (marcados como sincronizados sem envio).`);
+  }
+
+  try {
+    await sqliteService.logAuditEvent(
+      getUserFromLocalStorage()?.email || 'sistema',
+      'FISCAL_ACCOUNT_RESYNC',
+      'local_assets',
+      FISCAL_ACCOUNT,
+      `Reparacao unica (origem: ${origin}): ${primaryKeys.length} registo(s) da conta ${FISCAL_ACCOUNT} devolvido(s) a fila de sincronizacao.`
+    );
+  } catch (auditErr) {
+    logger.warn('>>> [Sync Repair] Falha ao registar a reparação em audit_logs:', auditErr);
   }
 
   localStorage.setItem(FISCAL_ACCOUNT_REPAIR_FLAG, 'done');
@@ -546,7 +578,7 @@ const _syncService = {
     try {
       // REPARACAO UNICA: registos que o corte fiscal deu por sincronizados sem
       // envio voltam a fila antes de a ler (uma vez por instalacao).
-      await requeueFiscalAccountRecordsOnce().catch((repairErr) => {
+      await requeueFiscalAccountRecordsOnce('sync').catch((repairErr) => {
         logger.warn('>>> [Sync Repair] Falha ao reparar a conta fiscal; segue sem reparação:', repairErr);
       });
 

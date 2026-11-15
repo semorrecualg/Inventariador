@@ -114,7 +114,7 @@ import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
 import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMarkDetailed, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
-import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
+import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager, requeueFiscalAccountRecordsOnce } from './services/syncService';
 import { isSyncLockStuck } from './services/syncQueueGuards';
 import { beginSyncCycle, endSyncCycle, pullIntoSession, pushAssetsWithReceipt, type SyncSession } from './services/syncSessionService';
 import { conferirAtivo, derivarAtualizacaoConferencia, reservarLamports, resolveDeviceId } from './services/fieldConferencing';
@@ -3290,6 +3290,14 @@ useEffect(() => {
           setDatabaseMode(migratedMode);
           return; // o efeito volta a correr com o modo já migrado
         }
+
+        // REPARAÇÃO ÚNICA (origem: arranque): os registos da conta fiscal que o
+        // corte antigo deu por sincronizados voltam à fila mesmo que a app não
+        // volte a sincronizar. A flag garante uma execução por instalação; o
+        // ciclo de sincronização usa a mesma flag, portanto não duplica.
+        await requeueFiscalAccountRecordsOnce('startup').catch((repairErr) => {
+          logger.warn('>>> [Sync Repair] Falha na reparação da conta fiscal no arranque:', repairErr);
+        });
         
         // Se não houver dados locais e estivermos em modo nuvem, não sincronizamos automaticamente no init
         // Deixamos que a navegação para UNIT_SELECTION ou MODULE_SELECTION trate disso

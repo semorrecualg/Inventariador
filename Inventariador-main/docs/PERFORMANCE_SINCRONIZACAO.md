@@ -157,12 +157,19 @@ encadeados.
 
 ---
 
+### Conta `131105001` (alteração posterior)
+
+A regra fiscal foi revertida: os registos desta conta são importados da planilha
+e sincronizados como quaisquer outros. Os que já tinham ficado marcados como
+sincronizados sem envio voltam à fila uma única vez por instalação
+(`requeueFiscalAccountRecordsOnce`, no arranque e antes da fila de envio), com o
+resultado registado em `audit_logs`.
+
+---
+
 ## 4. O que **não** mudou
 
 - Contratos de isolamento por `tenantid` (chave composta e `onConflict`).
-- **Conta `131105001`**: deixou de ser travada. A regra fiscal foi revertida por
-  decisão posterior — os registos desta conta são importados e sincronizados como
-  quaisquer outros.
 - Formato dos ficheiros de backup e chaves de `localStorage`.
 - Fluxo de confirmação, unitização, adoção e exclusão.
 - Nenhuma dependência nova, nenhum `eslint-disable`, nenhum `@ts-ignore`.
