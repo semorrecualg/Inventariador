@@ -493,7 +493,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     };
 
     setUsers(prev => {
-      const updated = prev.map(u => u.email === selectedUser.email ? updatedUser : u);
+      const updated = prev.map(u => sameRecord(u, selectedUser) ? updatedUser : u);
       logger.info('[UserManagement] Lista de usuários atualizada localmente.');
       localStorage.setItem('app_users', safeStringify(updated));
       return updated;
@@ -526,11 +526,30 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     showModal("Sucesso", `As credenciais de ${name || username} foram atualizadas com sucesso!`, "success");
   };
 
-  const removeUser = (email: string) => {
-    if (isAdminEmail(email)) {
+  /**
+   * Registos que partilham o e-mail informado. Um e-mail pode ter mais de um
+   * registo na lista local (caso real: um 'ADMINISTRADOR' global criado à mão
+   * para trocar a senha, ao lado do dono verdadeiro). Excluir por e-mail
+   * apagava os dois; por isso a exclusão é sempre de UM registo.
+   */
+  const recordsWithEmail = (email: string) =>
+    users.filter(u => u.email.toLowerCase() === String(email || '').toLowerCase());
+
+  const sameRecord = (a: User, b: User) =>
+    a.email.toLowerCase() === b.email.toLowerCase() && a.username === b.username;
+
+  const removeUser = (target: User) => {
+    const email = target.email;
+    const siblings = recordsWithEmail(email);
+    // O administrador mestre continua protegido — mas apenas o registo que
+    // representa o acesso em uso. Um duplicado do mesmo e-mail pode ser removido.
+    if (isAdminEmail(email) && siblings.length <= 1) {
       showModal("Operação Negada", "O administrador mestre não pode ser excluído.", "warning");
       return;
     }
+    // Registro duplicado: apaga só a linha da lista. Limpar a nuvem ou a base
+    // pelo e-mail derrubaria o acesso verdadeiro que partilha o mesmo endereço.
+    const isDuplicate = siblings.length > 1;
     
     showModal(
       "Remover Acesso", 
@@ -538,20 +557,26 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       "confirm",
       async () => {
         try {
-          // 1. Remove da Nuvem (Tabela user_permissions)
-          await deleteUserFromCloud(email);
-          
-          // 2. Remove Localmente
+          if (!isDuplicate) {
+            // 1. Remove da Nuvem (Tabela user_permissions)
+            await deleteUserFromCloud(email);
+          } else {
+            logger.warn(`[UserManagement] '${email}' tem outros registos: removendo apenas a linha '${target.username}' (nuvem intacta).`);
+          }
+
+          // 2. Remove Localmente (apenas este registo)
           setUsers(prev => {
-            const updated = prev.filter(u => u.email !== email);
+            const updated = prev.filter(u => !sameRecord(u, target));
             localStorage.setItem('app_users', safeStringify(updated));
             return updated;
           });
-          try {
-            await localDb.users.remove(email);
-            logger.info(`[UserManagement] Acesso de ${email} removido do armazenamento local.`);
-          } catch (persistErr) {
-            logger.warn('[UserManagement] Falha ao remover usuário do armazenamento local:', persistErr);
+          if (!isDuplicate) {
+            try {
+              await localDb.users.remove(email);
+              logger.info(`[UserManagement] Acesso de ${email} removido do armazenamento local.`);
+            } catch (persistErr) {
+              logger.warn('[UserManagement] Falha ao remover usuário do armazenamento local:', persistErr);
+            }
           }
         } catch (err) {
           logger.error('Erro ao remover usuário da nuvem:', err);
@@ -647,8 +672,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                     <button onClick={() => handleOpenEdit(u)} className="w-11 h-11 flex items-center justify-center text-accent bg-accent-soft border border-accent/10 rounded-xl transition-all shadow-sm hover:bg-accent/20">
                       <Edit3 size={20} />
                     </button>
-                    {!u.isAdmin && (
-                      <button onClick={(e) => { e.stopPropagation(); removeUser(u.email); }} className="w-11 h-11 flex items-center justify-center text-danger bg-danger/10 border border-danger/20 rounded-xl transition-all shadow-sm hover:bg-danger/20">
+                    {(!u.isAdmin || recordsWithEmail(u.email).length > 1) && (
+                      <button onClick={(e) => { e.stopPropagation(); removeUser(u); }} className="w-11 h-11 flex items-center justify-center text-danger bg-danger/10 border border-danger/20 rounded-xl transition-all shadow-sm hover:bg-danger/20">
                         <Trash2 size={20} />
                       </button>
                     )}
