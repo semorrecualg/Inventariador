@@ -19,6 +19,7 @@ import {
   comCodigoTecnico,
   ehCredencialInvalida,
   emailNaoConfirmado,
+  linhaSreDeLoginRecusado,
   MENSAGEM_CREDENCIAL_INVALIDA,
   MENSAGEM_EMAIL_NAO_CONFIRMADO
 } from '../utils/loginErrors';
@@ -58,6 +59,19 @@ const Login: React.FC<LoginProps> = ({
   // Ref do projeto em uso: o badge de ambiente dizia só «SUPABASE (WEB)» e um
   // VITE_SUPABASE_URL trocado no ambiente dava o mesmo erro de senha errada.
   const projectRef = refDoProjetoSupabase(import.meta.env.VITE_SUPABASE_URL);
+
+  // O formulário diz que a entrada foi recusada, mas não que código o Auth
+  // devolveu nem contra que projeto: sem esta linha no SRE Monitor, comparar
+  // com o dashboard obrigava a abrir o DevTools no aparelho onde falhou.
+  const registarFalhaDeLogin = (codigo: unknown, motivo: string) => {
+    logger.warn(linhaSreDeLoginRecusado({
+      codigo,
+      motivo,
+      projectRef,
+      projetoUrl: import.meta.env.VITE_SUPABASE_URL,
+      utilizador: username.trim()
+    }));
+  };
 
   // FLUXO ÚNICO DE ACESSO: a tela de login apenas AUTENTICA. Contrato, filial
   // (unidade operacional) e módulo são escolhidos na tela de contrato de
@@ -287,6 +301,8 @@ const Login: React.FC<LoginProps> = ({
         return prev;
       });
     }, 45000);
+
+    let codigoDeAuth: unknown = null;
 
     try {
       const inputUser = username.trim();
@@ -693,6 +709,9 @@ const Login: React.FC<LoginProps> = ({
             ? supErr 
             : (supErr?.message || supErr?.error_description || String(supErr || ''));
           const errorMsg = rawMessage.toLowerCase();
+          // Código/estado devolvido pelo GoTrue (`invalid_credentials`, 400…):
+          // é o que vai para o SRE Monitor junto com o ref do projeto.
+          codigoDeAuth = supErr?.code ?? supErr?.status ?? null;
           
           // Verificação se o erro é de fato um limite de rede ou conexão
           const isNetError = !navigator.onLine || 
@@ -759,6 +778,7 @@ const Login: React.FC<LoginProps> = ({
     } catch (err: unknown) {
       const error = err as Error;
       logger.error('[Login] Erro durante o processo:', error);
+      registarFalhaDeLogin(codigoDeAuth, error.message || 'Falha sem mensagem');
       setError(error.message || "Erro ao autenticar. Verifique seus dados.");
     } finally {
       clearTimeout(loginTimeout);

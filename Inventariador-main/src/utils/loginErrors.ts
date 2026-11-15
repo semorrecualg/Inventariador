@@ -62,6 +62,40 @@ export const emailNaoConfirmado = (mensagem: string): boolean =>
  * apagada, e-mail por confirmar ou limite de pedidos — todas chegam ao ecrã como
  * a mesma frase, e o diagnóstico fica a adivinhar.
  */
+/**
+ * Linha do SRE Monitor para uma entrada recusada.
+ *
+ * O `[INVALID_CREDENTIALS]` no formulário diz *que* foi recusada, mas não
+ * responde às duas perguntas do diagnóstico: o Auth devolveu que código, e
+ * contra que projeto Supabase? Sem isto, comparar com o dashboard obrigava a
+ * abrir o DevTools no aparelho onde o login falhou.
+ *
+ * O ref e o URL do projeto são públicos (fazem parte do pedido); a senha nunca
+ * entra na linha.
+ */
+export interface FalhaDeLoginSre {
+  codigo?: unknown;
+  motivo: string;
+  projectRef?: string | null;
+  projetoUrl?: string | null;
+  utilizador?: string | null;
+}
+
+export const linhaSreDeLoginRecusado = (falha: FalhaDeLoginSre): string => {
+  const codigo = typeof falha.codigo === 'string' || typeof falha.codigo === 'number'
+    ? String(falha.codigo).trim()
+    : '';
+  const projeto = (falha.projectRef || '').trim() || 'desconhecido';
+  const url = (falha.projetoUrl || '').trim();
+  const utilizador = (falha.utilizador || '').trim() || '-';
+
+  return [
+    `[Login] Entrada recusada${codigo ? ` [${codigo}]` : ''}: ${falha.motivo}`,
+    `projeto ${projeto}${url ? ` (${url})` : ''}`,
+    `utilizador ${utilizador}`
+  ].join(' · ');
+};
+
 export const comCodigoTecnico = (mensagem: string, codigo?: unknown): string => {
   const texto = typeof codigo === 'string' || typeof codigo === 'number'
     ? String(codigo).trim()

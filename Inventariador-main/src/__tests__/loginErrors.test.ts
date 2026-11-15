@@ -3,11 +3,13 @@
 // loginErrors.test.ts — a resposta real do GoTrue tem de casar o ramo localizado.
 // ============================================================================
 import { describe, it, expect } from 'vitest';
+import { interessaAoSreMonitor } from '../services/sreMonitor';
 import {
   comCodigoTecnico,
   ehCredencialInvalida,
   emailNaoConfirmado,
-  MENSAGEM_CREDENCIAL_INVALIDA
+  MENSAGEM_CREDENCIAL_INVALIDA,
+  linhaSreDeLoginRecusado
 } from '../utils/loginErrors';
 
 describe('ehCredencialInvalida', () => {
@@ -35,6 +37,30 @@ describe('ehCredencialInvalida', () => {
     expect(MENSAGEM_CREDENCIAL_INVALIDA).toContain('senha');
     expect(MENSAGEM_CREDENCIAL_INVALIDA).toContain('conta ainda não existe');
     expect(MENSAGEM_CREDENCIAL_INVALIDA.toLowerCase()).not.toContain('invalid');
+  });
+
+  it('a linha do SRE diz o código do Auth e o projeto em uso', () => {
+    const linha = linhaSreDeLoginRecusado({
+      codigo: 'invalid_credentials',
+      motivo: 'Invalid login credentials',
+      projectRef: 'mpulmonxbcpqjxouzvuc',
+      projetoUrl: 'https://mpulmonxbcpqjxouzvuc.supabase.co',
+      utilizador: 'semorr@gmail.com'
+    });
+
+    expect(linha).toContain('Entrada recusada [invalid_credentials]');
+    expect(linha).toContain('projeto mpulmonxbcpqjxouzvuc');
+    expect(linha).toContain('https://mpulmonxbcpqjxouzvuc.supabase.co');
+    expect(linha).toContain('utilizador semorr@gmail.com');
+    // aceite pelo filtro do SRE Monitor (Gestor de Base → monitor)
+    expect(interessaAoSreMonitor(linha)).toBe(true);
+  });
+
+  it('sem código nem projeto a linha continua legível', () => {
+    const linha = linhaSreDeLoginRecusado({ motivo: 'Credenciais locais inválidas' });
+    expect(linha).toContain('[Login] Entrada recusada: Credenciais locais inválidas');
+    expect(linha).toContain('projeto desconhecido');
+    expect(linha).toContain('utilizador -');
   });
 
   it('a mensagem ensina a escrever a senha sem autofill', () => {
