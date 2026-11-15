@@ -56,6 +56,7 @@ describe('configScope — contrato vs. dispositivo', () => {
         protheusApiUrl: 'https://erp',
         mandatoryPhotoOnDivergence: true,
         mandatoryPhotoOnNewItem: false,
+        excludedAccounts: ['9999'],
         databaseMode: DatabaseMode.SUPABASE
       },
       'CICOPAL'
@@ -63,6 +64,8 @@ describe('configScope — contrato vs. dispositivo', () => {
 
     const sent = Object.keys(full!.payload).filter((key) => key !== 'id' && key !== 'tenantid');
     expect(sent.sort()).toEqual(Object.values(CONTRACT_CONFIG_COLUMNS).sort());
+    // Contas excluídas são governação do contrato: viajam.
+    expect(full!.payload.excluded_accounts).toEqual(['9999']);
     // Passaram a ser de dispositivo nesta revisão.
     expect(sent).not.toContain('database_mode');
     expect(sent).not.toContain('inventory_search_mode');

@@ -53,7 +53,10 @@ export const CONTRACT_CONFIG_COLUMNS = {
   protheusIntegrationEnabled: 'protheus_integration_enabled',
   protheusApiUrl: 'protheus_api_url',
   mandatoryPhotoOnDivergence: 'mandatory_photo_on_divergence',
-  mandatoryPhotoOnNewItem: 'mandatory_photo_on_new_item'
+  mandatoryPhotoOnNewItem: 'mandatory_photo_on_new_item',
+  // Governação do contrato: quais contas contábeis não entram na carga. Sem
+  // isto, um aparelho novo carregava contas que o contrato já tinha excluído.
+  excludedAccounts: 'excluded_accounts'
 } as const;
 
 export type ContractConfigKey = keyof typeof CONTRACT_CONFIG_COLUMNS;

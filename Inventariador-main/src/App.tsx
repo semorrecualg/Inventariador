@@ -62,6 +62,7 @@ import WorkContextSelector from './components/WorkContextSelector';
 import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, SupabaseUserProfile } from './utils/routingUtils';
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { migrateDevicePreferencesFromSnapshot, readFieldPreferences, writeFieldPreferences } from './utils/fieldPreferences';
+import { migrateDatabaseModeFromSnapshot } from './utils/databaseModeStore';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
@@ -3279,6 +3280,16 @@ useEffect(() => {
       try {
         savedInventory = await loadInventory(databaseMode);
         const saved = savedInventory;
+
+        // MIGRAÇÃO DE DISPOSITIVO: `databaseMode` deixou de viajar no snapshot.
+        // Se este aparelho ainda não tem modo gravado em `app_database_mode`,
+        // adopta o do snapshot — sem duplicar a preferência no fieldPreferences.
+        const migratedMode = migrateDatabaseModeFromSnapshot(saved);
+        if (migratedMode && migratedMode !== databaseMode) {
+          logger.info(`>>> [Config] Modo de base migrado do snapshot: ${migratedMode}.`);
+          setDatabaseMode(migratedMode);
+          return; // o efeito volta a correr com o modo já migrado
+        }
         
         // Se não houver dados locais e estivermos em modo nuvem, não sincronizamos automaticamente no init
         // Deixamos que a navegação para UNIT_SELECTION ou MODULE_SELECTION trate disso
@@ -4178,6 +4189,9 @@ useEffect(() => {
         localStorage.setItem('app_committed_consultation_filters', safeStringify(committedConsultationFilters));
         // Ajustes de Campo: um único ponto de gravação (ver utils/fieldPreferences).
         writeFieldPreferences(inventory);
+        // Contas excluídas são CONTRATO (viajam), mas o arranque lê o espelho
+        // local: mantê-lo alinhado com o que desceu da nuvem.
+        localStorage.setItem('app_excluded_accounts', safeStringify(inventory.excludedAccounts || []));
         localStorage.setItem('app_mandatory_photo_divergence', String(inventory.mandatoryPhotoOnDivergence || false));
         localStorage.setItem('app_mandatory_photo_new', String(inventory.mandatoryPhotoOnNewItem || false));
       } catch { logger.warn("Storage cap reached"); }
