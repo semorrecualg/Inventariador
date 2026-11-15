@@ -127,6 +127,7 @@ import { demoService } from './services/demoService';
 import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
 import { logger } from './utils/logger';
+import { mensagemDeErroDeSync } from './utils/syncError';
 import pkg from '../package.json';
 
 export class AppBootstrapError extends Error {
@@ -3011,7 +3012,9 @@ useEffect(() => {
         });
       }
 
-      setSyncError('Erro de tráfego em rede WebView. Chaveado para contingência local.');
+      // Mensagem real: o texto fixo afirmava contingência mesmo quando nada foi
+      // chaveado (prazo estourado, RLS, contrato sem config).
+      setSyncError(mensagemDeErroDeSync(error));
     } finally {
       // F2 — encerra o ciclo em QUALQUER saída. Havendo faltantes, a sessão
       // permanece ABERTA/PARCIAL para a próxima rodada retomar sem reenviar aceitos.

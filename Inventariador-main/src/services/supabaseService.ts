@@ -2297,11 +2297,22 @@ const fetchFullInventoryImpl = async (
     
     let config: Record<string, unknown> = {};
     try {
-      const { data: configData, error: configError } = await supabase
-        .from('inventory_config')
-        .select('*')
-        .eq('id', configId)
-        .maybeSingle();
+      // A config vinha SEM prazo e fica logo depois da última página de ativos:
+      // um socket pendurado aqui deixava o overlay "SINCRONIZANDO BASE" preso na
+      // mesma. Mesmo prazo por pedido que a paginação.
+      type LinhaConfig = {
+        data: Record<string, unknown> | null;
+        error: { code?: string; message: string } | null;
+      };
+      const { data: configData, error: configError } = await comTimeout(
+        supabase
+          .from('inventory_config')
+          .select('*')
+          .eq('id', configId)
+          .maybeSingle() as unknown as PromiseLike<LinhaConfig>,
+        PULL_PAGE_TIMEOUT_MS,
+        `Tempo esgotado a ler a configuração ${configId} (${PULL_PAGE_TIMEOUT_MS / 1000}s). Verifique a rede e tente novamente.`
+      );
 
       if (configError) {
         throw configError;
@@ -2310,11 +2321,15 @@ const fetchFullInventoryImpl = async (
         config = configData;
       } else {
         logger.info('>>> [Supabase] Config não encontrada para o tenant. Tentando global_config...');
-        const { data: globalConfigData, error: globalError } = await supabase
-          .from('inventory_config')
-          .select('*')
-          .eq('id', 'global_config')
-          .maybeSingle();
+        const { data: globalConfigData, error: globalError } = await comTimeout(
+          supabase
+            .from('inventory_config')
+            .select('*')
+            .eq('id', 'global_config')
+            .maybeSingle() as unknown as PromiseLike<LinhaConfig>,
+          PULL_PAGE_TIMEOUT_MS,
+          `Tempo esgotado a ler a configuração global_config (${PULL_PAGE_TIMEOUT_MS / 1000}s). Verifique a rede e tente novamente.`
+        );
           
         if (globalError) {
           throw globalError;

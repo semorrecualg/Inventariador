@@ -26,7 +26,9 @@ describe('sreMonitor', () => {
     expect(interessaAoSreMonitor('[App] Login detectado.')).toBe(true);
     expect(interessaAoSreMonitor('>>> [Sync] Dados recebidos da nuvem: 12 ativos.')).toBe(true);
     expect(interessaAoSreMonitor('[SRE_CLOUD] Enviando 500 ativos')).toBe(true);
-    expect(interessaAoSreMonitor('[Supabase] Conexão OK')).toBe(false);
+    // `[Supabase]` passou a interessar (páginas do pull); o que continua de fora
+    // é log de domínio que não ajuda a diagnosticar login/sincronização.
+    expect(interessaAoSreMonitor('[OCR] Página processada: 3')).toBe(false);
     expect(interessaAoSreMonitor('texto solto')).toBe(false);
   });
 
@@ -54,7 +56,7 @@ describe('sreMonitor', () => {
   });
 
   it('descarta o que não interessa ao monitor', () => {
-    publicarLinhaSre(['[Supabase] ruído']);
+    publicarLinhaSre(['[OCR] ruído']);
     publicarLinhaSre(['']);
 
     expect(lerLinhasSre()).toEqual([]);
@@ -97,11 +99,20 @@ describe('sreMonitor', () => {
 
   it('o logger alimenta o monitor (ponte real)', () => {
     logger.info('>>> [Sync] Dados recebidos da nuvem: 3 ativos.');
-    logger.info('[Supabase] esta não interessa');
+    logger.info('[OCR] esta não interessa');
 
     const linhas = lerLinhasSre();
 
     expect(linhas).toHaveLength(1);
     expect(linhas[0].mensagem).toContain('Dados recebidos da nuvem: 3 ativos');
+  });
+});
+
+describe('SRE Monitor — páginas do pull', () => {
+  it('mostra as linhas [Supabase] da paginação de ativos', () => {
+    expect(interessaAoSreMonitor('>>> [Supabase] Carregados 1000 ativos...')).toBe(true);
+    expect(interessaAoSreMonitor('>>> [Supabase] Carregados 7000 ativos...')).toBe(true);
+    expect(interessaAoSreMonitor('>>> [Supabase] Busca concluída. Total: 7000 ativos.')).toBe(true);
+    expect(interessaAoSreMonitor('>>> [Supabase] Buscando config para ID: config_CICOPAL')).toBe(true);
   });
 });
