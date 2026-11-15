@@ -115,6 +115,7 @@ import { saveInventory, loadInventory, clearInventory, clearMultipleInventories,
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
 import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMarkDetailed, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager, requeueFiscalAccountRecordsOnce } from './services/syncService';
+import { migrateAssetKeysToErpOnce } from './services/assetKeyMigration';
 import { isSyncLockStuck } from './services/syncQueueGuards';
 import { beginSyncCycle, endSyncCycle, pullIntoSession, pushAssetsWithReceipt, type SyncSession } from './services/syncSessionService';
 import { conferirAtivo, derivarAtualizacaoConferencia, reservarLamports, resolveDeviceId } from './services/fieldConferencing';
@@ -3290,6 +3291,14 @@ useEffect(() => {
           setDatabaseMode(migratedMode);
           return; // o efeito volta a correr com o modo já migrado
         }
+
+        // MIGRAÇÃO ÚNICA: as chaves antigas (etiqueta ou derivada do conteúdo)
+        // passam para o formato do ERP antes de qualquer reimportação, senão a
+        // carga criaria linhas novas ao lado das existentes. Execução única por
+        // instalação, a mesma flag usada pelo ciclo de sincronização.
+        await migrateAssetKeysToErpOnce().catch((migrErr) => {
+          logger.warn('>>> [Asset Key] Falha na migração das chaves no arranque:', migrErr);
+        });
 
         // REPARAÇÃO ÚNICA (origem: arranque): os registos da conta fiscal que o
         // corte antigo deu por sincronizados voltam à fila mesmo que a app não

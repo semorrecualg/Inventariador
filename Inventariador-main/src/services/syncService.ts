@@ -5,6 +5,7 @@ import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getD
 import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
 import { FISCAL_ACCOUNT_PREFIX, isFiscalAccount } from '../utils/fiscalAccount';
+import { migrateAssetKeysToErpOnce } from './assetKeyMigration';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { matchUnitKeys } from '../utils/schema';
@@ -579,6 +580,12 @@ const _syncService = {
     const filialClean = String(rawFilial).trim();
 
     try {
+      // MIGRACAO UNICA: chaves antigas (etiqueta/derivada) -> formato do ERP,
+      // antes de a fila ser lida. Mesma flag do arranque: so corre uma vez.
+      await migrateAssetKeysToErpOnce().catch((migrErr) => {
+        logger.warn('>>> [Asset Key] Falha na migração das chaves; segue sem migração:', migrErr);
+      });
+
       // REPARACAO UNICA: registos que o corte fiscal deu por sincronizados sem
       // envio voltam a fila antes de a ler (uma vez por instalacao).
       await requeueFiscalAccountRecordsOnce('sync').catch((repairErr) => {
