@@ -115,6 +115,7 @@ import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } 
 import { isSyncLockStuck } from './services/syncQueueGuards';
 import { beginSyncCycle, endSyncCycle, pullIntoSession, pushAssetsWithReceipt, type SyncSession } from './services/syncSessionService';
 import { conferirAtivo, derivarAtualizacaoConferencia, reservarLamports, resolveDeviceId } from './services/fieldConferencing';
+import { flushFieldEvents } from './services/fieldEventSync';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 import { determineAssetTag } from './services/tagService';
@@ -2522,9 +2523,31 @@ useEffect(() => {
     const effectiveTenantid = user?.tenantid;
 
     const dirtyIds = Array.from(dirtyAssetsRef.current);
-    if (dirtyIds.length === 0) return;
-
     const dirtyAssets = dirtyIds.map(id => inventoryRef.current.assets.find(a => String(a.id) === id)).filter(Boolean) as Asset[];
+
+    // O log de campo sobe mesmo sem ativos sujos: uma leitura pode não alterar
+    // nenhuma coluna que o push de ativos envia, e o evento não pode ficar
+    // preso no aparelho à espera de uma edição que nunca vem.
+    let eventosPendentes = 0;
+    try {
+      const { synced: aceitos, pending } = await flushFieldEvents(effectiveTenantid, {
+        auditor: user?.email,
+        session: cycleSession,
+      });
+      eventosPendentes = pending - aceitos.length;
+      if (pending > 0) {
+        logger.info(`>>> [Sync] Log de campo: ${aceitos.length}/${pending} eventos confirmados na nuvem.`);
+      }
+    } catch (err) {
+      logger.warn('>>> [Sync] Falha ao enviar o log de campo; eventos ficam para a próxima rodada:', err);
+    }
+
+    if (dirtyAssets.length === 0) {
+      if (eventosPendentes > 0) {
+        setSyncError(`Log de campo pendente: ${eventosPendentes} evento(s) não enviados.`);
+      }
+      return;
+    }
 
     if (dirtyAssets.length > 0) {
       if (!skipLoadingState) setIsSyncing(true);
@@ -5131,7 +5154,13 @@ useEffect(() => {
     }
     const pending = Array.from(cloudQueueRef.current.values());
     cloudQueueRef.current.clear();
-    if (pending.length === 0) return;
+    if (pending.length === 0) {
+      // Sem ativos na fila, o log de campo ainda pode ter o que subir.
+      await flushFieldEvents(user?.tenantid, { auditor: user?.email }).catch(err =>
+        logger.warn('>>> [Sync Queue] Falha ao enviar o log de campo:', err)
+      );
+      return;
+    }
 
     try {
       // F2 — mesmo recibo/idempotência do push principal, na fila de nuvem.
@@ -5147,6 +5176,12 @@ useEffect(() => {
         setSqliteUnitAssets(prev => prev.map(mark));
         logger.info(`>>> [Sync Queue] ${synced.length}/${pending.length} ativos confirmados na nuvem e marcados como sincronizados.`);
       }
+      // O log de campo do mesmo turno sobe junto: o recibo da fila passa a
+      // contar eventos, não só ativos.
+      await flushFieldEvents(user?.tenantid, { auditor: user?.email }).catch(err =>
+        logger.warn('>>> [Sync Queue] Falha ao enviar o log de campo:', err)
+      );
+
       const unsent = pending.filter(a => !syncedSet.has(String(a.id)));
       if (unsent.length > 0) {
         // Offline (syncAssetsToCloud devolve []): fica em fila e só volta com o

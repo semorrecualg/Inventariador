@@ -73,6 +73,36 @@ export interface SyncSessionReceipt {
   /** Impressão determinística das chaves recebidas no pull. */
   pullChecksum: string;
   durationMs: number;
+  /** Log de campo do ciclo; ausente quando nenhum evento foi enviado. */
+  fieldEvents?: SyncFieldEventsReceipt;
+}
+
+/**
+ * Log de campo dentro do MESMO recibo do ciclo.
+ *
+ * Contadores separados dos ativos de propósito: misturar `event_id` com
+ * `assetSyncKey` no mesmo `acceptedKeys` faria o recibo dizer "enviei 1.200"
+ * quando foram 1.200 eventos e 40 ativos, e o `missing` (ativos que faltam)
+ * passaria a incluir leituras — que não são ativos e nunca vão aparecer no pull.
+ */
+export interface SyncSessionFieldEvents {
+  acceptedIds: string[];
+  rejectedIds: string[];
+  rejections?: SyncRejection[];
+  /**
+   * Recibo já fechado. Ao encerrar a sessão as listas de ids são libertadas
+   * (como as chaves dos ativos) e fica só este resumo — sem ele, o recibo de
+   * um ciclo fechado perderia a contagem de eventos.
+   */
+  receipt?: SyncFieldEventsReceipt;
+}
+
+export interface SyncFieldEventsReceipt {
+  sent: number;
+  accepted: number;
+  rejected: number;
+  /** Impressão determinística dos `event_id` aceites. */
+  checksum: string;
 }
 
 export interface SyncRejection {
@@ -100,6 +130,8 @@ export interface SyncSession {
   /** Motivo de cada recusa, para a tela e para o suporte. */
   rejections?: SyncRejection[];
   pull?: SyncSessionPull;
+  /** Eventos de campo enviados neste ciclo (`field_events`). */
+  fieldEvents?: SyncSessionFieldEvents;
   receipt?: SyncSessionReceipt;
   /** A rodada falhou no meio (rede/erro): a sessão NÃO deve fechar como concluída. */
   failed?: boolean;
@@ -375,6 +407,41 @@ export const registerRejections = async (
   return session;
 };
 
+/** Registra os `event_id` que a nuvem confirmou neste ciclo. */
+export const registerFieldEventsAccepted = async (
+  session: SyncSession,
+  eventIds: string[],
+  store?: SyncSessionStore
+): Promise<SyncSession> => {
+  const block = session.fieldEvents ?? { acceptedIds: [], rejectedIds: [] };
+  const merged = new Set([...block.acceptedIds, ...eventIds]);
+  block.acceptedIds = [...merged];
+  block.rejectedIds = block.rejectedIds.filter(id => !merged.has(id));
+  if (block.rejections) block.rejections = block.rejections.filter(item => !merged.has(item.key));
+  session.fieldEvents = block;
+  await persistSession(session, store);
+  return session;
+};
+
+/** Registra os eventos que a nuvem recusou, com o motivo real, no mesmo ciclo. */
+export const registerFieldEventsRejected = async (
+  session: SyncSession,
+  items: { key: string; reason: string }[],
+  store?: SyncSessionStore
+): Promise<SyncSession> => {
+  if (items.length === 0) return session;
+  const block = session.fieldEvents ?? { acceptedIds: [], rejectedIds: [] };
+  const merged = new Set([...block.rejectedIds, ...items.map(item => item.key)]);
+  block.rejectedIds = [...merged];
+  const at = new Date().toISOString();
+  const known = new Map((block.rejections ?? []).map(item => [item.key, item]));
+  for (const item of items) known.set(item.key, { key: item.key, reason: item.reason, at });
+  block.rejections = [...known.values()].slice(-MAX_REJECTIONS_KEPT);
+  session.fieldEvents = block;
+  await persistSession(session, store);
+  return session;
+};
+
 export const registerRejected = async (
   session: SyncSession,
   keys: string[],
@@ -432,6 +499,13 @@ export const pullIntoSession = async (
     store
   );
 
+export const buildFieldEventsReceipt = (block: SyncSessionFieldEvents): SyncFieldEventsReceipt => ({
+  sent: block.acceptedIds.length + block.rejectedIds.length,
+  accepted: block.acceptedIds.length,
+  rejected: block.rejectedIds.length,
+  checksum: checksumOf(block.acceptedIds),
+});
+
 export const buildReceipt = (session: SyncSession, now: number = Date.now()): SyncSessionReceipt => {
   const accepted = session.acceptedKeys.length;
   const rejected = session.rejectedKeys.length;
@@ -448,6 +522,9 @@ export const buildReceipt = (session: SyncSession, now: number = Date.now()): Sy
     checksum: checksumOf(session.acceptedKeys),
     pullChecksum: checksumOf(receivedKeys ?? []),
     durationMs: Number.isFinite(started) ? Math.max(0, now - started) : 0,
+    ...(session.fieldEvents
+      ? { fieldEvents: session.fieldEvents.receipt ?? buildFieldEventsReceipt(session.fieldEvents) }
+      : {}),
   };
 };
 
@@ -485,16 +562,46 @@ export const finalizeSyncSession = async (
     return session;
   }
 
-  session.status = receipt.accepted > 0 || receipt.received > 0 ? 'COMPLETED' : 'ABORTED';
+  // Um ciclo que só subiu log de campo também concluiu: sem os eventos nesta
+  // condição, 300 leituras confirmadas e nenhum ativo enviado davam "abortado".
+  const eventosAceitos = receipt.fieldEvents?.accepted ?? 0;
+  session.status =
+    receipt.accepted > 0 || receipt.received > 0 || eventosAceitos > 0 ? 'COMPLETED' : 'ABORTED';
   session.finishedAt = new Date(now).toISOString();
   session.acceptedKeys = [];
   session.rejectedKeys = [];
   session.rejections = [];
+  if (session.fieldEvents) {
+    // Guarda o resumo e liberta os ids: um turno grande tem milhares e a
+    // sessão já provou o que provava.
+    const snapshot =
+      session.fieldEvents.receipt ?? buildFieldEventsReceipt(session.fieldEvents);
+    session.fieldEvents = { acceptedIds: [], rejectedIds: [], rejections: [], receipt: snapshot };
+  }
   if (session.pull?.receivedKeys) session.pull.receivedKeys = [];
 
   await persistSession(session, store, true);
   logger.info(formatReceipt(session));
   return session;
+};
+
+/**
+ * Marca a rodada como falhada e deixa a sessão ABERTA para retomada — a mesma
+ * regra do envio de ativos, para o log de campo não fechar um ciclo que a rede
+ * cortou a meio.
+ */
+export const markSyncSessionFailed = async (
+  session: SyncSession,
+  store?: SyncSessionStore
+): Promise<SyncSession> => {
+  const s = resolveStore(store);
+  const sessions = await readSessions(s);
+  const stored = sessions.find(item => item.id === session.id) ?? session;
+  stored.status = 'OPEN';
+  stored.failed = true;
+  stored.finishedAt = undefined;
+  await persistSession(stored, s);
+  return stored;
 };
 
 /** Mantido para chamadas que encerram a sessão explicitamente. */
@@ -526,6 +633,12 @@ export const formatReceipt = (session: SyncSession): string => {
     // Só fala em "recebi" quando o ciclo teve pull registrado.
     session.pull ? `recebi ${r.received}` : null,
     r.missing > 0 ? `FALTAM ${r.missing}` : 'faltam 0',
+    // Eventos só aparecem quando o ciclo os teve: recibo de uma rodada só de
+    // ativos não ganha uma linha "eventos 0".
+    session.fieldEvents
+      ? `eventos ${r.fieldEvents?.accepted ?? 0}/${r.fieldEvents?.sent ?? 0}` +
+        ((r.fieldEvents?.rejected ?? 0) > 0 ? ` (recusados ${r.fieldEvents?.rejected})` : '')
+      : null,
   ].filter(Boolean);
   return `>>> [Sync Recibo] ${session.tenantid}|${session.filial} · ${parts.join(' · ')} · conferência ${r.checksum}`;
 };

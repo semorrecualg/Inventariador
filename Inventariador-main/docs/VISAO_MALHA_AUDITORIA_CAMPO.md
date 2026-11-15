@@ -361,7 +361,15 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
   A ficha do ativo, a etiqueta e a conciliação já não escrevem nada disso à mão
   (passam pelo mesmo `commitAssetUpdate`), e a edição em lote emite um evento por
   ativo com o bloco de lamports reservado de uma vez (`reservarLamports`), para
-  não repetir números entre os eventos paralelos. Falta F1.6 (cadeia de hash).
+  não repetir números entre os eventos paralelos.
+- **Log na nuvem (F2 do log)**: `field_events` passou a subir para o Supabase
+  por `upsert` com `onConflict: 'event_id'` e `ignoreDuplicates` — reenviar não
+  duplica nem falha, e o aparelho só marca `_synced = 1` depois da confirmação.
+  A tabela (DDL em `docs/supabase_field_events.sql`) é só-adição também no
+  servidor, com um índice único `(tenantid, device_id, lamport)` que apanha
+  contador reutilizado. Os eventos viajam na MESMA sessão/recibo do ciclo, com
+  contadores próprios (`recibo.fieldEvents`), para não poluir `accepted`/`missing`
+  dos ativos. Falta F1.6 (cadeia de hash) e o pull do log entre aparelhos.
 - **F1 em curso** (v8 do schema local): `field_events` criada com escrita
   só-adição — hooks `updating`/`deleting` do Dexie recusam alterar ou apagar o
   evento (`AppendOnlyViolation`), e a única alteração aceite é `_synced` 0 → 1,
