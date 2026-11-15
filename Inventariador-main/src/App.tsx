@@ -119,6 +119,7 @@ import { flushFieldEvents } from './services/fieldEventSync';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 import { deveEntrarEmModoNuvem, deveEntrarEmModoNuvemNaSessaoGuardada, avisoAposCargaLocal } from './utils/sessionMode';
+import { fundirPullComPendentes } from './services/pullMerge';
 import { determineAssetTag } from './services/tagService';
 
 import { requestPersistentStorage, localDb } from './services/localDbService';
@@ -2776,6 +2777,7 @@ useEffect(() => {
           // Sem isto, tudo o que é descarregado ficava "PENDENTE NUVEM" para
           // sempre — o upsert só envia colunas do schema remoto, nunca `_is_synced`.
           const cloudAssets: Asset[] = (cloudData.assets || []).map(a => ({ ...a, _is_synced: 1 }));
+          const contratoAtivo = String((user?.tenantid || readSessionTenantId() || '').trim()).toUpperCase();
           
           // SEGURANÇA + ISOLAMENTO SRE: Se a nuvem retornou 0 ativos mas temos
           // dados locais, mantemos a base local SOMENTE se ela pertencer ao
@@ -2784,10 +2786,9 @@ useEffect(() => {
           // anterior do CICOPAL), ela é descartada — jamais exibimos dados de
           // um contrato para outro (regra de isolamento por tenantid).
           if (cloudAssets.length === 0 && prev.assets.length > 0 && !isGlobalAdmin) {
-            const userTenant = String((user?.tenantid || readSessionTenantId() || '').trim()).toUpperCase();
             const leaksForeignTenant = prev.assets.some(a => {
               const t = String((a as Record<string, unknown>).tenantid || '').trim().toUpperCase();
-              return !userTenant || (t && t !== userTenant);
+              return !contratoAtivo || (t && t !== contratoAtivo);
             });
             if (!leaksForeignTenant) {
               logger.warn('[Sync] Nuvem retornou 0 ativos para este tenantid. Mantendo base local do MESMO tenant para evitar perda de dados.');
@@ -2888,15 +2889,32 @@ useEffect(() => {
             });
           }
 
-          const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.filial || '').trim().toUpperCase()))).filter(Boolean);
+          // PULL x CARGA LOCAL: uma base carregada há pouco ainda não está na
+          // nuvem (`_is_synced = 0`). Sem isto, o pull substituía o inventário e
+          // a Unidade Operacional dizia "nenhum dado importado" com os ativos
+          // carregados no aparelho. Só sobrevivem pendentes do MESMO contrato.
+          const { assets: assetsFinais, mantidos, deOutroContrato } = fundirPullComPendentes({
+            daNuvem: mergedAssets as unknown as Record<string, unknown>[],
+            locais: prev.assets as unknown as Record<string, unknown>[],
+            contratoAtivo
+          });
+          if (mantidos > 0) {
+            logger.info(`>>> [Sync] Pull: ${cloudAssets.length} da nuvem + ${mantidos} local(is) pendente(s) de ${contratoAtivo || 'sem contrato'} mantidos até espelhar.`);
+          }
+          if (deOutroContrato > 0) {
+            logger.warn(`>>> [Sync] ${deOutroContrato} linha(s) de outro contrato ficaram fora do inventário (isolamento).`);
+          }
+          const assetsDoPull = assetsFinais as unknown as Asset[];
+
+          const extractedCompanies = Array.from(new Set(assetsDoPull.map(a => (a.filial || '').trim().toUpperCase()))).filter(Boolean);
           const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
 
           const newState: InventoryState = {
             ...prev,
             ...cloudData.config,
-            assets: mergedAssets.length > 0 ? mergedAssets : prev.assets,
+            assets: assetsDoPull.length > 0 ? assetsDoPull : prev.assets,
             companies: finalCompanies.length > 0 ? finalCompanies : prev.companies,
-            status: (mergedAssets.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
+            status: (assetsDoPull.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
             lastUpdated: syncTimestamp
           };
           saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
