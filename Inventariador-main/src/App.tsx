@@ -118,6 +118,7 @@ import { conferirAtivo, derivarAtualizacaoConferencia, reservarLamports, resolve
 import { flushFieldEvents } from './services/fieldEventSync';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
+import { deveEntrarEmModoNuvem } from './utils/sessionMode';
 import { determineAssetTag } from './services/tagService';
 
 import { requestPersistentStorage, localDb } from './services/localDbService';
@@ -7256,7 +7257,7 @@ useEffect(() => {
             onUpdateDatabaseMode={handleUpdateDatabaseMode}
             isInitializing={isInitializing}
             dbInitialized={dbInitialized}
-            onLogin={async (u) => {
+            onLogin={async (u, origem) => {
               setUser(u);
               // Login concluído = sessão válida, independentemente da origem
               // (Dexie/local, barreira local ou Supabase). Sem isto, um perfil
@@ -7264,11 +7265,15 @@ useEffect(() => {
               // formulário porque a sessão só era validada pela nuvem.
               setIsSessionValid(true);
               sessionStorage.setItem('app_current_user', safeStringify(u));
-              if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode) {
-                setDatabaseMode(DatabaseMode.SUPABASE);
-              } else {
-                setDatabaseMode(DatabaseMode.INTERNAL);
-              }
+              // O modo segue a ORIGEM da sessão, não o `app_database_mode` que
+              // ficou guardado. Era isso que prendia em INTERNAL um MASTER
+              // autenticado no Supabase (herdado de uma demo ou de uma carga
+              // local): sem modo SUPABASE o pull da nuvem nunca corria e a base
+              // ficava vazia — "nenhuma filial na base deste contrato".
+              const naNuvem = deveEntrarEmModoNuvem(origem, !isInternalMode);
+              const modoSessao = naNuvem ? DatabaseMode.SUPABASE : DatabaseMode.INTERNAL;
+              setDatabaseMode(modoSessao);
+              localStorage.setItem('app_database_mode', modoSessao);
               const defaultTenant = String(u.tenantid || '').toUpperCase().trim();
               const defaultUnit = String(u.filial || u.unitid || u._unitid || '').toUpperCase().trim();
               const multiContextLogin = buildWorkContexts(u, users, workContextFiliais).length > 1;
@@ -7278,9 +7283,9 @@ useEffect(() => {
               // Sessão de credencial local (auditor criado em ACESSOS) não tem
               // token do Supabase: o pull da nuvem rodaria sem autorização e só
               // geraria erro de RLS. A base dele já está no dispositivo.
-              if (isAppManagedSession()) {
-                logger.info('[App] Login por credencial local do app: sincronização da nuvem adiada (sem token Supabase).');
-              } else if (databaseMode !== DatabaseMode.INTERNAL && !isInternalMode && !multiContextLogin) {
+              if (!naNuvem) {
+                logger.info('[App] Sessão sem BASE OFICIAL (credencial local ou build offline): sincronização da nuvem adiada.');
+              } else if (!multiContextLogin) {
                 // ETAPA 1/2 (FLUXO_ACESSO_INICIAL): o onLogin não repete o pull do
                 // Boot Loader para o mesmo contrato+filial, e o pull respeita o
                 // filtro de filial do perfil (dados sob demanda da filial).

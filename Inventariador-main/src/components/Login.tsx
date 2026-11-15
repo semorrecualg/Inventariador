@@ -12,9 +12,10 @@ import { demoService } from '../services/demoService';
 import pkg from '../../package.json';
 import { logger } from '../utils/logger';
 import { readSessionTenantId, readLocalTenantId } from '../utils/tenantUtils';
+import type { LoginOrigin } from '../utils/sessionMode';
 
 interface LoginProps {
-  onLogin: (user: User) => void;
+  onLogin: (user: User, origem?: LoginOrigin) => void;
   users: User[];
   databaseMode: DatabaseMode;
   onOpenPrivacyCenter: () => void;
@@ -116,7 +117,7 @@ const Login: React.FC<LoginProps> = ({
             tenantid: localUser.tenantid
           });
 
-          onLogin(localUser);
+          onLogin(localUser, 'LOCAL');
         } else {
           setError("Usuário biométrico não encontrado no banco local.");
         }
@@ -196,7 +197,7 @@ const Login: React.FC<LoginProps> = ({
         // Altera modo para usar SQLite localmente como fonte da verdade
         onUpdateDatabaseMode?.(DatabaseMode.INTERNAL);
         const demoUser = demoService.getDemoUser();
-        onLogin(demoUser);
+        onLogin(demoUser, 'LOCAL');
       } else {
         const lastErrStr = localStorage.getItem('gbr_kardex_last_db_error');
         let errorHint = '';
@@ -290,7 +291,7 @@ const Login: React.FC<LoginProps> = ({
         // local (Dexie/Barreira Local) não tem token do Supabase: a sessão é
         // marcada como gerida pelo app para a checagem da nuvem não destruí-la.
         markAppManagedSession();
-        onLogin(dexieUser);
+        onLogin(dexieUser, 'LOCAL');
         setIsLoading(false);
         clearTimeout(loginTimeout);
         return;
@@ -406,7 +407,7 @@ const Login: React.FC<LoginProps> = ({
           // FLUXO ÚNICO: autenticado na Barreira Local, entra direto; contrato,
           // filial e módulo são escolhidos na tela de contrato de trabalho.
           markAppManagedSession();
-          onLogin(loggedUser);
+          onLogin(loggedUser, 'LOCAL');
           clearTimeout(loginTimeout);
           return; // ENCERRA O FLUXO SEM COCORRER CÓDIGOS DO SUPABASE
         } catch (localErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -439,6 +440,9 @@ const Login: React.FC<LoginProps> = ({
       }
 
       let loggedUser: User | null = null;
+      // De onde saiu esta sessão: o App decide o modo (e o pull da nuvem) por
+      // aqui, nunca pelo `app_database_mode` que ficou guardado.
+      let origemSessao: LoginOrigin | null = null;
       const isOnline = navigator.onLine;
 
       const doLocalAuthFallback = (): User => {
@@ -590,6 +594,7 @@ const Login: React.FC<LoginProps> = ({
             filial: unitId,
             units: profileUnits
           };
+          origemSessao = 'SUPABASE';
 
           if (!tenantid && !is_master) {
             logger.warn('[Login] Bloqueando login pois tenantid está nulo ou vazio no perfil.');
@@ -638,6 +643,8 @@ const Login: React.FC<LoginProps> = ({
           if (isNetError) {
             logger.info('[Login] Erro de rede legítimo detectado. Executando login via SQLite local.');
             loggedUser = doLocalAuthFallback();
+          origemSessao = 'LOCAL';
+            origemSessao = 'LOCAL';
           } else {
             // Se for erro de credenciais (ou qualquer coisa diferente de timeout/falha de rede), NÃO mascara com o SQLite!
             const isInvalidCreds = errorMsg.includes('invalid credentials') || 
@@ -680,7 +687,8 @@ const Login: React.FC<LoginProps> = ({
           tenantid: loggedUser.tenantid
         });
 
-        onLogin(loggedUser);
+        if (origemSessao === 'LOCAL') markAppManagedSession();
+        onLogin(loggedUser, origemSessao ?? 'LOCAL');
       }
     } catch (err: unknown) {
       const error = err as Error;
