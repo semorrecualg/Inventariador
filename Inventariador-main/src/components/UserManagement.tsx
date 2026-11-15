@@ -31,7 +31,7 @@ import { isAdminEmail } from '../utils/authUtils';
 import { buildAccessRows, type AccessRow } from '../utils/accessTree';
 import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
 import { validateStrongPassword, validateQuickLoginPassword, STRONG_PASSWORD_RULE_LABELS } from '../utils/passwordPolicy';
-import { provisionUserInAuth, resetPassword, deleteUserFromCloud, ProvisionResult } from '../services/supabaseService';
+import { provisionUserInAuth, resetPassword, deleteUserFromCloud, syncUsersToCloud, ProvisionResult } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { logger } from '../utils/logger';
 
@@ -508,6 +508,24 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       logger.warn('[UserManagement] Falha ao persistir edição no armazenamento local:', persistErr);
     }
 
+    // GRAVAÇÃO NA NUVEM, AGUARDADA E VERIFICADA.
+    // Antes a edição só vivia neste dispositivo: a sincronização era disparada
+    // por um efeito "fire and forget" e qualquer recusa (RLS, coluna ausente,
+    // rede) ficava num warn do console. No login seguinte o perfil da nuvem —
+    // ainda antigo — sobrescrevia as permissões e a alteração "voltava atrás".
+    let cloudSaved = true;
+    let cloudMessage = '';
+    if (databaseMode === DatabaseMode.SUPABASE) {
+      try {
+        await syncUsersToCloud([updatedUser]);
+        logger.info(`[UserManagement] Permissões de ${email} gravadas na nuvem.`);
+      } catch (cloudErr) {
+        cloudSaved = false;
+        cloudMessage = cloudErr instanceof Error ? cloudErr.message : String(cloudErr);
+        logger.error('[UserManagement] A nuvem recusou as permissões:', cloudErr);
+      }
+    }
+
     // Se o usuário editado for o usuário logado, atualiza o estado global e o localStorage
     if (currentUser && selectedUser.email.toLowerCase() === currentUser.email.toLowerCase()) {
       logger.info('[UserManagement] Atualizando dados do usuário logado...');
@@ -524,7 +542,15 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setToast({ message: `Credenciais de ${name || username} atualizadas!`, type: 'success' });
     setTimeout(() => setToast(null), 3000);
     
-    showModal("Sucesso", `As credenciais de ${name || username} foram atualizadas com sucesso!`, "success");
+    if (cloudSaved) {
+      showModal("Sucesso", `As credenciais de ${name || username} foram atualizadas com sucesso!`, "success");
+    } else {
+      showModal(
+        "Gravado só neste dispositivo",
+        `As permissões foram salvas aqui, mas a nuvem recusou a gravação (${cloudMessage || 'erro desconhecido'}). Ao entrar noutro dispositivo, o perfil antigo voltará.`,
+        "warning"
+      );
+    }
   };
 
   /**
