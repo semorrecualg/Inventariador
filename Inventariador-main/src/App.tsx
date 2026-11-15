@@ -27,6 +27,7 @@ declare global {
 }
 import Modal from './components/Modal';
 const Login = React.lazy(() => import('./components/Login'));
+const RecoveryPassword = React.lazy(() => import('./components/RecoveryPassword'));
 import Register from './components/Register';
 const MainMenu = React.lazy(() => import('./components/MainMenu'));
 const DatabaseManagerScreen = React.lazy(() => import('./screens/DatabaseManagerScreen').then(m => ({ default: m.DatabaseManagerScreen })));
@@ -134,6 +135,12 @@ import {
   perfilAdministrativo,
   perfilNaoLido
 } from './utils/sessionScope';
+import {
+  ehLinkDeRecuperacao,
+  emRecuperacaoDeSenha,
+  limparRecuperacaoDeSenha,
+  marcarRecuperacaoDeSenha
+} from './utils/passwordRecovery';
 import pkg from '../package.json';
 
 export class AppBootstrapError extends Error {
@@ -752,6 +759,14 @@ useEffect(() => {
   // Quantos ativos já desceram neste pull: o overlay deixou de ser um spinner
   // mudo ("demorando muito" sem sinal de vida).
   const [syncBaixados, setSyncBaixados] = useState<number | null>(null);
+  // Link de recuperação do Supabase: a app mostra o ecrã de nova senha em vez
+  // de deixar entrar com a sessão temporária que o link cria.
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(() => {
+    const doLink = typeof window !== 'undefined'
+      && ehLinkDeRecuperacao(window.location.hash, window.location.search);
+    if (doLink) marcarRecuperacaoDeSenha();
+    return doLink || emRecuperacaoDeSenha();
+  });
   const isSyncingRef = useRef(false);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
@@ -4398,6 +4413,14 @@ useEffect(() => {
     // Função para processar o login a partir de uma sessão
     const processSession = async (session: Session) => {
       if (!session?.user) return;
+      // Sessão vinda do link de recuperação não é um login: só serve para
+      // `auth.updateUser`. Sem este guarda, o utilizador entrava com a senha
+      // antiga e o ecrã de nova senha nunca aparecia.
+      if (emRecuperacaoDeSenha()) {
+        logger.info('[Auth] Sessão de recuperação de senha: login suspenso até definir a nova senha.');
+        setIsLoading(false);
+        return;
+      }
       
       const currentUser = userRef.current;
       
@@ -4766,6 +4789,16 @@ useEffect(() => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       logger.info('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
+
+      // PASSWORD_RECOVERY: o link do e-mail abriu uma sessão temporária. Login
+      // suspenso até a senha nova ser definida no ecrã de recuperação.
+      if (event === 'PASSWORD_RECOVERY') {
+        marcarRecuperacaoDeSenha();
+        setIsPasswordRecovery(true);
+        setIsSessionValid(false);
+        setIsLoading(false);
+        return;
+      }
       const isValid = !!session && !!session.user && typeof session.user.id === "string";
 
       // Sessão gerida pelo app: sem token do Supabase, ou com token de OUTRO
@@ -8254,6 +8287,29 @@ useEffect(() => {
           <h3 className="text-sm font-black text-ink uppercase tracking-[0.2em] mb-2">Processando Login</h3>
           <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest animate-pulse">Aguarde, validando credenciais...</p>
         </div>
+      )}
+
+      {isPasswordRecovery && (
+        <RecoveryPassword
+          onDone={() => {
+            limparRecuperacaoDeSenha();
+            setIsPasswordRecovery(false);
+            setUser(null);
+            setIsSessionValid(false);
+            pushScreen(AppScreen.LOGIN);
+            setModalConfig({
+              isOpen: true,
+              title: 'Senha Alterada',
+              message: 'A nova senha foi definida. Entre com ela para continuar.',
+              type: 'info'
+            });
+          }}
+          onCancel={() => {
+            limparRecuperacaoDeSenha();
+            setIsPasswordRecovery(false);
+            pushScreen(AppScreen.LOGIN);
+          }}
+        />
       )}
 
       {/* Overlay de Reconexão e Processamento (Pessimismo Saudável) */}
