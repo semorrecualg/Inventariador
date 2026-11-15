@@ -139,6 +139,10 @@ jobs:
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
 
+      # Docs: link/referência quebrada falha a geração do APK — mesmo gate do ci.yml.
+      - name: Docs (links e referências)
+        run: npm run check:docs
+
       # Sem as duas credenciais o build continua "verde", mas o APK nasce em
       # modo INTERNAL (100% offline) — foi o sintoma do selo "MOBILE (LOCAL)".
       - name: Validar credenciais do Supabase

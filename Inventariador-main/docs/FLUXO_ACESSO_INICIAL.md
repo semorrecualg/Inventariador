@@ -206,6 +206,43 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   08-09T21:46:19; merge upsert preservou os 12.636 totais locais; SYNC_PULL
   incremental registrado. 344/344 testes (16 novos) · TSC limpo.*
 
+- **Lista de filiais presa ao escopo (2026-11-13):** a lista guardada em
+  memória é `{ scope, names }`, com `scope = unitListScope(email, tenantid)`
+  (`email|CONTRATO`). O memo das unidades só a usa quando o `scope` bate com o
+  atual; a decisão do efeito (limpar / não fazer nada / buscar) vive em
+  `decideUnitListAction` (testada) e um contador de pedidos descarta respostas
+  atrasadas. Sair e entrar com outro utilizador no mesmo aparelho já
+  não mostra filiais do contrato anterior.
+
+- **Lista de filiais sem base local (2026-11-13):** com o boot a exigir a
+  filial, um aparelho novo (base vazia) abria `UNIT_SELECTION` sem nenhuma
+  unidade para escolher, porque a lista vinha dos dados locais. Agora
+  `fetchUnitNamesFromCloud(tenantid)` consulta **só a coluna `filial`**
+  (paginada, `Range`), normaliza (`normalizeUnitNames`: trim/UPPER, sem
+  sentinelas, dedupe, ordenada) e o App mistura o resultado na lista de
+  unidades enquanto não houver base local. Nenhum ativo é baixado; sem
+  tenantid a consulta não corre (muro SRE).
+
+- **Boot nunca baixa o contrato inteiro (2026-11-13):** com perfil sem filial
+  (`TODAS`/vazio) e sem última escolha válida, `bootFilial` ficava indefinido e
+  `fetchFullInventory` baixava os **12.636** ativos do contrato de uma vez,
+  marcando todos como sincronizados. Agora `resolveBootPullPlan(filial,
+  lastCtx, tenant)` devolve `{ unit }` só quando há filial resolvida; caso
+  contrário devolve `{ requiresUnitSelection: true }` e o Boot Loader **aborta a
+  carga** e abre `UNIT_SELECTION`. A verificação secundária pós-boot (que também
+  chamava `fetchFullInventory` sem unidade) passou a exigir a mesma filial.
+  Um pull do contrato só acontece em ação explícita de administrador
+  (backup/espelhamento no gestor de base).
+
+- **Fix do checkpoint do contrato (2026-11-13):** o pull do Boot Loader de
+  contrato (perfil sem filial e sem última escolha) grava o checkpoint na chave
+  `TENANT|`, enquanto `syncFromCloud` com unidade procurava `TENANT|FILIAL` —
+  não achava e caía em pull **completo**, baixando os 12.636 outra vez. Agora
+  `readCheckpointForDelta(tenant, unidade)` usa o checkpoint exato quando existe
+  e, na falta dele, aceita o do **contrato** como piso (mesma regra de cobertura
+  do dedup: contrato cobre as filiais; filial NUNCA cobre contrato nem outra
+  filial). Sem checkpoint nenhum, o pull continua completo por desenho.
+
 - **Fix do timing do delta no boot (2026-08-14):** o auto-aplicar (Etapa 4)
   disparava o sync ANTES de o boot terminar o `loadInventory` — com
   `inventoryRef` ainda vazio, `hasLocalData=false` e o pull virava COMPLETO em

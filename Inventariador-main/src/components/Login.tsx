@@ -63,12 +63,12 @@ const Login: React.FC<LoginProps> = ({
   // avoiding 2 wasted re-renders per Dexie auth call.
   const { authenticate: localAuthenticate } = useLocalAuth(false);
 
-  // Vercel Best Practice: derive during render, no useMemo for simple primitives
+  // Boas práticas React: derive during render, no useMemo for simple primitives
   // (rerender-simple-expression-in-memo)
   const normalizedUsername = username.trim().toLowerCase();
 
   // Check for biometrics when username changes
-  // Vercel Best Practice: Lazy state init for derived async state
+  // Boas práticas React: Lazy state init for derived async state
   // (rerender-lazy-state-init, rerender-split-combined-hooks)
   React.useEffect(() => {
     let cancelled = false;
@@ -218,7 +218,7 @@ const Login: React.FC<LoginProps> = ({
     }
   };
 
-  // Vercel Best Practice: derive during render, no redundant bool for simple checks
+  // Boas práticas React: derive during render, no redundant bool for simple checks
   // (rerender-simple-expression-in-memo)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -705,7 +705,7 @@ const Login: React.FC<LoginProps> = ({
 
   const config = getFieldConfig();
 
-  // Vercel Best Practice: use ternary for JSX conditionals (rendering-conditional-render)
+  // Boas práticas React: use ternary for JSX conditionals (rendering-conditional-render)
   // Derived booleans inline — avoids '0' or unexpected falsy rendering
   const hasBioAvailable = hasBio && !isLoading;
 

@@ -45,6 +45,10 @@ jobs:
       - name: Lint (zero warnings)
         run: npm run lint
 
+      # Docs: qualquer link ou referência de ficheiro quebrada falha o job.
+      - name: Docs (links e referências)
+        run: npm run check:docs
+
       - name: Typecheck
         run: npx tsc --noEmit
 

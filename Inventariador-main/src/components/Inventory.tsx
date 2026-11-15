@@ -12,7 +12,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, TransactionOrigin, AppScreen } from '../types';
+import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, AppScreen } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
 import { generateUUID } from '../services/supabaseService';
@@ -28,6 +28,14 @@ import { normalizeKey } from '../utils/schema';
 import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
+import { findBatchGroup, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
+import {
+  buildCopyForNewItem,
+  getDeviceCode,
+  radSequenceOf,
+  readRadCounter,
+  writeRadCounter,
+} from '../utils/copyAssetForNewItem';
 import { AssetListItem } from './AssetListItem';
 import PreferencesPanel from './PreferencesPanel';
 import { resolvePersistedTag } from '../services/tagService';
@@ -468,6 +476,11 @@ const Inventory: React.FC<InventoryProps> = ({
   const [isListening, setIsListening] = useState<string | null>(null);
 
   const [manualAsset, setManualAsset] = useState<Partial<Asset>>({});
+  // FICHA DO ATIVO em modo LEITURA, aberta a partir de "não localizado" ou da
+  // busca em outras unidades. Nada aqui altera o registo de origem: só existe
+  // para o auditor ver o bem e, se quiser, copiar os dados para o item novo
+  // desta unidade/endereço. ADOTADO EXTERNO deixa de ser criado por padrão.
+  const [fichaPreview, setFichaPreview] = useState<Asset | null>(null);
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
   const [isLocationSearchVisible, setIsLocationSearchVisible] = useState(false);
@@ -476,6 +489,11 @@ const Inventory: React.FC<InventoryProps> = ({
   const [isLocSearching, setIsLocSearching] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
+
+  // Conferência em lote disparada pelo clique no item (plaqueta repetida).
+  const [batchGroup, setBatchGroup] = useState<Asset[]>([]);
+  const [batchCheckedIds, setBatchCheckedIds] = useState<Set<string>>(new Set());
+  const [isBatchGroupSaving, setIsBatchGroupSaving] = useState(false);
   const [scannedAsset, setScannedAsset] = useState<Asset | null>(null);
   const [scannedResult, setScannedResult] = useState<string | null>(null);
 
@@ -804,33 +822,47 @@ const Inventory: React.FC<InventoryProps> = ({
     setIsManualEntryOpen(true);
   };
 
-  const handleLinkToUnit = async (asset: Asset) => {
-    try {
-      setIsHierarchyLoading(true);
-      const rawUpdatedAsset = {
-        ...asset,
-        filial: selectedUnit || asset.filial,
-        _conferido: true,
-        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-        _localMaster: selectedLocation || asset.endereco,
-        _dataLeitura: new Date().toISOString(),
-        _origemTransacao: TransactionOrigin.INVENTORY
-      };
-      
-      const cleanAsset = cleanAndCapitalizeAsset(rawUpdatedAsset);
-      await onUpdateAssetRef.current(cleanAsset);
-      
-      // Limpa estados
-      setShowGlobalSearchResolution(null);
-      setGlobalSearchResults([]);
-      setCommittedSearch('');
-      setDisplayValue('');
-    } catch (err) {
-      logger.error(">>> [Inventory] Erro ao vincular ativo:", err);
-      alert(`Falha técnica ao vincular/adotar ativo de outra unidade operacional: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsHierarchyLoading(false);
-    }
+  /**
+   * COPIA os dados de um bem de outra unidade para o formulário do item novo.
+   * O registo de origem NÃO é alterado (nada de mudar filial/endereço dele):
+   * o que este bem tem de identidade e de auditoria fica de fora da cópia.
+   */
+  const handleCopyToNewItem = (origem: Asset) => {
+    // LISTA BRANCA (utils/copyAssetForNewItem): só campos descritivos viajam.
+    // `primarykey`, `_is_synced` e `sn1_recno` não — o registo novo tem de ser
+    // um registo novo. O recno da origem fica em `rad_recno` (REGISTRO ADOTADO)
+    // e o registro original só em `_copiadoDeRegistro`, para não colidir.
+    // Código curto desta instalação: sem ele dois aparelhos na mesma unidade
+    // emitiam o mesmo `rad_..._000001`.
+    const dispositivo = getDeviceCode();
+    const copia = buildCopyForNewItem(
+      origem,
+      {
+        unidade: selectedUnit,
+        endereco: selectedLocation,
+        etiqueta: showGlobalSearchResolution || origem.etiqueta,
+        dispositivo,
+        // Contador persistido: a série continua mesmo que o item anterior
+        // tenha sido apagado ou a gravação falhado.
+        ultimoContador: readRadCounter(selectedUnit, dispositivo),
+        hoje: new Date().toLocaleDateString('pt-BR'),
+      },
+      // Base carregada: a sequência continua a partir dos rótulos já gravados.
+      allAssets,
+    );
+    const sequenciaRad = radSequenceOf(copia.rad_recno);
+    if (sequenciaRad !== null) writeRadCounter(selectedUnit, dispositivo, sequenciaRad);
+
+    setManualAsset({
+      ...copia,
+      TAG_INVENTARIO: TagInventario.NOVO_ITEM,
+    });
+    setIsManualEntryOpen(true);
+    setFichaPreview(null);
+    setShowGlobalSearchResolution(null);
+    setGlobalSearchResults([]);
+    setCommittedSearch('');
+    setDisplayValue('');
   };
 
   const renderHierarchyResolutionModals = () => {
@@ -846,7 +878,7 @@ const Inventory: React.FC<InventoryProps> = ({
              </div>
              <h3 className="text-xl font-black uppercase italic tracking-tighter leading-none">Bem não localizado</h3>
              <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest mt-2 px-4 italic leading-relaxed">
-               A etiqueta <span className="text-amber-400">{showGlobalSearchResolution}</span> não pertence à unidade atual.
+               A etiqueta <span className="text-amber-400">{showGlobalSearchResolution}</span> não foi localizada nesta unidade. Nada é movido de outra unidade: você só copia os dados se confirmar.
              </p>
           </div>
 
@@ -904,10 +936,10 @@ const Inventory: React.FC<InventoryProps> = ({
                       
                       <div className="flex space-x-2 pt-1">
                         <button 
-                          onClick={() => handleLinkToUnit(asset)}
+                          onClick={() => setFichaPreview(asset)}
                           className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all shadow-md"
                         >
-                          Vincular a esta Unidade
+                          Ver Ficha do Ativo
                         </button>
                       </div>
                     </div>
@@ -920,7 +952,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     className="w-full py-4 bg-emerald-600/10 text-emerald-600 border border-emerald-600/20 rounded-2xl flex items-center justify-center space-x-2 active:scale-95 transition-all font-black uppercase text-[9px] tracking-widest"
                   >
                     <Plus size={14} />
-                    <span>Ignorar e Criar Novo</span>
+                    <span>Incluir Manualmente</span>
                   </button>
                   <button 
                     onClick={() => { setGlobalSearchResults([]); setShowGlobalSearchResolution(null); }}
@@ -931,6 +963,77 @@ const Inventory: React.FC<InventoryProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  };
+
+  /**
+   * FICHA DO ATIVO em modo LEITURA para um bem que não está nesta unidade.
+   * Fecha o ciclo do "não localizado": o auditor vê os dados completos e
+   * escolhe copiar para um item novo desta unidade/endereço ou voltar ao
+   * formulário de origem. O registo consultado nunca é alterado.
+   */
+  const renderFichaPreview = () => {
+    if (!fichaPreview) return null;
+    const a = fichaPreview;
+    const campos: Array<[string, string]> = [
+      ['Registro', String(a.registro || '—')],
+      ['Descrição', String(a.descricaodoativo || '—')],
+      ['Série', String(a.serial || '—')],
+      ['Quantidade', String(a.qt ?? 1)],
+      ['Endereço (origem)', String(a.endereco || a._localMaster || '—')],
+      ['Fornecedor', String(a.nomefornecedor || '—')],
+      ['Nota fiscal', String(a.notafiscal || '—')],
+      ['Data de aquisição', String(a.dataaqusic || '—')],
+      ['Valor de aquisição', a.vlraquisic != null ? String(a.vlraquisic) : '—'],
+    ];
+
+    return createPortal(
+      <div className="fixed inset-0 z-[12000] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fadeIn">
+        <div className="bg-white w-full max-w-md rounded-[2rem] border border-border shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-slate-900 p-5 text-white shrink-0">
+            <div className="flex items-center gap-2">
+              <Database size={16} />
+              <span className="text-[9px] font-black uppercase tracking-widest text-white/60">Ficha do Ativo · somente leitura</span>
+            </div>
+            <h3 className="text-lg font-black uppercase italic tracking-tighter leading-none mt-1 font-mono">
+              {a.etiqueta || 'SEM PLAQUETA'}
+            </h3>
+            <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">
+              Unidade de origem: {a.filial || a._unitid || 'NÃO INFORMADA'}
+            </p>
+          </div>
+
+          <div className="p-4 overflow-y-auto space-y-1.5">
+            {campos.map(([rotulo, valor]) => (
+              <div key={rotulo} className="flex items-start justify-between gap-3 px-3 py-2 rounded-xl bg-bg-main border border-border">
+                <span className="text-[8px] font-black uppercase tracking-wider text-ink-muted shrink-0 pt-0.5">{rotulo}</span>
+                <span className="text-[11px] font-bold text-ink text-right break-words min-w-0">{valor}</span>
+              </div>
+            ))}
+            <p className="text-[9px] font-bold text-ink-muted uppercase tracking-wide leading-relaxed px-1 pt-2">
+              Copiar cria um item NOVO em {selectedUnit || 'esta unidade'} / {selectedLocation || 'este endereço'}. O registo de {a.filial || 'origem'} não é alterado nem movido.
+            </p>
+          </div>
+
+          <div className="p-4 pt-2 space-y-2 shrink-0">
+            <button
+              onClick={() => handleCopyToNewItem(a)}
+              className="w-full py-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
+            >
+              <FilePlus2 size={16} />
+              <span>Copiar dados para novo item</span>
+            </button>
+            <button
+              onClick={() => setFichaPreview(null)}
+              className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              <ArrowLeft size={16} />
+              <span>Voltar</span>
+            </button>
           </div>
         </div>
       </div>,
@@ -1031,8 +1134,9 @@ const Inventory: React.FC<InventoryProps> = ({
 
       if (term) {
         const etq = normalizeKeyFast(a.etiqueta || '');
+        const reg = normalizeKeyFast(a.registro || '');
         const descText = String(a.descricaodoativo || '').toUpperCase();
-        if (!(etq === term || etq.includes(term) || descText.includes(searchUpper))) continue;
+        if (!(etq === term || etq.includes(term) || reg === term || reg.includes(term) || descText.includes(searchUpper))) continue;
       } else {
         // Baixado não conferido não entra no giro (o hub só o conta quando localizado).
         const isBaixado = String(a.status || '').toUpperCase().includes('BAIXA') || !!a.databaixa;
@@ -1092,20 +1196,44 @@ const Inventory: React.FC<InventoryProps> = ({
     : 0;
   const pendingSearchCount = filteredAssets.filter(a => !a._conferido).length;
 
-  const handleConfirmSearchBatch = async () => {
+  /**
+   * Leitura digitada e clique no item usam o MESMO modal de conferência em
+   * lote (`batchGroup`): a barra do resultado da busca só monta o grupo e abre
+   * a lista para o auditor ver e confirmar, em vez de conferir às cegas.
+   */
+  const handleConfirmSearchBatch = () => {
     const pendingInSearch = filteredAssets.filter(a => !a._conferido);
     if (pendingInSearch.length === 0) return;
-    
-    const ids = pendingInSearch.map(a => String(a.id));
-    try {
-      await onBulkUpdateAssets(ids);
-      setCommittedSearch('');
-      setDisplayValue('');
-    } catch (err) {
-      logger.error(">>> [Inventory] Erro na gravação de lote:", err);
-      alert(`Falha crítica na injeção ou atualização em lote: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const grupo = findBatchGroup(pendingInSearch[0], allAssets, selectedUnit || activeFilialKey);
+    const alvo = grupo.length >= 2 ? grupo : pendingInSearch;
+    setBatchGroup(alvo);
+    setBatchCheckedIds(new Set(alvo.map(a => String(a.id)).filter(Boolean)));
+    setCommittedSearch('');
+    setDisplayValue('');
   };
+
+  /**
+   * Leitura digitada: quando o código digitado forma lote (plaqueta ou registro
+   * repetido), abre o modal automaticamente — antes o resultado só aparecia
+   * como lista filtrada e o auditor tinha de conferir um a um.
+   */
+  useEffect(() => {
+    const term = normalizeKeyFast(committedSearch || '');
+    if (!term) return;
+    const daUnidade = allAssets.filter(a => belongsToUnit(a, activeFilialKey));
+    const alvo = daUnidade.find(a => {
+      if (a._conferido) return false;
+      const etq = normalizeKeyFast(a.etiqueta || '');
+      const reg = normalizeKeyFast(a.registro || '');
+      return etq === term || reg === term;
+    });
+    if (!alvo) return;
+    const grupo = findBatchGroup(alvo, allAssets, selectedUnit || activeFilialKey);
+    if (grupo.length < 2) return;
+    setBatchGroup(grupo);
+    setBatchCheckedIds(new Set(grupo.map(a => String(a.id)).filter(Boolean)));
+  }, [committedSearch, allAssets, activeFilialKey, selectedUnit]);
+
 
   const handleMakeDecision = useCallback(async (id: string, decision: 'YES' | 'NO') => {
     if (decision === 'NO') return;
@@ -1153,46 +1281,40 @@ const Inventory: React.FC<InventoryProps> = ({
   }, [allAssets, handleUpdateAssetWithBackup, onBulkUpdateAssets, selectedUnit, selectedLocation]);
 
   const handleAssetClick = useCallback(async (asset: Asset) => {
-    const etq = normalizeKey(asset.etiqueta || "");
-    const isBatch = asset.TAG_DUPLICIDADE === 'ETIQUETA+1REGISTRO';
     const currentCompKey = normalizeKey(selectedUnit || '');
     const assetCompKey = normalizeKey(asset.filial || asset._unitid || '');
-    
+
     // BLOQUEIO DE SEGURANÇA: Se já foi conferido, mostra modal de duplicidade e impede abertura
     if (asset._conferido) {
       setDuplicateAsset(asset);
       return;
     }
 
-    // Regra C: Se for de outra empresa, adotar automaticamente (fluidez sênior)
-    if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
-      await handleUpdateAssetWithBackup({ 
-        ...asset, 
-        filial: selectedUnit || asset.filial || asset._unitid || '',
-        _conferido: true,
-        TAG_INVENTARIO: TagInventario.ADOTADO_EXTERNO,
-        _localMaster: selectedLocation || asset.endereco
-      });
+    // CONFERÊNCIA EM LOTE PELA PLAQUETA (mesma regra da leitura digitada).
+    // Antes dependia da coluna `TAG_DUPLICIDADE = 'ETIQUETA+1REGISTRO'` — que a
+    // maioria das bases não traz — e exigia a mesma filial, então clicar nos
+    // itens conferia um a um e os irmãos da plaqueta ficavam pendentes.
+    // Agora: 2+ registros pendentes com a mesma plaqueta, em QUALQUER unidade,
+    // abrem a lista para o auditor ver e confirmar. Agrupa também o item de
+    // outra filial (antes ele era adotado direto, sem mostrar os irmãos).
+    const grupoLote = findBatchGroup(asset, allAssets, selectedUnit || activeFilialKey);
+    if (grupoLote.length >= 2) {
+      setBatchGroup(grupoLote);
+      setBatchCheckedIds(new Set(grupoLote.map(a => String(a.id)).filter(Boolean)));
+      setCommittedSearch('');
       return;
     }
 
-    if (isBatch && etq && etq !== "ETIQUETAR" && !asset._conferido) {
-      const related = allAssets.filter(a => {
-        const sameEtq = normalizeKey(a.etiqueta || "") === etq;
-        const sameComp = normalizeKey(a.filial || a._unitid || "") === currentCompKey;
-        const statusUpper = String(a.status || '').toUpperCase();
-        const isNotBaixado = !statusUpper.includes('BAIXA') && !a.databaixa;
-        return sameEtq && sameComp && isNotBaixado && !a._conferido;
-      });
-
-      if (related.length > 1) {
-        const ids = related.map(a => String(a.id));
-        await onBulkUpdateAssets(ids);
-        return;
-      }
+    // Regra C: bem de outra unidade NÃO é adotado automaticamente (ADOTADO
+    // EXTERNO deixa de existir por padrão). Só se mostra a ficha em leitura,
+    // de onde o auditor pode copiar os dados para um item novo desta unidade.
+    if (assetCompKey !== "" && assetCompKey !== currentCompKey) {
+      setFichaPreview(asset);
+      return;
     }
+
     onSelectAsset(asset);
-  }, [allAssets, onSelectAsset, handleUpdateAssetWithBackup, onBulkUpdateAssets, selectedUnit, selectedLocation]);
+  }, [allAssets, onSelectAsset, selectedUnit, activeFilialKey]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -1205,6 +1327,14 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const handleBatchConfirm = async () => {
     if (selectedIds.size === 0) return;
+
+    // Mesma regra do lote por plaqueta: sem endereço do inventário o App calcula
+    // a TAG contra o endereço de cada item e o lote cairia como CONFERIDO no
+    // endereço de origem, em vez de ADOTADO no endereço aberto.
+    if (!selectedLocation) {
+      alert('Selecione o endereço do inventário antes de conferir a seleção.');
+      return;
+    }
     
     // Filtra apenas os que ainda não foram conferidos para preservar integridade De/Para
     const ids = Array.from(selectedIds).filter(id => {
@@ -1231,6 +1361,42 @@ const Inventory: React.FC<InventoryProps> = ({
     } else {
       const allIds = filteredAssets.map(a => String(a.id));
       setSelectedIds(new Set(allIds));
+    }
+  };
+
+  const handleConfirmBatchGroup = async () => {
+    // Sem endereço de inventário o App calcula a TAG contra o endereço de cada
+    // item e o lote cairia como CONFERIDO no endereço de origem, em vez de
+    // ADOTADO no endereço aberto. Melhor recusar do que gravar errado.
+    if (!selectedLocation) {
+      alert('Selecione o endereço do inventário antes de confirmar em lote.');
+      return;
+    }
+
+    const selecionados = batchGroup.filter(a => batchCheckedIds.has(String(a.id)));
+    if (selecionados.length === 0) {
+      setBatchGroup([]);
+      setBatchCheckedIds(new Set());
+      return;
+    }
+
+    // O App (bulkUpdateAssets) grava a conferência no ENDEREÇO DO INVENTÁRIO
+    // (`_localMaster`) e resolve a TAG: mesmo endereço → CONFERIDO; endereço
+    // diferente → ADOTADO; outra unidade → ADOTADO EXTERNO. Aqui só se envia a
+    // lista — nada de mexer no endereço de origem (senão o ADOTADO se perde).
+    const ids = selecionados.map(a => String(a.id)).filter(Boolean);
+    setIsBatchGroupSaving(true);
+    try {
+      await onBulkUpdateAssets(ids);
+      setDisplayValue('');
+      setCommittedSearch('');
+    } catch (err) {
+      logger.error(">>> [Inventory] Erro na conferência em lote da plaqueta:", err);
+      alert(`Falha na conferência em lote: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsBatchGroupSaving(false);
+      setBatchGroup([]);
+      setBatchCheckedIds(new Set());
     }
   };
 
@@ -1298,6 +1464,8 @@ const Inventory: React.FC<InventoryProps> = ({
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
         _conferido: true,
         _isNew: true,
+        // Item criado no aparelho: tem de subir, então nasce pendente.
+        _is_synced: 0,
         currentCampaignId: currentCampaignId,
         _localMaster: selectedLocation || ""
     } as Asset;
@@ -1406,6 +1574,94 @@ const Inventory: React.FC<InventoryProps> = ({
           </div>,
           document.body
         )}
+
+      {/* Modal de Conferência em Lote — plaqueta OU registro repetido (clique e leitura) */}
+      {batchGroup.length > 0 && createPortal(
+        <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-md rounded-[2rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn flex flex-col max-h-[90vh]">
+            <button
+              onClick={() => { setBatchGroup([]); setBatchCheckedIds(new Set()); }}
+              className="absolute top-3 right-3 z-10 p-2 rounded-full text-ink-muted hover:bg-slate-100 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="bg-accent p-5 text-white">
+              <div className="flex items-center gap-2">
+                <CheckSquare size={18} />
+                <span className="text-[9px] font-black uppercase tracking-widest text-white/70">{batchLabel(batchGroup).titulo} — conferência em lote</span>
+              </div>
+              <h3 className="text-xl font-black uppercase italic tracking-tighter leading-none mt-1">
+                {batchLabel(batchGroup).subtitulo || 'Lote'}
+              </h3>
+              <p className="text-[10px] font-bold text-white/80 uppercase tracking-widest mt-2">
+                {batchGroup.length} registros · {splitByAddress(batchGroup, selectedLocation).outroEndereco.length} de outro endereço
+              </p>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-2">
+              <p className="text-[10px] font-bold text-ink-muted uppercase tracking-wide leading-relaxed px-1">
+                Marque só os itens fisicamente conferidos. O item de outro endereço é registado no endereço do inventário ao confirmar (ADOTADO).
+              </p>
+              {batchGroup.map(item => {
+                const id = String(item.id);
+                const enderecoInventario = normalizeKey(selectedLocation || '');
+                const outroEndereco = !!enderecoInventario && addressKey(item) !== enderecoInventario;
+                return (
+                  <label
+                    key={id}
+                    className="flex items-start gap-3 p-3 rounded-xl border border-border bg-bg-main cursor-pointer active:scale-[0.995] transition-all"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={batchCheckedIds.has(id)}
+                      onChange={() => setBatchCheckedIds(prev => {
+                        const novo = new Set(prev);
+                        if (novo.has(id)) novo.delete(id); else novo.add(id);
+                        return novo;
+                      })}
+                      className="mt-1 w-4 h-4 accent-[color:var(--accent,#0f766e)] shrink-0"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[11px] font-black text-ink font-mono truncate">{item.etiqueta || '—'} · {String(item.registro || id)}</span>
+                      <span className="block text-[10px] font-bold text-ink-muted leading-snug line-clamp-2">{item.descricaodoativo || 'Sem descrição'}</span>
+                      <span className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-[8px] font-black uppercase tracking-wider text-ink-muted">{item.filial || 'SEM UNIDADE'}</span>
+                        {item.endereco && (
+                          <span className="text-[8px] font-black uppercase tracking-wider text-ink-muted">· {item.endereco}</span>
+                        )}
+                        {outroEndereco && (
+                          <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-warning/10 text-warning border border-warning/20">Outro endereço · ADOTADO</span>
+                        )}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="p-4 border-t border-border flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => { setBatchGroup([]); setBatchCheckedIds(new Set()); }}
+                className="flex-1 py-3.5 rounded-xl border border-border text-ink-muted font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBatchGroup}
+                disabled={isBatchGroupSaving || batchCheckedIds.size === 0}
+                className="flex-1 py-3.5 rounded-xl bg-success text-white font-black uppercase text-[10px] tracking-widest shadow-lg active:scale-95 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {isBatchGroupSaving ? <Loader2 size={14} className="animate-spin" /> : <CheckSquare size={14} />}
+                Conferir {batchCheckedIds.size}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {isSettingsOpen && (
         <PreferencesPanel
@@ -1982,7 +2238,8 @@ const Inventory: React.FC<InventoryProps> = ({
                 if (!next) setSelectedIds(new Set());
               }}
               className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${isBatchMode ? 'bg-accent text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}
-              title={isBatchMode ? 'Sair do modo lote' : 'Modo lote'}
+              title={isBatchMode ? 'Sair da seleção manual' : 'Seleção manual (marcar vários ativos)'}
+              aria-label={isBatchMode ? 'Sair da seleção manual' : 'Seleção manual' }
             >
               <CheckSquare size={18} />
             </button>
@@ -2105,16 +2362,16 @@ const Inventory: React.FC<InventoryProps> = ({
                     <FilePlus2 size={14} />
                     Incluir novo registro
                   </button>
-                  {/* ADOTADO EXTERNO (5.1/5.2): a busca global só é oferecida a partir
-                      da etiqueta digitada manualmente, trazendo o registro de outra
-                      empresa para análise e confirmação do auditor. */}
+                  {/* NÃO LOCALIZADO: nada é adotado de outra unidade. A busca só
+                      abre a Ficha do Ativo em leitura, de onde o auditor copia os
+                      dados para um item novo DESTA unidade — ou volta ao formulário. */}
                   <button
                     type="button"
                     onClick={() => setShowGlobalSearchResolution(committedSearch)}
                     className="w-full py-3.5 rounded-xl bg-slate-950 text-amber-300 border border-amber-400 font-black uppercase text-[10px] tracking-widest active:scale-[0.98] transition-all flex items-center justify-center gap-2"
                   >
                     <Database size={14} />
-                    Buscar em outras empresas
+                    Pesquisar em outras Unidades
                   </button>
                 </div>
               )}
@@ -2146,7 +2403,7 @@ const Inventory: React.FC<InventoryProps> = ({
       ) : (
         <div className="bg-slate-900 px-4 py-3 flex items-center gap-3 shrink-0">
           <div className="flex-1 min-w-0">
-            <p className="text-[8px] font-black uppercase tracking-widest text-white/40">Modo lote</p>
+            <p className="text-[8px] font-black uppercase tracking-widest text-white/40">Seleção manual</p>
             <p className="text-sm font-black text-white leading-tight">
               {selectedIds.size} <span className="text-white/40">selecionado(s)</span>
             </p>
@@ -2243,6 +2500,7 @@ const Inventory: React.FC<InventoryProps> = ({
       {renderConfirmationModals()}
 
       {renderHierarchyResolutionModals()}
+      {renderFichaPreview()}
 
       {/* Outros Modais do Sistema */}
       {isNewLocationModalOpen && (
@@ -2489,6 +2747,19 @@ const Inventory: React.FC<InventoryProps> = ({
                   <FilePlus2 size={16} />
                   <span>Incluir Manual</span>
                 </button>
+                <button
+                  onClick={() => {
+                    const codigo = scannedResult;
+                    setScannedResult(null);
+                    setCommittedSearch('');
+                    setDisplayValue('');
+                    if (codigo) setShowGlobalSearchResolution(codigo);
+                  }}
+                  className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all flex items-center justify-center space-x-2 shadow-lg shadow-blue-600/20"
+                >
+                  <Search size={16} />
+                  <span>Pesquisar em outras Unidades</span>
+                </button>
                 <button 
                   onClick={() => setScannedResult(null)} 
                   className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
@@ -2626,6 +2897,23 @@ const Inventory: React.FC<InventoryProps> = ({
                       <span className="text-[8px] font-black text-accent uppercase text-right leading-tight">NOVO ITEM (MANUAL)</span>
                     </div>
                   </div>
+                  {manualAsset._copiadoDe && (
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl">
+                      <p className="text-[9px] font-black text-blue-700 uppercase tracking-widest">
+                        Dados copiados de {manualAsset._copiadoDe}
+                      </p>
+                      <p className="text-[9px] font-bold text-blue-600 leading-snug mt-1">
+                        {manualAsset._copiadoDeEtiqueta ? `Plaqueta ${manualAsset._copiadoDeEtiqueta}. ` : ''}
+                        O registo de origem não foi alterado. Confira descrição, série e quantidade antes de salvar.
+                      </p>
+                      {manualAsset.rad_recno && (
+                        <p className="text-[8px] font-bold text-blue-500 uppercase tracking-wider mt-1">
+                          Registro adotado {String(manualAsset.rad_recno)} · sub {String(manualAsset.subreg || '0001')}
+                          {manualAsset._copiadoDeRegistro ? ` · origem ${manualAsset._copiadoDeRegistro}` : ''}
+                        </p>
+                      )}
+                    </div>
+                  )}
                </div>
             </div>
 

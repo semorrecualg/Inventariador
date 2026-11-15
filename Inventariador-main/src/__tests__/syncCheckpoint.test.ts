@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   syncCheckpointKey,
   readSyncCheckpoint,
+  readCheckpointForDelta,
   saveSyncCheckpoint,
   advanceSyncCheckpoint,
   clearSyncCheckpoint,
@@ -135,5 +136,56 @@ describe('syncCheckpoint — checkpoint de delta sync por [tenantid+filial] (Eta
       const empty: SyncCheckpoint = { key: 'CICOPAL|', lastUpdatedAt: '', savedAt: '' };
       expect(resolveDeltaMode(empty, false)).toEqual({ since: undefined, incremental: false });
     });
+  });
+});
+
+describe('readCheckpointForDelta — tolerância ao pull do contrato', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it('usa o checkpoint exato da unidade quando existe', () => {
+    saveSyncCheckpoint('CICOPAL|010101 CICOPAL GO', '2026-08-13T12:00:00.000Z');
+    saveSyncCheckpoint('CICOPAL|', '2026-09-01T00:00:00.000Z');
+
+    expect(readCheckpointForDelta('CICOPAL', '010101 CICOPAL GO')?.lastUpdatedAt)
+      .toBe('2026-08-13T12:00:00.000Z');
+  });
+
+  it('cai no checkpoint do contrato quando a unidade ainda não tem o seu', () => {
+    // Cenário do boot: perfil sem filial baixa o CONTRATO inteiro (12.636) e
+    // grava `TENANT|`; o sync seguinte da filial tem de partir desse piso.
+    saveSyncCheckpoint('CICOPAL|', '2026-09-01T00:00:00.000Z');
+
+    expect(readCheckpointForDelta('CICOPAL', '010101 CICOPAL GO')?.lastUpdatedAt)
+      .toBe('2026-09-01T00:00:00.000Z');
+  });
+
+  it('checkpoint de OUTRA filial não serve (muro por unidade)', () => {
+    saveSyncCheckpoint('CICOPAL|010201 SNACKS PA', '2026-09-01T00:00:00.000Z');
+
+    expect(readCheckpointForDelta('CICOPAL', '010101 CICOPAL GO')).toBeNull();
+  });
+
+  it('checkpoint de OUTRO contrato não serve (muro multi-tenant)', () => {
+    saveSyncCheckpoint('CLIENTETESTE|', '2026-09-01T00:00:00.000Z');
+
+    expect(readCheckpointForDelta('CICOPAL', '010101 CICOPAL GO')).toBeNull();
+  });
+
+  it('sem nenhum checkpoint → null (pull completo)', () => {
+    expect(readCheckpointForDelta('CICOPAL', '010101 CICOPAL GO')).toBeNull();
+  });
+
+  it('após o pull do boot, o delta da filial passa a ter since', () => {
+    saveSyncCheckpoint('CICOPAL|', '2026-09-01T00:00:00.000Z');
+    const modo = resolveDeltaMode(readCheckpointForDelta('CICOPAL', '010101 CICOPAL GO'), false);
+
+    expect(modo.incremental).toBe(true);
+    expect(modo.since).toBe('2026-09-01T00:00:00.000Z');
   });
 });

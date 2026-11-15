@@ -18,7 +18,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
-import { isAdminUser } from '../utils/authUtils';
+import { isAdminUser, userHasPermission } from '../services/rbacService';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot, fetchCampaigns, fetchAllCampaigns } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { db } from '../services/sqliteService';
@@ -82,6 +82,23 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   // Sincronização Local para Resposta Instantânea v25.50
   const [localCampaigns, setLocalCampaigns] = useState<InventoryCampaign[]>(campaigns);
 
+  // Campanhas já excluídas nesta sessão. O `campaigns` que vem do App só é
+  // recarregado pelo refresh; enquanto isso, ele ainda traz a campanha apagada
+  // e o efeito de sincronização abaixo a devolvia ao ecrã — o utilizador via a
+  // exclusão "não fazer nada".
+  const deletedCampaignIdsRef = React.useRef<Set<string>>(new Set());
+  const withoutDeleted = React.useCallback((list: InventoryCampaign[]): InventoryCampaign[] =>
+    list.filter(c => !deletedCampaignIdsRef.current.has(String(c.id))), []);
+
+  // Mesmo critério do ecrã de campanhas (App.tsx: `userHasPermission(user,
+  // 'manage_campaigns') || isAdminUser(user)`). O botão do cartão não tinha
+  // verificação nenhuma: qualquer perfil que chegasse ao ecrã apagava campanha,
+  // enquanto o botão da ficha exigia admin. Agora os dois usam este gate.
+  const canManageCampaigns = React.useMemo(
+    () => isAdminUser(user) || userHasPermission(user, 'manage_campaigns'),
+    [user]
+  );
+
   // Agrupamento por filial para a visão de manutenção administrativa (todas as campanhas)
   const campaignsByFilial = React.useMemo(() => {
     const groups = new Map<string, InventoryCampaign[]>();
@@ -128,8 +145,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
       logger.info(`>>> [Dexie Native] Campanhas carregadas (local+nuvem):`, parsedCampaigns);
 
-      setLocalCampaigns(parsedCampaigns);
-      return parsedCampaigns;
+      const visible = withoutDeleted(parsedCampaigns);
+      setLocalCampaigns(visible);
+      return visible;
     } catch (err) {
       logger.error(`>>> [Dexie Native] Erro na leitura automática:`, err);
       if (campaigns && campaigns.length > 0) {
@@ -139,7 +157,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     } finally {
       setIsRefreshing(false);
     }
-  }, [initialUnit, propsTenantid, campaigns, user]);
+  }, [initialUnit, propsTenantid, campaigns, user, withoutDeleted]);
 
   React.useEffect(() => {
     fetchLocalCampaignsOnScreen();
@@ -150,9 +168,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     // resultado local+nuvem carregado pela leitura interna quando o state do App
     // ainda está vazio (ex.: refreshCampaigns abortou por falta de tenantid).
     if (campaigns && campaigns.length > 0 && !isRefreshing && !isSaving) {
-      setLocalCampaigns(campaigns);
+      setLocalCampaigns(withoutDeleted(campaigns));
     }
-  }, [campaigns, isRefreshing, isSaving]);
+  }, [campaigns, isRefreshing, isSaving, withoutDeleted]);
 
   // OPERACIONALIZAÇÃO DO BOTÃO REFRESH:
   // Dispara nova consulta direta ao SQLite local, atualiza o estado e força a renderização
@@ -309,10 +327,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     try {
       logger.info(`>>> [Dexie] Executando deleção estrita para ID=${campaignId}`);
       
-      await localDb.campaigns.delete(campaignId);
-      
+      await localDb.campaigns.delete(String(campaignId));
+      // Tombstone da sessão: o `campaigns` vindo do App ainda traz esta linha
+      // até o refresh terminar, e sem isto ela voltava para a lista.
+      deletedCampaignIdsRef.current.add(String(campaignId));
+      setLocalCampaigns(prev => prev.filter(c => String(c.id) !== String(campaignId)));
+
       // Limpeza de ativos relacionados vinculados a essa campanha
-      await localDb.assets.removeCampaignFromAssets(campaignId);
+      await localDb.assets.removeCampaignFromAssets(String(campaignId));
       
       // Também deleta no Supabase em background para continuar funcionando sincronizado se online
       try {
@@ -328,6 +350,14 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       setIsConfirmDeleteOpen(false);
       setDeletingCampaignId(null);
       setSelectedCampaign(null);
+
+      // O estado do App também tem de esquecer a campanha: sem isto o prop
+      // `campaigns` continuava com ela e reabastecia a lista na tela.
+      try {
+        await Promise.resolve(onRefresh?.());
+      } catch (refreshErr) {
+        logger.warn('>>> [Governance] Refresh do App falhou após excluir campanha:', refreshErr);
+      }
 
       // Re-fetch automático para limpar a tela ou usar navegação se zerar
       const remaining = await fetchLocalCampaignsOnScreen();
@@ -584,7 +614,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                   </button>
                 </div>
 
-                {(isAdminUser(user)) && (
+                {canManageCampaigns && (
                   <button 
                     onClick={() => {
                       setDeletingCampaignId(selectedCampaign.id);
@@ -681,7 +711,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                     </div>
 
                     {/* Botões de Ação na Base do Card */}
-                    <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-800/60">
+                    <div className={`grid ${canManageCampaigns ? 'grid-cols-2' : 'grid-cols-1'} gap-2 mt-4 pt-4 border-t border-slate-800/60`}>
                       {/* Ativar a Campanha */}
                       {campaign.id === currentCampaignId ? (
                         <div className="py-2 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 flex items-center justify-center gap-1.5">
@@ -704,16 +734,18 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
                       )}
 
                       {/* Excluir Campanha */}
-                      <button
-                        onClick={() => {
-                          setDeletingCampaignId(campaign.id);
-                          setIsConfirmDeleteOpen(true);
-                        }}
-                        className="py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-500 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1"
-                      >
-                        <Trash2 size={12} />
-                        <span>Excluir</span>
-                      </button>
+                      {canManageCampaigns && (
+                        <button
+                          onClick={() => {
+                            setDeletingCampaignId(campaign.id);
+                            setIsConfirmDeleteOpen(true);
+                          }}
+                          className="py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-500 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1"
+                        >
+                          <Trash2 size={12} />
+                          <span>Excluir</span>
+                        </button>
+                      )}
                     </div>
                   </motion.div>
                     ))}

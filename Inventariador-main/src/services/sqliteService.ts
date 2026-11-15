@@ -39,6 +39,10 @@ export interface DexieAsset {
   vlraquisic: number;
   sn1_recno: number | null;
   sn3_recno: number | null;
+  // REGISTRO ADOTADO: rótulo `rad_NNNNNN` do registo criado copiando os dados
+  // de outra unidade. O registo novo fica com `sn1_recno` nulo, sem duplicar a
+  // chave, e o vínculo vive aqui (`rad_` = REGISTRO ADOTADO + sequência).
+  rad_recno?: string | null;
   _is_synced: number; // 0 or 1
   _is_deleted: number; // 0 or 1
   _conferido: number; // 0 or 1
@@ -53,6 +57,10 @@ export interface DexieAsset {
   gps_lat: number | null;
   gps_lng: number | null;
   currentCampaignId?: string | null;
+  // Conferência que desceu da nuvem (assets.auditor / assets.data_leitura):
+  // sem estes campos a carga da base descartava quem conferiu e quando.
+  _auditor?: string | null;
+  _dataLeitura?: string | null;
   tag_atual?: string;
   status_auditoria?: string;
   descricao?: string;
@@ -745,6 +753,8 @@ export class SqliteService {
               _is_synced: options?.markSynced ? 1 : (Number(asset._is_synced) === 1 ? 1 : 0),
               _is_deleted: asset._is_deleted ? 1 : 0,
               _conferido: asset._conferido ? 1 : 0,
+              _auditor: asset._auditor !== undefined && asset._auditor !== null ? String(asset._auditor) : null,
+              _dataLeitura: asset._dataLeitura !== undefined && asset._dataLeitura !== null ? String(asset._dataLeitura) : null,
               _plaquetado: asset._plaquetado ? 1 : 0,
               _aprovado: asset._aprovado ? 1 : 0,
               _isNew: asset._isNew ? 1 : 0,

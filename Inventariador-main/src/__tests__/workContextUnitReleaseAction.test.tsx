@@ -13,7 +13,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import WorkContextSelector from '../components/WorkContextSelector';
-import { AppScreen, UserRole } from '../types';
+import { AppModule, AppScreen, UserRole } from '../types';
 import type { User } from '../types';
 import { buildUnitReleaseMap } from '../utils/unitRelease';
 import { listContracts } from '../utils/tenantCatalog';
@@ -44,14 +44,19 @@ const releaseMap = buildUnitReleaseMap([
   { name: FILIAL, tenantid: TENANT, hasAnchor: false, hasCampaign: false }
 ]);
 
-const renderSelector = (role: UserRole) => {
+// Unidade LIBERADA: âncora GPS e campanha configuradas.
+const releasedMap = buildUnitReleaseMap([
+  { name: FILIAL, tenantid: TENANT, hasAnchor: true, hasCampaign: true }
+]);
+
+const renderSelector = (role: UserRole, map = releaseMap) => {
   const onOpenAdmin = vi.fn();
   const onSelect = vi.fn();
   render(
     React.createElement(WorkContextSelector, {
       user: buildUser(role),
       contexts: [{ tenantid: TENANT, filial: FILIAL }],
-      unitRelease: releaseMap,
+      unitRelease: map,
       onSelect,
       onLogout: vi.fn(),
       onOpenAdmin
@@ -62,6 +67,12 @@ const renderSelector = (role: UserRole) => {
 
 /** Card da filial (o botão que envolve o nome da unidade na lista). */
 const unitCard = () => screen.getByText(FILIAL).closest('button') as HTMLButtonElement;
+
+/** Botão de acesso ao módulo (barra inferior). */
+const accessButton = () => screen.getByText('Acessar o Módulo').closest('button') as HTMLButtonElement;
+
+const chooseModule = (label: 'INVENTARIADOR' | 'CONTROLE DE ATIVO') =>
+  fireEvent.click(screen.getByText(label).closest('button') as HTMLButtonElement);
 
 describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
   afterEach(() => cleanup());
@@ -108,6 +119,57 @@ describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
 
     expect(onOpenAdmin).not.toHaveBeenCalled();
     expect(screen.getByText(FILIAL)).toBeTruthy();
+  });
+
+  // ── Trava do módulo INVENTARIADOR: vale para o ADMIN também ────────────────
+  // Bug real (figuras): unidade "AGUARDANDO LIBERAÇÃO · FALTA ÂNCORA GPS E
+  // CAMPANHA" escolhida, módulo INVENTARIADOR selecionado, clique em ACESSAR →
+  // abria a Auditoria Inteligente. O admin tinha passe livre na trava.
+  it('admin: unidade aguardando liberação NÃO acessa o módulo INVENTARIADOR', () => {
+    const { onSelect } = renderSelector(UserRole.ADMIN);
+
+    chooseModule('INVENTARIADOR');
+
+    expect(accessButton().disabled).toBe(true);
+    fireEvent.click(accessButton());
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(screen.getByText(/Configure âncora GPS e campanha na Unidade Operacional/i)).toBeTruthy();
+  });
+
+  it('admin: unidade liberada acessa o módulo INVENTARIADOR', () => {
+    const { onSelect } = renderSelector(UserRole.ADMIN, releasedMap);
+
+    chooseModule('INVENTARIADOR');
+    expect(accessButton().disabled).toBe(false);
+
+    fireEvent.click(accessButton());
+    expect(onSelect).toHaveBeenCalledWith(
+      { tenantid: TENANT, filial: FILIAL },
+      AppModule.INVENTORY
+    );
+  });
+
+  it('admin: unidade aguardando liberação ainda acessa CONTROLE DE ATIVO (não é inventário de campo)', () => {
+    const { onSelect } = renderSelector(UserRole.ADMIN);
+
+    chooseModule('CONTROLE DE ATIVO');
+    expect(accessButton().disabled).toBe(false);
+
+    fireEvent.click(accessButton());
+    expect(onSelect).toHaveBeenCalledWith(
+      { tenantid: TENANT, filial: FILIAL },
+      AppModule.ASSET_CONTROL
+    );
+  });
+
+  it('auditor: unidade aguardando liberação continua travada no INVENTARIADOR', () => {
+    const { onSelect } = renderSelector(UserRole.AUDITOR);
+
+    chooseModule('INVENTARIADOR');
+
+    expect(accessButton().disabled).toBe(true);
+    fireEvent.click(accessButton());
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('admin: enxerga também as filiais reais do contrato na base local', async () => {

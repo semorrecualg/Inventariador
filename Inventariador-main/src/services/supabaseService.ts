@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot } from '../types';
+import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot, DatabaseMode } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
 import { sanitizeForSupabase } from './utils';
 import { localDb } from './localDbService';
@@ -15,6 +15,8 @@ import { pullDedupKey } from '../utils/syncDedup';
 import { normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
+import { sanitizeAssetKey } from '../utils/assetKey';
+import { normalizeUnitNames } from '../utils/unitContextUtils';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -118,6 +120,23 @@ export const getDatabaseMode = () => {
   if (isInternalMode) return 'INTERNAL';
   return localStorage.getItem('app_database_mode') || 'SUPABASE';
 };
+
+/**
+ * Sessão com nuvem? `INTERNAL` e `INTERNAL_PLUS` são base local; `SUPABASE` e
+ * `SUPABASE_PLUS` falam com o Supabase. Uma comparação a `'SUPABASE'` exacto
+ * tratava `SUPABASE_PLUS` como offline.
+ */
+export const isOnlineDatabaseMode = (mode?: string | null): boolean =>
+  !String(mode ?? getDatabaseMode()).startsWith('INTERNAL');
+
+/**
+ * Modo inicial do app (App e uiStore). Regra única:
+ * - `INTERNAL` quando o build não tem credenciais ou o modo INTERNAL está gravado;
+ * - `SUPABASE_PLUS` em memória quando há credenciais (é o valor que o App já usava
+ *   e que `databaseMode.startsWith('SUPABASE')` aceita).
+ */
+export const getInitialDatabaseMode = (): DatabaseMode =>
+  (getDatabaseMode() === 'INTERNAL' ? DatabaseMode.INTERNAL : DatabaseMode.SUPABASE_PLUS);
 
 // Teste de conexão expandido (REST e AUTH) - Removido auto-run para evitar loops em modo offline
 export const testSupabaseConnection = async () => {
@@ -487,7 +506,10 @@ export const logAuditEvent = async (entry: {
     // Ignora silenciosamente durante a carga em lote para isolar o SQLite local
     return;
   }
-  const isInternal = localStorage.getItem('app_database_mode') === 'INTERNAL';
+  // `getDatabaseMode()`: sem a chave gravada e sem credenciais no build isto é
+  // INTERNAL. Antes a leitura crua dava `false` e o log tentava o Supabase num
+  // build offline, perdendo o registo de auditoria.
+  const isInternal = getDatabaseMode() === 'INTERNAL';
 
   // Se for modo interno, salva no Dexie
   if (isInternal) {
@@ -1021,7 +1043,9 @@ const syncAssetsCore = async (assets: Asset[], tenantid?: string | string[], onP
         throw new Error("Sessão Expirada: Contrato ausente para sincronização.");
       }
 
-      const assetPrimaryKey = String(cleanAsset.primarykey !== undefined && cleanAsset.primarykey !== null ? cleanAsset.primarykey : '').trim() || String(cleanAsset.id || '');
+      // Chave canônica única (utils/assetKey): a carga, o pull e o envio usam a
+      // MESMA grafia — sem isso o upsert criava uma linha por variante da chave.
+      const assetPrimaryKey = sanitizeAssetKey(cleanAsset.primarykey) || sanitizeAssetKey(cleanAsset.id);
 
       // Projeção estrita de colunas GBR v2.6 sem campos fantasmas, usando tenantid e _unitid direto, preenchendo id com a propriedade primarykey
       const row: Record<string, unknown> = {
@@ -1064,7 +1088,22 @@ const syncAssetsCore = async (assets: Asset[], tenantid?: string | string[], onP
           if (val === undefined || val === null) return null;
           const num = Number(val);
           return isNaN(num) ? null : num;
-        })()
+        })(),
+        // CONFERÊNCIA (quem e quando): viaja no schema quando as colunas existem
+        // (scripts/assets-conferencia.sql). Se ainda não existirem, o sendBatch
+        // remove a coluna e reenvia o lote — nunca derruba a sincronização.
+        conferido: Boolean(
+          cleanAsset._conferido === true ||
+          Number(cleanAsset._conferido) === 1 ||
+          String(cleanAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM' ||
+          String(cleanAsset.status || '').toUpperCase().includes('CONFERIDO')
+        ),
+        auditor: (cleanAsset._auditor !== undefined && cleanAsset._auditor !== null
+          ? String(cleanAsset._auditor).trim()
+          : '') || null,
+        data_leitura: (cleanAsset._dataLeitura !== undefined && cleanAsset._dataLeitura !== null
+          ? String(cleanAsset._dataLeitura)
+          : null)
       };
 
       byKey.set(`${row.tenantid}|${row.primarykey}`, {
@@ -1292,13 +1331,28 @@ export const downloadBaseToLocal = async (
   }
 
   const PAGE = 1000;
-  const cols = [
+  // `conferido`, `auditor` e `data_leitura` (scripts/assets-conferencia.sql) são
+  // pedidas quando existem. Se o script ainda não correu, a coluna que falta sai
+  // da lista e a carga repete — em vez de falhar com PGRST204 e deixar o
+  // operador sem base nenhuma.
+  const cols: string[] = [
     'id', 'tenantid', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo',
     'serial', 'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 'endereco',
     'registro', 'subreg', 'databaixa', 'contacontabil', 'primarykey',
     'centrodecusto', 'vlraquisic', 'sn1_recno', 'sn3_recno', 'gps_lat', 'gps_lng',
-    'id'
-  ].join(',');
+    'conferido', 'auditor', 'data_leitura'
+  ];
+
+  const dropMissingColumn = (message: string): boolean => {
+    const missing = /'([a-zA-Z0-9_]+)' column/.exec(message)?.[1]
+      || /column "([a-zA-Z0-9_]+)"/.exec(message)?.[1];
+    if (!missing) return false;
+    const index = cols.indexOf(missing);
+    if (index === -1) return false;
+    cols.splice(index, 1);
+    logger.warn(`>>> [Supabase] Coluna '${missing}' não existe em assets: base descarregada sem ela (script pendente).`);
+    return true;
+  };
 
   const filiaisNorm = filiais && filiais.length > 0
     ? filiais.map(f => String(f).trim().toUpperCase()).filter(Boolean)
@@ -1307,15 +1361,20 @@ export const downloadBaseToLocal = async (
   logger.info(`>>> [Supabase] Iniciando download da base do tenant ${tenant}${filiaisNorm && filiaisNorm.length ? ` (filiais: ${filiaisNorm.join(' | ')})` : ' (todas as filiais)'}...`);
 
   // 1. Contagem exata para o progresso
-  let countQuery = supabase.from('assets').select(cols, { count: 'exact' }).eq('tenantid', tenant);
-  if (filiaisNorm && filiaisNorm.length > 0) {
-    countQuery = countQuery.in('filial', filiaisNorm);
-  }
-  const { count, error: countErr } = await countQuery;
-  if (countErr) {
+  let total = 0;
+  for (;;) {
+    let countQuery = supabase.from('assets').select(cols.join(','), { count: 'exact' }).eq('tenantid', tenant);
+    if (filiaisNorm && filiaisNorm.length > 0) {
+      countQuery = countQuery.in('filial', filiaisNorm);
+    }
+    const { count, error: countErr } = await countQuery;
+    if (!countErr) {
+      total = count || 0;
+      break;
+    }
+    if (dropMissingColumn(countErr.message || '')) continue;
     throw new SupabaseNetworkException(`Falha ao consultar a base do tenant: ${countErr.message || 'Erro de esquema.'}`);
   }
-  const total = count || 0;
   if (total === 0) {
     logger.warn(`>>> [Supabase] Base do tenant ${tenant} vazia na Nuvem.`);
     return 0;
@@ -1324,15 +1383,21 @@ export const downloadBaseToLocal = async (
   // 2. Baixa paginado (PostgREST limita a 1000 linhas por requisição)
   const all: Record<string, unknown>[] = [];
   for (let start = 0; start < total; start += PAGE) {
-    let q = supabase.from('assets').select(cols).eq('tenantid', tenant).order('id', { ascending: true }).range(start, start + PAGE - 1);
-    if (filiaisNorm && filiaisNorm.length > 0) {
-      q = q.in('filial', filiaisNorm);
+    for (;;) {
+      let q = supabase.from('assets').select(cols.join(',')).eq('tenantid', tenant).order('id', { ascending: true }).range(start, start + PAGE - 1);
+      if (filiaisNorm && filiaisNorm.length > 0) {
+        q = q.in('filial', filiaisNorm);
+      }
+      const { data, error } = await q;
+      if (error) {
+        if (dropMissingColumn(error.message || '')) continue;
+        throw new SupabaseNetworkException(`Falha ao baixar lote ${start}-${start + PAGE - 1}: ${error.message || 'Erro de esquema.'}`);
+      }
+      // A linha crua do Postgres não tem `_conferido`/`_auditor`/`_dataLeitura`:
+      // a conversão comum (a mesma do pull) traz quem conferiu e quando.
+      all.push(...(data || []).map((row: Record<string, unknown>) => mapCloudAssetRow(row) as unknown as Record<string, unknown>));
+      break;
     }
-    const { data, error } = await q;
-    if (error) {
-      throw new SupabaseNetworkException(`Falha ao baixar lote ${start}-${start + PAGE - 1}: ${error.message || 'Erro de esquema.'}`);
-    }
-    all.push(...(data || []));
     if (onProgress) onProgress(Math.min(start + PAGE, total), total);
   }
 
@@ -1342,21 +1407,31 @@ export const downloadBaseToLocal = async (
   return all.length;
 };
 
-export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
-  if (getDatabaseMode() === 'INTERNAL') return;
-  if (!supabase || !navigator.onLine) return;
-  
+/**
+ * Monta a linha de `inventory_config` que representa a configuração do tenant
+ * (`id = config_<TENANT>`).
+ *
+ * A identidade da linha (id/tenantid) vem SEMPRE do tenant resolvido, nunca do
+ * objeto `config`. A configuração que desce da nuvem traz o `id`/`tenantid` da
+ * LINHA de origem (`global_config` / `default`); ao subir de volta, esses campos
+ * faziam o app gravar nessa mesma linha — era por isso que `config_<TENANT>`
+ * nunca nascia e a leitura caía sempre no `global_config`.
+ */
+export const buildConfigCloudPayload = (
+  config: Omit<InventoryState, 'assets'> | Record<string, unknown>,
+  tenantid?: string | string[]
+): { configId: string; tenantid: string; payload: Record<string, unknown> } | null => {
   // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente
   // IMPORTANTE: battery_saver é omitido para garantir compatibilidade estrita até que o backend processe a nova estrutura
   const allowedKeys = [
-    'id', 
-    'companies', 
-    'last_updated', 
+    'id',
+    'companies',
+    'last_updated',
     'status',
-    'editable_fields', 
-    'qr_code_fields', 
-    'scanner_mode', 
-    'scan_feedback_mode', 
+    'editable_fields',
+    'qr_code_fields',
+    'scanner_mode',
+    'scan_feedback_mode',
     'inventory_search_mode',
     'immersive_mode',
     'dark_mode',
@@ -1368,43 +1443,6 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'tenantid'
   ];
 
-  const resolvedTenantid = (
-    (Array.isArray(tenantid) ? tenantid[0] : tenantid) ||
-    (config as Record<string, unknown>).tenantid ||
-    (config as Record<string, unknown>).tenantid ||
-    readLocalTenantId() ||
-    readSessionTenantId() ||
-    ''
-  ).toString().trim();
-
-  const cleanTenantidRaw = resolvedTenantid !== 'undefined' && resolvedTenantid !== 'null' ? resolvedTenantid : '';
-
-  if (!cleanTenantidRaw) {
-    logger.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantid ausente.");
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
-        detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. O envio das configurações foi bloqueado." }
-      }));
-    }
-    return; // Interrompe a operação de sync
-  }
-
-  const cleanTenant = encodeURIComponent(cleanTenantidRaw.replace(/[%_\s]+/g, ''));
-  if (!cleanTenant || cleanTenant === 'undefined' || cleanTenant === 'null') {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
-        detail: { message: "Contrato inválido para sincronização. Por favor, reautentique para carregar a sessão." }
-      }));
-    }
-    return; // Interrompe a operação de sync
-  }
-  const configId = `config_${cleanTenant}`;
-
-  const payload: Record<string, unknown> = {
-    id: configId,
-    tenantid: cleanTenant
-  };
-  
   // Mapeamento de camelCase para snake_case
   const mapping: Record<string, string> = {
     'lastUpdated': 'last_updated',
@@ -1422,30 +1460,144 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
     'databaseMode': 'database_mode'
   };
 
-  Object.keys(config).forEach(key => {
+  const source = config as unknown as Record<string, unknown>;
+
+  // `default` é o tenant da linha global (sentinela), não um contrato: gravar
+  // com ele criava uma linha `config_default` que ninguém reivindica.
+  const INVALID_TENANTS = new Set(['', 'undefined', 'null', 'default']);
+  const isInvalidTenant = (value: unknown) => {
+    const raw = value === undefined || value === null ? '' : String(value).trim();
+    return INVALID_TENANTS.has(raw.toLowerCase());
+  };
+
+  // Ordem de resolução: tenant explícito do chamador → tenant válido dentro da
+  // própria config → tenant desta sessão (localStorage/sessionStorage), que só
+  // serve de último recurso: um contrato antigo guardado no aparelho não pode
+  // receber a configuração de outro contrato.
+  // Um candidato inválido é saltado: o próximo válido assume o destino.
+  const cleanTenantidRaw = [
+    Array.isArray(tenantid) ? tenantid[0] : tenantid,
+    source.tenantid,
+    readLocalTenantId(),
+    readSessionTenantId()
+  ]
+    .map(candidate => (candidate === undefined || candidate === null ? '' : String(candidate).trim()))
+    .find(candidate => !isInvalidTenant(candidate)) || '';
+
+  if (!cleanTenantidRaw) return null;
+
+  const cleanTenant = encodeURIComponent(cleanTenantidRaw.replace(/[%_\s]+/g, ''));
+  if (!cleanTenant || isInvalidTenant(cleanTenant)) return null;
+
+  const configId = `config_${cleanTenant}`;
+  const payload: Record<string, unknown> = {
+    id: configId,
+    tenantid: cleanTenant
+  };
+
+  Object.keys(source).forEach(key => {
     const dbKey = mapping[key] || key;
     // Omitimos explicitamente o batterySaver ou battery_saver para garantir a blindagem do payload
     if (key === 'batterySaver' || key === 'battery_saver' || dbKey === 'battery_saver') {
       return;
     }
-    if (allowedKeys.includes(dbKey)) {
-      const val = (config as Record<string, unknown>)[key];
-      // Impedimos o envio de campos nulos ou indefinidos de infraestrutura para evitar a quebra do interceptor do v2.6
-      if (val !== undefined && val !== null) {
-        if (dbKey === 'tenantid' && (!val || val === 'undefined' || val === 'null' || String(val).trim() === '')) {
-          return; // ignora valores inválidos de tenantid no config
-        }
-        payload[dbKey] = val;
-      }
+    // Identidade nunca vem do objeto (ver comentário da função).
+    if (dbKey === 'id' || dbKey === 'tenantid') return;
+    if (!allowedKeys.includes(dbKey)) return;
+    const val = source[key];
+    // Impedimos o envio de campos nulos ou indefinidos de infraestrutura para evitar a quebra do interceptor do v2.6
+    if (val !== undefined && val !== null) {
+      payload[dbKey] = val;
     }
   });
 
+  return { configId, tenantid: cleanTenant, payload };
+};
+
+/**
+ * LISTA DE FILIAIS DO CONTRATO — sem baixar ativos.
+ *
+ * O Boot Loader deixou de baixar o contrato inteiro quando o perfil não fixa
+ * filial: ele abre a seleção. Mas num aparelho novo a lista vinha dos dados
+ * locais (vazios), e o usuário ficava preso. Esta consulta puxa SÓ a coluna
+ * `filial` (paginada) para montar a lista de unidades do contrato.
+ *
+ * Muro SRE: sem tenantid não consulta nada — jamais lista filiais de outro
+ * contrato.
+ */
+export const fetchUnitNamesFromCloud = async (tenantid?: string | null): Promise<string[]> => {
+  if (!supabase || !navigator.onLine) return [];
+
+  const tenant = String(tenantid || '').trim().toUpperCase();
+  if (!tenant) {
+    logger.warn('>>> [SRE ISOLAMENTO] Lista de filiais sem contrato resolvido: abortando (não lista unidades de outros contratos).');
+    return [];
+  }
+
+  const PAGE = 1000;
+  const nomes = new Set<string>();
+
+  try {
+    for (let start = 0; start < 50000; start += PAGE) {
+      const { data, error } = await supabase
+        .from('assets')
+        .select('filial')
+        .eq('tenantid', tenant)
+        .order('filial', { ascending: true })
+        .range(start, start + PAGE - 1);
+
+      if (error) {
+        logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', error.message);
+        break;
+      }
+
+      const linhas = (data || []) as Array<{ filial?: string | null }>;
+      linhas.forEach(linha => nomes.add(String(linha.filial || '')));
+      if (linhas.length < PAGE) break;
+    }
+  } catch (err) {
+    logger.warn('>>> [Unidades] Erro ao listar filiais do contrato:', err);
+  }
+
+  const filiais = normalizeUnitNames(Array.from(nomes));
+  logger.info(`>>> [Unidades] ${filiais.length} filial(is) listada(s) do contrato ${tenant} (sem baixar ativos).`);
+  return filiais;
+};
+
+export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, tenantid?: string | string[]) => {
+  if (getDatabaseMode() === 'INTERNAL') return;
+  if (!supabase || !navigator.onLine) return;
+
+  const built = buildConfigCloudPayload(config, tenantid);
+  if (!built) {
+    logger.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantid ausente.");
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
+        detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. O envio das configurações foi bloqueado." }
+      }));
+    }
+    return; // Interrompe a operação de sync
+  }
+
+  const { configId, tenantid: tenant, payload } = built;
+
   const { error } = await supabase
     .from('inventory_config')
-    .upsert(payload);
+    .upsert(payload, { onConflict: 'id' });
 
   if (error) {
     logger.error('Error syncing config to Supabase:', error);
+    // Diagnóstico durável: antes, uma falha aqui só existia na consola do
+    // aparelho e `config_<TENANT>` ficava a faltar sem rasto nenhum.
+    void logAuditEvent({
+      user_email: 'system',
+      action: 'CONFIG_SYNC_FAIL',
+      table_name: 'inventory_config',
+      record_id: configId,
+      details: `Falha ao gravar ${configId} (Code: ${error.code || 'sem código'}): ${error.message}`,
+      tenantid: tenant,
+      origin: 'SYNC'
+    }).catch(() => { /* auditoria é diagnóstico: nunca derruba o fluxo */ });
     throw error;
   }
 };
@@ -1971,6 +2123,97 @@ export const fetchFullInventory = async (
  * Implementação real da paginação. Nunca chamar diretamente fora do wrapper
  * fetchFullInventory (que resolve o tenantid e deduplica requisições).
  */
+/**
+ * Converte uma linha do Postgres em `Asset`, preservando a CONFERÊNCIA.
+ *
+ * O upsert só envia colunas do schema remoto, e a conferência (quem conferiu e
+ * quando) não tinha coluna: reinstalar o app devolvia a base sem autor nem data.
+ * Com `scripts/assets-conferencia.sql` aplicado, as colunas `conferido`,
+ * `auditor` e `data_leitura` vêm na linha. Sem elas, `status = 'CONFERIDO'`
+ * continua a bastar para o item voltar marcado como conferido (só perde
+ * autor/data, que a nuvem nunca guardou).
+ */
+export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
+  const tId = String(row.tenantid || '').trim().toUpperCase();
+  const uId = String(row.filial || row.unit_id || row.unitid || '').trim().toUpperCase();
+
+  const rawConferido = row.conferido;
+  const statusUpper = String(row.status || '').toUpperCase();
+  const conferido =
+    rawConferido === true ||
+    String(rawConferido).toLowerCase() === 'true' ||
+    statusUpper.includes('CONFERIDO') ||
+    String(row.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+
+  const auditor = row.auditor !== undefined && row.auditor !== null ? String(row.auditor).trim() : '';
+  const dataLeitura = row.data_leitura !== undefined && row.data_leitura !== null ? String(row.data_leitura) : '';
+
+  return {
+    ...(row as unknown as Asset),
+    id: row.id as string | number,
+    tenantid: tId,
+    filial: uId,
+    unitid: uId, // Legado
+    _conferido: conferido,
+    ...(auditor ? { _auditor: auditor } : {}),
+    ...(dataLeitura ? { _dataLeitura: dataLeitura } : {}),
+  };
+};
+
+/**
+ * Converte a linha de `inventory_config` na parte de configuração do estado.
+ *
+ * Os campos de IDENTIDADE da linha ficam de fora: `id`, `tenantid`, `filial`,
+ * `data`, `metadata`, `created_at` e `updated_at`. Não são política do contrato:
+ * dentro do estado, qualquer gravador que fizesse spread os copiava de volta
+ * para o payload — foi assim que a configuração voltava sempre para a linha de
+ * origem (`global_config`, tenant `default`) em vez de `config_<TENANT>`.
+ */
+const CONFIG_REVERSE_MAPPING: Record<string, string> = {
+  'last_updated': 'lastUpdated',
+  'editable_fields': 'editableFields',
+  'qr_code_fields': 'qrCodeFields',
+  'scanner_mode': 'scannerMode',
+  'scan_feedback_mode': 'scanFeedbackMode',
+  'inventory_search_mode': 'inventorySearchMode',
+  'immersive_mode': 'immersiveMode',
+  'dark_mode': 'darkMode',
+  'battery_saver': 'batterySaver',
+  'protheus_integration_enabled': 'protheusIntegrationEnabled',
+  'protheus_api_url': 'protheusApiUrl',
+  'mandatory_photo_on_divergence': 'mandatoryPhotoOnDivergence',
+  'mandatory_photo_on_new_item': 'mandatoryPhotoOnNewItem',
+  'database_mode': 'databaseMode'
+};
+
+const CONFIG_IDENTITY_KEYS = new Set([
+  'id',
+  'tenantid',
+  'tenantId',
+  'filial',
+  'data',
+  'metadata',
+  'created_at',
+  'createdAt',
+  'updated_at',
+  'updatedAt'
+]);
+
+export const mapCloudConfigRow = (
+  row: Record<string, unknown> | null | undefined
+): Partial<InventoryState> => {
+  const mapped: Record<string, unknown> = {};
+  if (!row) return mapped as Partial<InventoryState>;
+
+  Object.keys(row).forEach(key => {
+    if (CONFIG_IDENTITY_KEYS.has(key)) return;
+    const camelKey = CONFIG_REVERSE_MAPPING[key] || key;
+    mapped[camelKey] = row[key];
+  });
+
+  return mapped as Partial<InventoryState>;
+};
+
 const fetchFullInventoryImpl = async (
   resolvedTenantid: string | string[] | undefined,
   unitid?: string,
@@ -2024,18 +2267,7 @@ const fetchFullInventoryImpl = async (
       }
 
       if (pageData && pageData.length > 0) {
-        const mappedPage = pageData.map((a: Record<string, unknown>) => {
-          const tId = String(a.tenantid || '').trim().toUpperCase();
-          const uId = String(a.filial || a.unit_id || a.unitid || '').trim().toUpperCase();
-
-          return {
-            ...a,
-            id: a.id as string | number,
-            tenantid: tId,
-            filial: uId,
-            unitid: uId      // Legado
-          };
-        }) as Asset[];
+        const mappedPage = pageData.map((a: Record<string, unknown>) => mapCloudAssetRow(a));
         
         assets = [...assets, ...mappedPage];
         logger.info(`>>> [Supabase] Carregados ${assets.length} ativos...`);
@@ -2110,29 +2342,8 @@ const fetchFullInventoryImpl = async (
       };
     }
 
-    // Mapeamento reverso de snake_case para camelCase
-    const reverseMapping: Record<string, string> = {
-      'last_updated': 'lastUpdated',
-      'editable_fields': 'editableFields',
-      'qr_code_fields': 'qrCodeFields',
-      'scanner_mode': 'scannerMode',
-      'scan_feedback_mode': 'scanFeedbackMode',
-      'inventory_search_mode': 'inventorySearchMode',
-      'immersive_mode': 'immersiveMode',
-      'dark_mode': 'darkMode',
-      'battery_saver': 'batterySaver',
-      'protheus_integration_enabled': 'protheusIntegrationEnabled',
-      'protheus_api_url': 'protheusApiUrl',
-      'mandatory_photo_on_divergence': 'mandatoryPhotoOnDivergence',
-      'mandatory_photo_on_new_item': 'mandatoryPhotoOnNewItem',
-      'database_mode': 'databaseMode'
-    };
-
-    const mappedConfig: Record<string, unknown> = {};
-    Object.keys(config).forEach(key => {
-      const camelKey = reverseMapping[key] || key;
-      mappedConfig[camelKey] = (config as Record<string, unknown>)[key];
-    });
+    // Sem id/tenantid: a identidade da linha não entra no estado (ver mapCloudConfigRow).
+    const mappedConfig = mapCloudConfigRow(config as Record<string, unknown>);
 
     if (onComplete) {
       logger.info(`>>> [Supabase] Invocando onComplete() de forma atômica no final da paginação.`);
@@ -2150,7 +2361,7 @@ const fetchFullInventoryImpl = async (
 
     return {
       assets: assets,
-      config: mappedConfig as Partial<InventoryState>
+      config: mappedConfig
     };
   } catch (err) {
     logger.error('Erro inesperado ao buscar inventário completo:', err);
@@ -2159,28 +2370,78 @@ const fetchFullInventoryImpl = async (
 };
 
 /**
- * Assina mudanças em tempo real na tabela de configuração do inventário
+ * Id da linha de configuração do contrato: `config_<TENANT>`.
+ *
+ * A configuração do contrato vive nessa linha (não em `global_config`). O tenant
+ * é resolvido pela mesma ordem do resto do serviço; `default`/vazio são
+ * sentinelas (linha global), não contratos → `null`.
  */
-export const subscribeToInventoryChanges = (onUpdate: (payload: Partial<InventoryState>) => void) => {
+export const configSubscriptionId = (tenantid?: string | string[]): string | null => {
+  const invalid = new Set(['', 'undefined', 'null', 'default']);
+  const raw = [
+    Array.isArray(tenantid) ? tenantid[0] : tenantid,
+    readLocalTenantId(),
+    readSessionTenantId()
+  ]
+    .map(t => (t === undefined || t === null ? '' : String(t).trim()))
+    .find(t => !invalid.has(t.toLowerCase()));
+
+  if (!raw) return null;
+
+  const cleanTenant = encodeURIComponent(raw.replace(/[%_\s]+/g, ''));
+  if (!cleanTenant || invalid.has(cleanTenant.toLowerCase())) return null;
+
+  return `config_${cleanTenant}`;
+};
+
+/**
+ * Assina mudanças em tempo real na configuração do contrato.
+ *
+ * O contrato vive em `config_<TENANT>`; `global_config` continua subscrito como
+ * reserva (linha legada ou instalação sem contrato). Antes o filtro era fixo em
+ * `id=eq.global_config`, por isso uma atualização de `config_<TENANT>` nunca era
+ * detetada.
+ *
+ * O payload do realtime é a linha crua: entregamos o mesmo mapeamento do pull
+ * (`mapCloudConfigRow`), em camelCase e sem a identidade da linha.
+ */
+export const subscribeToInventoryChanges = (
+  onUpdate: (payload: Partial<InventoryState>) => void,
+  tenantid?: string | string[]
+) => {
   if (!supabase) return null;
 
-  const channel = supabase
-    .channel('inventory_config_changes')
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'inventory_config',
-        filter: 'id=eq.global_config'
-      },
-      (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => {
-        onUpdate(payload.new);
-      }
-    )
-    .subscribe();
+  const contractId = configSubscriptionId(tenantid);
+  const ids = contractId ? [contractId, 'global_config'] : ['global_config'];
 
-  return channel;
+  const deliver = (row: Record<string, unknown>) => {
+    const mapped = mapCloudConfigRow(row);
+    if (Object.keys(mapped).length > 0) onUpdate(mapped);
+  };
+
+  const channels = ids.map(id =>
+    supabase
+      .channel(`inventory_config_changes_${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'inventory_config',
+          filter: `id=eq.${id}`
+        },
+        (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => {
+          deliver(payload.new || {});
+        }
+      )
+      .subscribe()
+  );
+
+  return {
+    unsubscribe: () => {
+      channels.forEach(channel => { void channel.unsubscribe(); });
+    }
+  };
 };
 
 /**
@@ -2599,8 +2860,10 @@ export const findAssetGlobally = async (etiqueta: string, tenantid: string): Pro
  * Exclui uma campanha
  */
 export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
+  // Mesma regra do fetchCampaigns: um `app_database_mode: INTERNAL` herdado de
+  // uma sessão anterior não pode transformar a exclusão em local-only — a
+  // campanha continuava na nuvem e voltava na leitura seguinte (merge).
+  const isInternal = getDatabaseMode() === 'INTERNAL';
 
   // Always perform local SQLite deletion first (Soberania Offline-First)
   logger.info('>>> [SQLite] Excluindo campanha do banco físico:', campaignId);
@@ -2623,7 +2886,11 @@ export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
   }
   
   try {
-    const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
+    const { error } = await supabase
+      .from('campaigns')
+      .delete()
+      .eq('id', campaignId)
+      .select('id');
     if (error) {
       logger.warn('>>> [Supabase] Erro ao excluir campanha na nuvem. Empilhando na fila delta:', error);
       if (campaignSyncQueueDelegate) {
@@ -2861,8 +3128,9 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
  * Outlines/Atualiza o status de uma campanha com suporte offline-first hibrido
  */
 export const updateCampaignStatus = async (campaignId: string, status: CampaignStatus, closedBy?: string): Promise<boolean> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
+  // Mesma regra do fetchCampaigns/deleteCampaign: um `app_database_mode: INTERNAL`
+  // herdado de sessão anterior não pode impedir o UPDATE na nuvem.
+  const isInternal = getDatabaseMode() === 'INTERNAL';
 
   // Always perform local SQLite update first (Soberania Offline-First)
   logger.info('>>> [SQLite] Atualizando status da campanha:', campaignId, 'para', status);
@@ -2965,12 +3233,57 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
 };
 
 /**
+ * Grava o laudo no Dexie do aparelho. Existe separado porque a cópia local é
+ * obrigatória nos DOIS modos: se a nuvem recusar (RLS/rede), o fecho da campanha
+ * não pode ficar sem histórico.
+ */
+const persistSnapshotLocally = async (snapshot: CampaignSnapshot): Promise<void> => {
+  await db.campaign_snapshots.put({
+    id: snapshot.id,
+    campaign_id: snapshot.campaign_id,
+    assets_data: JSON.stringify(snapshot.assets_data),
+    metadata: JSON.stringify(snapshot.metadata),
+    closed_at: snapshot.snapshot_date,
+    closed_by: snapshot.closed_by || '',
+    tenantid: snapshot.tenantid
+  });
+};
+
+/**
+ * Lê o laudo mais recente gravado no aparelho (Dexie).
+ */
+const readLocalSnapshot = async (campaignId: string): Promise<CampaignSnapshot | null> => {
+  try {
+    const snapshots = await db.campaign_snapshots.where('campaign_id').equals(campaignId).toArray();
+    if (snapshots.length === 0) return null;
+
+    // Sort by closed_at descending (latest first)
+    snapshots.sort((a, b) => b.closed_at.localeCompare(a.closed_at));
+
+    const row = snapshots[0];
+    return {
+      id: row.id,
+      campaign_id: row.campaign_id,
+      assets_data: JSON.parse(row.assets_data),
+      metadata: JSON.parse(row.metadata),
+      snapshot_date: row.closed_at,
+      closed_by: row.closed_by,
+      tenantid: row.tenantid || readLocalTenantId() || readSessionTenantId() || ''
+    } as CampaignSnapshot;
+  } catch (err) {
+    logger.error('>>> [SQLite] Erro ao recuperar snapshot:', err);
+    return null;
+  }
+};
+
+/**
  * Cria um Snapshot (Congelamento) de todos os ativos de uma campanha.
  * Isso garante que o Laudo Final seja imutável conforme CPC 27.
  */
 export const createCampaignSnapshot = async (campaignId: string, closedBy: string): Promise<boolean> => {
-    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-    const isInternal = mode === 'INTERNAL';
+    // Mesma regra do fetchCampaigns/deleteCampaign/updateCampaignStatus: sem a
+    // chave gravada o snapshot ia só para o SQLite e a nuvem ficava sem o laudo.
+    const isInternal = getDatabaseMode() === 'INTERNAL';
 
     if (isInternal) {
       logger.info('>>> [SQLite] Criando Snapshot de Campanha (Encerramento)...');
@@ -3028,15 +3341,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
           tenantid: tenantid
         };
 
-        await db.campaign_snapshots.put({
-          id: snapshot.id,
-          campaign_id: snapshot.campaign_id,
-          assets_data: JSON.stringify(snapshot.assets_data),
-          metadata: JSON.stringify(snapshot.metadata),
-          closed_at: snapshot.snapshot_date,
-          closed_by: snapshot.closed_by || '',
-          tenantid: snapshot.tenantid
-        });
+        await persistSnapshotLocally(snapshot);
 
         logger.info('>>> [SQLite] Snapshot criado com sucesso.');
         return true;
@@ -3083,6 +3388,23 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             cpc_compliance: 'CPC 27 / NBC TG 27'
         };
 
+        // 3.1 Cópia local do laudo ANTES da nuvem: se o insert falhar (RLS, quota,
+        // rede), o fecho da campanha continua com histórico no aparelho.
+        try {
+            await persistSnapshotLocally({
+                id: `snap_${campaignId}_${Date.now()}`,
+                campaign_id: campaignId,
+                assets_data: assets as unknown as Asset[],
+                metadata: stats,
+                snapshot_date: new Date().toISOString(),
+                closed_by: closedBy,
+                tenantid,
+            } as CampaignSnapshot);
+            logger.info('>>> [Snapshot] Cópia local do laudo gravada (fallback offline).');
+        } catch (localErr) {
+            logger.warn('>>> [Snapshot] Falha ao gravar a cópia local do laudo:', localErr);
+        }
+
         // 4. Salva o Snapshot em JSONB (Alta eficiência de armazenamento v24.50)
         // Isso evita criar 12k linhas extras no banco, preservando o limite free de 500MB
         const { error: snapshotError } = await supabase
@@ -3122,36 +3444,15 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
  * Busca o Snapshot histórico de uma campanha encerrada.
  */
 export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignSnapshot | null> => {
-    const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-    const isInternal = mode === 'INTERNAL';
+    const isInternal = getDatabaseMode() === 'INTERNAL';
 
     if (isInternal) {
       logger.info('>>> [SQLite] Recuperando Snapshot da campanha:', campaignId);
-      try {
-        const snapshots = await db.campaign_snapshots.where('campaign_id').equals(campaignId).toArray();
-        if (snapshots.length === 0) return null;
-        
-        // Sort by closed_at descending (latest first)
-        snapshots.sort((a, b) => b.closed_at.localeCompare(a.closed_at));
-        
-        const row = snapshots[0];
-        return {
-          id: row.id,
-          campaign_id: row.campaign_id,
-          assets_data: JSON.parse(row.assets_data),
-          metadata: JSON.parse(row.metadata),
-          snapshot_date: row.closed_at,
-          closed_by: row.closed_by,
-          tenantid: row.tenantid || readLocalTenantId() || readSessionTenantId() || ''
-        } as CampaignSnapshot;
-      } catch (err) {
-        logger.error('>>> [SQLite] Erro ao recuperar snapshot:', err);
-        return null;
-      }
+      return await readLocalSnapshot(campaignId);
     }
 
-    if (!supabase) return null;
-    
+    if (!supabase) return await readLocalSnapshot(campaignId);
+
     try {
         const { data, error } = await supabase
             .from('campaign_snapshots')
@@ -3160,9 +3461,23 @@ export const getCampaignSnapshot = async (campaignId: string): Promise<CampaignS
             .maybeSingle();
 
         if (error) throw error;
-        return data as CampaignSnapshot;
+        if (data) return data as CampaignSnapshot;
+
+        // Campanha encerrada sem rede (ou antes do insert na nuvem): o laudo do
+        // aparelho continua a valer em vez de aparecer "sem snapshot".
+        const local = await readLocalSnapshot(campaignId);
+        if (local) {
+          logger.info('>>> [Snapshot] Nuvem sem laudo — usando o snapshot gravado no aparelho.');
+          return local;
+        }
+        return null;
     } catch (err) {
         logger.error('Erro ao buscar snapshot:', err);
+        const local = await readLocalSnapshot(campaignId);
+        if (local) {
+          logger.info('>>> [Snapshot] Nuvem indisponível — usando o snapshot gravado no aparelho.');
+          return local;
+        }
         return null;
     }
 };
@@ -3229,7 +3544,8 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
  * Falha silenciosa (a coluna pode não existir antes do script): o local manda.
  */
 export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> => {
-  if (!supabase) return false;
+  // Modo INTERNAL = zero chamadas de rede (docs/ARCHITECTURE.md §10).
+  if (!supabase || getDatabaseMode() === 'INTERNAL') return false;
 
   const tenantid = (config.tenantid || readLocalTenantId() || readSessionTenantId() || '')
     .toString().trim();
@@ -3288,8 +3604,8 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
 
 export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | string> => {
   try {
-    // v25.70: a sincronizacao com a nuvem e tentada sempre que o client Supabase
-    // estiver configurado, independente do modo (try-catch interno = offline-first).
+    // A sincronizacao com a nuvem so acontece em modo de nuvem (try-catch
+    // interno = offline-first): em INTERNAL nada sai do aparelho.
 
     // 1. SALVAMENTO SQLITE (Prioritário para Soberania de Dados)
     try {
@@ -3354,7 +3670,10 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       logger.warn('>>> [Persistence] Falha ao espelhar GPS no Dexie:', dexieErr);
     }
 
-    if (!supabase) return true;
+    // Modo INTERNAL = zero chamadas de rede (docs/ARCHITECTURE.md §10). A âncora
+    // e as flags já ficaram no SQLite/Dexie acima; sem esta guarda, um aparelho
+    // em modo interno gravava em `inventory_config` e disparava auditoria.
+    if (!supabase || getDatabaseMode() === 'INTERNAL') return true;
 
   // 2. SINCRONIZAÇÃO EM NUVEM (falha silenciosa nao bloqueia o fluxo local)
   const syncToCloud = async () => {
@@ -3410,8 +3729,9 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
  * Busca as configurações de geofencing combinando Local e Nuvem
  */
 export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
-  const mode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-  const isInternal = mode === 'INTERNAL';
+  // Mesma regra do resto do módulo: sem a chave gravada, decide pelas credenciais
+  // do build — antes o GPS ficava só local enquanto o app já usava a nuvem.
+  const isInternal = getDatabaseMode() === 'INTERNAL';
   
   try {
     const configs: Record<string, UnitConfig> = {};

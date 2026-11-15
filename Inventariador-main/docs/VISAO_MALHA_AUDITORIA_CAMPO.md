@@ -111,7 +111,7 @@ ordem = (lamport, device_id, event_id)
 ```
 
 A projeção roda localmente no celular e no servidor, com o **mesmo código**
-(`src/services/fieldProjection.ts`, novo), para que os dois lados nunca
+(o projetor puro, a criar em `src/services/`), para que os dois lados nunca
 discordem. Campos derivados: `_conferido`, `_auditor`, `_dataLeitura`,
 `_localMaster`, `gps_lat/lng`, `_version`.
 
