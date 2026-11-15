@@ -1223,20 +1223,39 @@ const syncAssetsCore = async (assets: Asset[], tenantid?: string | string[], onP
  * Espelhamento no contrato antigo: devolve os ids aceites e lança se houver
  * recusa — quem precisa das razões usa `syncAssetsToCloudAndMarkDetailed`.
  */
-export const syncAssetsToCloud = async (
+/**
+ * Executor do espelhamento: por padrão o núcleo real; os testes injectam um
+ * dublê para fixar o desfecho sem cliente Supabase.
+ */
+export type AssetSyncRun = (
   assets: Asset[],
   tenantid?: string | string[],
   onProgress?: (processed: number, total: number) => void
-): Promise<string[]> => {
-  const { synced, failures } = await syncAssetsCore(assets, tenantid, onProgress);
-  if (failures.length > 0) {
-    const amostra = failures.slice(0, 3).map(f => `${f.key}: ${f.reason}`).join(' | ');
-    throw new SupabaseNetworkException(
-      `Espelhamento parcial: ${synced.length} ativos sincronizados, ${failures.length} rejeitados (ex.: ${amostra})`
-    );
-  }
-  return synced;
+) => Promise<{ synced: string[]; failures: AssetSyncFailure[] }>;
+
+/**
+ * Política única de recusa parcial: a API antiga só devolve a lista de aceites
+ * quando o lote fechou completo; caso contrário lança com contagem e amostra dos
+ * motivos. Era este bloco que estava copiado em duas funções.
+ */
+export const requireCompleteSync = (result: {
+  synced: string[];
+  failures: AssetSyncFailure[];
+}): string[] => {
+  if (result.failures.length === 0) return result.synced;
+  const amostra = result.failures.slice(0, 3).map(f => `${f.key}: ${f.reason}`).join(' | ');
+  throw new SupabaseNetworkException(
+    `Espelhamento parcial: ${result.synced.length} ativos sincronizados, ` +
+    `${result.failures.length} rejeitados (ex.: ${amostra})`
+  );
 };
+
+export const syncAssetsToCloud = async (
+  assets: Asset[],
+  tenantid?: string | string[],
+  onProgress?: (processed: number, total: number) => void,
+  run: AssetSyncRun = syncAssetsCore
+): Promise<string[]> => requireCompleteSync(await run(assets, tenantid, onProgress));
 
 /**
  * Espelha para a nuvem e devolve o estado local ao o que já está no Postgres:
@@ -1246,9 +1265,10 @@ export const syncAssetsToCloud = async (
 export const syncAssetsToCloudAndMarkDetailed = async (
   assets: Asset[],
   tenantid?: string | string[],
-  onProgress?: (processed: number, total: number) => void
+  onProgress?: (processed: number, total: number) => void,
+  run: AssetSyncRun = syncAssetsCore
 ): Promise<{ synced: string[]; failures: AssetSyncFailure[] }> => {
-  const { synced, failures } = await syncAssetsCore(assets, tenantid, onProgress);
+  const { synced, failures } = await run(assets, tenantid, onProgress);
   if (synced.length > 0) {
     // `syncAssetsToCloud` devolve ids locais, mas o índice `primarykey` é a chave
     // de origem — nos ativos em que `id !== primarykey`, marcar pelo id não
@@ -1270,17 +1290,10 @@ export const syncAssetsToCloudAndMarkDetailed = async (
 export const syncAssetsToCloudAndMark = async (
   assets: Asset[],
   tenantid?: string | string[],
-  onProgress?: (processed: number, total: number) => void
-): Promise<string[]> => {
-  const { synced, failures } = await syncAssetsToCloudAndMarkDetailed(assets, tenantid, onProgress);
-  if (failures.length > 0) {
-    const amostra = failures.slice(0, 3).map(f => `${f.key}: ${f.reason}`).join(' | ');
-    throw new SupabaseNetworkException(
-      `Espelhamento parcial: ${synced.length} ativos sincronizados, ${failures.length} rejeitados (ex.: ${amostra})`
-    );
-  }
-  return synced;
-};
+  onProgress?: (processed: number, total: number) => void,
+  run?: AssetSyncRun
+): Promise<string[]> =>
+  requireCompleteSync(await syncAssetsToCloudAndMarkDetailed(assets, tenantid, onProgress, run));
 
 /**
  * REGRA DE OURO (inventariador mobile): baixa a base do tenant da Nuvem para o

@@ -340,6 +340,11 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
 - **Isolamento de lote testado**: `batchIsolation` separa o que o Postgres
   recusou linha a linha (`23505` conta como aceite, o resto vira chave + motivo)
   com o transporte injectado — 10 casos em `src/__tests__/batchIsolation.test.ts`.
+- **Contrato de envio**: `syncAssetsDelivery.test.ts` fixa a diferença entre as
+  duas APIs com núcleo injectado — a antiga (`syncAssetsToCloud`) lança
+  `SupabaseNetworkException` em recusa parcial, com contagem e amostra dos
+  motivos; a detalhada devolve `{ synced, failures }` sem lançar. A política
+  vive num só `requireCompleteSync`, não em dois blocos iguais.
 - **Push parcial no ciclo**: `syncSession.test.ts` cobre push com aceite +
   recusa, `pullIntoSession` no mesmo ciclo e recibo coerente
   (`enviados = aceitos + recusados`, `recebidos` do pull, `faltantes` > 0).
