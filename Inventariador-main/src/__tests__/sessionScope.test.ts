@@ -3,7 +3,12 @@
 // sessionScope.test.ts — não derrubar sessão válida por leitura falhada.
 // ============================================================================
 import { describe, it, expect } from 'vitest';
-import { decidirEscopoDeSessao, perfilNaoLido, type EntradaEscopo } from '../utils/sessionScope';
+import {
+  decidirEscopoDeSessao,
+  mensagemContaSemContrato,
+  perfilNaoLido,
+  type EntradaEscopo
+} from '../utils/sessionScope';
 
 const base: EntradaEscopo = {
   tenantid: 'CICOPAL',
@@ -75,5 +80,22 @@ describe('perfilNaoLido', () => {
     expect(perfilNaoLido(null)).toBe(false);
     expect(perfilNaoLido(undefined)).toBe(false);
     expect(perfilNaoLido('perfilIndisponivel')).toBe(false);
+  });
+});
+
+describe('mensagemContaSemContrato', () => {
+  it('mostra o que foi lido da base, não só "sem contrato"', () => {
+    const texto = mensagemContaSemContrato('semorr@gmail.com', '', 'MATRIZ');
+    expect(texto).toContain('semorr@gmail.com');
+    expect(texto).toContain('contrato vazio');
+    expect(texto).toContain('filial "MATRIZ"');
+    expect(texto).toContain('user_permissions');
+  });
+
+  it('mostra os valores quando existem (ex.: sentinela NULL)', () => {
+    expect(mensagemContaSemContrato('a@b.c', 'NULL', '  '))
+      .toContain('contrato "NULL"');
+    expect(mensagemContaSemContrato('a@b.c', 'CICOPAL', 'MATRIZ'))
+      .toContain('filial "MATRIZ"');
   });
 });

@@ -45,3 +45,20 @@ export const perfilNaoLido = (perfil: unknown): boolean =>
   typeof perfil === 'object' &&
   perfil !== null &&
   (perfil as { perfilIndisponivel?: unknown }).perfilIndisponivel === true;
+
+/**
+ * Mensagem do bloqueio por escopo. Diz o que foi LIDO (contrato/filial) porque
+ * "sem contrato" sozinho não distingue coluna vazia de coluna com sentinela, e
+ * sem isso o administrador corrige a base às cegas.
+ */
+export const mensagemContaSemContrato = (
+  email: string,
+  tenantid?: string | null,
+  filial?: string | null
+): string => {
+  const lido = (valor?: string | null) => {
+    const texto = (valor ?? '').trim();
+    return texto ? `"${texto}"` : 'vazio';
+  };
+  return `A conta ${email} não tem Contrato nem Filial atribuídos na base de permissões (lido: contrato ${lido(tenantid)}, filial ${lido(filial)}). Peça ao administrador para atribuir o contrato e a filial em user_permissions — reautenticar sozinho não resolve.`;
+};

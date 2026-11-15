@@ -128,7 +128,7 @@ import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
 import { logger } from './utils/logger';
 import { mensagemDeErroDeSync } from './utils/syncError';
-import { decidirEscopoDeSessao, perfilNaoLido } from './utils/sessionScope';
+import { decidirEscopoDeSessao, mensagemContaSemContrato, perfilNaoLido } from './utils/sessionScope';
 import pkg from '../package.json';
 
 export class AppBootstrapError extends Error {
@@ -4491,7 +4491,11 @@ useEffect(() => {
           setModalConfig({
             isOpen: true,
             title: 'Conta sem Contrato',
-            message: 'A sua conta não tem Contrato nem Filial atribuídos na base de permissões. Peça ao administrador para atribuir o contrato e a filial — reautenticar sozinho não resolve.',
+            message: mensagemContaSemContrato(
+              session.user.email || '',
+              resolvedTenantid,
+              resolvedUnitId
+            ),
             type: 'error',
             onConfirm: () => {}
           });
