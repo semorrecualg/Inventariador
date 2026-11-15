@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { db, sqliteService } from '../services/sqliteService';
+import { db } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
@@ -7,6 +7,7 @@ import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clea
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
 import { resolverEscopoEspelhamento } from '../services/mirrorScope';
+import { lerBaseLocalUnificada } from '../services/localBaseSource';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
@@ -183,8 +184,11 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setMirrorProgress(1);
       addLog(`[SRE_CLOUD] Iniciando espelhamento em massa da base local para a Nuvem (Supabase)...`);
 
-      const ativos = await db.ativos.toArray();
-      if (!ativos || ativos.length === 0) {
+      // MESMA FONTE DO CARTÃO: o cartão conta o espelho mais completo e o envio
+      // lia só `db.ativos`; com espelhos divergentes o ecrã anunciava N ativos e
+      // o envio mandava menos. `lerBaseLocalUnificada` decide o espelho uma vez.
+      const base = await lerBaseLocalUnificada();
+      if (base.rows.length === 0) {
         addLog(`[SRE_CLOUD] Aviso: Nenhum ativo local para espelhar.`);
         return;
       }
@@ -192,10 +196,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       // SRE ISOLAMENTO: só sobe o que tem UM contrato identificado. O cache
       // local pode conter dados de OUTROS contratos (ex.: CICOPAL de sessão
       // anterior) e a nuvem não é lugar para descobrir isso por tentativa.
-      const escopo = resolverEscopoEspelhamento(
-        ativos as unknown as Record<string, unknown>[],
-        activeTenantid
-      );
+      const escopo = resolverEscopoEspelhamento(base.rows, activeTenantid);
       if (!escopo.ok) {
         addLog(`[SRE_CLOUD] Espelhamento recusado (${escopo.reason}): ${escopo.message}`);
         showRecoveryToast(`⛔ ${escopo.message}`, 'red');
@@ -242,12 +243,12 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           if (userStr) tid = String(JSON.parse(userStr)?.tenantid || '').trim().toUpperCase();
         } catch { /* ignore */ }
       }
-      // Contagem contra os TRÊS espelhos (local_assets · ativos · assets), com a
-      // mesma regra do resto do app (maior espelho). Antes contava só
-      // `local_assets` e anunciava 0 ativos com dados vivos noutro espelho.
-      const counts = await sqliteService.countAssetMirrors(tid || null);
-      setMirrors({ local_assets: counts.local_assets, ativos: counts.ativos, assets: counts.assets });
-      const aCount = counts.total;
+      // Contagem contra os TRÊS espelhos (local_assets · ativos · assets), pela
+      // mesma fonte que o espelhamento usa para enviar: o número do cartão e o
+      // número enviado não podem divergir.
+      const base = await lerBaseLocalUnificada(tid || null);
+      setMirrors(base.mirrors);
+      const aCount = base.rows.length;
 
       // Banco local vazio: verifica o espelho virtual (iframe sandbox) — é dele
       // que a Unidade Operacional tira o número quando não há linhas em disco.
@@ -265,7 +266,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       if (vCount > 0) {
         addLog(`[SRE_STATS] Banco local vazio, mas existe espelho virtual com ${vCount} ativos (origem do número mostrado na Unidade Operacional).`);
       } else {
-        addLog(`[SRE_STATS] Espelhos: local_assets=${counts.local_assets} · ativos=${counts.ativos} · assets=${counts.assets}.`);
+        addLog(`[SRE_STATS] Espelhos: local_assets=${base.mirrors.local_assets} · ativos=${base.mirrors.ativos} · assets=${base.mirrors.assets} (fonte: ${base.fonte ?? 'nenhuma'}).`);
       }
     } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
       console.error("[SRE STATS ERR]", err);
