@@ -7,6 +7,7 @@ import { localDb } from './localDbService';
 import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
+import { comTimeout, PULL_PAGE_TIMEOUT_MS } from '../utils/pullTimeout';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { buildUnitFlags, mergeUnitFlags, pickUnitFlags } from '../utils/unitConfigFlags';
@@ -2244,7 +2245,17 @@ const fetchFullInventoryImpl = async (
         q = q.gt('updated_at', options.since);
       }
 
-      const { data: pageData, error: assetsError } = await q;
+      // Prazo por página: sem isto, um socket meio-aberto deixava o overlay
+      // "SINCRONIZANDO BASE" a girar para sempre (o `finally` do sync nunca corria).
+      type PaginaAssets = {
+        data: Record<string, unknown>[] | null;
+        error: { code?: string; message: string } | null;
+      };
+      const { data: pageData, error: assetsError } = await comTimeout(
+        q as unknown as PromiseLike<PaginaAssets>,
+        PULL_PAGE_TIMEOUT_MS,
+        `Tempo esgotado a ler a página ${from / PAGE_SIZE + 1} de ativos (${PULL_PAGE_TIMEOUT_MS / 1000}s). Verifique a rede e tente novamente.`
+      );
       
       if (assetsError) {
         logger.error(`[Supabase] Erro em fetchFullInventory (Paginação ${from}): ${assetsError.code} - ${assetsError.message}`, assetsError);

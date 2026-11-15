@@ -742,6 +742,9 @@ useEffect(() => {
 
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  // Quantos ativos já desceram neste pull: o overlay deixou de ser um spinner
+  // mudo ("demorando muito" sem sinal de vida).
+  const [syncBaixados, setSyncBaixados] = useState<number | null>(null);
   const isSyncingRef = useRef(false);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
@@ -2755,10 +2758,13 @@ useEffect(() => {
       if (incremental) {
         logger.info(`>>> [Sync] Delta ativo para ${ckKey} (checkpoint ${String(since)}). Baixando apenas o que mudou desde o último pull (Etapa 5b).`);
       }
-      const cloudData = await fetchFullInventory(tenantid, explicitUnitId, undefined, undefined, {
-        since,
-        trackCheckpoint: true
-      });
+      const cloudData = await fetchFullInventory(
+        tenantid,
+        explicitUnitId,
+        (baixados) => setSyncBaixados(baixados),
+        undefined,
+        { since, trackCheckpoint: true }
+      );
       const syncTimestamp = new Date().toISOString();
 
       logger.info(`>>> [Sync] Dados recebidos da nuvem: ${cloudData?.assets?.length || 0} ativos.`);
@@ -3014,6 +3020,7 @@ useEffect(() => {
       }
       isSyncingRef.current = false;
       setIsSyncing(false);
+      setSyncBaixados(null);
     }
   }, [databaseMode, screen, isSyncing, pushLocalChanges, user]);
 
@@ -8163,7 +8170,11 @@ useEffect(() => {
             {databaseMode === DatabaseMode.INTERNAL ? 'Processando Local' : 'Sincronizando Base'}
           </h3>
           <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest animate-pulse">
-            {databaseMode === DatabaseMode.INTERNAL ? 'Aguarde, alternando modo de dados...' : 'Aguarde, baixando dados da nuvem...'}
+            {databaseMode === DatabaseMode.INTERNAL
+              ? 'Aguarde, alternando modo de dados...'
+              : syncBaixados === null
+                ? 'Aguarde, baixando dados da nuvem...'
+                : `${syncBaixados.toLocaleString('pt-BR')} ativos baixados — continuando...`}
           </p>
         </div>
       )}
