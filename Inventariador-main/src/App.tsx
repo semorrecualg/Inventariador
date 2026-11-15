@@ -762,10 +762,13 @@ useEffect(() => {
   // Link de recuperação do Supabase: a app mostra o ecrã de nova senha em vez
   // de deixar entrar com a sessão temporária que o link cria.
   const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(() => {
+    // A marca é posta na avaliação de `passwordRecovery` (importado primeiro em
+    // index.tsx) ou no evento PASSWORD_RECOVERY. O hash já pode estar limpo
+    // aqui, por isso a leitura do URL é só um reforço.
     const doLink = typeof window !== 'undefined'
       && ehLinkDeRecuperacao(window.location.hash, window.location.search);
     if (doLink) marcarRecuperacaoDeSenha();
-    return doLink || emRecuperacaoDeSenha();
+    return emRecuperacaoDeSenha() || doLink;
   });
   const isSyncingRef = useRef(false);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);

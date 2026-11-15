@@ -18,15 +18,38 @@ export const ehLinkDeRecuperacao = (hash: string, search = ''): boolean => {
   return temParametro(hash) || temParametro(search);
 };
 
+/**
+ * Marca em memória. O supabase-js consome e limpa o `#access_token` quando o
+ * cliente é construído, por isso a leitura do URL tem de acontecer ANTES disso
+ * (ver a captura no fim deste módulo, importada primeiro por `index.tsx`).
+ */
+let recuperacaoEmMemoria = false;
+
 export const marcarRecuperacaoDeSenha = (): void => {
+  recuperacaoEmMemoria = true;
   try {
     sessionStorage.setItem(CHAVE_RECUPERACAO, 'true');
   } catch {
-    /* storage bloqueado: a marca em memória do App continua a valer */
+    /* storage bloqueado: a marca em memória continua a valer */
   }
 };
 
+/**
+ * Lê o URL e marca a recuperação. Chamada na avaliação deste módulo, que
+ * `index.tsx` importa antes do App/supabaseService — ordem determinística de
+ * ESM, para apanhar o hash antes de o cliente o apagar.
+ */
+export const capturarLinkDeRecuperacao = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const doLink = ehLinkDeRecuperacao(window.location.hash, window.location.search);
+  if (doLink) marcarRecuperacaoDeSenha();
+  return doLink;
+};
+
+capturarLinkDeRecuperacao();
+
 export const emRecuperacaoDeSenha = (): boolean => {
+  if (recuperacaoEmMemoria) return true;
   try {
     return sessionStorage.getItem(CHAVE_RECUPERACAO) === 'true';
   } catch {
@@ -35,6 +58,7 @@ export const emRecuperacaoDeSenha = (): boolean => {
 };
 
 export const limparRecuperacaoDeSenha = (): void => {
+  recuperacaoEmMemoria = false;
   try {
     sessionStorage.removeItem(CHAVE_RECUPERACAO);
   } catch {
