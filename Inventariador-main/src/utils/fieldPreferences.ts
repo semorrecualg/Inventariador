@@ -9,20 +9,10 @@
 // ============================================================================
 
 import { ScannerMode, ScanFeedbackMode, InventoryState } from '../types';
+import { DEVICE_CONFIG_KEYS } from './configScope';
 
-export type FieldPreferences = Pick<
-  InventoryState,
-  'scannerMode' | 'autoConfirmOnScan' | 'scanFeedbackMode' | 'darkMode' | 'batterySaver'
->;
-
-/** Campos que pertencem ao dispositivo; nunca seguem no snapshot. */
-export const DEVICE_PREF_FIELDS = [
-  'scannerMode',
-  'autoConfirmOnScan',
-  'scanFeedbackMode',
-  'darkMode',
-  'batterySaver'
-] as const;
+/** Escopo declarado uma única vez em utils/configScope. */
+export type FieldPreferences = Pick<InventoryState, (typeof DEVICE_CONFIG_KEYS)[number]>;
 
 const KEYS = {
   scannerMode: 'app_scanner_mode',
@@ -94,7 +84,7 @@ export function writeFieldPreferences(prefs: Partial<FieldPreferences>): void {
  * Devolve o mesmo objeto (mutável) para não duplicar memória com ativos grandes.
  */
 export function stripDevicePreferences<T extends Record<string, unknown>>(snapshot: T): T {
-  DEVICE_PREF_FIELDS.forEach((field) => {
+  DEVICE_CONFIG_KEYS.forEach((field) => {
     delete snapshot[field];
   });
   return snapshot;

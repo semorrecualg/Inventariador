@@ -1,4 +1,5 @@
 
+import { CONTRACT_CONFIG_COLUMNS, CONTRACT_REVERSE_COLUMNS, DEVICE_CONFIG_COLUMNS, DEVICE_CONFIG_KEY_SET } from '../utils/configScope';
 import { createClient } from '@supabase/supabase-js';
 import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot, DatabaseMode } from '../types';
 import { Capacitor } from '@capacitor/core';
@@ -1428,42 +1429,6 @@ export const buildConfigCloudPayload = (
   config: Omit<InventoryState, 'assets'> | Record<string, unknown>,
   tenantid?: string | string[]
 ): { configId: string; tenantid: string; payload: Record<string, unknown> } | null => {
-  // Filtra apenas os campos que sabemos que existem na tabela para evitar erros de coluna inexistente.
-  // Preferências de DISPOSITIVO (scanner_mode, scan_feedback_mode, dark_mode,
-  // battery_saver) ficam de fora de propósito: a fonte única delas é o
-  // localStorage do aparelho (utils/fieldPreferences). Enquanto viajavam aqui,
-  // a configuração descia no login seguinte e desfazia o ajuste.
-  const allowedKeys = [
-    'id',
-    'companies',
-    'last_updated',
-    'status',
-    'editable_fields',
-    'qr_code_fields',
-    'inventory_search_mode',
-    'immersive_mode',
-    'protheus_integration_enabled',
-    'protheus_api_url',
-    'mandatory_photo_on_divergence',
-    'mandatory_photo_on_new_item',
-    'database_mode',
-    'tenantid'
-  ];
-
-  // Mapeamento de camelCase para snake_case
-  const mapping: Record<string, string> = {
-    'lastUpdated': 'last_updated',
-    'editableFields': 'editable_fields',
-    'qrCodeFields': 'qr_code_fields',
-    'inventorySearchMode': 'inventory_search_mode',
-    'immersiveMode': 'immersive_mode',
-    'protheusIntegrationEnabled': 'protheus_integration_enabled',
-    'protheusApiUrl': 'protheus_api_url',
-    'mandatoryPhotoOnDivergence': 'mandatory_photo_on_divergence',
-    'mandatoryPhotoOnNewItem': 'mandatory_photo_on_new_item',
-    'databaseMode': 'database_mode'
-  };
-
   const source = config as unknown as Record<string, unknown>;
 
   // `default` é o tenant da linha global (sentinela), não um contrato: gravar
@@ -1499,19 +1464,14 @@ export const buildConfigCloudPayload = (
     tenantid: cleanTenant
   };
 
-  Object.keys(source).forEach(key => {
-    const dbKey = mapping[key] || key;
-    // Omitimos explicitamente o batterySaver ou battery_saver para garantir a blindagem do payload
-    if (key === 'batterySaver' || key === 'battery_saver' || dbKey === 'battery_saver') {
-      return;
-    }
-    // Identidade nunca vem do objeto (ver comentário da função).
-    if (dbKey === 'id' || dbKey === 'tenantid') return;
-    if (!allowedKeys.includes(dbKey)) return;
-    const val = source[key];
+  // SÓ as chaves de CONTRATO sobem (utils/configScope). Preferências de
+  // dispositivo não entram aqui por construção — não há lista local para
+  // divergir da fonte única.
+  Object.entries(CONTRACT_CONFIG_COLUMNS).forEach(([stateKey, column]) => {
+    const val = source[stateKey] !== undefined ? source[stateKey] : source[column];
     // Impedimos o envio de campos nulos ou indefinidos de infraestrutura para evitar a quebra do interceptor do v2.6
     if (val !== undefined && val !== null) {
-      payload[dbKey] = val;
+      payload[column] = val;
     }
   });
 
@@ -2173,19 +2133,7 @@ export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
  * para o payload — foi assim que a configuração voltava sempre para a linha de
  * origem (`global_config`, tenant `default`) em vez de `config_<TENANT>`.
  */
-const CONFIG_REVERSE_MAPPING: Record<string, string> = {
-  'last_updated': 'lastUpdated',
-  'editable_fields': 'editableFields',
-  'qr_code_fields': 'qrCodeFields',
-  'inventory_search_mode': 'inventorySearchMode',
-  'immersive_mode': 'immersiveMode',
-  'protheus_integration_enabled': 'protheusIntegrationEnabled',
-  'protheus_api_url': 'protheusApiUrl',
-  'mandatory_photo_on_divergence': 'mandatoryPhotoOnDivergence',
-  'mandatory_photo_on_new_item': 'mandatoryPhotoOnNewItem',
-  'database_mode': 'databaseMode'
-};
-
+const CONFIG_REVERSE_MAPPING: Readonly<Record<string, string>> = CONTRACT_REVERSE_COLUMNS;
 const CONFIG_IDENTITY_KEYS = new Set([
   'id',
   'tenantid',
@@ -2207,6 +2155,9 @@ export const mapCloudConfigRow = (
 
   Object.keys(row).forEach(key => {
     if (CONFIG_IDENTITY_KEYS.has(key)) return;
+    // Linha antiga que ainda traga preferência de dispositivo é ignorada: a
+    // fonte dela é o aparelho (utils/fieldPreferences).
+    if (DEVICE_CONFIG_COLUMNS.has(key) || DEVICE_CONFIG_KEY_SET.has(key)) return;
     const camelKey = CONFIG_REVERSE_MAPPING[key] || key;
     mapped[camelKey] = row[key];
   });

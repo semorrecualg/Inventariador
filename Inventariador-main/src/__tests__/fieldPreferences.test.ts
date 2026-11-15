@@ -3,9 +3,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   readFieldPreferences,
   writeFieldPreferences,
-  stripDevicePreferences,
-  DEVICE_PREF_FIELDS
+  stripDevicePreferences
 } from '../utils/fieldPreferences';
+import { DEVICE_CONFIG_KEYS } from '../utils/configScope';
 import { ScannerMode, ScanFeedbackMode } from '../types';
 
 /**
@@ -67,7 +67,7 @@ describe('fieldPreferences — fonte única do dispositivo', () => {
 
     const stripped = stripDevicePreferences(snapshot);
 
-    DEVICE_PREF_FIELDS.forEach((field) => expect(stripped).not.toHaveProperty(field));
+    DEVICE_CONFIG_KEYS.forEach((field) => expect(stripped).not.toHaveProperty(field));
     expect(stripped.editableFields).toEqual(['SERIAL']);
     expect(stripped.lastUpdated).toBe('2026-11-15T00:00:00.000Z');
   });
