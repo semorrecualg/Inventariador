@@ -348,6 +348,14 @@ eventos (F1) é a mudança mais profunda e pode entrar por baixo, sem trocar a t
 - **Push parcial no ciclo**: `syncSession.test.ts` cobre push com aceite +
   recusa, `pullIntoSession` no mesmo ciclo e recibo coerente
   (`enviados = aceitos + recusados`, `recebidos` do pull, `faltantes` > 0).
+- **F1.3/F1.4 entregues na conferência**: a tela de inventário emite
+  `LEITURA`/`DIVERGENCIA` (`conferirAtivo`, com `lamport` do aparelho, GPS e
+  `device_id`) e o estado do ativo é derivado do log (`derivarAtualizacaoConferencia`)
+  e gravado em `local_assets` (e espelhos até F5) por `applyProjectionToState` —
+  deixou de se escrever `_conferido`/`_dataLeitura`/`_auditor`/`_localMaster` à
+  mão nesse caminho. Falta estender a ficha/etiqueta/conciliação e a edição em
+  lote (`bulkUpdateAssets`), que continuam com escrita direta até F1 fechar em
+  todas as telas, e F1.6 (cadeia de hash).
 - **F1 em curso** (v8 do schema local): `field_events` criada com escrita
   só-adição — hooks `updating`/`deleting` do Dexie recusam alterar ou apagar o
   evento (`AppendOnlyViolation`), e a única alteração aceite é `_synced` 0 → 1,

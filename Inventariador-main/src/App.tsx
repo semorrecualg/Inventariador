@@ -114,6 +114,7 @@ import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudI
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isSyncLockStuck } from './services/syncQueueGuards';
 import { beginSyncCycle, endSyncCycle, pullIntoSession, pushAssetsWithReceipt, type SyncSession } from './services/syncSessionService';
+import { conferirAtivo, derivarAtualizacaoConferencia } from './services/fieldConferencing';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
 import { determineAssetTag } from './services/tagService';
@@ -5207,22 +5208,51 @@ useEffect(() => {
           : (updatedAsset.endereco || "").toString().toUpperCase().trim());
     
     const updates = { ...updatedAsset } as Asset;
-    // Se vier com _conferido explicitamente definido, respeitamos (para permitir desmarcar no bumerangue)
-    if (updates._conferido === undefined) {
-      updates._conferido = true;
-    }
-    if (!updates._dataLeitura) {
-      updates._dataLeitura = new Date().toISOString();
-    }
-    updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
     updates._origemTransacao = origin; // Aplica o código fixo
-    
+
     // Garantir que tenant e unit estão definidos de forma dinâmica
     if (!updates.tenantid) {
       updates.tenantid = user?.tenantid || readLocalTenantId() || readSessionTenantId() || '';
     }
     if (!updates.filial) {
       updates.filial = user?.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '';
+    }
+
+    const auditor = user?.name || user?.username || user?.email || 'SISTEMA';
+    // F1.3/F1.4 — na tela de conferência o estado vem da PROJEÇÃO: a leitura
+    // nasce como evento (com lamport, GPS e aparelho) e os campos derivados
+    // (`_conferido`, `_dataLeitura`, `_auditor`, `_localMaster`) são calculados
+    // a partir do log. Desmarcar (`_conferido === false`) não gere evento.
+    const emConferencia = origin === TransactionOrigin.INVENTORY && updates._conferido !== false;
+    if (emConferencia) {
+      try {
+        const { estado } = await conferirAtivo({
+          tenantid: updates.tenantid,
+          filial: updates.filial,
+          asset_key: String(updates.primarykey || updates.id || ''),
+          auditor,
+          tipo: String(updates.TAG_INVENTARIO || '').toUpperCase().includes('DIVERG')
+            ? 'DIVERGENCIA'
+            : 'LEITURA',
+          local: targetLoc,
+          gps_lat: (updates as unknown as { gps_lat?: number | null }).gps_lat ?? null,
+          gps_lng: (updates as unknown as { gps_lng?: number | null }).gps_lng ?? null,
+        });
+        Object.assign(updates, derivarAtualizacaoConferencia(estado));
+      } catch (err) {
+        // A conferência não pode falhar por causa do log: cai na escrita direta
+        // (comportamento anterior) e deixa rasto para o suporte.
+        logger.warn('>>> [FieldProjection] Falha ao registar conferência; escrita direta:', err);
+        updates._conferido = true;
+        if (!updates._dataLeitura) updates._dataLeitura = new Date().toISOString();
+        updates._auditor = auditor;
+      }
+    } else if (updates._conferido !== false) {
+      // Fora da conferência (ficha, etiqueta, conciliação) mantém-se o
+      // comportamento anterior até F1 chegar a essas telas.
+      if (updates._conferido === undefined) updates._conferido = true;
+      if (!updates._dataLeitura) updates._dataLeitura = new Date().toISOString();
+      updates._auditor = auditor;
     }
     
     // Log de Auditoria
