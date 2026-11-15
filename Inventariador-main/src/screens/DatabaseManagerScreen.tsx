@@ -485,6 +485,18 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     }
   };
 
+  /**
+   * Abre o seletor de arquivo pelo caminho que já funcionava nesta tela: clique
+   * programático no input via ref. Clicar num `<label htmlFor>` também abre no
+   * Chrome desktop, mas fica sem efeito em WebViews que exigem o input no fluxo
+   * normal do documento — o botão voltou a ser `<button>`.
+   */
+  const handleButtonClick = (): void => {
+    const input = fileInputRef.current;
+    if (!input || isUploading || isPurging) return;
+    input.click();
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -828,24 +840,20 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <FileSpreadsheet className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Carga de Planilhabase</h3>
+            <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Carga de Planilha Base</h3>
             <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
               Selecione o arquivo higienizado (.xls/.xlsx/.csv) para importar na base de dados
             </p>
           </div>
-          {/* `<label htmlFor>` abre o seletor de ficheiros pelo próprio navegador.
-              O `.click()` programático num input `display:none` é bloqueado em
-              vários WebViews (Android/iOS) — o botão existia e não abria nada. */}
-          <label
-            htmlFor={isUploading || isPurging ? undefined : 'file-loader'}
-            aria-disabled={isUploading || isPurging}
-            className={`w-full flex items-center justify-center space-x-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-98 cursor-pointer border border-emerald-500/20 ${
-              isUploading || isPurging ? 'bg-slate-800 text-slate-600 pointer-events-none' : ''
-            }`}
+          <button
+            type="button"
+            disabled={isUploading || isPurging}
+            onClick={handleButtonClick}
+            className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-98 cursor-pointer border border-emerald-500/20"
           >
             <UploadCloud size={14} />
             <span>{isUploading ? `CARREGANDO: ${progress}%` : "SELECIONAR E CARREGAR PLANILHA"}</span>
-          </label>
+          </button>
         </div>
 
         {/* Guardião suave de duplicidade por recno (Protheus sn1_recno) */}
