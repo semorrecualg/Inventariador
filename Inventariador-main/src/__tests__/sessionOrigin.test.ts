@@ -14,7 +14,7 @@ import {
   isAppManagedSession,
   markAppManagedSession
 } from '../utils/authUtils';
-import { deveEntrarEmModoNuvem, origemDaSessaoGuardada } from '../utils/sessionMode';
+import { deveEntrarEmModoNuvemNaSessaoGuardada } from '../utils/sessionMode';
 
 const sessaoValida = () => sessionStorage.setItem('app_current_user', '{"email":"master@cicopal"}');
 
@@ -48,19 +48,14 @@ describe('marca de sessão local', () => {
     sessaoValida();
     clearAppManagedSession();
 
-    const origem = origemDaSessaoGuardada(isAppManagedSession());
-
-    expect(origem).toBe('SUPABASE');
-    expect(deveEntrarEmModoNuvem(origem, true)).toBe(true);
+    expect(deveEntrarEmModoNuvemNaSessaoGuardada(isAppManagedSession(), true)).toBe(true);
   });
 
   it('sem a limpeza, o reload voltaria a BASE LOCAL (o bug)', () => {
     markAppManagedSession();
     sessaoValida();
 
-    const origem = origemDaSessaoGuardada(isAppManagedSession());
-
-    expect(deveEntrarEmModoNuvem(origem, true)).toBe(false);
+    expect(deveEntrarEmModoNuvemNaSessaoGuardada(isAppManagedSession(), true)).toBe(false);
   });
 
   it('limpar duas vezes não estoura', () => {

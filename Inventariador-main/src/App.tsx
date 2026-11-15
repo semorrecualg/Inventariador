@@ -118,7 +118,7 @@ import { conferirAtivo, derivarAtualizacaoConferencia, reservarLamports, resolve
 import { flushFieldEvents } from './services/fieldEventSync';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
 import { safeStringify } from './services/utils';
-import { deveEntrarEmModoNuvem, origemDaSessaoGuardada, avisoAposCargaLocal } from './utils/sessionMode';
+import { deveEntrarEmModoNuvem, deveEntrarEmModoNuvemNaSessaoGuardada, avisoAposCargaLocal } from './utils/sessionMode';
 import { determineAssetTag } from './services/tagService';
 
 import { requestPersistentStorage, localDb } from './services/localDbService';
@@ -4488,8 +4488,8 @@ useEffect(() => {
         // o facto de o build ter credenciais. Credencial local do app (marcada
         // em `gbr_session_origin`) fica em BASE LOCAL; sessão Supabase entra em
         // BASE OFICIAL e puxa o contrato.
-        const naNuvemReload = deveEntrarEmModoNuvem(
-          origemDaSessaoGuardada(isAppManagedSession()),
+        const naNuvemReload = deveEntrarEmModoNuvemNaSessaoGuardada(
+          isAppManagedSession(),
           !isInternalMode
         );
         if (naNuvemReload) {

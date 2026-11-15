@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   avisoAposCargaLocal,
   deveEntrarEmModoNuvem,
-  origemDaSessaoGuardada
+  deveEntrarEmModoNuvemNaSessaoGuardada
 } from '../utils/sessionMode';
 
 describe('deveEntrarEmModoNuvem', () => {
@@ -39,19 +39,15 @@ describe('deveEntrarEmModoNuvem', () => {
 
 describe('auto-login (reload) usa a mesma regra do login', () => {
   it('sessão guardada do app (credencial local) fica em BASE LOCAL', () => {
-    const origem = origemDaSessaoGuardada(true);
-    expect(origem).toBe('LOCAL');
-    expect(deveEntrarEmModoNuvem(origem, true)).toBe(false);
+    expect(deveEntrarEmModoNuvemNaSessaoGuardada(true, true)).toBe(false);
   });
 
   it('sessão Supabase guardada entra em BASE OFICIAL', () => {
-    const origem = origemDaSessaoGuardada(false);
-    expect(origem).toBe('SUPABASE');
-    expect(deveEntrarEmModoNuvem(origem, true)).toBe(true);
+    expect(deveEntrarEmModoNuvemNaSessaoGuardada(false, true)).toBe(true);
   });
 
   it('credencial local com build sem credenciais continua local', () => {
-    expect(deveEntrarEmModoNuvem(origemDaSessaoGuardada(true), false)).toBe(false);
+    expect(deveEntrarEmModoNuvemNaSessaoGuardada(true, false)).toBe(false);
   });
 });
 

@@ -25,15 +25,16 @@ export const deveEntrarEmModoNuvem = (
 ): boolean => credenciaisNuvem && origem !== 'LOCAL';
 
 /**
- * Origem de uma sessão que o app encontrou já aberta (reload / auto-login).
+ * Mesma regra para a sessão que já está aberta (reload / auto-login).
  *
- * Sem login a acontecer não há como perguntar ao formulário: usa-se a marca que
- * o login deixou. Sessão marcada como do app (`markAppManagedSession`, gravada
- * nos logins por credencial local) é LOCAL; qualquer outra é a nuvem, porque só
- * chega aqui quem tem sessão Supabase guardada.
+ * Sem formulário não há origem explícita: vale a marca que o login deixou
+ * (`markAppManagedSession`). Sessão marcada como do app é LOCAL; qualquer outra
+ * é a nuvem, porque só chega aqui quem tem sessão Supabase guardada.
  */
-export const origemDaSessaoGuardada = (sessaoDoApp: boolean): LoginOrigin =>
-  (sessaoDoApp ? 'LOCAL' : 'SUPABASE');
+export const deveEntrarEmModoNuvemNaSessaoGuardada = (
+  sessaoDoApp: boolean,
+  credenciaisNuvem: boolean
+): boolean => deveEntrarEmModoNuvem(sessaoDoApp ? 'LOCAL' : 'SUPABASE', credenciaisNuvem);
 
 export interface AvisoCargaLocal {
   titulo: string;
