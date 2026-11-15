@@ -158,6 +158,10 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     // permissão fantasma se perpetuava a cada edição. Para nomes ainda ausentes
     // da base existe o campo "Filial fora da lista".
     (baseFiliaisByTenant.get(key) || []).forEach(push);
+    // Ativos carregados em memória do MESMO contrato: em modo nuvem as filiais
+    // vivem aqui, não na base local — sem esta fonte o contrato aparecia sem
+    // unidade nenhuma. A origem é só a base (ver unitsByTenant em App.tsx).
+    Array.from(unitsByTenant.get(key) || new Set<string>()).forEach(push);
     return Array.from(merged.values()).sort((a, b) => a.localeCompare(b));
   };
 

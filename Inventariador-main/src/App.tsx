@@ -7030,31 +7030,23 @@ useEffect(() => {
       }
     });
 
-    // 2. De Usuários (Apenas para garantir que unidades já atribuídas apareçam, se forem válidas)
-    users.forEach(u => {
-      const t = (u.tenantid || '').toUpperCase();
-      const isValidUnit = (unit: string) => {
-        if (!unit) return false;
-        const upper = unit.toUpperCase();
-        return upper !== 'DEFAULT' && upper !== 'NULL' && upper !== '0' && upper !== t;
-      };
-
-      if (u.unitid && isValidUnit(u.unitid)) {
-        if (!map.has(t)) map.set(t, new Set());
-        map.get(t)!.add(u.unitid);
-      }
-      if (u.units) {
-        u.units.forEach(unit => {
-          if (isValidUnit(unit)) {
-            if (!map.has(t)) map.set(t, new Set());
-            map.get(t)!.add(unit);
-          }
-        });
-      }
+    // 2. Unidades operacionais que o app mostra para o contrato (a mesma lista
+    // do contrato de trabalho). Cobre o modo nuvem, onde as filiais não estão na
+    // base local e sim no conjunto carregado/cadastrado.
+    fullCompaniesWithStatus.forEach(c => {
+      const t = (c.tenantid || '').toUpperCase().trim();
+      const name = String(c.name || '').trim();
+      if (!t || !name) return;
+      if (!map.has(t)) map.set(t, new Set());
+      map.get(t)!.add(name);
     });
 
+    // Unidades vindas de PERFIS ficam de fora de propósito: era por aqui que uma
+    // unidade antiga (ex.: 'MATRIZ' de contrato sem matriz) voltava à lista de
+    // permissões e se perpetuava a cada edição. A lista de unidades de um acesso
+    // espelha as filiais da base do contrato.
     return map;
-  }, [inventory.assets, users]);
+  }, [inventory.assets, fullCompaniesWithStatus]);
 
   const availableUnits = useMemo(() => {
     const fromAssets = inventory.assets.map(a => a._unitid || a.tenantid).filter(Boolean);
