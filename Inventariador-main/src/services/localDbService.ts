@@ -932,6 +932,53 @@ export async function backupDatabaseToPhysicalStorage(assetsData: any[]): Promis
 
 let userWorkspaceHandle: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+/**
+ * Pasta escolhida pela pessoa no Gestor de Base de Dados.
+ *
+ * O handle é guardado em IndexedDB (localforage): FileSystemDirectoryHandle é
+ * structured-cloneable e sobrevive ao reload, mas a PERMISSÃO não — volta a ser
+ * pedida quando o app precisar de escrever. Sem este registo, "vincular pasta"
+ * desaparecia ao fechar o ecrã e o utilizador via sempre "NENHUM DIRETÓRIO".
+ */
+const workspaceHandleStore = localforage.createInstance({
+  name: 'GBR_Audit_v24',
+  storeName: 'gbr_workspace_handle',
+});
+
+export function setUserWorkspaceHandle(handle: unknown): void {
+  userWorkspaceHandle = handle;
+}
+
+export function getUserWorkspaceHandleName(): string | null {
+  const nome = (userWorkspaceHandle as { name?: unknown } | null)?.name;
+  return typeof nome === 'string' ? nome : null;
+}
+
+export async function persistWorkspaceHandle(handle: unknown): Promise<boolean> {
+  try {
+    await workspaceHandleStore.setItem('pasta', handle);
+    return true;
+  } catch (err) {
+    logger.warn('[SRE] Pasta escolhida mas não foi possível guardar o handle para o próximo arranque:', err);
+    return false;
+  }
+}
+
+/** Recupera a pasta vinculada num arranque novo e devolve o nome dela. */
+export async function restoreWorkspaceHandle(): Promise<string | null> {
+  try {
+    const handle = await workspaceHandleStore.getItem<{ name?: string; queryPermission?: (opts: { mode: string }) => Promise<string> }>('pasta');
+    if (!handle) return null;
+    userWorkspaceHandle = handle;
+    const permissao = await handle.queryPermission?.({ mode: 'readwrite' });
+    logger.info(`[SRE] Pasta vinculada recuperada: ${handle.name ?? '?'} (permissão: ${permissao ?? 'desconhecida'}).`);
+    return typeof handle.name === 'string' ? handle.name : null;
+  } catch (err) {
+    logger.warn('[SRE] Não foi possível recuperar a pasta vinculada:', err);
+    return null;
+  }
+}
+
 export function selectLocalFile(): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');

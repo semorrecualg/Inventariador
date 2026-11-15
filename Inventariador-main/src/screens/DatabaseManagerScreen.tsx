@@ -3,7 +3,7 @@ import { db, sqliteService } from '../services/sqliteService';
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
-import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
+import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot, setUserWorkspaceHandle, persistWorkspaceHandle, restoreWorkspaceHandle } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
@@ -143,12 +143,17 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   };
 
   const [activePathName, setActivePathName] = useState<string>(() => {
+    // A pasta vinculada é guardada em localStorage (não só em sessionStorage):
+    // com sessionStorage, fechar o ecrã voltava a mostrar "NENHUM DIRETÓRIO".
+    const pastaGuardada =
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('gbr_physical_folder_name') : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('gbr_physical_folder_name') : null);
+    if (pastaGuardada && pastaGuardada !== 'GBR_Inventario_Virtual') return pastaGuardada;
     const isIframe = typeof window !== 'undefined' && window.self !== window.top;
-    const sessionFolder = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('gbr_physical_folder_name') : null;
     if (isIframe) {
-      return sessionFolder ? `iFrame Sandbox / ${sessionFolder}` : "iFrame Sandbox / GBR_Inventario_Virtual";
+      return pastaGuardada ? `iFrame Sandbox / ${pastaGuardada}` : "iFrame Sandbox / sem pasta vinculada";
     }
-    return sessionFolder || "NENHUM DIRETÓRIO VINCULADO";
+    return pastaGuardada || "NENHUM DIRETÓRIO VINCULADO";
   });
 
   const [isMirroring, setIsMirroring] = useState<boolean>(false);
@@ -362,6 +367,22 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     addLog("[SRE BOOT] Inicializando painel de gestão de base de dados...");
   }, [addLog]);
 
+  // Pasta vinculada em sessões anteriores: o handle vive em IndexedDB. Sem esta
+  // recuperação, o cartão dizia "NENHUM DIRETÓRIO VINCULADO" depois de reiniciar
+  // mesmo com a pasta escolhida antes.
+  useEffect(() => {
+    let activo = true;
+    void (async () => {
+      const nome = await restoreWorkspaceHandle();
+      if (!activo || !nome) return;
+      setWorkspaceFolderName(nome);
+      setActivePathName(nome);
+      localStorage.setItem('gbr_physical_folder_name', nome);
+      addLog(`[SRE_LOADER] Pasta vinculada recordada: ${nome}. Use VINCULAR PASTA para trocar.`);
+    })();
+    return () => { activo = false; };
+  }, [addLog]);
+
   // Carga central de planilha (usada pelo input de arquivo E pela listagem de
   // planilhas da pasta vinculada). O parser XLSX (SheetJS) suporta .xls/.xlsx/.csv.
   const loadSpreadsheetFile = async (file: File) => {
@@ -483,50 +504,95 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   };
 
   // ── Pasta vinculada: listar as planilhas .xls/.xlsx/.csv existentes ──
-  const [workspaceSheets, setWorkspaceSheets] = useState<{ name: string; handle: FileSystemFileHandle }[]>([]);
+  // `file` (webkitdirectory) e `handle` (File System Access) são as duas origens
+  // possíveis: nem todo o ambiente tem `showDirectoryPicker` (Android WebView e
+  // iFrame de outro domínio não têm), e antes isso deixava o botão sem efeito.
+  type WorkspaceSheet = { name: string; handle?: FileSystemFileHandle; file?: File };
+  const [workspaceSheets, setWorkspaceSheets] = useState<WorkspaceSheet[]>([]);
   const [workspaceFolderName, setWorkspaceFolderName] = useState<string | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
 
-  const handleLinkFolder = async () => {
-    const w = window as unknown as { showDirectoryPicker?: (opts?: { mode?: string }) => Promise<{ name: string; values: () => AsyncIterable<{ kind: string; name: string; getFile: () => Promise<File> }> }> };
-    if (typeof w.showDirectoryPicker !== 'function') {
-      addLog('[SRE_LOADER] Seletor de pasta indisponível neste navegador. Use SELECIONAR E CARREGAR PLANILHA.');
-      showRecoveryToast('Seletor de pasta indisponível — use SELECIONAR E CARREGAR PLANILHA.', 'red');
-      return;
-    }
-    try {
-      const handle = await w.showDirectoryPicker({ mode: 'read' });
-      const sheets: { name: string; handle: FileSystemFileHandle }[] = [];
-      for await (const entry of handle.values()) {
-        if (entry.kind === 'file' && /\.(xlsx?|csv)$/i.test(entry.name)) {
-          sheets.push({ name: entry.name, handle: entry as unknown as FileSystemFileHandle });
-        }
-      }
-      setWorkspaceSheets(sheets);
-      setWorkspaceFolderName(handle.name);
-      sessionStorage.setItem('gbr_physical_folder_name', handle.name);
-      localStorage.setItem('gbr_physical_link_active', 'true');
-      addLog(`[SRE_LOADER] Pasta vinculada: ${handle.name} — ${sheets.length} planilha(s) encontrada(s).`);
-    } catch {
-      addLog('[SRE_LOADER] Seletor de pasta cancelado.');
-    }
+  const registrarPasta = (nome: string) => {
+    setWorkspaceFolderName(nome);
+    setActivePathName(nome);
+    localStorage.setItem('gbr_physical_folder_name', nome);
+    localStorage.setItem('gbr_physical_link_active', 'true');
+    sessionStorage.setItem('gbr_physical_folder_name', nome);
   };
 
-  const handleLoadWorkspaceSheet = async (sheet: { name: string; handle: FileSystemFileHandle }) => {
+  const listarPlanilhasDoHandle = async (handle: FileSystemDirectoryHandle): Promise<WorkspaceSheet[]> => {
+    const sheets: WorkspaceSheet[] = [];
+    const entradas = (handle as unknown as { values: () => AsyncIterable<FileSystemHandle> }).values();
+    for await (const entry of entradas) {
+      if (entry.kind === 'file' && /\.(xlsx?|csv)$/i.test(entry.name)) {
+        sheets.push({ name: entry.name, handle: entry as unknown as FileSystemFileHandle });
+      }
+    }
+    return sheets;
+  };
+
+  const handleLinkFolder = async () => {
+    const w = window as unknown as { showDirectoryPicker?: (opts?: { mode?: string; id?: string }) => Promise<FileSystemDirectoryHandle> };
+
+    if (typeof w.showDirectoryPicker === 'function') {
+      try {
+        const handle = await w.showDirectoryPicker({ mode: 'readwrite', id: 'gbr_inventario_root' });
+        const sheets = await listarPlanilhasDoHandle(handle);
+        setUserWorkspaceHandle(handle);
+        await persistWorkspaceHandle(handle);
+        setWorkspaceSheets(sheets);
+        registrarPasta(handle.name);
+        addLog(`[SRE_LOADER] Pasta vinculada: ${handle.name} — ${sheets.length} planilha(s) encontrada(s).`);
+        showRecoveryToast(`📁 Pasta vinculada: ${handle.name}`, 'blue');
+        return;
+      } catch (err) {
+        // Cancelar o seletor é diferente de não haver seletor: só o segundo caso
+        // cai para o input de diretório.
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          addLog('[SRE_LOADER] Seleção de pasta cancelada.');
+          return;
+        }
+        addLog(`[SRE_LOADER] Seletor de pasta recusou (${err instanceof Error ? err.message : String(err)}); usando o seletor de diretório do navegador.`);
+      }
+    }
+
+    // Fallback universal: `<input webkitdirectory>` devolve os ficheiros da pasta
+    // escolhida (Chrome/Edge/Android). Não dá handle para escrita, mas permite
+    // navegar e carregar a planilha — que é o que o utilizador pediu aqui.
+    if (folderInputRef.current) {
+      folderInputRef.current.click();
+      return;
+    }
+    showRecoveryToast('Este navegador não permite escolher pastas. Use SELECIONAR E CARREGAR PLANILHA.', 'red');
+  };
+
+  const handleFolderInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (files.length === 0) {
+      addLog('[SRE_LOADER] Seleção de pasta cancelada.');
+      return;
+    }
+    const primeira = files[0] as File & { webkitRelativePath?: string };
+    const nomePasta = String(primeira.webkitRelativePath || '').split('/')[0] || 'Pasta local';
+    const sheets: WorkspaceSheet[] = files
+      .filter(file => /\.(xlsx?|csv)$/i.test(file.name))
+      .map(file => ({ name: file.name, file }));
+    setWorkspaceSheets(sheets);
+    registrarPasta(nomePasta);
+    addLog(`[SRE_LOADER] Pasta vinculada: ${nomePasta} — ${sheets.length} planilha(s) encontrada(s).`);
+    showRecoveryToast(`📁 Pasta vinculada: ${nomePasta}`, 'blue');
+  };
+
+  const handleLoadWorkspaceSheet = async (sheet: WorkspaceSheet) => {
     try {
-      const file = await sheet.handle.getFile();
+      const file = sheet.file ?? (sheet.handle ? await sheet.handle.getFile() : null);
+      if (!file) throw new Error('planilha sem origem legível');
       addLog(`[SRE_LOADER] Carregando planilha da pasta: ${sheet.name}`);
       await loadSpreadsheetFile(file);
     } catch (err) {
       addLog(`[SRE ERROR] Falha ao ler planilha da pasta: ${err instanceof Error ? err.message : String(err)}`);
       showRecoveryToast('❌ ERRO AO LER PLANILHA DA PASTA.', 'red');
-    }
-  };
-
-  const handleButtonClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (fileInputRef.current) {
-      addLog("[SRE_UI] Acionando seletor de arquivos de forma síncrona...");
-      fileInputRef.current.click();
     }
   };
 
@@ -654,6 +720,20 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           style={{ display: 'none' }} 
           onChange={handleBackupFileChange} 
         />
+        {/* Fallback de pasta sem File System Access (Android WebView, iFrame de
+            outro domínio): o navegador deixa escolher a pasta e devolve os
+            ficheiros dela. */}
+        <input
+          type="file"
+          ref={folderInputRef}
+          id="folder-loader"
+          // Atributos não-padrão (Chrome/Edge/Android): sem eles o input aceita
+          // ficheiros soltos em vez de uma pasta.
+          {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFolderInputChange}
+        />
 
         {/* Botão de Carga Síncrono */}
         <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col items-center text-center space-y-4">
@@ -666,14 +746,19 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
               Selecione o arquivo higienizado (.xls/.xlsx/.csv) para importar na base de dados
             </p>
           </div>
-          <button 
-            disabled={isUploading || isPurging}
-            onClick={handleButtonClick}
-            className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-98 cursor-pointer border border-emerald-500/20"
+          {/* `<label htmlFor>` abre o seletor de ficheiros pelo próprio navegador.
+              O `.click()` programático num input `display:none` é bloqueado em
+              vários WebViews (Android/iOS) — o botão existia e não abria nada. */}
+          <label
+            htmlFor={isUploading || isPurging ? undefined : 'file-loader'}
+            aria-disabled={isUploading || isPurging}
+            className={`w-full flex items-center justify-center space-x-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-98 cursor-pointer border border-emerald-500/20 ${
+              isUploading || isPurging ? 'bg-slate-800 text-slate-600 pointer-events-none' : ''
+            }`}
           >
             <UploadCloud size={14} />
             <span>{isUploading ? `CARREGANDO: ${progress}%` : "SELECIONAR E CARREGAR PLANILHA"}</span>
-          </button>
+          </label>
         </div>
 
         {/* Guardião suave de duplicidade por recno (Protheus sn1_recno) */}
@@ -792,7 +877,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
               </p>
             </div>
           </div>
-          <button 
+          <button
+            type="button"
             onClick={handleLinkFolder}
             className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-98 border border-indigo-500/20"
           >
