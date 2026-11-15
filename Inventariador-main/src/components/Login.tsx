@@ -14,6 +14,12 @@ import { logger } from '../utils/logger';
 import { readSessionTenantId, readLocalTenantId } from '../utils/tenantUtils';
 import type { LoginOrigin } from '../utils/sessionMode';
 import { perfilNaoLido } from '../utils/sessionScope';
+import {
+  ehCredencialInvalida,
+  emailNaoConfirmado,
+  MENSAGEM_CREDENCIAL_INVALIDA,
+  MENSAGEM_EMAIL_NAO_CONFIRMADO
+} from '../utils/loginErrors';
 
 interface LoginProps {
   onLogin: (user: User, origem?: LoginOrigin) => void;
@@ -654,21 +660,18 @@ const Login: React.FC<LoginProps> = ({
             origemSessao = 'LOCAL';
           } else {
             // Se for erro de credenciais (ou qualquer coisa diferente de timeout/falha de rede), NÃO mascara com o SQLite!
-            const isInvalidCreds = errorMsg.includes('invalid credentials') || 
-                                   errorMsg.includes('invalid_credentials') || 
-                                   errorMsg.includes('incorrect') || 
-                                   errorMsg.includes('senha') ||
-                                   errorMsg.includes('invalid grant') ||
-                                   errorMsg.includes('user not found') ||
-                                   errorMsg.includes('user_not_found') ||
-                                   errorMsg.includes('invalid email') ||
-                                   errorMsg.includes('invalid password');
-            
-            if (isInvalidCreds) {
-              throw new Error("E-mail ou senha incorretos na nuvem");
-            } else {
-              throw new Error(rawMessage || "Erro ao autenticar. Verifique seus dados.");
+            // `Invalid login credentials` (resposta real do GoTrue) não contém
+            // `invalid credentials` — o ramo localizado nunca corria e o
+            // formulário mostrava o texto cru em inglês.
+            if (emailNaoConfirmado(rawMessage)) {
+              throw new Error(MENSAGEM_EMAIL_NAO_CONFIRMADO);
             }
+
+            if (ehCredencialInvalida(rawMessage)) {
+              throw new Error(MENSAGEM_CREDENCIAL_INVALIDA);
+            }
+
+            throw new Error(rawMessage || "Erro ao autenticar. Verifique seus dados.");
           }
         }
       } else {
