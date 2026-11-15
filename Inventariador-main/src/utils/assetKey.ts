@@ -115,7 +115,45 @@ export interface AssetKeySources {
   primarykey?: unknown;
   etiqueta?: unknown;
   tag?: unknown;
+  /** Contrato; a chave primária local é composta `[tenantid+primarykey]`. */
+  tenantid?: unknown;
+  /** Unidade, só para a chave derivada de conteúdo. */
+  filial?: unknown;
+  /** Impressão digital da linha, quando já calculada (ver `contentFingerprint`). */
+  fingerprint?: string;
 }
+
+/**
+ * Alocador com estado para uma carga inteira, para linhas SEM `primarykey`.
+ *
+ * A chave primária local é `[tenantid + primarykey]` e, sem `primarykey`, a
+ * etiqueta passa a ser a chave. Duas linhas da planilha com a mesma etiqueta no
+ * mesmo contrato geravam a MESMA chave e o `bulkPut` da segunda sobrescrevia a
+ * primeira: a planilha tinha N linhas e a base ficava com uma. Aqui a primeira
+ * ocorrência fica com a etiqueta e as seguintes recebem `-2`, `-3`, … pela ordem
+ * do ficheiro, para todas as linhas entrarem e a recarga do mesmo ficheiro
+ * produzir as mesmas chaves (sem duplicar a cada importação).
+ *
+ * Linha com `primarykey` nunca recebe sufixo: é a chave do contrato.
+ * A derivação por conteúdo (`allocateFallback`) fica para linhas sem identidade.
+ */
+export const createAssetKeyAllocator = (
+  allocateFallback: (sources: AssetKeySources) => string
+): ((sources: AssetKeySources) => string) => {
+  const seen = new Map<string, number>();
+  return (sources) => {
+    const primary = sanitizeAssetKey(sources.primarykey);
+    if (primary) return primary;
+
+    const base = sanitizeAssetKey(sources.etiqueta) || sanitizeAssetKey(sources.tag);
+    if (!base) return allocateFallback(sources);
+
+    const scope = `${sanitizeAssetKey(sources.tenantid)}|${base}`;
+    const occurrence = (seen.get(scope) ?? 0) + 1;
+    seen.set(scope, occurrence);
+    return occurrence === 1 ? base : `${base}-${occurrence}`;
+  };
+};
 
 /**
  * Resolve a chave de um ativo na ordem do contrato:

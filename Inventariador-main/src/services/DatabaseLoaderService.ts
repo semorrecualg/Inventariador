@@ -6,7 +6,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
 import { normalizeFieldValue, normalizeDateISO, normalizeNumeric } from '../utils/normalize';
-import { contentFingerprint, createFallbackKeyAllocator, resolveAssetKey, sanitizeAssetKey } from '../utils/assetKey';
+import { contentFingerprint, createAssetKeyAllocator, createFallbackKeyAllocator, sanitizeAssetKey } from '../utils/assetKey';
 import { reportRecnoCollisions } from './recnoGuardService';
 
 export interface AtivoPlanilha {
@@ -198,6 +198,12 @@ export class DatabaseLoaderService {
     let registrosProcessados = 0;
     // Chaves derivadas (linhas sem identidade) contam por carga inteira, não por lote.
     const allocateFallbackKey = createFallbackKeyAllocator();
+    // Etiqueta repetida sem `primarykey` também conta pela carga inteira: a 2.ª
+    // linha com a mesma etiqueta no mesmo contrato recebe sufixo em vez de
+    // sobrescrever a 1.ª no `bulkPut` (chave primária [tenantid+primarykey]).
+    const allocateAssetKey = createAssetKeyAllocator((sources) =>
+      allocateFallbackKey(sources.tenantid, sources.filial, sources.fingerprint ?? '')
+    );
 
     for (let i = 0; i < dadosBrutos.length; i += this.CHUNK_SIZE) {
       const loteBruto = dadosBrutos.slice(i, i + this.CHUNK_SIZE) as Record<string, unknown>[];
@@ -210,10 +216,14 @@ export class DatabaseLoaderService {
         // Chave canônica única (utils/assetKey): primarykey → etiqueta → tag →
         // derivada do conteúdo. Antes esta carga olhava só `primarykey` e caía num
         // `ALT-<aleatório>`: cada importação criava linhas novas para o mesmo ativo.
-        const pk = resolveAssetKey(
-          { primarykey: row.primarykey, etiqueta: row.etiqueta, tag: row.tag },
-          () => allocateFallbackKey(tenantid, rawFilial, contentFingerprint(row))
-        );
+        const pk = allocateAssetKey({
+          primarykey: row.primarykey,
+          etiqueta: row.etiqueta,
+          tag: row.tag,
+          tenantid,
+          filial: rawFilial,
+          fingerprint: contentFingerprint(row)
+        });
         // Coluna canônica da planilha: 'endereco' (posição 11 do contrato). O nome 'codigo_endereco'
         // era lido antes e NÃO existe no contrato → gravava endereco: null para todos os ativos,
         // deixando o AddressSelector vazio. Fallbacks aceitos para tolerância de nomes de coluna.
@@ -363,6 +373,9 @@ export class DatabaseLoaderService {
       // Processamento em lotes de 1000 (Chunking)
       const totalRows = rawRows.length;
       const allocateFallbackKey = createFallbackKeyAllocator();
+      const allocateAssetKey = createAssetKeyAllocator((sources) =>
+        allocateFallbackKey(sources.tenantid, sources.filial, sources.fingerprint ?? '')
+      );
       for (let i = 0; i < totalRows; i += this.BATCH_SIZE) {
         batchIndex++;
         const chunk = rawRows.slice(i, Math.min(i + this.BATCH_SIZE, totalRows));
@@ -376,8 +389,14 @@ export class DatabaseLoaderService {
           // Chave canônica única (utils/assetKey) — a mesma de todos os caminhos.
           const primarykeyVal = sanitizeAssetKey(getRowValue(row, 'primarykey'));
           const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
-          const finalId = primarykeyVal || tagSanitizada
-            || allocateFallbackKey(finalTenantid, finalFilial, contentFingerprint(row as Record<string, unknown>));
+          const finalId = allocateAssetKey({
+            primarykey: primarykeyVal,
+            etiqueta: tagSanitizada,
+            tag: tagSanitizada,
+            tenantid: finalTenantid,
+            filial: finalFilial,
+            fingerprint: contentFingerprint(row as Record<string, unknown>)
+          });
           const itemDesc = normalizeFieldValue(
             'descricaodoativo',
             getRowValue(row, 'descricaodoativo', 'descricao', 'item')
@@ -638,6 +657,9 @@ export class DatabaseLoaderService {
     try {
       const BATCH_SIZE = 200;
       const allocateFallbackKey = createFallbackKeyAllocator();
+      const allocateAssetKey = createAssetKeyAllocator((sources) =>
+        allocateFallbackKey(sources.tenantid, sources.filial, sources.fingerprint ?? '')
+      );
       for (let i = 0; i < totalRows; i += BATCH_SIZE) {
         const chunk = rawExcelData.slice(i, Math.min(i + BATCH_SIZE, totalRows));
         const assetsToInsert: DexieAsset[] = [];
@@ -650,8 +672,14 @@ export class DatabaseLoaderService {
           // Chave canônica única (utils/assetKey) — a mesma de todos os caminhos.
           const primarykeyVal = sanitizeAssetKey(getRowValue(row, 'primarykey'));
           const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
-          const finalId = primarykeyVal || tagSanitizada
-            || allocateFallbackKey(finalTenantid, finalFilial, contentFingerprint(row as Record<string, unknown>));
+          const finalId = allocateAssetKey({
+            primarykey: primarykeyVal,
+            etiqueta: tagSanitizada,
+            tag: tagSanitizada,
+            tenantid: finalTenantid,
+            filial: finalFilial,
+            fingerprint: contentFingerprint(row as Record<string, unknown>)
+          });
           const itemDesc = normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${finalId}`;
           const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${finalId}`);
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
