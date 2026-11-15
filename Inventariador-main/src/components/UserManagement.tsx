@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { isAdminEmail } from '../utils/authUtils';
+import { buildAccessRows, type AccessRow } from '../utils/accessTree';
 import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
 import { validateStrongPassword, validateQuickLoginPassword, STRONG_PASSWORD_RULE_LABELS } from '../utils/passwordPolicy';
 import { provisionUserInAuth, resetPassword, deleteUserFromCloud, ProvisionResult } from '../services/supabaseService';
@@ -586,6 +587,15 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     );
   };
 
+  /**
+   * Lista de acessos em ÁRVORE (dono → empresa → master → complementares).
+   * A montagem vive em utils/accessTree para poder ser testada isoladamente.
+   */
+  const accessRows = React.useMemo<AccessRow[]>(
+    () => buildAccessRows(users, currentUser),
+    [users, currentUser],
+  );
+
   return (
     <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn">
       {/* Header */}
@@ -616,20 +626,27 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           ref={virtuosoRef}
           style={{ height: '100%' }}
           atTopStateChange={(atTop) => setShowScrollTop(!atTop)}
-          data={users.filter(u => {
-            // Admin global vê tudo
-            if (isAdminEmail(currentUser?.email) || currentUser?.role === UserRole.ADMIN) return true;
-            // Master vê apenas usuários do seu tenant
-            if (currentUser?.role === UserRole.MASTER) {
-              return u.tenantid === currentUser.tenantid;
+          data={accessRows}
+          itemContent={(index, row) => {
+            if (row.kind === 'header') {
+              return (
+                <div className={`px-6 ${row.icon === 'owner' ? 'pt-6' : 'pt-5'} pb-2`}>
+                  <div className="flex items-center space-x-2">
+                    {row.icon === 'owner'
+                      ? <Shield size={14} strokeWidth={3} className="text-warning" />
+                      : <Building2 size={14} strokeWidth={3} className="text-ink-muted" />}
+                    <span className="text-[10px] font-black text-ink-muted uppercase tracking-[0.25em]">{row.title}</span>
+                    <span className="text-[9px] font-bold text-ink-muted/60 uppercase tracking-widest">{row.subtitle}</span>
+                  </div>
+                  <div className="h-px bg-border mt-2" />
+                </div>
+              );
             }
-            // Outros papéis não devem ver nada (ou apenas a si mesmos)
-            return u.email === currentUser?.email;
-          })}
-          itemContent={(index, u) => (
-            <div className="px-6 py-2">
+            const u = row.user;
+            return (
+            <div className={`px-6 py-2 ${row.indent ? 'pl-12' : ''}`}>
               <div 
-                key={u.email} 
+                key={`${u.email}-${u.username}`} 
                 onDoubleClick={() => handleOpenEdit(u)}
                 className="bg-white p-6 rounded-[2.5rem] border border-border shadow-sm flex items-center justify-between group active:scale-[0.98] transition-all cursor-pointer hover:border-accent modern-card"
               >
@@ -682,7 +699,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                 </div>
               </div>
             </div>
-          )}
+            );
+          }}
         />
         
         {/* Scroll to top button */}

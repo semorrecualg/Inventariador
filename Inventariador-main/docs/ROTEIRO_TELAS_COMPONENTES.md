@@ -204,7 +204,7 @@ MAIN_MENU · MainMenu.tsx            ← entrada após a seleção de unidade (t
   → SIGNATURE · Signature.tsx                         (ASSINATURA DIGITAL)
   → CAMPAIGN_MANAGEMENT · CampaignManager.tsx
   → UNIT_CONFIGURATOR · UnitConfigurator.tsx
-  → USER_MANAGEMENT · UserManagement.tsx
+  → USER_MANAGEMENT · UserManagement.tsx             (lista em árvore: dono → empresa → master → complementares)
   → FIELD_CONFIGURATOR · FieldConfigurator.tsx
   → QR_CODE_CONFIGURATOR · QrCodeConfigurator.tsx
   → AUDIT_LOGS · AuditLogs.tsx
