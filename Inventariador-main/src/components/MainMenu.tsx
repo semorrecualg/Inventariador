@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import { AppScreen, User, ScanFeedbackMode, ScannerMode, DatabaseMode, NavigationParams } from '../types';
 import { isAdminUser, isAuditorUser } from '../services/rbacService';
-import { canAccessDatabaseManager } from '../utils/authUtils';
+import { canAccessDatabaseManager, canProvisionLicenses } from '../utils/authUtils';
 import Modal from './Modal';
 import BackButton from './BackButton';
 import { 
@@ -607,7 +607,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               </button>
               )}
 
-              {canAccessDatabaseManager(user) && (
+              {canProvisionLicenses(user) && (
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.LICENSE_PROVISIONING); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
                 <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Building2 size={16} /></div>
                 <div className="flex-1">

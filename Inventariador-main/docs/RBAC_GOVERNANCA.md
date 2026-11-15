@@ -104,6 +104,10 @@ isOwnerEmail(email)                        // email == VITE_ADMIN_EMAIL (case-in
 - Painel Administrativo (Trilha A): Configurar Campos, Configurar QR Code,
   Acessos, Auditoria, Integridade, **Filiais** (UNIT_CONFIGURATOR),
   **Banco de Dados** (DATABASE_MANAGER — gate adicional `canAccessDatabaseManager`).
+- **Licenças** (LICENSE_PROVISIONING) é a excepção: provisionar cliente novo é
+  acção de plataforma, não de contrato. Gate próprio `canProvisionLicenses` —
+  só ADMIN (papel), o email do dono ou super-admin. **MASTER não passa**: ele
+  administra o contrato que já tem, não abre clientes nem cria outro MASTER.
 - **Campanhas de Inventário** (`CAMPAIGN_MANAGEMENT`) e a **UNIDADE OPERACIONAL**
   (âncora GPS) não têm entrada solta no painel. O caminho é contextual: no
   CONTRATO DE TRABALHO (`WorkContextSelector`), o card da unidade (ou o badge

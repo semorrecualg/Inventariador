@@ -12,7 +12,7 @@ import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
-import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
+import { canAccessDatabaseManager, canProvisionLicenses, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, isAuditorUser, userHasPermission } from './services/rbacService';
@@ -7973,7 +7973,7 @@ useEffect(() => {
               }}
             />
           ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
-          {screen === AppScreen.LICENSE_PROVISIONING && (canAccessDatabaseManager(user) ? <LicenseProvisioning onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.LICENSE_PROVISIONING && (canProvisionLicenses(user) ? <LicenseProvisioning onBack={popScreen} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.ASSET_MAP && (
             <AssetMap 
               assets={selectedUnit ? filteredAssetsByUnit : inventory.assets} 

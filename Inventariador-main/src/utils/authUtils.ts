@@ -63,6 +63,25 @@ export const canAccessDatabaseManager = (
 };
 
 /**
+ * Gate de acesso às LICENÇAS (provisionar novo cliente: tenant + MASTER).
+ *
+ * É acção de PLATAFORMA, não de contrato: o MASTER administra o cliente que já
+ * tem, mas não abre clientes novos nem cria outro MASTER. Só o ADMIN (papel) ou
+ * o email configurado em VITE_ADMIN_EMAIL — e o super-admin do sistema.
+ */
+export const canProvisionLicenses = (
+  user: { email?: string | null; isSuperAdmin?: boolean; role?: string | null } | null | undefined,
+): boolean => {
+  if (!user) return false;
+  if (user.isSuperAdmin) return true;
+  const role = String(user.role || '').trim().toUpperCase();
+  if (role === 'ADMIN') return true;
+  const email = (user.email || '').trim().toLowerCase();
+  const admin = getAdminEmail().trim().toLowerCase();
+  return !!email && !!admin && email === admin;
+};
+
+/**
  * Checks whether the given email or username matches special local-only
  * accounts used for offline-first operation (admin, demo, etc.).
  */
