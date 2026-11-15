@@ -124,6 +124,22 @@ export const markAppManagedSession = (): void => {
 };
 
 /**
+ * Limpa a marca de sessão do app.
+ *
+ * Chamado no login que autenticou no Supabase: a marca `APP` de um login local
+ * anterior ficaria viva no `sessionStorage` e, num reload, o auto-login leria
+ * `isAppManagedSession() === true` e devolveria a app a BASE LOCAL — mesmo com
+ * uma sessão Supabase válida.
+ */
+export const clearAppManagedSession = (): void => {
+  try {
+    sessionStorage.removeItem(SESSION_ORIGIN_KEY);
+  } catch {
+    /* storage indisponível — nada a limpar */
+  }
+};
+
+/**
  * `true` quando o login que abriu a sessão foi feito pelo app (credencial
  * local) e o usuário ainda está no cache de sessão do navegador.
  */

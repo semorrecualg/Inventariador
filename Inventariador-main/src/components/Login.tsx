@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
-import { isAdminEmail, markAppManagedSession, ADMIN_EMAIL } from '../utils/authUtils';
+import { isAdminEmail, markAppManagedSession, clearAppManagedSession, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode } from '../services/supabaseService';
 import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
@@ -687,7 +687,10 @@ const Login: React.FC<LoginProps> = ({
           tenantid: loggedUser.tenantid
         });
 
+        // Sessão local antiga não pode sobreviver a um login na nuvem: a marca
+        // faria o reload voltar a BASE LOCAL.
         if (origemSessao === 'LOCAL') markAppManagedSession();
+        else clearAppManagedSession();
         onLogin(loggedUser, origemSessao ?? 'LOCAL');
       }
     } catch (err: unknown) {
