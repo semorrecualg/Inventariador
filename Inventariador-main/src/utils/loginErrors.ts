@@ -81,13 +81,27 @@ export interface FalhaDeLoginSre {
   utilizador?: string | null;
 }
 
+const textoDoCodigo = (codigo: unknown): string =>
+  typeof codigo === 'string' || typeof codigo === 'number' ? String(codigo).trim() : '';
+
+/**
+ * Resumo curto mostrado no PRÓPRIO ecrã de login.
+ *
+ * O SRE Monitor só abre depois de autenticar — inútil para quem está bloqueado
+ * na porta. Estes três campos são os que respondem a «por que razão a entrada
+ * é recusada» sem DevTools: código do Auth, projeto e utilizador tentado.
+ */
+export const resumoDaRecusaDeLogin = (
+  falha: FalhaDeLoginSre
+): { codigo: string; projeto: string; utilizador: string } => ({
+  codigo: textoDoCodigo(falha.codigo),
+  projeto: (falha.projectRef || '').trim() || 'desconhecido',
+  utilizador: (falha.utilizador || '').trim() || '-'
+});
+
 export const linhaSreDeLoginRecusado = (falha: FalhaDeLoginSre): string => {
-  const codigo = typeof falha.codigo === 'string' || typeof falha.codigo === 'number'
-    ? String(falha.codigo).trim()
-    : '';
-  const projeto = (falha.projectRef || '').trim() || 'desconhecido';
+  const { codigo, projeto, utilizador } = resumoDaRecusaDeLogin(falha);
   const url = (falha.projetoUrl || '').trim();
-  const utilizador = (falha.utilizador || '').trim() || '-';
 
   return [
     `[Login] Entrada recusada${codigo ? ` [${codigo}]` : ''}: ${falha.motivo}`,

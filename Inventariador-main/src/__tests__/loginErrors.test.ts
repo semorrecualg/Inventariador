@@ -9,7 +9,8 @@ import {
   ehCredencialInvalida,
   emailNaoConfirmado,
   MENSAGEM_CREDENCIAL_INVALIDA,
-  linhaSreDeLoginRecusado
+  linhaSreDeLoginRecusado,
+  resumoDaRecusaDeLogin
 } from '../utils/loginErrors';
 
 describe('ehCredencialInvalida', () => {
@@ -54,6 +55,29 @@ describe('ehCredencialInvalida', () => {
     expect(linha).toContain('utilizador semorr@gmail.com');
     // aceite pelo filtro do SRE Monitor (Gestor de Base → monitor)
     expect(interessaAoSreMonitor(linha)).toBe(true);
+  });
+
+  it('o resumo do ecrã de login traz código, projeto e utilizador', () => {
+    const resumo = resumoDaRecusaDeLogin({
+      codigo: 400,
+      motivo: 'Invalid login credentials',
+      projectRef: 'mpulmonxbcpqjxouzvuc',
+      utilizador: '  semorr@gmail.com '
+    });
+
+    expect(resumo).toEqual({
+      codigo: '400',
+      projeto: 'mpulmonxbcpqjxouzvuc',
+      utilizador: 'semorr@gmail.com'
+    });
+  });
+
+  it('sem dados, o resumo do login continua legível', () => {
+    expect(resumoDaRecusaDeLogin({ motivo: 'x' })).toEqual({
+      codigo: '',
+      projeto: 'desconhecido',
+      utilizador: '-'
+    });
   });
 
   it('sem código nem projeto a linha continua legível', () => {

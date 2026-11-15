@@ -20,6 +20,7 @@ import {
   ehCredencialInvalida,
   emailNaoConfirmado,
   linhaSreDeLoginRecusado,
+  resumoDaRecusaDeLogin,
   MENSAGEM_CREDENCIAL_INVALIDA,
   MENSAGEM_EMAIL_NAO_CONFIRMADO
 } from '../utils/loginErrors';
@@ -56,6 +57,13 @@ const Login: React.FC<LoginProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [clickCount, setClickCount] = useState(0);
   const [isSendingReset, setIsSendingReset] = useState(false);
+  // Última recusa do Auth, mostrada aqui mesmo: o SRE Monitor só abre depois
+  // de autenticar, ou seja, nunca quando é preciso.
+  const [ultimaRecusa, setUltimaRecusa] = useState<{
+    codigo: string;
+    projeto: string;
+    utilizador: string;
+  } | null>(null);
   // Ref do projeto em uso: o badge de ambiente dizia só «SUPABASE (WEB)» e um
   // VITE_SUPABASE_URL trocado no ambiente dava o mesmo erro de senha errada.
   const projectRef = refDoProjetoSupabase(import.meta.env.VITE_SUPABASE_URL);
@@ -64,13 +72,15 @@ const Login: React.FC<LoginProps> = ({
   // devolveu nem contra que projeto: sem esta linha no SRE Monitor, comparar
   // com o dashboard obrigava a abrir o DevTools no aparelho onde falhou.
   const registarFalhaDeLogin = (codigo: unknown, motivo: string) => {
-    logger.warn(linhaSreDeLoginRecusado({
+    const falha = {
       codigo,
       motivo,
       projectRef,
       projetoUrl: import.meta.env.VITE_SUPABASE_URL,
       utilizador: username.trim()
-    }));
+    };
+    setUltimaRecusa(resumoDaRecusaDeLogin(falha));
+    logger.warn(linhaSreDeLoginRecusado(falha));
   };
 
   // FLUXO ÚNICO DE ACESSO: a tela de login apenas AUTENTICA. Contrato, filial
@@ -902,6 +912,20 @@ const Login: React.FC<LoginProps> = ({
             <div className="bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-2xl text-[10px] font-black uppercase flex items-center mb-4 tracking-widest shadow-md animate-shake">
               <AlertCircle size={16} className="mr-3 shrink-0" />
               <span className="flex-1">{error}</span>
+            </div>
+          )}
+
+          {ultimaRecusa && (
+            <div
+              className="mb-4 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-[9px] font-bold text-slate-500 tracking-wider flex flex-wrap items-center justify-center gap-x-2 gap-y-1"
+              data-testid="ultima-recusa"
+            >
+              <span className="uppercase">Última recusa:</span>
+              <span className="text-slate-900">{ultimaRecusa.codigo || 'sem código'}</span>
+              <span className="text-slate-300">·</span>
+              <span className="uppercase">Projeto {ultimaRecusa.projeto}</span>
+              <span className="text-slate-300">·</span>
+              <span className="lowercase">{ultimaRecusa.utilizador}</span>
             </div>
           )}
         
