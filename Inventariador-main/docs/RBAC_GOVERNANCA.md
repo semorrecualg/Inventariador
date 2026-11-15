@@ -104,6 +104,11 @@ isOwnerEmail(email)                        // email == VITE_ADMIN_EMAIL (case-in
 - Painel Administrativo (Trilha A): Configurar Campos, Configurar QR Code,
   Acessos, Auditoria, Integridade, **Filiais** (UNIT_CONFIGURATOR),
   **Banco de Dados** (DATABASE_MANAGER — gate adicional `canAccessDatabaseManager`).
+- **Unidades de um acesso espelham a base.** A lista «Unidades Operacionais
+  (Permissões)» mostra exactamente a coluna de filiais do contrato, na grafia da
+  planilha: se o cliente tem uma matriz, ela aparece como filial «MATRIZ»; se não
+  tem, não aparece nenhuma unidade inventada. AUDITOR/AUX. AUDIT. continuam
+  obrigados a ter ao menos uma unidade, escolhida pelo ADMIN/MASTER.
 - **Licenças** (LICENSE_PROVISIONING) é a excepção: provisionar cliente novo é
   acção de plataforma, não de contrato. Gate próprio `canProvisionLicenses` —
   só ADMIN (papel), o email do dono ou super-admin. **MASTER não passa**: ele

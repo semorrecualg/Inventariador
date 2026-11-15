@@ -153,7 +153,11 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
     originalAsset.filial_id ||
     originalAsset.UNIDADE ||
     originalAsset.unidade ||
-    'MATRIZ'
+    // Sem coluna de filial a linha NÃO ganha filial inventada: a lista de
+    // unidades de um acesso espelha a base do cliente e um 'MATRIZ' fabricado
+    // aqui virava permissão fantasma (aparecia para contratos que não têm
+    // matriz nenhuma).
+    ''
   ).toString().trim();
 
   const status = (

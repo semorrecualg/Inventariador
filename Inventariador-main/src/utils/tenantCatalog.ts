@@ -74,7 +74,10 @@ export async function listContracts(): Promise<ContractSummary[]> {
 
   try {
     const users = await localDb.users.toArray();
-    users.forEach((u) => add(u.tenantid, u.filial));
+    // O perfil só revela que o contrato existe. As filiais de um acesso ficam
+    // por conta da base: usar `u.filial` aqui devolvia à lista a unidade antiga
+    // do próprio usuário (o 'MATRIZ' fantasma voltava por essa porta).
+    users.forEach((u) => add(u.tenantid, ''));
   } catch {
     /* sem tabela de usuários — segue */
   }

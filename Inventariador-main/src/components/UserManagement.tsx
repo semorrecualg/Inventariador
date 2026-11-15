@@ -108,11 +108,11 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       alive = false;
     };
   }, [isAddModalOpen, isEditModalOpen]);
-  const [newUnits, setNewUnits] = useState<string[]>(
-    (currentUser?._unitid || currentUser?.unitid) && (currentUser?._unitid || currentUser?.unitid)?.toUpperCase() !== 'DEFAULT' 
-      ? [currentUser?._unitid || currentUser?.unitid || ''] 
-      : []
-  );
+  // Começa SEM unidade marcada: herdar a unidade de quem cadastra era o que
+  // entregava ao auditor uma filial que ninguém escolheu (o 'MATRIZ' antigo do
+  // criador). Quem define a unidade do auditor é o ADMIN/MASTER, marcando na
+  // lista abaixo.
+  const [newUnits, setNewUnits] = useState<string[]>([]);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
   const [showNewPasswordConfirm, setShowNewPasswordConfirm] = useState(false);
@@ -152,8 +152,12 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       if (dedupe === key) return;
       if (!merged.has(dedupe)) merged.set(dedupe, label);
     };
+    // ESPELHO DA BASE: a lista oferecida é exactamente a coluna de filiais do
+    // contrato. Unidades que só existem porque algum perfil antigo as tinha
+    // (ex.: 'MATRIZ' de contrato que não tem matriz) não entram aqui — senão a
+    // permissão fantasma se perpetuava a cada edição. Para nomes ainda ausentes
+    // da base existe o campo "Filial fora da lista".
     (baseFiliaisByTenant.get(key) || []).forEach(push);
-    Array.from(unitsByTenant.get(key) || new Set<string>()).forEach(push);
     return Array.from(merged.values()).sort((a, b) => a.localeCompare(b));
   };
 
@@ -277,7 +281,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           newRole, 
           newTenantid, 
                     newName.trim(),
-          newUnits[0] || (currentUser?.unitid && currentUser.unitid.toUpperCase() !== 'DEFAULT' ? currentUser.unitid : ''),
+          newUnits[0] || '',
           newUnits
         );
         if (result && result.existing) {
@@ -459,6 +463,14 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     const is_admin = editRole === UserRole.ADMIN || editRole === UserRole.MASTER || isAdminEmail(email);
     const normTenantid = normalizeValue(editTenantid);
     const normUnits = normalizeArray(editUnits);
+
+    // Mesma trava do cadastro: auditor/auxiliar sem unidade não abre inventário
+    // nenhum. Quem define a filial dele é o ADMIN/MASTER — inclusive ao corrigir
+    // um perfil antigo preso numa unidade que a base do contrato não tem.
+    if ((editRole === UserRole.AUDITOR || editRole === UserRole.AUXILIARY_AUDITOR) && normUnits.length === 0) {
+      showModal("Filial Obrigatória", "Marque — ou digite — pelo menos uma unidade operacional (filial) para o auditor.", "error");
+      return;
+    }
     const normUnitId = normalizeValue(normUnits[0] || '');
 
     const updatedUser: User = { 
