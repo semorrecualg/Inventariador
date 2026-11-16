@@ -11,7 +11,9 @@ import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { isRevokedAnchor } from '../utils/revokedAnchors';
-import { buildUnitFlags, mergeUnitFlags, pickUnitFlags } from '../utils/unitConfigFlags';
+import { resolveCanonicalUnitAnchor } from '../utils/unitAnchorPriority';
+import { buildUnitConfigRowPayload } from '../utils/unitConfigPayload';
+import { buildUnitFlags, mergeUnitFlags } from '../utils/unitConfigFlags';
 import { isAdminEmail } from '../utils/authUtils';
 import { pullDedupKey } from '../utils/syncDedup';
 import { normalizeKey } from '../utils/schema';
@@ -3627,7 +3629,8 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
  *
  * Antes estas regras (exigir NF/seriado/plaqueta, permitir novo ativo/baixa) só
  * existiam no SQLite/Dexie do aparelho: trocar de dispositivo mostrava a filial
- * "sem regras". A âncora continua em `inventory_config`; aqui vai a política.
+ * "sem regras". A âncora está AQUI (fonte canónica); `inventory_config` passa a
+ * ser compatibilidade de leitura para builds antigos.
  *
  * Não-destrutivo: lê o que já está na nuvem e faz merge antes do upsert, para
  * um aparelho que só conhece `hasGps` não apagar a regra configurada noutro.
@@ -3642,8 +3645,6 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
   const filial = (config.filial || config.unit_id || config._unitid || '')
     .toString().trim();
   if (!tenantid || !filial) return false;
-
-  const flags = buildUnitFlags(config, hasRealAnchor(config.lat, config.lng));
 
   try {
     // 1. Flags já gravadas (outro dispositivo pode saber mais do que este)
@@ -3660,18 +3661,9 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
       /* leitura opcional: segue só com o que este aparelho conhece */
     }
 
-    const payload = {
-      tenantid,
-      filial,
-      unit_id: filial,
-      lat: Number(config.lat) || 0,
-      lng: Number(config.lng) || 0,
-      radius_meters: Number(config.radius_meters) || 0,
-      is_active: config.is_active !== false,
-      updated_by: String(config.updated_by || 'system'),
-      updated_at: new Date().toISOString(),
-      flags: { ...pickUnitFlags(stored), ...flags }
-    };
+    // Sem coordenada real a linha não recebe lat/lng: um salvamento só de
+    // flags não pode zerar a âncora canónica da filial.
+    const payload = buildUnitConfigRowPayload(config, stored, tenantid, filial);
 
     const { error } = await supabase
       .from('unit_configs')
@@ -4103,22 +4095,23 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
             if (!filial) return;
 
             const existing = configs[filial];
-            if (existing) {
-              configs[filial] = mergeUnitFlags(existing, row.flags);
+            // `unit_configs` é a fonte canónica: quando tem âncora real, vence a
+            // que veio de `inventory_config`. Sem âncora canónica valem as
+            // flags e/ou a âncora antiga (compatibilidade com builds antigos).
+            const canonical = resolveCanonicalUnitAnchor(existing, row);
+            if (!canonical) {
+              if (existing) configs[filial] = mergeUnitFlags(existing, row.flags);
               return;
             }
-            // Sem âncora em inventory_config: só a linha de flags não vira
-            // configuração — evita unidade fantasma com coordenada 0.
-            if (!hasRealAnchor(row.lat, row.lng)) return;
             configs[filial] = mergeUnitFlags(
               {
                 tenantid,
                 filial,
                 unit_id: filial,
-                lat: Number(row.lat),
-                lng: Number(row.lng),
-                radius_meters: Number(row.radius_meters) || 0,
-                is_active: true
+                lat: canonical.lat,
+                lng: canonical.lng,
+                radius_meters: canonical.radius_meters,
+                is_active: existing?.is_active ?? true
               } as UnitConfig,
               row.flags
             );
