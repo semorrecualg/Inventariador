@@ -10,7 +10,7 @@ import { validateAndPushRoute, registerToastCallback } from './services/Navigati
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
-import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
+import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
@@ -2523,34 +2523,11 @@ useEffect(() => {
     }
   }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode, setHistory, pushScreen]);
 
-  // Efeito de reparo automático de GPS para ativos conferidos sem coordenadas
-  useEffect(() => {
-    const inv = inventoryRef.current;
-    if (inv.assets.length > 0 && inv.unitConfigs && inv.unitConfigs.length > 0) {
-      let hasRepaired = false;
-      const repairedAssets = inv.assets.map(a => {
-        const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-        if (isConferido && (!a.latitude || !a.longitude)) {
-          const unitId = a.filial || a._unidade;
-          const config = inv.unitConfigs?.find(c => c.unit_id === unitId);
-          // Só âncora com leitura de sensor posiciona o ativo: o pino manual não
-          // pode virar ponto no mapa de calor (não é leitura de sensor).
-          if (config && isRealAnchorRecord(config)) {
-            hasRepaired = true;
-            return { ...a, latitude: config.lat, longitude: config.lng };
-          }
-        }
-        return a;
-      });
-
-      if (hasRepaired) {
-        logger.info('>>> [GPS] Reparo automático de coordenadas aplicado a ativos conferidos sem GPS.');
-        const repairedState = { ...inv, assets: repairedAssets };
-        setInventory(prev => ({ ...prev, assets: repairedAssets }));
-        saveInventory(repairedState);
-      }
-    }
-  }, [inventory.assets, inventory.unitConfigs]);
+  // NÃO existe preenchimento automático do GPS dos ativos a partir da âncora da
+  // unidade. `assets.latitude/longitude` (nuvem: gps_lat/gps_lng) só é gravado
+  // na conferência do inventário: se estava vazio, continua vazio. Repartir a
+  // âncora pela base inteira inventava coordenadas para ativos que nunca foram
+  // lidos e ia parar à nuvem no envio seguinte.
 
   const currentUnitConfig = useMemo(() => {
     if (!selectedUnit || !inventory.unitConfigs) return null;
@@ -6562,13 +6539,14 @@ useEffect(() => {
       typeof localStorage !== 'undefined' ? localStorage : null
     );
 
-    // Pré-cálculo das unidades com âncora contável como leitura de sensor.
-    // Pino posicionado manualmente no mapa (source: 'manual') NÃO conta aqui —
-    // e é daqui que saem a liberação da unidade e o chip de GPS.
+    // Pré-cálculo das unidades com âncora CONFIGURADA — é daqui que saem a
+    // liberação da unidade e o chip de GPS. O pino fixado à mão no mapa
+    // (`source: 'manual'`) conta: FIXAR ÂNCORA GPS é o ato administrativo que
+    // configura a filial. Só o mapa de calor exige leitura de sensor.
     const unitsWithGps = new Set<string>();
     unitConfigs.forEach(c => {
       const uId = c.filial || c._unitid || c.unit_id;
-      if (uId && isRealAnchorRecord(c)) {
+      if (uId && isConfiguredAnchorRecord(c)) {
         const norm = normalizeKey(uId);
         unitsWithGps.add(norm);
       }
