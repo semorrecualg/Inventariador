@@ -6702,6 +6702,17 @@ useEffect(() => {
       logger.info('>>> [fullCompaniesWithStatus] Inventory companies is empty.');
     }
 
+    // Contrato único presente nas linhas: quando a sessão não traz `tenantid`, é
+    // ele que recebe as linhas legadas sem contrato. Sem isso, a agregação pelo
+    // tenant da linha criava uma unidade «SEM CONTRATO» paralela e a unidade do
+    // contrato ficava a zero (a contagem do SQLite usa o tenant da sessão).
+    const dataTenants = new Set<string>();
+    for (let i = 0; i < assets.length; i++) {
+      const t = String(assets[i]?.tenantid || '').toUpperCase().trim();
+      if (t) dataTenants.add(t);
+    }
+    const fallbackTenant = userTenant || (dataTenants.size === 1 ? Array.from(dataTenants)[0] : '');
+
     // 1. Agrupar estatísticas e campanhas por empresa em um único loop O(N)
     // Isso evita loops aninhados que causavam travamentos com grandes volumes de dados
     const companyStatsMap = new Map<string, { tenantid: string; hasData: boolean; hasActiveAssets: boolean; unitIds: Set<string>; hasAssetCampaign: boolean }>();
@@ -6729,7 +6740,7 @@ useEffect(() => {
       if (!company || company === 'UNIT_UNDEFINED' || company === 'UNIT UNDEFINED' || company === 'DEFAULT' || company === 'NULL' || company === 'UNDEFINED') continue;
       // Linha sem contrato (dado legado) entra no contrato activo: não cria uma
       // unidade «SEM CONTRATO» paralela com a mesma filial.
-      const tenant = resolveRowTenant(a.tenantid, userTenant);
+      const tenant = resolveRowTenant(a.tenantid, fallbackTenant);
       const statsKey = unitContextKey(tenant, company);
       
       let stats = companyStatsMap.get(statsKey);
@@ -6917,7 +6928,7 @@ useEffect(() => {
       assets.forEach(a => {
         const company = getAssetUnit(a).replace(/_/g, ' ');
         if (!company) return;
-        const key = unitContextKey(resolveRowTenant(a.tenantid, userTenant), company);
+        const key = unitContextKey(resolveRowTenant(a.tenantid, fallbackTenant), company);
         localCountsMap.set(key, (localCountsMap.get(key) || 0) + 1);
       });
     }
@@ -6973,7 +6984,7 @@ useEffect(() => {
         const a = assets[i];
         const company = (a.filial || a._unitid || '').toString().trim().toUpperCase();
         if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0') {
-          const tenant = resolveRowTenant(a.tenantid, userTenant);
+          const tenant = resolveRowTenant(a.tenantid, fallbackTenant);
           emergencyUnits.set(unitContextKey(tenant, company), { name: company.replace(/_/g, ' '), tenantid: tenant });
         }
       }

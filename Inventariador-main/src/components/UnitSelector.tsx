@@ -23,11 +23,11 @@ import { AppScreen, DatabaseMode, NavigationParams, UnitConfig } from '../types'
 import * as turf from '@turf/turf';
 import { localDb, readVirtualSnapshot } from '../services/localDbService';
 import { resolveTenantId } from '../utils/tenantUtils';
-import { findHomonymUnits } from '../utils/unitContextUtils';
+import { findHomonymUnits, resolveRowTenant } from '../utils/unitContextUtils';
 import { normalizeKey } from '../utils/schema';
 import { isAdminEmail } from '../utils/authUtils';
 import { isUnitInScope, UnitScopeUser } from '../utils/unitScope';
-import { createUnitCounter } from '../utils/unitAssetStats';
+import { createUnitCounter, dropGhostUnits, normalizeLegacyTenants } from '../utils/unitAssetStats';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 import type { DexieAsset } from '../services/sqliteService';
@@ -178,8 +178,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
 
         // Propriedades (nuvem/sessão) e GPS entram apenas como fallback de rótulo
         // quando a filial não aparece em nenhum ativo da base local.
-        unitsRef.current.forEach(u => counter.addLabel(u.filial));
-        configList.forEach(c => counter.addLabel(c.filial || c.nome));
+        unitsRef.current.forEach(u => counter.addLabel(u.filial, u.tenantid ?? currentTenantid));
+        configList.forEach(c => counter.addLabel(c.filial || c.nome, currentTenantid));
 
         // UMA passagem pela tabela. Antes, o código trazia todos os ativos para
         // memória e voltava a varrê-los uma vez POR UNIDADE (O(n × unidades)):
@@ -187,12 +187,19 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
         let matched = 0;
         const keepRow = (item: unknown) => {
           const asset = item as DexieAsset;
-          const rowTenant = String(resolveTenantId(asset) || '').trim().toUpperCase();
-          if (currentTenantid && rowTenant !== currentTenantid) return;
+          // Lê o `tenantid` cru: `resolveTenantId` devolve um valor por omissão
+          // (GBR_DEFAULT) e a linha legada sem contrato era descartada aqui —
+          // ficava fora da contagem e invisível no ecrã.
+          const rowTenant = String((asset as { tenantid?: unknown }).tenantid ?? '').trim().toUpperCase();
+          if (currentTenantid && rowTenant && rowTenant !== currentTenantid) return;
           matched += 1;
           if (asset._is_deleted !== 0) return;
           const rawFilial = (asset as { filial_raw?: string }).filial_raw || asset.filial;
-          counter.count(rawFilial, asset._conferido);
+          // Unidade = (contrato da linha, filial). Sem contrato na sessão, a linha
+          // legada entra em «sem contrato» e é normalizada abaixo para o único
+          // contrato da base — antes todas as unidades levavam o tenant da sessão
+          // e a contagem cruzava-se com a agregação do App.
+          counter.count(rawFilial, asset._conferido, resolveRowTenant(rowTenant, currentTenantid));
         };
 
         await db.local_assets.each(keepRow);
@@ -216,15 +223,16 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           });
         }
 
-        const mapped: SqliteUnitStats[] = counter
-          .entries()
+        const mapped: SqliteUnitStats[] = dropGhostUnits(
+          normalizeLegacyTenants(counter.entries(), currentTenantid)
+        )
           // Restrição do perfil (auditor contratado por filial) — a MESMA regra
           // do modo nuvem; sem isso a base local entregava todas as filiais.
           .filter(({ label }) => isUnitInScope(sessionUser, label, currentTenantid))
           .map((entry) => ({
             filial: entry.label,
             displayName: entry.label,
-            tenantid: currentTenantid,
+            tenantid: entry.tenantid,
             total: Math.max(0, entry.total),
             checked: Math.max(0, entry.checked)
           }));
