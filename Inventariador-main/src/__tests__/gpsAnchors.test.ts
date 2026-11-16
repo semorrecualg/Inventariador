@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   hasRealAnchor,
-  isRealAnchorRecord,
   isConfiguredAnchorRecord,
   collectGpsAnchorsFromStorage,
   mergeUnitConfigIntoList
@@ -36,24 +35,6 @@ describe('hasRealAnchor', () => {
     expect(hasRealAnchor(undefined, undefined)).toBe(false);
     expect(hasRealAnchor(NaN, NaN)).toBe(false);
     expect(hasRealAnchor('abc', '-49.1')).toBe(false);
-  });
-});
-
-describe('isRealAnchorRecord', () => {
-  it('aceita âncora com leitura de sensor', () => {
-    expect(isRealAnchorRecord({ lat: -16.7, lng: -49.1, source: 'sensor' })).toBe(true);
-  });
-  it('rejeita âncora posicionada manualmente no mapa', () => {
-    expect(isRealAnchorRecord({ lat: -16.7, lng: -49.1, source: 'manual' })).toBe(false);
-  });
-  it('mantém registros legados (sem source) como âncora real', () => {
-    expect(isRealAnchorRecord({ lat: -16.7, lng: -49.1 })).toBe(true);
-  });
-  it('rejeita coordenadas inválidas mesmo com source sensor', () => {
-    expect(isRealAnchorRecord({ lat: 0, lng: 0, source: 'sensor' })).toBe(false);
-    expect(isRealAnchorRecord({ lat: null, lng: null, source: 'sensor' })).toBe(false);
-    expect(isRealAnchorRecord(null)).toBe(false);
-    expect(isRealAnchorRecord(undefined)).toBe(false);
   });
 });
 

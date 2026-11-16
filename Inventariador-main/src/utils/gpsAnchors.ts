@@ -20,20 +20,6 @@ export const hasRealAnchor = (lat: unknown, lng: unknown): boolean =>
   Number(lat) !== 0 && Number(lng) !== 0;
 
 /**
- * Âncora que pode ser contada como LEITURA DE SENSOR.
- *
- * Exige coordenadas válidas e proveniência diferente de `manual`. Serve só para
- * o que é telemetria (mapa de calor); NUNCA para decidir se a filial está
- * configurada — quem faz isso é `isConfiguredAnchorRecord`.
- *
- * `source` ausente é registro legado (anterior à proveniência): conta como
- * sensor para não travar unidades já configuradas. Só um `manual` explícito é
- * excluído.
- */
-export const isRealAnchorRecord = (record: AnchorRecordFields | null | undefined): boolean =>
-  !!record && record.source !== 'manual' && hasRealAnchor(record.lat, record.lng);
-
-/**
  * Âncora CONFIGURADA para a unidade — qualquer proveniência.
  *
  * `FIXAR ÂNCORA GPS` grava `source: 'manual'` (o pino foi colocado à mão no

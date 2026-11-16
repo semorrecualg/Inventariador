@@ -21,11 +21,10 @@
 --      âncora; NÃO são apagados aqui, exigem decisão humana
 --   5. secção 5 (verificação e restauro)
 --
--- A âncora vem de `public.unit_configs` (tenantid, filial, lat, lng), que é
--- onde `saveUnitConfigFlags` grava e onde `scripts/unit-configs-flags.sql`
--- backfill a partir de `inventory_config.data`. Se a filial tiver âncora APENAS
--- em `inventory_config.data` (script de flags pendente), troque a CTE `ancora`
--- por uma leitura de `inventory_config` — as comparações ficam iguais.
+-- A CTE `ancora` lê as DUAS fontes por filial: `public.unit_configs` (canónica,
+-- onde `saveUnitConfigFlags` grava e onde `scripts/unit-configs-flags.sql` faz
+-- backfill) e `public.inventory_config.data` (registo histórico). Nesta base
+-- `unit_configs` está vazia e só `inventory_config` tem âncoras.
 -- Ajuste o tenant nas consultas: o exemplo usa 'CICOPAL'.
 -- Idempotente: rodar duas vezes não apaga nada além do mesmo conjunto.
 -- ============================================================================
@@ -57,7 +56,20 @@ WITH ancora AS (
          upper(trim(uc.filial)) AS filial_norm,
          uc.lat,
          uc.lng
-    FROM public.unit_configs uc
+    FROM (
+      -- `unit_configs` é a tabela canónica da filial; `inventory_config.data` é
+      -- o registo histórico. Nesta base só `inventory_config` tem âncoras, por
+      -- isso a leitura é a UNIÃO das duas — ler só uma delas reportaria zero.
+      SELECT tenantid, filial, lat, lng
+        FROM public.unit_configs
+       WHERE filial IS NOT NULL
+      UNION ALL
+      SELECT tenantid, filial,
+             NULLIF(data->>'lat', '')::numeric AS lat,
+             NULLIF(data->>'lng', '')::numeric AS lng
+        FROM public.inventory_config
+       WHERE filial IS NOT NULL AND data IS NOT NULL
+    ) uc
    WHERE uc.tenantid = 'CICOPAL'
      AND coalesce(uc.lat, 0) <> 0
      AND coalesce(uc.lng, 0) <> 0
@@ -129,7 +141,20 @@ WITH ancora AS (
          upper(trim(uc.filial)) AS filial_norm,
          uc.lat,
          uc.lng
-    FROM public.unit_configs uc
+    FROM (
+      -- `unit_configs` é a tabela canónica da filial; `inventory_config.data` é
+      -- o registo histórico. Nesta base só `inventory_config` tem âncoras, por
+      -- isso a leitura é a UNIÃO das duas — ler só uma delas reportaria zero.
+      SELECT tenantid, filial, lat, lng
+        FROM public.unit_configs
+       WHERE filial IS NOT NULL
+      UNION ALL
+      SELECT tenantid, filial,
+             NULLIF(data->>'lat', '')::numeric AS lat,
+             NULLIF(data->>'lng', '')::numeric AS lng
+        FROM public.inventory_config
+       WHERE filial IS NOT NULL AND data IS NOT NULL
+    ) uc
    WHERE uc.tenantid = 'CICOPAL'
      AND coalesce(uc.lat, 0) <> 0
      AND coalesce(uc.lng, 0) <> 0
@@ -163,7 +188,20 @@ WITH ancora AS (
          upper(trim(uc.filial)) AS filial_norm,
          uc.lat,
          uc.lng
-    FROM public.unit_configs uc
+    FROM (
+      -- `unit_configs` é a tabela canónica da filial; `inventory_config.data` é
+      -- o registo histórico. Nesta base só `inventory_config` tem âncoras, por
+      -- isso a leitura é a UNIÃO das duas — ler só uma delas reportaria zero.
+      SELECT tenantid, filial, lat, lng
+        FROM public.unit_configs
+       WHERE filial IS NOT NULL
+      UNION ALL
+      SELECT tenantid, filial,
+             NULLIF(data->>'lat', '')::numeric AS lat,
+             NULLIF(data->>'lng', '')::numeric AS lng
+        FROM public.inventory_config
+       WHERE filial IS NOT NULL AND data IS NOT NULL
+    ) uc
    WHERE uc.tenantid = 'CICOPAL'
      AND coalesce(uc.lat, 0) <> 0
      AND coalesce(uc.lng, 0) <> 0
@@ -189,7 +227,7 @@ SELECT a.filial,
 -- BEGIN;
 -- WITH ancora AS (
 --   SELECT uc.tenantid, upper(trim(uc.filial)) AS filial_norm, uc.lat, uc.lng
---     FROM public.unit_configs uc
+--     FROM (public.unit_configs UNION ALL public.inventory_config) uc  -- ver secção 1
 --    WHERE uc.tenantid = 'CICOPAL'
 --      AND coalesce(uc.lat, 0) <> 0 AND coalesce(uc.lng, 0) <> 0
 -- )
@@ -215,7 +253,20 @@ WITH ancora AS (
          upper(trim(uc.filial)) AS filial_norm,
          uc.lat,
          uc.lng
-    FROM public.unit_configs uc
+    FROM (
+      -- `unit_configs` é a tabela canónica da filial; `inventory_config.data` é
+      -- o registo histórico. Nesta base só `inventory_config` tem âncoras, por
+      -- isso a leitura é a UNIÃO das duas — ler só uma delas reportaria zero.
+      SELECT tenantid, filial, lat, lng
+        FROM public.unit_configs
+       WHERE filial IS NOT NULL
+      UNION ALL
+      SELECT tenantid, filial,
+             NULLIF(data->>'lat', '')::numeric AS lat,
+             NULLIF(data->>'lng', '')::numeric AS lng
+        FROM public.inventory_config
+       WHERE filial IS NOT NULL AND data IS NOT NULL
+    ) uc
    WHERE uc.tenantid = 'CICOPAL'
      AND coalesce(uc.lat, 0) <> 0
      AND coalesce(uc.lng, 0) <> 0
