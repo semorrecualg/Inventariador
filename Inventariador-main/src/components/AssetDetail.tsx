@@ -226,83 +226,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     );
   };
 
-  useEffect(() => {
-    const calculateDynamicLocation = async () => {
-      try {
-        const filialName = (workingAsset.filial || '').toUpperCase().trim();
-        if (!filialName) return;
-        const configs = await localDb.unitConfigs.toArray();
-        const config = configs.find(c => {
-          const uId = (c._unitid || c.unit_id || '').toUpperCase().trim();
-          return uId === filialName || uId.replace(/_/g, ' ') === filialName.replace(/_/g, ' ');
-        });
-
-        const anchorLat = config?.lat ? Number(config.lat) : -23.5505; // default SP
-        const anchorLng = config?.lng ? Number(config.lng) : -46.6333;
-
-        // Obter deslocamento físico do terminal
-        let dispLat = 0;
-        let dispLng = 0;
-
-        const getGPSPosition = () => {
-          return new Promise<{ lat: number; lng: number }>((resolve, reject) => {
-            if (!navigator.geolocation) {
-              reject(new Error('GPS indisponível'));
-              return;
-            }
-            navigator.geolocation.getCurrentPosition(
-              (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-              (err) => reject(err),
-              { enableHighAccuracy: false, timeout: 3000 }
-            );
-          });
-        };
-
-        try {
-          const gps = await getGPSPosition();
-          // Guarda Defensiva: GPS pode vir nulo/incompleto - nunca ler .lng de undefined
-          if (!gps || !Number.isFinite(Number(gps.lat)) || !Number.isFinite(Number(gps.lng))) {
-            throw new Error('GPS invalido retornado pelo hardware');
-          }
-          // Se temos o GPS real, o vetor de deslocamento é a diferença entre o GPS real e a âncora
-          dispLat = gps.lat - anchorLat;
-          dispLng = gps.lng - anchorLng;
-
-          // Se a diferença for muito absurda (fora do limite razoável) ou precisão baixa, limitamos usando amortecimento
-          if (Math.abs(dispLat) > 0.05 || Math.abs(dispLng) > 0.05) {
-            // Fallback matemático (Simulação de sensor de movimento)
-            dispLat = (Math.random() - 0.5) * 0.001;
-            dispLng = (Math.random() - 0.5) * 0.001;
-          }
-        } catch (gpsErr) {
-          logger.warn('>>> [AssetDetail GPS Fallback] Sem sinal real, simulando vetor de odometria de movimento:', gpsErr);
-          // Fallback matemático baseado em sensores de movimento simulados/Capacitor para Modo Avião
-          dispLat = (Math.random() - 0.5) * 0.0005;
-          dispLng = (Math.random() - 0.5) * 0.0005;
-        }
-
-        // Equação: Coordenada da Âncora da Filial + Vetor de Deslocamento Físico
-        const finalLat = Number((anchorLat + dispLat).toFixed(6));
-        const finalLng = Number((anchorLng + dispLng).toFixed(6));
-
-        setWorkingAsset(prev => ({
-          ...prev,
-          latitude: String(finalLat),
-          longitude: String(finalLng)
-        }));
-      } catch (e) {
-        logger.error('>>> [AssetDetail] Erro ao calcular deslocamento dinâmico:', e);
-      }
-    };
-
-    if (!workingAsset?.id) return;
-    // Debounce: a dep workingAsset?.filial re-executa o effect a cada tecla digitada
-    // no campo filial; agrupa as chamadas em uma única consulta de GPS após pausa.
-    const timer = setTimeout(() => {
-      calculateDynamicLocation();
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [workingAsset?.id, workingAsset?.filial]);
+  // O ativo fica SÓ com o GPS que já tem (leitura do inventário) ou vazio. A
+  // versão anterior gravava aqui a âncora da filial mais um deslocamento
+  // aleatório — e São Paulo como default quando a filial não tinha config —, o
+  // que inventava coordenadas no registo do ativo.
 
 
   const effectiveAssets = dexieAssets.length > 0 ? dexieAssets : assets;
