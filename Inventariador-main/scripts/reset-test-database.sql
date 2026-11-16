@@ -54,37 +54,61 @@ end $$;
 
 -- ----------------------------------------------------------------------------
 -- 1. DROPAR AS TABELAS DE INVENTÁRIO / AUDITORIA
---    `cascade` remove FKs dependentes entre elas. Tabelas inexistentes são
---    ignoradas. `user_permissions` fica de fora por omissão (§ 1-B).
+--
+--    1-A. Tabelas que o `docs/supabase_bootstrap.sql` RECRIA: podem ser
+--         dropadas sem risco de ficarem em falta.
+--    1-C. Tabelas que o app USA mas o bootstrap NÃO recria (movimentos,
+--         depreciação, grupos, plano de contas, NCM, log térmico, field events).
+--         Por omissão são MANTIDAS — dropar sem DDL para recriar deixaria o app
+--         com PGRST205 nessas telas. Para as incluir, autorize também:
+--             select set_config('gbr.reset_drop_extras', 'SIM', false);
+--
+--    `cascade` remove FKs/views dependentes (não dropa as tabelas que só
+--    referenciam). Tabelas inexistentes são ignoradas.
 -- ----------------------------------------------------------------------------
 do $$
 declare
   alvo text;
+  extras boolean := current_setting('gbr.reset_drop_extras', true) = 'SIM';
 begin
   foreach alvo in array array[
     'assets',
     'asset_logs',
     'asset-photos',
-    'asset_movements',
-    'asset_depreciation_history',
-    'asset_groups',
-    'chart_of_accounts',
-    'ncm_classifiers',
     'locations',
     'inventory_config',
     'unit_configs',
     'campaigns',
     'campaign_snapshots',
-    'log_inventario_termico',
-    'field_events',
     'audit_logs'
   ]
   loop
     if to_regclass(format('public.%I', alvo)) is not null then
       execute format('drop table public.%I cascade', alvo);
-      raise notice 'dropada: public.%', alvo;
+      raise notice 'dropada (recriada pelo bootstrap): public.%', alvo;
     else
       raise notice 'ignorada (não existe): public.%', alvo;
+    end if;
+  end loop;
+
+  -- 1-C. Sem DDL no repositório para recriar: mantidas por omissão.
+  foreach alvo in array array[
+    'asset_movements',
+    'asset_depreciation_history',
+    'asset_groups',
+    'chart_of_accounts',
+    'ncm_classifiers',
+    'log_inventario_termico',
+    'field_events'
+  ]
+  loop
+    if to_regclass(format('public.%I', alvo)) is null then
+      raise notice 'ignorada (não existe): public.%', alvo;
+    elsif extras then
+      execute format('drop table public.%I cascade', alvo);
+      raise notice 'dropada (reset_drop_extras=SIM, precisa de DDL próprio): public.%', alvo;
+    else
+      raise notice 'MANTIDA (o bootstrap não a recria; use gbr.reset_drop_extras=SIM para dropar): public.%', alvo;
     end if;
   end loop;
 end $$;
@@ -103,6 +127,8 @@ commit;
 --    Rode agora, neste mesmo editor, o conteúdo de `docs/supabase_bootstrap.sql`.
 --    É idempotente e repõe tabelas, colunas, PK (tenantid, id), índice único
 --    (tenantid, primarykey), índices de leitura, defaults e políticas RLS.
+--    Se tiver dropado `field_events` (§ 1-C), rode também
+--    `docs/supabase_field_events.sql`.
 --
 --    Confirmação rápida de que a recriação passou:
 -- ----------------------------------------------------------------------------
