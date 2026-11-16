@@ -31,7 +31,7 @@ interface UnitConfiguratorProps {
   onUpdateConfigs?: (configs: UnitConfig[]) => void;
   onNavigate?: (screen: AppScreen) => void;
   initialUnit?: string | null;
-  /** Bypass offline: chamado quando o auditor aplica coordenadas padrão e a campanha de contingência é aberta. */
+  /** Bypass offline: chamado com a UNIDADE quando a campanha de contingência é aberta — sem coordenada nenhuma. */
   onBypassApplied?: (unit: string) => void;
 }
 
@@ -995,8 +995,8 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       localStorage.setItem('campaign_bypass_open', 'true');
       sessionStorage.setItem('kardek_campaign_open', campaignFlag);
 
-      setJustSaved(true);
-      setTimeout(() => setJustSaved(false), 3000);
+      // NÃO toca em `justSaved`: o rótulo do botão de âncora ("POSIÇÃO FIXADA!")
+      // é exclusivo do handleSave. Aqui nada foi fixado — só a campanha abriu.
       setMessage({
         text: 'BYPASS ATIVADO: CAMPANHA DE CONTINGÊNCIA ABERTA. A FILIAL CONTINUA EM FALTA ÂNCORA GPS.',
         type: 'success'

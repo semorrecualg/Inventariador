@@ -242,6 +242,14 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
       expect(sessionStorage.getItem('kardek_campaign_open')).toMatch(/^BYPASS_/);
       expect(applied).toEqual([unit]);
       expect(container.textContent).toContain('FALTA ÂNCORA GPS');
+
+      // Nada foi fixado: o botão de âncora não pode dizer "POSIÇÃO FIXADA!".
+      expect(container.textContent).not.toContain('POSIÇÃO FIXADA');
+      const fixar = Array.from(container.querySelectorAll('button')).find((b) =>
+        (b.textContent || '').toUpperCase().includes('FIXAR ÂNCORA GPS')
+      );
+      expect(fixar).toBeTruthy();
+      expect(fixar!.disabled).toBe(true);
     } finally {
       root.unmount();
       container.remove();
