@@ -11,8 +11,6 @@
   --color-success: #10B981;
   --color-warning: #F59E0B;
   --color-danger: #EF4444;
-  --color-ai-start: #4F46E5;
-  --color-ai-end: #2563EB;
 
   /* Palette for Phases and Modules */
   --color-phase-welcome: #2563EB;
@@ -126,10 +124,6 @@
 
   .btn-primary {
     @apply bg-accent text-white rounded-2xl font-bold transition-all active:scale-95 active:opacity-90;
-  }
-
-  .ai-gradient {
-    @apply bg-gradient-to-r from-ai-start to-ai-end text-white;
   }
 
   .glass-effect {

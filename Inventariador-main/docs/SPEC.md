@@ -31,7 +31,7 @@ credenciais `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` estão presentes.
 | Roteamento | React Router `HashRouter` | Compatível com `file://` no Capacitor |
 | Estado | State local em `App.tsx` (máquina de telas) + Zustand (`stores/`) | `uiStore`, `authStore`, `inventoryStore`, `syncStore` |
 | Persistência local | **Dexie.js / IndexedDB** — banco `InventoryLocalStore` | Schema **v7** (chave composta `[tenantid+primarykey]` — baseline em `docs/SCHEMA_BASELINE.md`) |
-| Nuvem (ativa) | Supabase (`@supabase/supabase-js`) + Gemini (`@google/genai`) | Multi-tenant (`tenantid` + `filial`); `isInternalMode = !(VITE_SUPABASE_URL && VITE_SUPABASE_ANON_KEY)` |
+| Nuvem (ativa) | Supabase (`@supabase/supabase-js`) | Multi-tenant (`tenantid` + `filial`); `isInternalMode = !(VITE_SUPABASE_URL && VITE_SUPABASE_ANON_KEY)` |
 | Mobile | Capacitor 6 (Android) | APK via GitHub Actions |
 | Banco nativo Android (fase 3) | `@capacitor-community/sqlite` + `jeep-sqlite` + `sql.js` | Instalados, ainda não usados |
 | Testes | Vitest (30 arquivos / 295 testes) + Playwright (E2E) | `npm test`, `npm run test:e2e` |
@@ -177,7 +177,6 @@ Duas fontes de verdade que devem andar juntas:
 
 | Variável | Uso | Obrigatória? |
 |---|---|---|
-| `GEMINI_API_KEY` | Insights AI (`geminiService`) | não (desliga o recurso) |
 | `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` / `VITE_SUPABASE_SCHEMA` | Cloud mode multi-tenant (ativa o SUPABASE) | sim p/ modo nuvem |
 | `VITE_ADMIN_EMAIL` | Override do e-mail admin (default `semorr@gmail.com`) | não |
 | `APP_URL` / `SHARED_APP_URL` | `vite.config.ts` `define` | não |

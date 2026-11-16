@@ -91,7 +91,6 @@ import StressTestManager from './components/StressTestManager';
 import { sqliteService, db, DexieAsset } from './services/sqliteService';
 import { auditService } from './services/auditService';
 import { telemetryService } from './services/telemetryService';
-import AIAssistant from './components/AIAssistant';
 import { motion } from 'motion/react';
 import { APP_LOGO } from './constants';
 import Building2 from 'lucide-react/dist/esm/icons/building-2';
@@ -102,7 +101,6 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import X from 'lucide-react/dist/esm/icons/x';
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert';
-import Sparkles from 'lucide-react/dist/esm/icons/sparkles';
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
 import Activity from 'lucide-react/dist/esm/icons/activity';
 import HardDrive from 'lucide-react/dist/esm/icons/hard-drive';
@@ -484,7 +482,6 @@ const App: React.FC = () => {
 
   const [isPrivacyCenterOpen, setIsPrivacyCenterOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
-  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
   const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
   // "Novo usuário" a partir do CONTRATO DE TRABALHO: a tela de Acessos abre já
   // com o formulário de cadastro, e o voltar regressa ao contrato.
@@ -7116,10 +7113,7 @@ useEffect(() => {
                   <div className="px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-600">
                     <span className="text-[7px] font-bold uppercase tracking-[0.1em]">Inventariador GBR v{pkg.version}</span>
                   </div>
-                  <div 
-                    onClick={() => setIsAIAssistantOpen(true)}
-                    className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center space-x-1 cursor-pointer hover:bg-indigo-100 transition-all text-indigo-600"
-                  >
+                  <div className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center space-x-1 text-indigo-600">
                     <Activity size={10} />
                     <span className="text-[7px] font-black uppercase tracking-widest">DEV</span>
                   </div>
@@ -7127,12 +7121,6 @@ useEffect(() => {
                     <ShieldCheck size={10} />
                     <span className="text-[7px] font-black uppercase tracking-widest">{permissionsGranted ? 'OPERACIONAL' : 'BLOQUEADO'}</span>
                   </div>
-                  {import.meta.env.VITE_GEMINI_API_KEY && (
-                    <div className="px-2 py-0.5 bg-purple-50 border border-purple-100 rounded-lg flex items-center space-x-1 text-purple-600">
-                      <Sparkles size={8} />
-                      <span className="text-[7px] font-black uppercase tracking-widest">AI</span>
-                    </div>
-                  )}
                </div>
                </div>
             </div>
@@ -7324,8 +7312,6 @@ useEffect(() => {
             onToggleGpsBypass={handleToggleGpsBypass}
             isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
             onCheckIntegrity={handleCheckIntegrity}
-            isAIAssistantOpen={isAIAssistantOpen}
-            setIsAIAssistantOpen={setIsAIAssistantOpen}
             campaignsCount={campaigns.length}
             currentCampaignId={inventory.currentCampaignId}
           />} />
@@ -7890,7 +7876,7 @@ useEffect(() => {
               databaseMode={databaseMode}
             />
           ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
-          {screen === AppScreen.GLOBAL_PERFORMANCE && (userHasPermission(user, 'view_global_performance') ? <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={() => setHistory([AppScreen.MAIN_MENU])} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.GLOBAL_PERFORMANCE && (userHasPermission(user, 'view_global_performance') ? <GlobalPerformance assets={filteredAssetsByUnit} onBack={() => setHistory([AppScreen.MAIN_MENU])} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && (userHasPermission(user, 'view_reconciliation') ? <AccountReconciliation assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.SYNC_MANAGER && (
             <SyncManager 
@@ -7923,7 +7909,6 @@ useEffect(() => {
             pushScreen(AppScreen.ONBOARDING);
           }}
           onOpenPalette={() => setIsPaletteOpen(true)}
-          onOpenAIAssistant={() => setIsAIAssistantOpen(true)}
           isOpen={isHelpMenuOpen}
           onToggle={setIsHelpMenuOpen}
         />
@@ -8042,11 +8027,6 @@ useEffect(() => {
           </motion.div>
         </div>
       )}
-
-      <AIAssistant 
-        isOpen={isAIAssistantOpen} 
-        onClose={() => setIsAIAssistantOpen(false)} 
-      />
 
       <Modal
         isOpen={modalConfig.isOpen}

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Remoção da integração Gemini (código morto e chave exposta ao cliente)
+
+- Saem o serviço de IA, o assistente, o modal de chat e o cartão de insight (este
+  último sem uso), junto com a dependência `@google/genai` e o selo «AI» do cabeçalho
+  que lia a chave da IA no cliente.
+- A chave sai do `.env.example`, do `metadata.json` (`majorCapabilities`) e da
+  documentação (README, ARCHITECTURE, SPEC, GOVERNANCA); o painel de desempenho global
+  deixa de pedir insights por IA. Os tokens `ai-start`/`ai-end` e a classe
+  `.ai-gradient` saem do `index.css` por ficarem sem consumidores.
+
 ### Muro multi-tenant ponta a ponta — isolamento por `tenantid` (usuário × contrato)
 
 Fechamento do muro de isolamento entre contratos no local e na nuvem, com login
