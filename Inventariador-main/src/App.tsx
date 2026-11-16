@@ -1774,6 +1774,18 @@ useEffect(() => {
     };
   }, [setHistory]);
 
+  // GUARDA DE ENVIO (utils/cloudPushGuard): a nuvem recusa um payload com
+  // cópias locais. O aviso sobe para a barra de sincronização em vez de ficar
+  // só no console — sem isso o operador veria "PENDENTE NUVEM" para sempre.
+  useEffect(() => {
+    const handleCloudPushBlocked = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      setSyncError(detail?.message || 'Envio à nuvem bloqueado: a base local tem cópias repetidas.');
+    };
+    window.addEventListener('gbr_cloud_push_blocked', handleCloudPushBlocked);
+    return () => window.removeEventListener('gbr_cloud_push_blocked', handleCloudPushBlocked);
+  }, []);
+
   useEffect(() => {
     // Check inicial
     const initialCheck = checkRuntimeIntegrity();

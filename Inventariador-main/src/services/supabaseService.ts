@@ -18,6 +18,8 @@ import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpo
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
+import { checkCloudPushGuard } from '../utils/cloudPushGuard';
+import type { DedupRow } from '../utils/dedupAssets';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -959,6 +961,27 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   if (!assets || assets.length === 0) {
     logger.error('>>> [Supabase] Fluxo Bloqueado: Ação explícita de sincronia abortada. Array de ativos nulo ou vazio detectado.');
     throw new SupabaseNetworkException('Ação Bloqueada: Não há ativos gravados no disco local para espelhamento Delta.');
+  }
+
+  // GUARDA DE ENVIO — ponto único por onde passam TODOS os caminhos de envio:
+  // a carga em massa do Gestor, o autosave de fundo (`saveInventory`), o push
+  // delta de boot (`pushLocalChanges`), a fila da nuvem (`flushCloudQueue`) e
+  // os envios de uma linha (conferência, unitização, restauro, exclusão).
+  //
+  // A tabela `assets` guarda uma linha por tenantid + filial + etiqueta. Um
+  // payload com duas linhas da mesma identidade (`primarykey` diferentes) grava
+  // as duas — é assim que as 1.195 cópias voltam para todos os dispositivos,
+  // uma linha de cada vez, mesmo com a nuvem já consolidada. O envio é recusado
+  // antes de tocar na rede; nada é perdido, os ativos ficam por sincronizar.
+  const cloudPushGuard = checkCloudPushGuard(assets as unknown as DedupRow[]);
+  if (cloudPushGuard.blocked) {
+    cloudPushGuard.message.forEach((line) => logger.warn(`>>> [Supabase] ${line}`));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gbr_cloud_push_blocked', {
+        detail: { message: cloudPushGuard.message[0], audit: cloudPushGuard.audit }
+      }));
+    }
+    return [];
   }
 
   if (!supabase || !navigator.onLine) {
