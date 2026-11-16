@@ -3695,6 +3695,45 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
 };
 
 /**
+ * Converte uma linha de `inventory_config` na config DA FILIAL dela.
+ *
+ * Devolve `null` quando a linha não é de filial (a linha `config_<tenant>` tem
+ * `filial` e `data` nulos) ou quando `data` não traz coordenada utilizável. Era
+ * isto que faltava: essas linhas caíam na filial da sessão e sobrescreviam a
+ * config com `lat/lng = 0`, deixando a unidade em "FALTA ÂNCORA GPS" mesmo com
+ * a âncora gravada no aparelho ou em outro dispositivo.
+ */
+export const mapInventoryConfigRow = (
+  item: Record<string, unknown>,
+  fallbackTenantid?: string
+): UnitConfig | null => {
+  const raw = item.data;
+  const itemData = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+  if (!itemData || !hasRealAnchor(itemData.lat, itemData.lng)) return null;
+
+  const filial = String(
+    item.filial || item.unit_id || item._unitid ||
+    itemData.filial || itemData.unit_id || itemData._unitid || ''
+  ).trim();
+  if (!filial) return null;
+
+  const tenantid = String(
+    item.tenantid || resolveTenantId(itemData) || fallbackTenantid || ''
+  ).trim();
+
+  return {
+    ...(itemData as unknown as UnitConfig),
+    filial,
+    unit_id: filial,
+    ...(tenantid ? { tenantid } : {}),
+    lat: Number(itemData.lat),
+    lng: Number(itemData.lng),
+    radius_meters: Number(itemData.radius_meters ?? 0),
+    is_active: itemData.is_active !== false
+  } as UnitConfig;
+};
+
+/**
  * Busca as configurações de geofencing combinando Local e Nuvem
  */
 export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
@@ -3852,33 +3891,28 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
 
       if (data && !error) {
         data.forEach((item: Record<string, unknown>) => {
-          const itemData = item.data as Record<string, unknown> | undefined;
-          const tenantidResolved = String(item.tenantid || (itemData && resolveTenantId(itemData)) || tenantid);
-          const filialUnit = String(item.filial || item._unitid || (itemData && (itemData.filial || itemData._unitid || itemData.unit_id)) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '');
-          
-          configs[filialUnit] = {
-            ...(itemData || {}),
-            filial: filialUnit,
-            tenantid: tenantidResolved,
-            unit_id: filialUnit,
-            lat: Number((itemData && itemData.lat) ?? 0),
-            lng: Number((itemData && itemData.lng) ?? 0),
-            radius_meters: Number((itemData && itemData.radius_meters) ?? 0),
-            is_active: !itemData || itemData.is_active !== false
-          } as UnitConfig;
+          const mapped = mapInventoryConfigRow(item, tenantid);
+          // Linha sem âncora (ex.: `config_<tenant>`, com `data` nulo) não é
+          // configuração de filial: não cria nem substitui config nenhuma.
+          if (!mapped) return;
+          configs[String(mapped.filial)] = mapped;
         });
-        
+
         // Atualiza o local com o que veio da nuvem, mas preserva dados locais mais recentes
         const updatedLocal = { ...localData };
-        data.forEach((item: Record<string, unknown>) => { 
+        data.forEach((item: Record<string, unknown>) => {
+          const mapped = mapInventoryConfigRow(item, tenantid);
+          if (!mapped) return; // linha global/sem âncora nunca entra no cache de filial
           const cloudTime = new Date(String(item.updated_at || '') || 0).getTime();
-          const itemKey = String(item.filial || item.unit_key || `${item.tenantid || tenantid}_${item.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || ''}`);
+          // Mesma chave do `saveUnitConfig` (tenant_filial) — antes a linha da
+          // nuvem era gravada com outra chave e o cache local não a encontrava.
+          const itemKey = `${String(mapped.tenantid || tenantid)}_${String(mapped.filial)}`.replace(/\s+/g, '_');
           const localItem = localData[itemKey];
           const localTime = localItem ? new Date(String(localItem.updated_at || '') || 0).getTime() : 0;
-          
+
           // Só sobrescreve se o dado da nuvem for realmente mais novo
           if (cloudTime >= localTime) {
-            updatedLocal[itemKey] = item.data || item; 
+            updatedLocal[itemKey] = mapped;
           }
         });
         localStorage.setItem('local_unit_configs', JSON.stringify(updatedLocal));
