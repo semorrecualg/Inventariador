@@ -1,4 +1,5 @@
 import { normalizeKey } from './schema';
+import { isRevokedAnchor } from './revokedAnchors';
 
 /**
  * Campos mínimos de um registro de âncora (config, espelho local ou rascunho).
@@ -72,7 +73,8 @@ export const collectGpsAnchorsFromStorage = (
       if (key && key.startsWith('kardek_gps_ancora_')) {
         const rec = readJson(local, key);
         const uId = rec?.filial || rec?.unit_id || rec?._unitid;
-        if (uId && isConfiguredAnchorRecord(rec)) {
+        // Âncora revogada na nuvem não volta pelo cache do aparelho.
+        if (uId && isConfiguredAnchorRecord(rec) && !isRevokedAnchor(uId, rec?.lat, rec?.lng)) {
           anchors.add(normalizeKey(String(uId)));
         }
       }
@@ -89,7 +91,7 @@ export const collectGpsAnchorsFromStorage = (
         // Sem config salva é rascunho de clique no mapa: a âncora não foi fixada
         // e a unidade continua sem configuração.
         if (!readJson(session, `unit_gps_config_${unit}`)) continue;
-        if (unit && isConfiguredAnchorRecord({ lat, lng })) {
+        if (unit && isConfiguredAnchorRecord({ lat, lng }) && !isRevokedAnchor(unit, lat, lng)) {
           anchors.add(normalizeKey(unit));
         }
       }

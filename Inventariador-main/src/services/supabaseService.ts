@@ -10,6 +10,7 @@ import { logger } from '../utils/logger';
 import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
+import { isRevokedAnchor } from '../utils/revokedAnchors';
 import { buildUnitFlags, mergeUnitFlags, pickUnitFlags } from '../utils/unitConfigFlags';
 import { isAdminEmail } from '../utils/authUtils';
 import { pullDedupKey } from '../utils/syncDedup';
@@ -3692,6 +3693,18 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
 };
 
 export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | string> => {
+  // Âncora revogada na nuvem (apagada em 2026-11-16) não pode voltar por um
+  // formulário que ainda traga o valor do cache do aparelho. Recusa aqui, antes
+  // de gravar em SQLite/Dexie/nuvem; uma posição nova passa normalmente.
+  const revokedUnit = (config as unknown as Record<string, unknown>).filial
+    || config.unit_id
+    || (config as unknown as Record<string, unknown>)._unitid;
+  if (isRevokedAnchor(revokedUnit, config.lat, config.lng)) {
+    const msg = `ÂNCORA REVOGADA: ${String(revokedUnit)} ainda tem a coordenada antiga (${String(config.lat)}, ${String(config.lng)}) em cache. Marque a posição correcta no mapa.`;
+    logger.warn(`>>> [GPS] ${msg}`);
+    return msg;
+  }
+
   try {
     // A sincronizacao com a nuvem so acontece em modo de nuvem (try-catch
     // interno = offline-first): em INTERNAL nada sai do aparelho.
@@ -3867,6 +3880,16 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
   try {
     const configs: Record<string, UnitConfig> = {};
 
+    // O que o app "vê" nunca inclui âncora revogada, venha ela do SQLite, do
+    // Dexie, do localStorage ou da nuvem (que pode ainda ter cache de outro
+    // aparelho). Sem este filtro o formulário abria pré-preenchido com o valor
+    // apagado e o SALVAR recriava a linha.
+    const visibleConfigs = (): UnitConfig[] =>
+      Object.values(configs).filter(cfg => {
+        const unit = cfg?.filial || cfg?.unit_id || (cfg as unknown as Record<string, unknown>)?._unitid;
+        return !isRevokedAnchor(unit, cfg?.lat, cfg?.lng);
+      });
+
     // 1. Carrega do LocalStorage (Sempre disponível)
     const localData = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
     
@@ -3881,6 +3904,24 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
         });
         localStorage.setItem('local_unit_configs', JSON.stringify(localData));
       }
+    }
+
+    // 1.0 Âncoras revogadas na nuvem saem do cache do aparelho. Sem isto o
+    // `local_unit_configs` do telemóvel devolvia a coordenada antiga e o próximo
+    // salvamento recriava a linha em `inventory_config`.
+    try {
+      const revokedKeys = Object.keys(localData).filter(k => {
+        const cfg = localData[k] as UnitConfig | undefined;
+        const unit = cfg?.filial || cfg?.unit_id || (cfg as unknown as Record<string, unknown>)?._unitid;
+        return isRevokedAnchor(unit, cfg?.lat, cfg?.lng);
+      });
+      if (revokedKeys.length > 0) {
+        revokedKeys.forEach(k => delete localData[k]);
+        localStorage.setItem('local_unit_configs', JSON.stringify(localData));
+        logger.info(`>>> [GPS] ${revokedKeys.length} âncora(s) revogada(s) removidas do cache local.`);
+      }
+    } catch (err) {
+      logger.warn('>>> [GPS] Falha ao limpar âncoras revogadas do cache local:', err);
     }
 
     // 1.1 Carrega do SQLite Físico (Soberania de Dados)
@@ -4000,10 +4041,10 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
     // Se for modo interno, retornamos apenas o que está no local
     if (isInternal) {
       logger.info(`>>> [Local] fetchUnitConfigs retornando ${Object.values(configs).length} configs locais.`);
-      return Object.values(configs);
+      return visibleConfigs();
     }
 
-    if (!supabase) return Object.values(configs);
+    if (!supabase) return visibleConfigs();
     
     // 2. Tenta carregar da Nuvem (inventory_config) para atualizar o local
     try {
@@ -4090,7 +4131,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
       logger.warn('>>> [Supabase] Falha ao buscar configs da nuvem, usando apenas locais.', err);
     }
 
-    return Object.values(configs);
+    return visibleConfigs();
   } catch (err) {
     logger.error('Erro ao buscar configs Local-First:', err);
     return [];
