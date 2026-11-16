@@ -111,7 +111,8 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
+import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
+import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isSyncLockStuck } from './services/syncQueueGuards';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
@@ -1774,6 +1775,20 @@ useEffect(() => {
     };
   }, [setHistory]);
 
+  // GUARDA DE ENVIO (utils/cloudPushGuard): a nuvem recusa um payload com
+  // cópias locais. O aviso sobe para a barra de sincronização em vez de ficar
+  // só no console — sem isso o operador veria "PENDENTE NUVEM" para sempre.
+  useEffect(() => {
+    const handleCloudPushBlocked = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      const message = detail?.message || 'Envio à nuvem bloqueado: a base local tem cópias repetidas.';
+      // Mesmo aviso repetido não volta a mexer no estado.
+      setSyncError(prev => (prev === message ? prev : message));
+    };
+    window.addEventListener('gbr_cloud_push_blocked', handleCloudPushBlocked);
+    return () => window.removeEventListener('gbr_cloud_push_blocked', handleCloudPushBlocked);
+  }, []);
+
   useEffect(() => {
     // Check inicial
     const initialCheck = checkRuntimeIntegrity();
@@ -2588,7 +2603,11 @@ useEffect(() => {
           });
         }
       } catch (err) {
-        setSyncError('Erro ao enviar alterações locais');
+        // Bloqueio por cópias é política, não falha: o operador tem de ver o
+        // número e a instrução de LIMPAR CÓPIAS, não um "erro" genérico.
+        setSyncError(
+          err instanceof CloudPushPolicyError ? err.message : 'Erro ao enviar alterações locais'
+        );
         logger.error('Push error:', err);
         throw err;
       } finally {
@@ -5131,6 +5150,9 @@ useEffect(() => {
   const cloudQueueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushCloudQueueRef = useRef<() => Promise<void>>(async () => {});
   const CLOUD_FLUSH_DELAY_MS = 1200;
+  // Guarda de cópias (utils/cloudPushGuard): enquanto a base local tiver cópias
+  // a fila fica retida e o recuo cresce — 1,2 s só repetia o mesmo aviso.
+  const cloudBlockedBackoffRef = useRef<number>(0);
 
   const scheduleCloudFlush = useCallback((delayMs: number = CLOUD_FLUSH_DELAY_MS) => {
     if (cloudQueueTimerRef.current) return;
@@ -5159,6 +5181,10 @@ useEffect(() => {
       const synced = await syncAssetsToCloudAndMark(pending, user?.tenantid);
       const syncedSet = new Set(synced.map(String));
       if (syncedSet.size > 0) {
+        // Envio aceito: o episódio de bloqueio fecha — o próximo recomeça o
+        // recuo e volta a avisar. (Sem ids aceitos nada foi enviado: offline.)
+        cloudBlockedBackoffRef.current = 0;
+        resetCloudPushBlockedNotice();
         const mark = (a: Asset) => (syncedSet.has(String(a.id)) ? { ...a, _is_synced: 1 } : a);
         // Patch local do estado: sem setRefreshVersion, sem reler a base inteira.
         setInventory(prev => ({ ...prev, assets: prev.assets.map(mark) }));
@@ -5173,8 +5199,18 @@ useEffect(() => {
         if (navigator.onLine) scheduleCloudFlush();
       }
     } catch (err) {
-      logger.warn('>>> [Sync Queue] Lote não enviado; mantido em fila para nova tentativa:', err);
       pending.forEach(a => cloudQueueRef.current.set(String(a.id), a));
+      if (err instanceof CloudPushPolicyError) {
+        // Política, não rede: a fila espera em vez de repetir a cada 1,2 s.
+        const delay = nextCloudPushBlockedBackoff(cloudBlockedBackoffRef.current);
+        cloudBlockedBackoffRef.current = delay;
+        logger.warn(
+          `>>> [Sync Queue] Envio bloqueado por cópias locais; nova tentativa em ${Math.round(delay / 1000)} s.`
+        );
+        if (navigator.onLine) scheduleCloudFlush(delay);
+        return;
+      }
+      logger.warn('>>> [Sync Queue] Lote não enviado; mantido em fila para nova tentativa:', err);
       // Recuo: 5 s para não martelar a nuvem em erro persistente.
       if (navigator.onLine) scheduleCloudFlush(5000);
     }
@@ -5187,7 +5223,8 @@ useEffect(() => {
   const queueCloudSync = useCallback((assets: Asset[]) => {
     if (!databaseMode.startsWith('SUPABASE') || assets.length === 0) return;
     assets.forEach(a => cloudQueueRef.current.set(String(a.id), a));
-    scheduleCloudFlush();
+    // Com um bloqueio ativo, a fila respeita o recuo em vez de o atropelar.
+    scheduleCloudFlush(cloudBlockedBackoffRef.current || undefined);
   }, [databaseMode, scheduleCloudFlush]);
 
   // Reenvia a fila quando a rede volta e fecha o timer no desmonte.

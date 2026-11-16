@@ -27,6 +27,12 @@ const chaveUtil = (value: unknown, minimo = 1): string => {
 /** Chave da plaqueta (etiqueta), ou vazio quando é placeholder. */
 export const plaquetaKey = (asset: Partial<Asset>): string => chaveUtil(asset.etiqueta);
 
+/**
+ * `true` quando a etiqueta serve de identidade: não é vazia nem placeholder
+ * (`ETIQUETAR`, `SEM ETIQUETA`, `SEM REGISTRO`, `0`, `S/N`).
+ */
+export const hasUsableTag = (value: unknown): boolean => chaveUtil(value) !== '';
+
 /** Chave do registro, ou vazio quando é placeholder/curto demais para ser lote. */
 export const registroKey = (asset: Partial<Asset>): string => chaveUtil(asset.registro, 3);
 
