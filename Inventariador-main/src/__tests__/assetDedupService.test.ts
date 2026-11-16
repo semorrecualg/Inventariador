@@ -13,9 +13,12 @@ const asset = (over: Partial<DexieAsset> & { primarykey: string }): DexieAsset =
     filial_raw: '010101 CICOPAL GO',
     etiqueta: 'E1',
     tag: 'E1',
+    registro: 'REG-A',
+    subreg: '1',
+    descricaodoativo: 'CADEIRA GIRATORIA',
+    serial: 'SN-1',
     status: 'PENDENTE',
     qt: 1,
-    descricaodoativo: 'Ativo',
     _is_synced: 0,
     _is_deleted: 0,
     _conferido: 0,
@@ -56,9 +59,9 @@ describe('assetDedupService — limpeza de cópias na base local', () => {
       asset({ primarykey: 'A1' }),
       asset({ primarykey: 'A2' }),
       asset({ primarykey: 'A3', _conferido: 1 }),
-      asset({ primarykey: 'B1', etiqueta: 'E2', tag: 'E2' }),
-      asset({ primarykey: 'B2', etiqueta: 'E2', tag: 'E2' }),
-      asset({ primarykey: 'SEM-ID', etiqueta: '', tag: '' })
+      asset({ primarykey: 'B1', etiqueta: 'E2', tag: 'E2', registro: 'REG-B' }),
+      asset({ primarykey: 'B2', etiqueta: 'E2', tag: 'E2', registro: 'REG-B' }),
+      asset({ primarykey: 'SEM-ID', etiqueta: '', tag: '', registro: null, subreg: null })
     ]);
 
     const report = await previewAssetDuplicateCleanup();
@@ -79,9 +82,9 @@ describe('assetDedupService — limpeza de cópias na base local', () => {
       asset({ primarykey: 'A1', _is_synced: 1 }),
       asset({ primarykey: 'A2', _conferido: 1, _auditor: 'semorr@gmail.com', _dataLeitura: '2026-11-12T10:00:00Z' }),
       asset({ primarykey: 'A3' }),
-      asset({ primarykey: 'B1', etiqueta: 'E2', tag: 'E2' }),
-      asset({ primarykey: 'B2', etiqueta: 'E2', tag: 'E2' }),
-      asset({ primarykey: 'SEM-ID', etiqueta: '', tag: '' })
+      asset({ primarykey: 'B1', etiqueta: 'E2', tag: 'E2', registro: 'REG-B' }),
+      asset({ primarykey: 'B2', etiqueta: 'E2', tag: 'E2', registro: 'REG-B' }),
+      asset({ primarykey: 'SEM-ID', etiqueta: '', tag: '', registro: null, subreg: null })
     ]);
 
     const report = await applyAssetDuplicateCleanup();
@@ -118,8 +121,8 @@ describe('assetDedupService — limpeza de cópias na base local', () => {
       asset({ primarykey: 'A1' }),
       asset({ primarykey: 'A2' }),
       asset({ primarykey: 'A3', _conferido: 1 }),
-      asset({ primarykey: 'B1', filial: '010102 CICOPAL GO', filial_raw: '010102 CICOPAL GO' }),
-      asset({ primarykey: 'B2', filial: '010102 CICOPAL GO', filial_raw: '010102 CICOPAL GO', etiqueta: 'E9', tag: 'E9' })
+      asset({ primarykey: 'B1', filial: '010102 CICOPAL GO', filial_raw: '010102 CICOPAL GO', registro: 'REG-B' }),
+      asset({ primarykey: 'B2', filial: '010102 CICOPAL GO', filial_raw: '010102 CICOPAL GO', etiqueta: 'E9', tag: 'E9', registro: 'REG-C' })
     ]);
 
     const report = await applyAssetDuplicateCleanup();
@@ -143,10 +146,11 @@ describe('assetDedupService — limpeza de cópias na base local', () => {
     // a cópia (`ARQUIVO1` vs `arquivo1`, `ALT-...`, com/sem espaços).
     expect(delta.examples.length).toBeGreaterThan(0);
     expect(delta.examples[0]).toMatchObject({
-      key: 'CICOPAL|010101 CICOPAL GO|E1',
       keeper: 'A3',
       removed: ['A1', 'A2']
     });
+    // A identidade do grupo é a do ERP, não a etiqueta.
+    expect(String(delta.examples[0].key)).toContain('CICOPAL|ERP|010101REG-A');
   });
 
   it('diagnóstico não escreve em audit_logs', async () => {
@@ -174,10 +178,36 @@ describe('assetDedupService — limpeza de cópias na base local', () => {
     expect(received).toBe(1);
   });
 
+  it('não apaga as linhas que a carga preservou com a chave do ERP (mesma etiqueta)', async () => {
+    await seed([
+      asset({ primarykey: '01010110011', etiqueta: '000420', registro: '1001', subreg: '1', descricaodoativo: 'CADEIRA' }),
+      asset({ primarykey: '01010110021', etiqueta: '000420', registro: '1002', subreg: '1', descricaodoativo: 'MESA' }),
+      asset({ primarykey: '01010110031', etiqueta: '000420', registro: '1003', subreg: '1', descricaodoativo: 'ARMARIO' })
+    ]);
+
+    const report = await applyAssetDuplicateCleanup();
+
+    expect(report.removed).toBe(0);
+    expect(await db.local_assets.count()).toBe(3);
+  });
+
+  it('o modo antigo por etiqueta exige confirmação explícita', async () => {
+    await seed([
+      asset({ primarykey: 'A1', registro: null, subreg: null }),
+      asset({ primarykey: 'A2', registro: null, subreg: null })
+    ]);
+
+    const semConfirmar = await previewAssetDuplicateCleanup();
+    expect(semConfirmar.removed).toBe(0);
+
+    const confirmado = await previewAssetDuplicateCleanup({ confirmEtiquetaDuplicates: true });
+    expect(confirmado.removed).toBe(1);
+  });
+
   it('base sem cópias fica intacta', async () => {
     await seed([
       asset({ primarykey: 'A1', etiqueta: 'E1' }),
-      asset({ primarykey: 'B1', etiqueta: 'E2', tag: 'E2' })
+      asset({ primarykey: 'B1', etiqueta: 'E2', tag: 'E2', registro: 'REG-B' })
     ]);
 
     const report = await applyAssetDuplicateCleanup();

@@ -1,18 +1,25 @@
 import { db } from './sqliteService';
-import { buildDedupPlan, type DedupRow } from '../utils/dedupAssets';
+import { buildDedupPlan, type DedupOptions, type DedupRow } from '../utils/dedupAssets';
 import { logger } from '../utils/logger';
 
 /**
- * Limpeza de cópias repetidas de ativos (mesmo `tenantid + filial + etiqueta`).
+ * Limpeza de cópias repetidas de ativos.
  *
  * Contexto: o mesmo conjunto pode ser gravado várias vezes na base local com
  * `primarykey` diferente, então o `bulkPut` não substitui — a Unidade Operacional
  * passa a somar 4× os mesmos ativos (50 544 no lugar de 12 636).
  *
+ * A identidade NÃO é a etiqueta: a planilha contábil repete etiquetas entre
+ * ativos distintos, e a carga agora preserva essas linhas (chave do ERP). O
+ * agrupamento usa a identidade do ERP (`tenantid + código da filial + registro
+ * + subreg`) mais a assinatura do conteúdo; duas linhas só são cópias se
+ * descreverem o mesmo ativo. Sem identidade de ERP, nada é agrupado, a menos
+ * que quem chama passe `confirmEtiquetaDuplicates: true` (comportamento antigo,
+ * explícito).
+ *
  * O plano é sempre calculado primeiro e exposto em relatório (antes/depois).
  * `previewAssetDuplicateCleanup` NÃO escreve nada; só
- * `applyAssetDuplicateCleanup` remove linhas — e apenas as que têm identidade
- * completa (tenantid + filial + etiqueta).
+ * `applyAssetDuplicateCleanup` remove linhas.
  */
 
 export const ASSET_MIRROR_TABLES = ['local_assets', 'ativos', 'assets'] as const;
@@ -34,7 +41,7 @@ export interface DedupFilialReport {
 }
 
 export interface DedupExample {
-  /** Identidade normalizada: tenantid|filial|etiqueta. */
+  /** Identidade normalizada: contrato|ERP|chave do ERP|assinatura do conteúdo. */
   key: string;
   keeper: string;
   removed: string[];
@@ -95,7 +102,7 @@ const keyIdOf = (row: DedupRow): string => primaryKeyOf(row).join('\u0000');
 /**
  * Calcula o relatório sem tocar na base. `after` é o que ficaria após a limpeza.
  */
-export async function previewAssetDuplicateCleanup(): Promise<DedupReport> {
+export async function previewAssetDuplicateCleanup(options: DedupOptions = {}): Promise<DedupReport> {
   const tables: DedupTableReport[] = [];
   let examples: DedupExample[] = [];
   let perFilial: DedupFilialReport[] = [];
@@ -107,7 +114,7 @@ export async function previewAssetDuplicateCleanup(): Promise<DedupReport> {
 
   for (const tableName of ASSET_MIRROR_TABLES) {
     const rows = (await tableOf(tableName).toArray()) as unknown as DedupRow[];
-    const plan = buildDedupPlan(rows);
+    const plan = buildDedupPlan(rows, options);
     const removedKeys = new Set<string>();
     plan.groups.forEach((group) => group.removed.forEach((row) => removedKeys.add(keyIdOf(row))));
 
@@ -142,13 +149,13 @@ export async function previewAssetDuplicateCleanup(): Promise<DedupReport> {
  * devolve o relatório antes/depois. A conferência (`_conferido`, `_auditor`,
  * `_dataLeitura`) da cópia conferida é preservada no registo que fica.
  */
-export async function applyAssetDuplicateCleanup(): Promise<DedupReport> {
-  const report = await previewAssetDuplicateCleanup();
+export async function applyAssetDuplicateCleanup(options: DedupOptions = {}): Promise<DedupReport> {
+  const report = await previewAssetDuplicateCleanup(options);
 
   for (const tableName of ASSET_MIRROR_TABLES) {
     const table = tableOf(tableName);
     const rows = (await table.toArray()) as unknown as DedupRow[];
-    const plan = buildDedupPlan(rows);
+    const plan = buildDedupPlan(rows, options);
     const keysToDelete = plan.groups.flatMap((group) => group.removed.map(primaryKeyOf));
     const patches = plan.groups.filter((group) => Object.keys(group.patch).length > 0);
     if (keysToDelete.length === 0 && patches.length === 0) continue;
@@ -161,7 +168,7 @@ export async function applyAssetDuplicateCleanup(): Promise<DedupReport> {
     });
   }
 
-  const auditId = await logDedupAudit(report);
+  const auditId = await logDedupAudit(report, options);
   report.auditId = auditId;
 
   // A Unidade Operacional guarda o total em estado: sem este aviso o ecrã
@@ -193,7 +200,7 @@ const currentUserEmail = (): string => {
  * detalhe por filial). `delta` leva os números em JSON para poderem ser lidos
  * sem interpretar texto.
  */
-async function logDedupAudit(report: DedupReport): Promise<string> {
+async function logDedupAudit(report: DedupReport, options: DedupOptions = {}): Promise<string> {
   const auditId = `DEDUP_${Date.now()}_${Math.random().toString(36).slice(2, 9).toUpperCase()}`;
   const porFilial = report.perFilial.map((f) => `${f.filial} ${f.before}→${f.after} (-${f.removed})`).join(' · ');
   await db.audit_logs.put({
@@ -202,7 +209,7 @@ async function logDedupAudit(report: DedupReport): Promise<string> {
     acao: 'DEDUP_ASSETS',
     tabela: 'assets',
     registro_id: 'DEDUP_ASSETS',
-    details: `Limpeza de cópias por tenantid + filial + etiqueta: ${report.before} → ${report.after} (removidas ${report.removed}) em ${report.groupsWithCopies} grupo(s); sem etiqueta (intocados): ${report.withoutIdentity}. Por filial: ${porFilial}`,
+    details: `Limpeza de cópias por identidade do ERP (tenantid + filial + registro + subreg) e conteúdo${options.confirmEtiquetaDuplicates ? ' [MODO ANTIGO: etiqueta, confirmado]' : ''}: ${report.before} → ${report.after} (removidas ${report.removed}) em ${report.groupsWithCopies} grupo(s); sem identidade (intocados): ${report.withoutIdentity}. Por filial: ${porFilial}`,
     delta: JSON.stringify({
       before: report.before,
       after: report.after,
@@ -223,7 +230,7 @@ async function logDedupAudit(report: DedupReport): Promise<string> {
 export function formatDedupReport(report: DedupReport): string[] {
   const lines = [
     `[DEDUP] ANTES: ${report.before} linhas em local_assets · DEPOIS: ${report.after} · remover: ${report.removed}`,
-    `[DEDUP] Grupos com cópias (tenantid+filial+etiqueta): ${report.groupsWithCopies} · sem etiqueta (intocados): ${report.withoutIdentity}`
+    `[DEDUP] Grupos com cópias (identidade do ERP + conteúdo): ${report.groupsWithCopies} · sem identidade (intocados): ${report.withoutIdentity}`
   ];
   report.tables.forEach((table) => {
     lines.push(`[DEDUP] ${table.table}: ${table.before} → ${table.after} (-${table.removed})`);

@@ -1,12 +1,22 @@
 import { normalizeKey } from './schema';
+import { contractAssetKey, filialCode } from './assetKey';
 
 /**
- * Identidade de um ativo para efeitos de limpeza de cópias:
- * `tenantid + filial + etiqueta`, todos normalizados.
+ * Identidade de um ativo para efeitos de limpeza de cópias.
  *
- * Um registo sem etiqueta NÃO tem identidade — fica de fora do agrupamento e
- * nunca é apagado. Isto é deliberado: apagar por engano um ativo legítimo é pior
- * do que manter uma cópia a mais.
+ * A etiqueta NÃO identifica um ativo: a planilha contábil repete-a entre linhas
+ * (contas, sub-registros, baixas), e essas linhas são ativos distintos que a
+ * carga passou a preservar. Agrupar por etiqueta apagava-as.
+ *
+ * Regra:
+ *   1. identidade do ERP — `tenantid + código da filial + registro + subreg`;
+ *   2. assinatura do conteúdo (descrição, serial, quantidade, valor, conta…) —
+ *      duas linhas só são cópias se descreverem o MESMO ativo;
+ *   3. sem identidade de ERP, a etiqueta só serve de agrupamento quando quem
+ *      chama pede confirmação explícita (`confirmEtiquetaDuplicates`).
+ *
+ * Um registo sem identidade fica de fora do agrupamento e nunca é apagado.
+ * Apagar por engano um ativo legítimo é pior do que manter uma cópia a mais.
  */
 export interface DedupRow {
   primarykey: string;
@@ -14,6 +24,15 @@ export interface DedupRow {
   filial?: string;
   filial_raw?: string;
   etiqueta?: string;
+  registro?: string | number | null;
+  subreg?: string | number | null;
+  descricaodoativo?: string | null;
+  serial?: string | null;
+  qt?: string | number | null;
+  vlraquisic?: string | number | null;
+  contacontabil?: string | null;
+  centrodecusto?: string | null;
+  databaixa?: string | null;
   /** Quando a linha desceu da nuvem, traz `updated_at`; nem sempre existe. */
   updated_at?: string;
   _conferido?: number;
@@ -26,12 +45,55 @@ export interface DedupRow {
   gps_lng?: number | null;
 }
 
-export const assetIdentityKey = (row: DedupRow): string => {
+export interface DedupOptions {
+  /**
+   * Agrupar também linhas SEM identidade de ERP pela etiqueta (comportamento
+   * antigo). Exige confirmação explícita: com a chave do contrato, etiqueta
+   * repetida é normal e apagá-la destrói ativos legítimos.
+   */
+  confirmEtiquetaDuplicates?: boolean;
+}
+
+/**
+ * Assinatura do conteúdo do ativo. Entra na identidade de propósito: duas
+ * linhas com a mesma identidade de contrato mas descrições diferentes são
+ * ativos distintos (a carga dá-lhes `-2`, `-3`), não cópias.
+ */
+export const contentSignatureOf = (row: DedupRow): string =>
+  [
+    row.descricaodoativo,
+    row.serial,
+    row.qt,
+    row.vlraquisic,
+    row.contacontabil,
+    row.centrodecusto,
+    row.databaixa
+  ]
+    .map((value) => normalizeKey(value))
+    .join('|');
+
+/** Identidade do ERP: contrato + `código da filial + registro + subreg`. */
+export const erpIdentityOf = (row: DedupRow): string => {
   const tenant = String(row.tenantid ?? '').trim().toUpperCase();
-  const filial = normalizeKey(row.filial_raw || row.filial);
+  const erpKey = contractAssetKey({
+    filial: row.filial_raw || row.filial,
+    registro: row.registro,
+    subreg: row.subreg
+  });
+  return erpKey ? `${tenant}|ERP|${erpKey}` : '';
+};
+
+export const assetIdentityKey = (row: DedupRow, options: DedupOptions = {}): string => {
+  const signature = contentSignatureOf(row);
+  const erp = erpIdentityOf(row);
+  if (erp) return `${erp}|${signature}`;
+
+  if (!options.confirmEtiquetaDuplicates) return '';
+  const tenant = String(row.tenantid ?? '').trim().toUpperCase();
+  const filial = normalizeKey(row.filial_raw || row.filial) || filialCode(row.filial_raw || row.filial);
   const etiqueta = normalizeKey(row.etiqueta);
   if (!etiqueta) return '';
-  return `${tenant}|${filial}|${etiqueta}`;
+  return `${tenant}|ETQ|${filial}|${etiqueta}|${signature}`;
 };
 
 const recencyOf = (row: DedupRow): number => {
@@ -86,16 +148,16 @@ export interface DedupPlan {
   total: number;
   /** Cópias a remover. */
   duplicates: number;
-  /** Linhas sem etiqueta: nunca entram no agrupamento. */
+  /** Linhas sem identidade de ERP (ou sem etiqueta, no modo antigo). */
   withoutIdentity: number;
 }
 
-export function buildDedupPlan(rows: DedupRow[]): DedupPlan {
+export function buildDedupPlan(rows: DedupRow[], options: DedupOptions = {}): DedupPlan {
   const byKey = new Map<string, DedupRow[]>();
   let withoutIdentity = 0;
 
   for (const row of rows) {
-    const key = assetIdentityKey(row);
+    const key = assetIdentityKey(row, options);
     if (!key) {
       withoutIdentity += 1;
       continue;
