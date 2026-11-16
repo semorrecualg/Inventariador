@@ -14,6 +14,33 @@ export interface GeoLocationResult {
   source: 'native' | 'admin_bypass';
 }
 
+/**
+ * A posição veio do BYPASS ADMINISTRATIVO — a âncora da unidade a fazer de
+ * leitura de aparelho (`admin_bypass`). Serve para a guarda de conformidade
+ * mostrar onde o operador deveria estar; NUNCA é GPS do ativo.
+ */
+export const isAnchorDerivedLocation = (
+  loc: Partial<GpsLocation> | null | undefined
+): boolean =>
+  !!loc && (loc.isBypassed === true || String(loc.source || '') === 'admin_bypass');
+
+/**
+ * A única coordenada que pode ser gravada no ativo é a leitura REAL do aparelho.
+ *
+ * Devolve `null` para bypass administrativo (âncora), para cache de âncora, para
+ * coordenada inválida/zero e para ausência de leitura. Sem fix real o ativo fica
+ * sem GPS — a âncora continua só na configuração da unidade operacional.
+ */
+export const persistableAssetGps = (
+  loc: Partial<GpsLocation> | null | undefined
+): { lat: number; lng: number } | null => {
+  if (!loc || isAnchorDerivedLocation(loc)) return null;
+  const lat = Number(loc.lat);
+  const lng = Number(loc.lng);
+  if (!isValidCoordinate(lat, lng)) return null;
+  return { lat, lng };
+};
+
 function showFloatingBypassToast(lat: number, lng: number, reason: string) {
   if (typeof document === 'undefined') return;
   
@@ -83,7 +110,9 @@ function showFloatingBypassToast(lat: number, lng: number, reason: string) {
 /**
  * Retorna a posição do aparelho para a guarda de conformidade, ou `null` quando
  * não há leitura válida e não há âncora da unidade para o bypass administrativo.
- * Nunca inventa coordenada: a âncora da unidade é a única contingência usada.
+ * Nunca inventa coordenada: a âncora da unidade é a única contingência usada, e
+ * o resultado com `isBypassed`/`source: 'admin_bypass'` NÃO pode ser gravado em
+ * ativo — `persistableAssetGps` recusa-o.
  */
 export async function getCurrentDeviceLocation(
   userRole: string,
@@ -184,6 +213,9 @@ export interface GpsLocation {
   lng: number;
   accuracy?: number;
   altitude?: number | null;
+  /** Posição vinda do bypass administrativo (âncora), não do sensor. */
+  isBypassed?: boolean;
+  source?: 'native' | 'admin_bypass';
 }
 
 let lastLocation: GpsLocation | null = null;
@@ -262,26 +294,13 @@ export const startAutonomousTracking = async () => {
             }
 
             if (isAdmin) {
-              // Só a âncora real da unidade; sem ela, nenhuma coordenada é inventada.
-              let anchor: { lat: number; lng: number } | null = null;
-              try {
-                const cStr = localStorage.getItem('gbr_current_unit_config');
-                if (cStr) {
-                  const cObj = JSON.parse(cStr);
-                  if (isValidCoordinate(Number(cObj.lat), Number(cObj.lng))) {
-                    anchor = { lat: Number(cObj.lat), lng: Number(cObj.lng) };
-                  }
-                }
-              } catch (e) {
-                logger.warn("Falha ao ler gbr_current_unit_config:", e);
-              }
-              lastLocation = anchor ? { lat: anchor.lat, lng: anchor.lng, accuracy: 1.0 } : null;
-              lastTimestamp = Date.now();
-              logger.warn('[Bypass Admin Ativo] Timeout de GPS; usando somente a âncora da unidade, se houver.');
-            } else {
-              // Envia coordenada nula controlada
-              lastLocation = null;
+              // Bypass administrativo NÃO gera coordenada: a âncora da unidade
+              // não é leitura do aparelho e não pode virar GPS de ativo. O cache
+              // fica nulo até haver um fix real do sensor.
+              logger.warn('[Bypass Admin Ativo] Timeout de GPS; sem coordenada até haver leitura real.');
             }
+            // Envia coordenada nula controlada (bypass inclusive).
+            lastLocation = null;
 
             // Aplica um mecanismo de recuo (debounce/backoff) de pelo menos 5000ms antes de reiniciar a escuta do sensor
             if (!isReconnectingGps) {

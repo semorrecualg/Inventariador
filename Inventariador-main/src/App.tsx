@@ -41,7 +41,7 @@ import Labeling from './components/Labeling';
 import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
 import localforage from 'localforage';
-import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
+import { getCurrentLocation, persistableAssetGps, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
 import UnitSelector from './components/UnitSelector';
 import AddressSelector from './components/AddressSelector';
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -5426,32 +5426,26 @@ useEffect(() => {
       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
       const isGpsBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
 
-      // null = sem leitura válida e precisa; nunca gravamos 0,0 inventado.
+      // Sem leitura real não há coordenada: a âncora da unidade não é GPS do
+      // ativo. Bypass administrativo (e bateria crítica) seguem sem ponto, e
+      // `persistableAssetGps` recusa qualquer posição marcada como bypass.
       let loc: import('./utils/gpsUtils').GpsLocation | null = null;
       if (isAdmin || isGpsBypassed) {
-        if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-          loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-        }
+        logger.info('>>> [GPS] Bypass administrativo: registro segue sem coordenada (âncora não é leitura).');
       } else if (metrics.battery > 5) {
         loc = await Promise.race([
           getCurrentLocation(),
           new Promise<null>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
         ]).catch(e => {
-          logger.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
-          if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-            return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-          }
+          logger.warn('>>> [GPS] Falha na captura rápida; registro segue sem coordenada:', e);
           return null;
         });
       } else {
         logger.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de', metrics.battery, '% ou inferior!');
-        if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-          loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-        }
       }
 
       const { convertAltitudeToFloor } = await import('./utils/gpsUtils');
-      if (!loc) {
+      if (!loc || !persistableAssetGps(loc)) {
         queueCloudSync([baseAsset]);
         return;
       }
@@ -5492,7 +5486,7 @@ useEffect(() => {
       logger.warn('>>> [GPS] Captura em background falhou; envio do registro segue sem coordenadas:', e);
       queueCloudSync([baseAsset]);
     }
-  }, [currentUnitConfig, queueCloudSync, user]);
+  }, [queueCloudSync, user]);
 
   const updateAsset = useCallback(async (updatedAsset: Asset) => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
@@ -5854,27 +5848,19 @@ useEffect(() => {
       origin = TransactionOrigin.ACCOUNT_RECONCILIATION;
     }
 
-    let gpsCoords: { lat?: number; lng?: number } = {};
+    // Sem leitura real não há coordenada a aplicar: a âncora da unidade não é
+    // GPS do ativo. O merge abaixo só escreve latitude/longitude quando existe
+    // fix — coordenada vazia continua vazia, e a que já existia não é apagada.
+    let gpsCoords: { lat: number; lng: number } | null = null;
     try {
       const metrics = await telemetryService.getDeviceMetrics();
       if (metrics.battery > 5) {
-        const loc = await getCurrentLocation();
-        if (loc) {
-          gpsCoords = { lat: loc.lat, lng: loc.lng };
-        } else if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
-          gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
-        }
+        gpsCoords = persistableAssetGps(await getCurrentLocation());
       } else {
         logger.warn('>>> [GPS Lote] Bloqueio crítico de GPS por bateria de', metrics.battery, '% ou inferior!');
-        if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
-          gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
-        }
       }
     } catch (e) {
-      logger.warn('GPS não capturado para lote, tentando fallback da unidade:', e);
-      if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
-        gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
-      }
+      logger.warn('GPS não capturado para lote; segue sem coordenada:', e);
     }
 
     // 1. CALCULAMOS OS NOVOS OBJETOS (MERGE NÃO DESTRUTIVO)
@@ -5884,8 +5870,7 @@ useEffect(() => {
         const updates: Asset & Record<string, unknown> = { 
           ...a, 
           ...(manualUpdates || {}), 
-          latitude: gpsCoords.lat, 
-          longitude: gpsCoords.lng,
+          ...(gpsCoords ? { latitude: gpsCoords.lat, longitude: gpsCoords.lng } : {}),
           _origemTransacao: origin // Aplica o código fixo
         };
         
@@ -6022,7 +6007,7 @@ useEffect(() => {
     } finally {
       setIsProcessing(false);
     }
-  }, [inventoryLocation, determineTag, user, databaseMode, history, currentUnitConfig, inventory.assets, queueCloudSync]);
+  }, [inventoryLocation, determineTag, user, databaseMode, history, inventory.assets, queueCloudSync]);
 
   const handleUpdateScannerMode = useCallback((mode: ScannerMode) => {
     setInventory(prev => ({ ...prev, scannerMode: mode }));
