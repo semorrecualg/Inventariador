@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getCurrentLocation, isAnchorDerivedLocation, persistableAssetGps } from '../utils/gpsUtils';
+import { getCurrentLocation, isAnchorDerivedLocation, persistableAssetGps, shouldAttemptAssetGpsCapture } from '../utils/gpsUtils';
 
 /**
  * Regra do produto: `assets.gps_lat/gps_lng` só recebe leitura REAL do aparelho.
@@ -53,6 +53,21 @@ describe('persistableAssetGps (o que pode ir para assets.gps_lat/gps_lng)', () =
     expect(persistableAssetGps({ lat: 0, lng: 0 })).toBeNull();
     expect(persistableAssetGps({ lat: Number.NaN, lng: -47.88 })).toBeNull();
     expect(persistableAssetGps({ lat: -15.79, lng: 999 })).toBeNull();
+  });
+});
+
+describe('shouldAttemptAssetGpsCapture — quem pode tentar a leitura', () => {
+  it('admin/master não é motivo para dispensar a captura', () => {
+    expect(shouldAttemptAssetGpsCapture({ bypassed: false, battery: 80 })).toBe(true);
+  });
+
+  it('bypass explícito (gbr_gps_bypass) dispensa a captura', () => {
+    expect(shouldAttemptAssetGpsCapture({ bypassed: true, battery: 80 })).toBe(false);
+  });
+
+  it('bateria crítica ou desconhecida dispensa a captura', () => {
+    expect(shouldAttemptAssetGpsCapture({ bypassed: false, battery: 5 })).toBe(false);
+    expect(shouldAttemptAssetGpsCapture({ bypassed: false, battery: undefined })).toBe(false);
   });
 });
 

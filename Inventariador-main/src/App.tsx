@@ -41,7 +41,7 @@ import Labeling from './components/Labeling';
 import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
 import localforage from 'localforage';
-import { getCurrentLocation, persistableAssetGps, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
+import { getCurrentLocation, persistableAssetGps, shouldAttemptAssetGpsCapture, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
 import UnitSelector from './components/UnitSelector';
 import AddressSelector from './components/AddressSelector';
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -5460,16 +5460,15 @@ useEffect(() => {
   const enrichAssetWithGps = useCallback(async (baseAsset: Asset, alreadySynced = false) => {
     try {
       const metrics = await telemetryService.getDeviceMetrics();
-      const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
       const isGpsBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
 
       // Sem leitura real não há coordenada: a âncora da unidade não é GPS do
-      // ativo. Bypass administrativo (e bateria crítica) seguem sem ponto, e
-      // `persistableAssetGps` recusa qualquer posição marcada como bypass.
+      // ativo. O PERFIL já não decide nada aqui — admin/master lê o sensor como
+      // qualquer operador; só o bypass explícito (`gbr_gps_bypass`) e a bateria
+      // crítica dispensam a captura. E `persistableAssetGps` recusa qualquer
+      // posição marcada como bypass (âncora), venha de onde vier.
       let loc: import('./utils/gpsUtils').GpsLocation | null = null;
-      if (isAdmin || isGpsBypassed) {
-        logger.info('>>> [GPS] Bypass administrativo: registro segue sem coordenada (âncora não é leitura).');
-      } else if (metrics.battery > 5) {
+      if (shouldAttemptAssetGpsCapture({ bypassed: isGpsBypassed, battery: metrics.battery })) {
         loc = await Promise.race([
           getCurrentLocation(),
           new Promise<null>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
@@ -5478,7 +5477,7 @@ useEffect(() => {
           return null;
         });
       } else {
-        logger.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de', metrics.battery, '% ou inferior!');
+        logger.info('>>> [GPS] Captura dispensada (bypass explícito ou bateria crítica): registro segue sem coordenada.');
       }
 
       const { convertAltitudeToFloor } = await import('./utils/gpsUtils');

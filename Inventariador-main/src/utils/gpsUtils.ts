@@ -41,6 +41,19 @@ export const persistableAssetGps = (
   return { lat, lng };
 };
 
+/**
+ * Decide se vale TENTAR uma leitura do sensor para o ativo.
+ *
+ * Perfil (admin/master) já não entra na conta: o admin lê o sensor como
+ * qualquer operador — o que o desqualifica é o bypass EXPLÍCITO
+ * (`gbr_gps_bypass`) e a bateria crítica. A posição obtida continua a passar
+ * por `persistableAssetGps`, que recusa qualquer coisa marcada como bypass.
+ */
+export const shouldAttemptAssetGpsCapture = (opts: {
+  bypassed: boolean;
+  battery: number | undefined;
+}): boolean => !opts.bypassed && Number(opts.battery) > 5;
+
 function showFloatingBypassToast(lat: number, lng: number, reason: string) {
   if (typeof document === 'undefined') return;
   
