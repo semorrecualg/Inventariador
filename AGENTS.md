@@ -65,9 +65,14 @@ Executar dentro de `Inventariador-main/` (Node do `.nvmrc`, ≥ 22):
 | `npx tsc --noEmit` | 0 erros |
 | `npm test` | suíte unitária verde (Vitest) |
 | `npm run build` | `dist/` gerado |
+| `npm run verify:governanca -- --offline --ci` | 0 falhas — estrutura do repo e versão do `package.json` com entrada no `CHANGELOG.md` |
 
 - Só correr os portões que o pedido justifica; em alterações de código, no mínimo
   `lint` + `tsc`.
+- O `verify:governanca --ci` é o modo do CI (`ci.yml`, passo "Governança (versão ↔
+  CHANGELOG)"): valida estrutura e a regra versão ↔ CHANGELOG da governança § 9.1 e trata
+  ambiente e "branch atrás de `main`" como aviso. Sem `--ci`, o mesmo comando também
+  verifica `VITE_SUPABASE_*` e exige a branch em dia — é o modo para a máquina local.
 - Corrigir a causa de uma falha. É proibido mascarar com `eslint-disable`,
   `@ts-ignore`, asserções enfraquecidas ou saltar testes para "ficar verde".
 - Os hooks Husky (`.husky/pre-commit` = lint + tsc + check:docs, `pre-push` = build) podem não
