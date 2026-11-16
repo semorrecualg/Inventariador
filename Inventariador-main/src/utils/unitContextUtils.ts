@@ -22,9 +22,16 @@ export function splitUnitContextKey(key: string): { tenantid: string; filial: st
 }
 
 /**
- * Casa duas unidades exigindo o MESMO tenant quando ambos os lados o definem.
- * Quando um dos lados não tem tenant (dado legado/sem contrato), cai na
- * tolerância por nome via matchUnitKeys (comportamento legado preservado).
+ * Casa duas unidades exigindo o MESMO contrato.
+ *
+ * Antes, `tenantid` vazio funcionava como curinga: a unidade «SEM CONTRATO»
+ * casava com as linhas de qualquer contrato e a MESMA filial era contada duas
+ * vezes (7061 + 7061 = 14.122 no cabeçalho da Unidade Operacional).
+ *
+ * Regra agora: contratos têm de ser iguais, incluindo o caso «sem contrato»
+ * (`''`) — `''` casa só com `''`. As linhas legadas sem tenant continuam
+ * visíveis, mas na sua própria unidade, ou na do contrato activo quando quem
+ * agrega as atribui (`resolveRowTenant`).
  */
 export function matchTenantUnit(
   tA: string, uA: string,
@@ -32,13 +39,22 @@ export function matchTenantUnit(
 ): boolean {
   const nA = (tA || '').toUpperCase().trim();
   const nB = (tB || '').toUpperCase().trim();
-  // O muro separa apenas quando os DOIS lados têm contrato definido:
-  // tenants diferentes nunca casam. Dado legado sem contrato (tenant vazio)
-  // cai na tolerância por nome (comportamento legado preservado).
-  if (nA && nB) {
-    if (nA !== nB) return false;
-  }
+  if (nA !== nB) return false;
   return matchUnitKeys(uA, uB);
+}
+
+/**
+ * Contrato a usar para agrupar/contar uma linha.
+ *
+ * Linha sem `tenantid` (dado legado, planilha sem a coluna): usa o contrato
+ * activo, para o ativo não aparecer numa unidade «SEM CONTRATO» paralela à do
+ * contrato do utilizador — era isso que criava a entrada fantasma e duplicava a
+ * contagem. Sem contrato activo, fica `''` e a unidade «SEM CONTRATO» é legitima.
+ */
+export function resolveRowTenant(rowTenant: unknown, activeTenant: string | null | undefined): string {
+  const own = String(rowTenant ?? '').toUpperCase().trim();
+  if (own) return own;
+  return String(activeTenant ?? '').toUpperCase().trim();
 }
 
 /**

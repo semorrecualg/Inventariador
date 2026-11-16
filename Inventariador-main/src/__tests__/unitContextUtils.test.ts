@@ -9,7 +9,8 @@ import {
   resolveBootPullPlan,
   normalizeUnitNames,
   unitListScope,
-  decideUnitListAction
+  decideUnitListAction,
+  resolveRowTenant
 } from '../utils/unitContextUtils';
 
 describe('resolveUnitFilter — filtro de filial dos pulls do fluxo inicial (Etapa 2)', () => {
@@ -83,15 +84,32 @@ describe('unitContextUtils — muro multi-tenant de Unidades Operacionais', () =
     });
   });
 
-  it('matchTenantUnit exige o mesmo tenant quando ambos os lados têm contrato', () => {
+  it('matchTenantUnit exige o mesmo contrato dos dois lados', () => {
     // Mesmo nome + mesmo tenant → casa
     expect(matchTenantUnit('CICOPAL', '010201 SNACKS PA', 'CICOPAL', '010201 SNACKS PA')).toBe(true);
     // Mesmo nome + tenants diferentes → NÃO casa (o muro)
     expect(matchTenantUnit('CICOPAL', '010201 SNACKS PA', 'CLIENTETESTE', '010201 SNACKS PA')).toBe(false);
-    // Tenant vazio de um lado → tolerância por nome
-    expect(matchTenantUnit('', '010201 SNACKS PA', 'CICOPAL', '010201 SNACKS PA')).toBe(true);
     // Prefixo numérico resiliente dentro do mesmo tenant
     expect(matchTenantUnit('CICOPAL', '010101 CICOPAL GO', 'CICOPAL', '010101')).toBe(true);
+  });
+
+  it('«sem contrato» deixou de ser curinga: não absorve a contagem de um contrato', () => {
+    // Era aqui que a unidade «SEM CONTRATO» contava as mesmas linhas do contrato.
+    expect(matchTenantUnit('', '010101 CICOPAL GO', 'CICOPAL', '010101 CICOPAL GO')).toBe(false);
+    expect(matchTenantUnit('CICOPAL', '010101 CICOPAL GO', '', '010101 CICOPAL GO')).toBe(false);
+    // Linhas legadas continuam a casar entre si (ficam visíveis na sua unidade).
+    expect(matchTenantUnit('', '010101 CICOPAL GO', '', '010101 CICOPAL GO')).toBe(true);
+  });
+
+  it('resolveRowTenant atribui a linha sem contrato ao contrato activo', () => {
+    // Dado legado sem tenant, com contrato activo → entra no contrato
+    expect(resolveRowTenant('', 'cicopal')).toBe('CICOPAL');
+    expect(resolveRowTenant(undefined, 'CICOPAL')).toBe('CICOPAL');
+    // Contrato próprio nunca é substituído
+    expect(resolveRowTenant('outro', 'CICOPAL')).toBe('OUTRO');
+    // Sem contrato activo, continua «sem contrato» (unidade legítima)
+    expect(resolveRowTenant('', '')).toBe('');
+    expect(resolveRowTenant(null, undefined)).toBe('');
   });
 
   it('findHomonymUnits detecta apenas filiais presentes em mais de um tenant', () => {

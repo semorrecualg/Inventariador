@@ -9,7 +9,7 @@ import { startSecurityMonitor, checkRuntimeIntegrity } from './services/security
 import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
-import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
+import { unitContextKey, splitUnitContextKey, matchTenantUnit, resolveRowTenant, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, hasRealAnchor } from './utils/gpsAnchors';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, canProvisionLicenses, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
@@ -6727,7 +6727,9 @@ useEffect(() => {
       const a = assets[i];
       const company = getAssetUnit(a).replace(/_/g, ' ');
       if (!company || company === 'UNIT_UNDEFINED' || company === 'UNIT UNDEFINED' || company === 'DEFAULT' || company === 'NULL' || company === 'UNDEFINED') continue;
-      const tenant = String(a.tenantid || '').toUpperCase().trim();
+      // Linha sem contrato (dado legado) entra no contrato activo: não cria uma
+      // unidade «SEM CONTRATO» paralela com a mesma filial.
+      const tenant = resolveRowTenant(a.tenantid, userTenant);
       const statsKey = unitContextKey(tenant, company);
       
       let stats = companyStatsMap.get(statsKey);
@@ -6891,6 +6893,10 @@ useEffect(() => {
       if (!norm || !isUnitAllowed(norm)) return;
       const key = unitContextKey(userTenant, nome);
       if (mergedCompanies.has(key)) return;
+      // Anti-fantasma: a mesma filial já existe num contrato — não criar uma
+      // segunda entrada sem dados só porque a nuvem a lista.
+      const sameNameExists = Array.from(mergedCompanies.values()).some(u => normalizeKey(u.name) === norm);
+      if (sameNameExists) return;
       mergedCompanies.set(key, {
         name: nome,
         tenantid: userTenant,
@@ -6911,7 +6917,7 @@ useEffect(() => {
       assets.forEach(a => {
         const company = getAssetUnit(a).replace(/_/g, ' ');
         if (!company) return;
-        const key = unitContextKey(String(a.tenantid || ''), company);
+        const key = unitContextKey(resolveRowTenant(a.tenantid, userTenant), company);
         localCountsMap.set(key, (localCountsMap.get(key) || 0) + 1);
       });
     }
@@ -6967,7 +6973,7 @@ useEffect(() => {
         const a = assets[i];
         const company = (a.filial || a._unitid || '').toString().trim().toUpperCase();
         if (company && company !== 'DEFAULT' && company !== 'NULL' && company !== '0') {
-          const tenant = String(a.tenantid || '').toUpperCase().trim();
+          const tenant = resolveRowTenant(a.tenantid, userTenant);
           emergencyUnits.set(unitContextKey(tenant, company), { name: company.replace(/_/g, ' '), tenantid: tenant });
         }
       }
