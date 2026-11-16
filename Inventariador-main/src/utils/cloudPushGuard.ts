@@ -110,21 +110,57 @@ export function auditCloudPush(rows: DedupRow[]): CloudPushAudit {
   };
 }
 
+/**
+ * Recuo do envio bloqueado por cópias.
+ *
+ * A fila da nuvem volta a tentar sozinha; sem recuo, um bloqueio que só o
+ * operador resolve (LIMPAR CÓPIAS) repetia o aviso a cada 1,2 s. Os valores
+ * crescem até ao teto e voltam a zero no primeiro envio aceito.
+ */
+export const CLOUD_PUSH_BLOCKED_BASE_BACKOFF_MS = 30_000;
+export const CLOUD_PUSH_BLOCKED_MAX_BACKOFF_MS = 300_000;
+
+export const nextCloudPushBlockedBackoff = (previousMs: number): number =>
+  previousMs > 0
+    ? Math.min(previousMs * 2, CLOUD_PUSH_BLOCKED_MAX_BACKOFF_MS)
+    : CLOUD_PUSH_BLOCKED_BASE_BACKOFF_MS;
+
+/**
+ * Erro de política, não de rede: a base local tem cópias, por isso o payload
+ * não pode subir. Os chamadores distinguem-no de uma falha de rede para fazer
+ * recuo em vez de nova tentativa imediata.
+ */
+export class CloudPushBlockedError extends Error {
+  readonly audit: CloudPushAudit;
+
+  constructor(audit: CloudPushAudit, message: string) {
+    super(message);
+    this.name = 'CloudPushBlockedError';
+    this.audit = audit;
+  }
+}
+
+/**
+ * Texto do bloqueio. Fonte única: o serviço usa-o no erro (`CloudPushBlockedError`)
+ * e o Gestor de Base mostra-o na tela a partir do `audit` do mesmo erro — assim
+ * o aviso da tela e o do terminal nunca divergem.
+ */
+export function formatCloudPushAudit(audit: CloudPushAudit): string[] {
+  if (audit.copies === 0) return [];
+
+  return [
+    `ENVIO BLOQUEADO: ${audit.copies} cópia(s) repetida(s) em ${audit.groupsWithCopies} grupo(s) — ${audit.total} linhas para ${audit.identities} ativos distintos (tenantid + filial + etiqueta).`,
+    'A nuvem guarda uma linha por identidade: enviar esta base recria as cópias em todos os dispositivos.',
+    'Execute CÓPIAS REPETIDAS → LIMPAR CÓPIAS (a conferência é preservada) e confira os três espelhos antes de enviar.',
+    ...audit.perFilial.map(
+      (f) => `${f.filial}: ${f.rows} linhas · ${f.identities} identidade(s) · ${f.copies} cópia(s)`
+    )
+  ];
+}
+
 /** Decide se o envio pode seguir. Com qualquer cópia, bloqueia e explica. */
 export function checkCloudPushGuard(rows: DedupRow[]): CloudPushGuardResult {
   const audit = auditCloudPush(rows);
   if (audit.copies === 0) return { blocked: false, audit, message: [] };
-
-  return {
-    blocked: true,
-    audit,
-    message: [
-      `ENVIO BLOQUEADO: ${audit.copies} cópia(s) repetida(s) em ${audit.groupsWithCopies} grupo(s) — ${audit.total} linhas para ${audit.identities} ativos distintos (tenantid + filial + etiqueta).`,
-      'A nuvem guarda uma linha por identidade: enviar esta base recria as cópias em todos os dispositivos.',
-      'Execute CÓPIAS REPETIDAS → LIMPAR CÓPIAS (a conferência é preservada) e confira os três espelhos antes de enviar.',
-      ...audit.perFilial.map(
-        (f) => `${f.filial}: ${f.rows} linhas · ${f.identities} identidade(s) · ${f.copies} cópia(s)`
-      )
-    ]
-  };
+  return { blocked: true, audit, message: formatCloudPushAudit(audit) };
 }

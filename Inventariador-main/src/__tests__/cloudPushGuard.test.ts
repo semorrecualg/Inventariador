@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { auditCloudPush, checkCloudPushGuard } from '../utils/cloudPushGuard';
+import {
+  auditCloudPush,
+  checkCloudPushGuard,
+  formatCloudPushAudit,
+  nextCloudPushBlockedBackoff,
+  CLOUD_PUSH_BLOCKED_BASE_BACKOFF_MS,
+  CLOUD_PUSH_BLOCKED_MAX_BACKOFF_MS
+} from '../utils/cloudPushGuard';
 import type { DedupRow } from '../utils/dedupAssets';
 
 const row = (over: Partial<DedupRow> & { primarykey: string }): DedupRow => ({
@@ -119,6 +126,25 @@ describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () =
       identities: 1,
       copies: 0
     });
+  });
+
+  it('formata o mesmo texto que a guarda devolve (fonte única do aviso)', () => {
+    const guard = checkCloudPushGuard([row({ primarykey: 'A' }), row({ primarykey: 'B' })]);
+
+    expect(formatCloudPushAudit(guard.audit)).toEqual(guard.message);
+    // Base limpa: sem aviso nenhum.
+    expect(formatCloudPushAudit(checkCloudPushGuard([row({ primarykey: 'A' })]).audit)).toEqual([]);
+  });
+
+  it('recua o envio bloqueado: começa em 30 s, dobra e para no teto de 5 min', () => {
+    expect(nextCloudPushBlockedBackoff(0)).toBe(CLOUD_PUSH_BLOCKED_BASE_BACKOFF_MS);
+    expect(nextCloudPushBlockedBackoff(CLOUD_PUSH_BLOCKED_BASE_BACKOFF_MS)).toBe(60000);
+    expect(nextCloudPushBlockedBackoff(60000)).toBe(120000);
+    expect(nextCloudPushBlockedBackoff(120000)).toBe(240000);
+    expect(nextCloudPushBlockedBackoff(240000)).toBe(CLOUD_PUSH_BLOCKED_MAX_BACKOFF_MS);
+    expect(nextCloudPushBlockedBackoff(CLOUD_PUSH_BLOCKED_MAX_BACKOFF_MS)).toBe(
+      CLOUD_PUSH_BLOCKED_MAX_BACKOFF_MS
+    );
   });
 
   it('reproduz o incidente real: 12 636 linhas / 11 441 identidades bloqueiam o envio', () => {

@@ -18,7 +18,7 @@ import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpo
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
-import { checkCloudPushGuard } from '../utils/cloudPushGuard';
+import { checkCloudPushGuard, CloudPushBlockedError } from '../utils/cloudPushGuard';
 import type { DedupRow } from '../utils/dedupAssets';
 
 export class SupabaseNetworkException extends Error {
@@ -957,6 +957,18 @@ export const signInWithMagicLink = async (email: string) => {
  */
 let assetsIdMode: 'key' | 'uuid' = 'key';
 
+/**
+ * Assinatura do último aviso de envio bloqueado. A fila da nuvem volta a tentar
+ * com recuo; sem isto, cada tentativa repetia as mesmas quatro linhas de aviso.
+ * Só volta a avisar quando os números mudam ou quando um envio é aceito.
+ */
+let lastCloudPushBlockedNoticeKey: string | null = null;
+
+/** Rearranque do aviso (fim de episódio, testes). */
+export const resetCloudPushBlockedNotice = (): void => {
+  lastCloudPushBlockedNoticeKey = null;
+};
+
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<string[]> => {
   if (!assets || assets.length === 0) {
     logger.error('>>> [Supabase] Fluxo Bloqueado: Ação explícita de sincronia abortada. Array de ativos nulo ou vazio detectado.');
@@ -975,14 +987,27 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   // antes de tocar na rede; nada é perdido, os ativos ficam por sincronizar.
   const cloudPushGuard = checkCloudPushGuard(assets as unknown as DedupRow[]);
   if (cloudPushGuard.blocked) {
-    cloudPushGuard.message.forEach((line) => logger.warn(`>>> [Supabase] ${line}`));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('gbr_cloud_push_blocked', {
-        detail: { message: cloudPushGuard.message[0], audit: cloudPushGuard.audit }
-      }));
+    // Avisa UMA vez por episódio: a fila da nuvem volta a tentar com recuo, e
+    // repetir o mesmo alerta a cada tentativa só poluía o terminal do SRE.
+    const noticeKey = [
+      cloudPushGuard.audit.total,
+      cloudPushGuard.audit.identities,
+      cloudPushGuard.audit.groupsWithCopies,
+      cloudPushGuard.audit.copies
+    ].join('|');
+    if (noticeKey !== lastCloudPushBlockedNoticeKey) {
+      cloudPushGuard.message.forEach((line) => logger.warn(`>>> [Supabase] ${line}`));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('gbr_cloud_push_blocked', {
+          detail: { message: cloudPushGuard.message[0], audit: cloudPushGuard.audit }
+        }));
+      }
+      lastCloudPushBlockedNoticeKey = noticeKey;
     }
-    return [];
+    // Erro de política: os chamadores fazem recuo em vez de nova tentativa.
+    throw new CloudPushBlockedError(cloudPushGuard.audit, cloudPushGuard.message[0]);
   }
+  lastCloudPushBlockedNoticeKey = null;
 
   if (!supabase || !navigator.onLine) {
     logger.warn('>>> [Supabase] Sincronização ignorada: Sem conexão ou Supabase não configurado.');

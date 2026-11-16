@@ -6,8 +6,7 @@ import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
-import { checkCloudPushGuard } from '../utils/cloudPushGuard';
-import type { DedupRow } from '../utils/dedupAssets';
+import { CloudPushBlockedError, formatCloudPushAudit } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
@@ -198,6 +197,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     try {
       setIsMirroring(true);
       setMirrorProgress(1);
+      setCloudPushBlock([]);
       addLog(`[SRE_CLOUD] Iniciando espelhamento em massa da base local para a Nuvem (Supabase)...`);
 
       const ativos = await db.ativos.toArray();
@@ -218,19 +218,6 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         addLog(`[SRE_CLOUD] Nenhum ativo do contrato ${activeTenantid || 'global'} para espelhar. Nada enviado.`);
         return;
       }
-
-      // GUARDA DE ENVIO: a nuvem guarda uma linha por tenantid + filial +
-      // etiqueta. Enviar daqui uma base com cópias grava os dois `primarykey`
-      // de cada grupo e as cópias voltam para todos os dispositivos — e a
-      // nuvem não guarda `_is_synced`, então nenhum pull posterior consegue
-      // distinguir a linha legítima. Sem limpeza local, o envio não acontece.
-      const cloudGuard = checkCloudPushGuard(baseParaEspelhar as unknown as DedupRow[]);
-      if (cloudGuard.blocked) {
-        setCloudPushBlock(cloudGuard.message);
-        cloudGuard.message.forEach((line) => addLog(`[SRE_CLOUD] ${line}`));
-        return;
-      }
-      setCloudPushBlock([]);
 
       // REGRA DE CONTRATO (tenant 100% da base): os tenantids vêm EXCLUSIVAMENTE
       // da própria base carregada (zero valor fixo / zero fallback hard-coded).
@@ -256,9 +243,17 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setMirrorProgress(100);
       addLog(`[SRE_CLOUD] Espelhamento concluído: ${syncedIds.length} ativos sincronizados na Nuvem (Supabase).`);
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
-      console.error("[SRE_CLOUD] Erro no espelhamento em massa:", err);
+      if (err instanceof CloudPushBlockedError) {
+        // A guarda vive no serviço (`syncAssetsToCloud`), não aqui: este ecrã só
+        // apresenta os números do mesmo erro, para não haver duas regras.
+        const lines = formatCloudPushAudit(err.audit);
+        setCloudPushBlock(lines);
+        lines.forEach((line) => addLog(`[SRE_CLOUD] ${line}`));
+      } else {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
+        console.error("[SRE_CLOUD] Erro no espelhamento em massa:", err);
+      }
     } finally {
       setIsMirroring(false);
       setMirrorProgress(0);
