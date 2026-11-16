@@ -193,8 +193,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   const [configs, setConfigs] = useState<UnitConfig[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
   const [currentConfig, setCurrentConfig] = useState<Partial<UnitConfig>>({
-    lat: BRASILIA_DEFAULT.lat,
-    lng: BRASILIA_DEFAULT.lng,
+    // SEM coordenada inicial: o formulário nasce vazio e o SALVAR fica
+    // desabilitado até alguém marcar a posição (clique/arraste ou leitura do
+    // sensor). Brasília é só o centro visual do mapa (BRASILIA_CENTER), nunca
+    // uma âncora pronta a gravar.
     radius_meters: 500,
     is_active: true
   });
@@ -466,13 +468,12 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       setMessage({ text: 'POSIÇÃO FIXADA PELO HARDWARE DO DISPOSITIVO!', type: 'success' });
       mapClickRef.current(lat, lng, 'sensor');
     } catch (err) {
-      // Fallback suave: permissão negada/política no Desktop → câmera para Brasília-DF (zoom nacional)
-      logger.warn('>>> [GPS Fallback] Hardware inacessível ou permissão negada no Desktop. Aplicando centro canônico (Brasília-DF):', err);
-      const { lat: fbLat, lng: fbLng } = safeLatLngPair({ lat: BRASILIA_DEFAULT.lat, lng: BRASILIA_DEFAULT.lng });
-      setCurrentConfig(prev => ({ ...prev, lat: fbLat, lng: fbLng }));
-      flyTo(fbLat, fbLng, DEFAULT_ZOOM);
-      setMessage({ text: 'MODO DESKTOP/POLÍTICA: ÂNCORA CANÔNICA (BRASÍLIA, DF) APLICADA.', type: 'success' });
-      mapClickRef.current(fbLat, fbLng);
+      // Sem leitura de hardware NÃO há âncora: a câmera vai para o centro visual
+      // do país e o operador marca a posição no mapa. Antes este catch aplicava
+      // Brasília como âncora no primeiro clique em "MINHA POSIÇÃO" no desktop.
+      logger.warn('>>> [GPS Fallback] Hardware inacessível ou permissão negada no Desktop. Sem âncora aplicada:', err);
+      flyTo(BRASILIA_DEFAULT.lat, BRASILIA_DEFAULT.lng, DEFAULT_ZOOM);
+      setMessage({ text: 'SEM LEITURA DE GPS. TOQUE NO MAPA PARA MARCAR A POSIÇÃO DA UNIDADE.', type: 'error' });
     }
   };
 
@@ -642,9 +643,15 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   const loadConfigs = useCallback(async () => {
     setLoading(true);
     const data = await fetchUnitConfigs(user.tenantid);
-    // Guarda Defensiva: registros do banco local com coordenadas nulas/NaN são
-    // higienizados para o canônico (Brasília) em vez de propagar undefined ao mapa
-    const sanitized = (data || []).map(cfg => ({ ...cfg, ...safeLatLngPair(cfg) }));
+    // Só entra na lista quem TEM coordenada utilizável: registro sem âncora (nulo,
+    // NaN ou zero) é descartado. Antes o sanitizador preenchia-o com Brasília e a
+    // unidade sem âncora aparecia com um pino pronto — bastava SALVAR para gravar a
+    // coordenada canônica como âncora. O formulário fica vazio e o SALVAR travado.
+    const sanitized = (data || [])
+      .filter(cfg => cfg.lat !== undefined && cfg.lng !== undefined &&
+        !isNaN(Number(cfg.lat)) && !isNaN(Number(cfg.lng)) &&
+        Number(cfg.lat) !== 0 && Number(cfg.lng) !== 0)
+      .map(cfg => ({ ...cfg, ...safeLatLngPair(cfg) }));
     setConfigs(sanitized);
     setLoading(false);
   }, [user?.tenantid]);
@@ -664,9 +671,17 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       return c.unit_id.trim().toUpperCase() === unit.trim().toUpperCase();
     });
 
-    if (sessionLat && sessionLng) {
-      // Guarda Defensiva: rascunhos de sessão podem conter 'null'/'NaN' — sanitiza antes de tocar o mapa
-      const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: Number(sessionLat), lng: Number(sessionLng) });
+    const draftLat = Number(sessionLat);
+    const draftLng = Number(sessionLng);
+    const draftValid = !!sessionLat && !!sessionLng && Number.isFinite(draftLat) && Number.isFinite(draftLng) &&
+      draftLat !== 0 && draftLng !== 0;
+    const existingLat = Number(existing?.lat);
+    const existingLng = Number(existing?.lng);
+    const existingValid = !!existing && existing.lat !== undefined && existing.lng !== undefined &&
+      Number.isFinite(existingLat) && Number.isFinite(existingLng) && existingLat !== 0 && existingLng !== 0;
+
+    if (draftValid) {
+      const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: draftLat, lng: draftLng });
       const cfg = {
         tenantid: user.tenantid,
         unit_id: unit,
@@ -679,20 +694,20 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       // Rascunho não guarda proveniência: só pode ter vindo de posicionamento no mapa.
       anchorSourceRef.current = 'manual';
       flyTo(cfg.lat, cfg.lng, UNIT_ZOOM);
-    } else if (existing) {
-      // Guarda Defensiva: registro do IndexedDB/SQLite pode estar parcialmente corrompido
+    } else if (existing && existingValid) {
       const { lat: safeLat, lng: safeLng } = safeLatLngPair(existing);
       const safeExisting = { ...existing, lat: safeLat, lng: safeLng };
       setCurrentConfig(safeExisting);
       anchorSourceRef.current = existing.source ?? 'manual';
       flyTo(safeExisting.lat, safeExisting.lng, UNIT_ZOOM);
     } else {
+      // Unidade sem âncora (ou rascunho inválido): formulário SEM coordenada. O
+      // mapa apenas voa para o centro visual do país — Brasília não é a posição
+      // da filial e não pode virar âncora por um clique em SALVAR.
       setCurrentConfig({
         tenantid: user.tenantid,
         unit_id: unit,
-        lat: BRASILIA_DEFAULT.lat,
-        lng: BRASILIA_DEFAULT.lng,
-        radius_meters: 500,
+        radius_meters: existing?.radius_meters || 500,
         is_active: true
       });
       anchorSourceRef.current = 'manual';
@@ -800,24 +815,15 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
         flyTo(newLat, newLng, UNIT_ZOOM);
         setMessage({ text: `CENTRALIZADO EM: ${searchQuery}`, type: 'success' });
       } else {
-        // Fallback contingência Brasília, DF
-        const defaultLat = BRASILIA_DEFAULT.lat;
-        const defaultLng = BRASILIA_DEFAULT.lng;
-        if (selectedUnit) {
-          setCurrentConfig(prev => ({ ...prev, lat: defaultLat, lng: defaultLng }));
-        }
-        flyTo(defaultLat, defaultLng, DEFAULT_ZOOM);
-        setMessage({ text: `CONVERTIDO PARA BRASÍLIA, DF (REGISTRO LOCAL ENCONTRADO SEM GPS / LOCALIZAÇÃO DESCONHECIDA)`, type: 'success' });
+        // Sem resultado: a câmera volta ao centro visual do país, sem definir
+        // coordenada — buscar um lugar inexistente não pode virar âncora.
+        flyTo(BRASILIA_DEFAULT.lat, BRASILIA_DEFAULT.lng, DEFAULT_ZOOM);
+        setMessage({ text: `SEM COORDENADAS PARA "${searchQuery}". TOQUE NO MAPA PARA MARCAR A POSIÇÃO.`, type: 'error' });
       }
     } catch (err: unknown) {
-      logger.warn('Erro na busca de localização, aplicando contingência Brasília:', err);
-      const defaultLat = BRASILIA_DEFAULT.lat;
-      const defaultLng = BRASILIA_DEFAULT.lng;
-      if (selectedUnit) {
-        setCurrentConfig(prev => ({ ...prev, lat: defaultLat, lng: defaultLng }));
-      }
-      flyTo(defaultLat, defaultLng, DEFAULT_ZOOM);
-      setMessage({ text: `MÉTODO DE CONTINGÊNCIA ATIVADO: BRASÍLIA, DF`, type: 'success' });
+      logger.warn('Erro na busca de localização; nenhuma coordenada foi aplicada:', err);
+      flyTo(BRASILIA_DEFAULT.lat, BRASILIA_DEFAULT.lng, DEFAULT_ZOOM);
+      setMessage({ text: 'BUSCA INDISPONÍVEL. TOQUE NO MAPA PARA MARCAR A POSIÇÃO DA UNIDADE.', type: 'error' });
     } finally {
       setSearching(false);
     }

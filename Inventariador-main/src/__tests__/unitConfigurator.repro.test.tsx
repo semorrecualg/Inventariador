@@ -116,9 +116,10 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     );
 
     // Espera o load assíncrono de configs + seed do currentConfig — polling com o
-    // MARCADOR DOM correto: o HUD exibe currentConfig.lat em texto. O estado inicial
-    // do componente já nasce com Brasília (-15.794200), então esperar só o botão não
-    // garante o seed: clicando cedo, o handleSave grava Brasília e descarta os rascunhos.
+    // MARCADOR DOM correto: o HUD exibe currentConfig.lat em texto. O formulário
+    // nasce SEM coordenada (Brasília é só centro visual), então o rascunho de
+    // sessão é a única fonte de posição: espera o HUD mostrar o rascunho antes de
+    // clicar, senão o handleSave recusa gravar ("marque a posição no mapa").
     const fixar = await until(() =>
       container.textContent?.includes('-16.706719')
         ? Array.from(container.querySelectorAll('button')).find((b) =>
@@ -153,5 +154,45 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     // Limite explícito: os dois `until(...)` acima podem esperar até 6 s cada,
     // então o padrão de 5 s do Vitest matava o teste num runner lento (CI) antes
     // de o helper desistir. O teste não trava — ele só precisa de mais folga.
+  }, 20000);
+
+  it('nasce SEM coordenada: SALVAR desabilitado e nenhuma âncora gravada', async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    vi.mocked(saveUnitConfig).mockClear();
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      root.render(
+        React.createElement(UnitConfigurator, {
+          user: ADMIN,
+          units: ['010105 CICOPAL PA'],
+          onBack: () => {},
+          initialUnit: '010105 CICOPAL PA'
+        })
+      );
+
+      const fixar = await until(() =>
+        Array.from(container.querySelectorAll('button')).find((b) =>
+          (b.textContent || '').toUpperCase().includes('FIXAR ÂNCORA GPS')
+        )
+      );
+      expect(fixar).toBeTruthy();
+      // Unidade sem âncora e sem rascunho: formulário vazio, botão travado.
+      expect(fixar!.disabled).toBe(true);
+      expect(container.textContent).toContain('AGUARDANDO GPS');
+
+      // Brasília é só o centro visual do mapa: clicar não grava coordenada alguma.
+      fixar!.click();
+      await new Promise((r) => setTimeout(r, 200));
+      expect(vi.mocked(saveUnitConfig)).not.toHaveBeenCalled();
+    } finally {
+      root.unmount();
+      container.remove();
+    }
   }, 20000);
 });
