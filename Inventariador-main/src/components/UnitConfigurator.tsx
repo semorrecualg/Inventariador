@@ -32,7 +32,7 @@ interface UnitConfiguratorProps {
   onNavigate?: (screen: AppScreen) => void;
   initialUnit?: string | null;
   /** Bypass offline: chamado quando o auditor aplica coordenadas padrão e a campanha de contingência é aberta. */
-  onBypassApplied?: (config: UnitConfig) => void;
+  onBypassApplied?: (unit: string) => void;
 }
 
 // ============================================================================
@@ -966,53 +966,27 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   };
 
   // ==========================================================================
-  // BYPASS DE SEGURANÇA TEMPORÁRIO (Diretiva 5)
-  // Se o usuário clicar no botão e o mapa falhar ou se ele salvar, o app grava
-  // uma coordenada fictícia padrão (Brasília canônica) no IndexedDB (Dexie) e
-  // define a flag de Campanha aberta para o auditor avançar na esteira operacional.
+  // BYPASS DE SEGURANÇA TEMPORÁRIO (Diretiva 5) — SEM COORDENADA
+  // Abre a campanha/esteira de contingência da filial sem gravar coordenada
+  // nenhuma. A âncora continua em falta ("FALTA ÂNCORA GPS") e nenhum ativo
+  // recebe GPS inventado. Antes o bypass gravava Brasília como âncora no
+  // SQLite/Dexie/localStorage e na nuvem — era o último caminho que fabricava
+  // coordenada.
   // ==========================================================================
-  const handleOfflineBypass = async () => {
+  const handleOfflineBypass = () => {
     const unit = selectedUnitRef.current || selectedUnit || initialUnit;
     if (!unit) {
       setMessage({ text: 'SELECIONE UMA UNIDADE ANTES DE APLICAR O BYPASS.', type: 'error' });
       return;
     }
 
-    // Guarda Defensiva: estrutura canônica explícita exigida pelo safeLngLat
-    const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: BRASILIA_DEFAULT.lat, lng: BRASILIA_DEFAULT.lng });
-
-    const bypassConfig: UnitConfig = {
-      tenantid: user?.tenantid || '',
-      filial: unit,
-      unit_id: unit,
-      lat: safeLat,
-      lng: safeLng,
-      radius_meters: currentConfig.radius_meters || 500,
-      is_active: true,
-      updated_by: user?.email || 'auditor',
-      updated_at: new Date().toISOString()
-    };
-    // Registro defensivo para leitores subsequentes: { lat, lng } + array [lng, lat]
-    const bypassRecord = { ...bypassConfig, coordenadas: [safeLng, safeLat] as [number, number] };
-
     setSaving(true);
-    setMessage({ text: 'BYPASS OFFLINE: COORDENADAS PADRÃO (BRASÍLIA, DF) SENDO GRAVADAS...', type: 'success' });
-    setCurrentConfig(prev => ({ ...prev, lat: bypassConfig.lat, lng: bypassConfig.lng, unit_id: unit }));
-    flyTo(bypassConfig.lat, bypassConfig.lng, UNIT_ZOOM);
+    setMessage({ text: 'BYPASS OFFLINE: ABRINDO A CAMPANHA SEM ÂNCORA GPS...', type: 'success' });
 
     try {
-      // 1) Persistência canônica: SQLite físico + espelho Dexie (IndexedDB) + localStorage
-      const ok = await saveUnitConfig(bypassConfig);
-      const saved = ok === true || (typeof ok === 'string' && ok.includes('sucesso'));
-      logger.info(`>>> [GPS Bypass] Persistência da coordenada padrão ${saved ? 'confirmada' : 'com aviso'}: ${String(ok)}`);
-
-      // 2) Flags preventivas de âncora e campanha aberta (esteira operacional liberada)
-      localStorage.setItem(`kardek_gps_ancora_${unit}`, JSON.stringify(bypassRecord));
-      sessionStorage.setItem(`unit_gps_config_${unit}`, JSON.stringify(bypassRecord));
-      sessionStorage.setItem('last_configured_gps_unit', unit);
-      // Estrutura canônica explícita para as telas subsequentes relerem sem quebrar
-      sessionStorage.setItem(`gps_lat_${unit}`, String(safeLat));
-      sessionStorage.setItem(`gps_lng_${unit}`, String(safeLng));
+      // Só flags de campanha: nenhuma chave de GPS é escrita (nem `kardek_gps_ancora_*`,
+      // nem `gps_lat_/gps_lng_`, nem `unit_gps_config_*`), então a unidade continua sem
+      // âncora e o inventário herda "FALTA ÂNCORA GPS".
       const campaignFlag = `BYPASS_${unit}_${Date.now()}`;
       setBypassCampaignId(campaignFlag);
       sessionStorage.setItem(`kardek_campaign_open_${unit}`, campaignFlag);
@@ -1021,34 +995,22 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       localStorage.setItem('campaign_bypass_open', 'true');
       sessionStorage.setItem('kardek_campaign_open', campaignFlag);
 
-      // 3) Estado local sincronizado E notifica o pai com a MESMA lista já atualizada.
-      // FIX(CRITICO): a closure antiga (`configs`) não tinha a âncora recém-gravada e
-      // deixava o botão GPS em 'SEM ÂNCORA' após voltar para a lista de unidades.
-      const updatedConfigs = mergeUnitConfigIntoList(configs, bypassConfig);
-      setConfigs(updatedConfigs);
-      if (typeof onUpdateConfigs === 'function') {
-        onUpdateConfigs(updatedConfigs);
-      }
-
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 3000);
-      setMessage({ text: 'BYPASS ATIVADO: ÂNCORA PADRÃO GRAVADA E CAMPANHA DE CONTINGÊNCIA ABERTA!', type: 'success' });
+      setMessage({
+        text: 'BYPASS ATIVADO: CAMPANHA DE CONTINGÊNCIA ABERTA. A FILIAL CONTINUA EM FALTA ÂNCORA GPS.',
+        type: 'success'
+      });
+      logger.info(`>>> [GPS Bypass] Campanha ${campaignFlag} aberta para ${unit} sem gravar coordenada.`);
 
-      // 4) Avança na esteira operacional (App abre a flag de campanha e navega)
+      // Avança na esteira operacional (App abre a flag de campanha e navega).
       if (typeof onBypassApplied === 'function') {
-        onBypassApplied(bypassConfig);
+        onBypassApplied(unit);
       }
     } catch (err: unknown) {
       const se = err as Error;
-      logger.error('>>> [GPS Bypass] Falha na persistência do bypass:', err);
-      // Mesmo com erro, o flag de campanha é aberto para não travar o auditor (simulação local)
-      const campaignFlag = `BYPASS_${unit}_${Date.now()}`;
-      sessionStorage.setItem('campaign_bypass_open', 'true');
-      sessionStorage.setItem(`kardek_campaign_open_${unit}`, campaignFlag);
-      setMessage({ text: `BYPASS PARCIAL: ${se.message || 'falha de persistência'} — CAMPANHA ABERTA PARA SIMULAÇÃO LOCAL.`, type: 'success' });
-      if (typeof onBypassApplied === 'function') {
-        onBypassApplied(bypassConfig);
-      }
+      logger.error('>>> [GPS Bypass] Falha ao abrir a campanha de contingência:', err);
+      setMessage({ text: `BYPASS PARCIAL: ${se.message || 'falha ao abrir a campanha'}.`, type: 'error' });
     } finally {
       setSaving(false);
     }
@@ -1339,7 +1301,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
             onClick={handleOfflineBypass}
             disabled={saving}
             className="w-full py-3.5 text-white rounded-xl font-black uppercase text-[8px] tracking-[0.15em] shadow-xl hover:scale-[1.01] transition-all disabled:opacity-40 flex items-center justify-center space-x-2 pointer-events-auto bg-slate-800 hover:bg-slate-700 border border-slate-600"
-            title="Aplica coordenadas padrão (Brasília, DF), grava no dispositivo e abre a campanha de contingência"
+            title="Abre a campanha de contingência SEM gravar coordenada — a filial fica em FALTA ÂNCORA GPS até alguém marcar o pino"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
             <span>Bypass Offline</span>

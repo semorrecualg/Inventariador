@@ -195,4 +195,56 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
       container.remove();
     }
   }, 20000);
+
+  it('BYPASS OFFLINE abre a campanha sem gravar coordenada nenhuma', async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    vi.mocked(saveUnitConfig).mockClear();
+
+    const unit = '010105 CICOPAL PA';
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    const applied: string[] = [];
+    try {
+      root.render(
+        React.createElement(UnitConfigurator, {
+          user: ADMIN,
+          units: [unit],
+          onBack: () => {},
+          initialUnit: unit,
+          onBypassApplied: (u: string) => { applied.push(u); }
+        })
+      );
+
+      const bypass = await until(() =>
+        Array.from(container.querySelectorAll('button')).find((b) =>
+          (b.textContent || '').toUpperCase().includes('BYPASS OFFLINE')
+        )
+      );
+      expect(bypass).toBeTruthy();
+      bypass!.click();
+      await new Promise((r) => setTimeout(r, 200));
+
+      // Nenhuma coordenada em lado nenhum: nem gravação, nem chaves de âncora.
+      expect(vi.mocked(saveUnitConfig)).not.toHaveBeenCalled();
+      expect(localStorage.getItem(`kardek_gps_ancora_${unit}`)).toBeNull();
+      expect(sessionStorage.getItem(`unit_gps_config_${unit}`)).toBeNull();
+      expect(sessionStorage.getItem(`gps_lat_${unit}`)).toBeNull();
+      expect(sessionStorage.getItem(`gps_lng_${unit}`)).toBeNull();
+
+      // A esteira abre: flags de campanha gravadas e App notificado.
+      expect(localStorage.getItem('campaign_bypass_open')).toBe('true');
+      expect(sessionStorage.getItem('campaign_bypass_open')).toBe('true');
+      expect(localStorage.getItem(`kardek_campaign_open_${unit}`)).toMatch(/^BYPASS_/);
+      expect(sessionStorage.getItem('kardek_campaign_open')).toMatch(/^BYPASS_/);
+      expect(applied).toEqual([unit]);
+      expect(container.textContent).toContain('FALTA ÂNCORA GPS');
+    } finally {
+      root.unmount();
+      container.remove();
+    }
+  }, 20000);
 });
