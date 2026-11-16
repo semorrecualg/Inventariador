@@ -112,7 +112,7 @@ import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
 import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
-import { CloudPushBlockedError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
+import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isSyncLockStuck } from './services/syncQueueGuards';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
@@ -2629,7 +2629,7 @@ useEffect(() => {
         // Bloqueio por cópias é política, não falha: o operador tem de ver o
         // número e a instrução de LIMPAR CÓPIAS, não um "erro" genérico.
         setSyncError(
-          err instanceof CloudPushBlockedError ? err.message : 'Erro ao enviar alterações locais'
+          err instanceof CloudPushPolicyError ? err.message : 'Erro ao enviar alterações locais'
         );
         logger.error('Push error:', err);
         throw err;
@@ -5223,7 +5223,7 @@ useEffect(() => {
       }
     } catch (err) {
       pending.forEach(a => cloudQueueRef.current.set(String(a.id), a));
-      if (err instanceof CloudPushBlockedError) {
+      if (err instanceof CloudPushPolicyError) {
         // Política, não rede: a fila espera em vez de repetir a cada 1,2 s.
         const delay = nextCloudPushBlockedBackoff(cloudBlockedBackoffRef.current);
         cloudBlockedBackoffRef.current = delay;

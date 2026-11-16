@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   auditCloudPush,
   checkCloudPushGuard,
+  findIdentityConflicts,
   formatCloudPushAudit,
+  formatCloudPushIdentityConflicts,
   nextCloudPushBlockedBackoff,
   CLOUD_PUSH_BLOCKED_BASE_BACKOFF_MS,
   CLOUD_PUSH_BLOCKED_MAX_BACKOFF_MS
@@ -126,6 +128,50 @@ describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () =
       identities: 1,
       copies: 0
     });
+  });
+
+  it('deteta a linha cuja identidade já está na nuvem com outro primarykey', () => {
+    const payload = [row({ primarykey: 'COPIA-LOCAL', etiqueta: '007222' }) ];
+    const cloud = [row({ primarykey: 'KEEPER-NUVEM', etiqueta: '007222' })];
+
+    const conflicts = findIdentityConflicts(payload, cloud);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toMatchObject({ attempted: 'COPIA-LOCAL', existing: ['KEEPER-NUVEM'] });
+    expect(formatCloudPushIdentityConflicts(conflicts)[0]).toContain('ENVIO BLOQUEADO: 1 ativo(s)');
+  });
+
+  it('não acusa conflito quando o primarykey enviado é o mesmo da nuvem', () => {
+    const payload = [row({ primarykey: 'A' })];
+    const cloud = [row({ primarykey: 'A' })];
+
+    expect(findIdentityConflicts(payload, cloud)).toEqual([]);
+  });
+
+  it('compara a identidade normalizada e separa contratos', () => {
+    const payload = [
+      row({ primarykey: 'A', tenantid: 'cicopal', filial: '010101  cicopal-go', etiqueta: ' 007222 ' })
+    ];
+    // Mesma identidade, outra grafia → conflito.
+    expect(
+      findIdentityConflicts(payload, [row({ primarykey: 'B', filial: '010101 CICOPAL GO' })])
+    ).toHaveLength(1);
+    // Outro contrato → sem conflito.
+    expect(findIdentityConflicts(payload, [row({ primarykey: 'B', tenantid: 'CARPER' })])).toEqual([]);
+  });
+
+  it('ignora linhas sem etiqueta (não têm identidade)', () => {
+    const payload = [row({ primarykey: 'A', etiqueta: '' })];
+    const cloud = [row({ primarykey: 'B', etiqueta: '' })];
+
+    expect(findIdentityConflicts(payload, cloud)).toEqual([]);
+  });
+
+  it('lista todos os primarykeys que a nuvem já tem para a identidade', () => {
+    const payload = [row({ primarykey: 'NOVO' })];
+    const cloud = [row({ primarykey: 'X' }), row({ primarykey: 'Y' })];
+
+    const conflicts = findIdentityConflicts(payload, cloud);
+    expect(conflicts[0].existing.sort()).toEqual(['X', 'Y']);
   });
 
   it('formata o mesmo texto que a guarda devolve (fonte única do aviso)', () => {

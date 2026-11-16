@@ -6,7 +6,7 @@ import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
-import { CloudPushBlockedError, formatCloudPushAudit } from '../utils/cloudPushGuard';
+import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
@@ -243,12 +243,11 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setMirrorProgress(100);
       addLog(`[SRE_CLOUD] Espelhamento concluído: ${syncedIds.length} ativos sincronizados na Nuvem (Supabase).`);
     } catch (err: unknown) {
-      if (err instanceof CloudPushBlockedError) {
+      if (err instanceof CloudPushPolicyError) {
         // A guarda vive no serviço (`syncAssetsToCloud`), não aqui: este ecrã só
-        // apresenta os números do mesmo erro, para não haver duas regras.
-        const lines = formatCloudPushAudit(err.audit);
-        setCloudPushBlock(lines);
-        lines.forEach((line) => addLog(`[SRE_CLOUD] ${line}`));
+        // apresenta as linhas do mesmo erro, para não haver duas regras.
+        setCloudPushBlock(err.lines);
+        err.lines.forEach((line) => addLog(`[SRE_CLOUD] ${line}`));
       } else {
         const errMsg = err instanceof Error ? err.message : String(err);
         addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);

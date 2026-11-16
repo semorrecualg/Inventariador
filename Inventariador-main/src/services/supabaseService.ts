@@ -18,7 +18,8 @@ import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpo
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
-import { checkCloudPushGuard, CloudPushBlockedError } from '../utils/cloudPushGuard';
+import { checkCloudPushGuard, findIdentityConflicts, CloudPushBlockedError, CloudPushIdentityConflictError } from '../utils/cloudPushGuard';
+import type { CloudPushAudit } from '../utils/cloudPushGuard';
 import type { DedupRow } from '../utils/dedupAssets';
 
 export class SupabaseNetworkException extends Error {
@@ -969,6 +970,92 @@ export const resetCloudPushBlockedNotice = (): void => {
   lastCloudPushBlockedNoticeKey = null;
 };
 
+
+/**
+ * Avisa UMA vez por episódio de bloqueio. A fila da nuvem volta a tentar com
+ * recuo; sem isto, cada tentativa repetia as mesmas linhas no terminal.
+ */
+const announceBlockedOnce = (lines: string[], audit: CloudPushAudit | null): void => {
+  if (lines.length === 0) return;
+  if (lines[0] === lastCloudPushBlockedNoticeKey) return;
+  lines.forEach((line) => logger.warn(`>>> [Supabase] ${line}`));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gbr_cloud_push_blocked', {
+      detail: { message: lines[0], audit }
+    }));
+  }
+  lastCloudPushBlockedNoticeKey = lines[0];
+};
+
+type CloudIdentityRow = {
+  tenantid?: string | null;
+  filial?: string | null;
+  etiqueta?: string | null;
+  primarykey?: string | null;
+};
+
+/**
+ * Identidades do lote que já existem na nuvem. A consulta é LIMITADA às
+ * etiquetas do lote (índice por etiqueta): o push delta paga um SELECT pequeno e
+ * nunca um download da tabela inteira — é essa a diferença entre comparar e
+ * penalizar o delta.
+ */
+const fetchCloudIdentities = async (rows: Record<string, unknown>[]): Promise<CloudIdentityRow[]> => {
+  if (!supabase) return [];
+  const etiquetas = [...new Set(rows.map((row) => String(row.etiqueta ?? '').trim()).filter(Boolean))];
+  if (etiquetas.length === 0) return []; // sem etiqueta não há identidade
+  const tenants = [
+    ...new Set(rows.map((row) => String(row.tenantid ?? '').trim().toUpperCase()).filter(Boolean))
+  ];
+  // Lotes pequenos de etiquetas: o URL do PostgREST não pode crescer sem limite
+  // num lote de 500 linhas. Para o delta (1 etiqueta) continua a ser um SELECT.
+  const IDENTITY_LOOKUP_CHUNK = 200;
+  const slices: string[][] = [];
+  for (let i = 0; i < etiquetas.length; i += IDENTITY_LOOKUP_CHUNK) {
+    slices.push(etiquetas.slice(i, i + IDENTITY_LOOKUP_CHUNK));
+  }
+
+  const responses = await Promise.all(
+    slices.map((slice) =>
+      supabase
+        .from('assets')
+        .select('tenantid,filial,etiqueta,primarykey')
+        .in('tenantid', tenants)
+        .in('etiqueta', slice)
+    )
+  );
+
+  const found: CloudIdentityRow[] = [];
+  for (const { data, error } of responses) {
+    if (error) {
+      // Falha de leitura não bloqueia o envio: o upsert por (tenantid, id) decide.
+      logger.warn(
+        `>>> [Supabase] Verificação de identidade indisponível no lote: ${describeSupabaseError(error)}`
+      );
+      return [];
+    }
+    found.push(...((data || []) as CloudIdentityRow[]));
+  }
+  return found;
+};
+
+/**
+ * Recusa o lote antes do upsert quando a identidade já está na nuvem com outro
+ * `primarykey`: gravar criaria uma segunda linha para o mesmo ativo.
+ */
+const assertCloudIdentities = async (rows: Record<string, unknown>[]): Promise<void> => {
+  const cloudRows = await fetchCloudIdentities(rows);
+  if (cloudRows.length === 0) return;
+  const conflicts = findIdentityConflicts(
+    rows as unknown as DedupRow[],
+    cloudRows as unknown as DedupRow[]
+  );
+  if (conflicts.length === 0) return;
+  const error = new CloudPushIdentityConflictError(conflicts);
+  announceBlockedOnce(error.lines, null);
+  throw error;
+};
+
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<string[]> => {
   if (!assets || assets.length === 0) {
     logger.error('>>> [Supabase] Fluxo Bloqueado: Ação explícita de sincronia abortada. Array de ativos nulo ou vazio detectado.');
@@ -987,27 +1074,10 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   // antes de tocar na rede; nada é perdido, os ativos ficam por sincronizar.
   const cloudPushGuard = checkCloudPushGuard(assets as unknown as DedupRow[]);
   if (cloudPushGuard.blocked) {
-    // Avisa UMA vez por episódio: a fila da nuvem volta a tentar com recuo, e
-    // repetir o mesmo alerta a cada tentativa só poluía o terminal do SRE.
-    const noticeKey = [
-      cloudPushGuard.audit.total,
-      cloudPushGuard.audit.identities,
-      cloudPushGuard.audit.groupsWithCopies,
-      cloudPushGuard.audit.copies
-    ].join('|');
-    if (noticeKey !== lastCloudPushBlockedNoticeKey) {
-      cloudPushGuard.message.forEach((line) => logger.warn(`>>> [Supabase] ${line}`));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('gbr_cloud_push_blocked', {
-          detail: { message: cloudPushGuard.message[0], audit: cloudPushGuard.audit }
-        }));
-      }
-      lastCloudPushBlockedNoticeKey = noticeKey;
-    }
+    announceBlockedOnce(cloudPushGuard.message, cloudPushGuard.audit);
     // Erro de política: os chamadores fazem recuo em vez de nova tentativa.
-    throw new CloudPushBlockedError(cloudPushGuard.audit, cloudPushGuard.message[0]);
+    throw new CloudPushBlockedError(cloudPushGuard.audit);
   }
-  lastCloudPushBlockedNoticeKey = null;
 
   if (!supabase || !navigator.onLine) {
     logger.warn('>>> [Supabase] Sincronização ignorada: Sem conexão ou Supabase não configurado.');
@@ -1207,6 +1277,10 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     const start = batchIndex * CHUNK_SIZE;
     const chunk = assets.slice(start, start + CHUNK_SIZE);
     const { rows, keys } = buildPayload(chunk);
+    // Identidade na nuvem: um `primarykey` novo para uma identidade existente é
+    // uma cópia — o upsert por (tenantid, id) não a impede. A consulta é
+    // limitada às etiquetas deste lote e corre antes de qualquer escrita.
+    await assertCloudIdentities(rows);
     const lote = batchIndex + 1;
 
     try {
@@ -1282,6 +1356,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     );
   }
 
+  // Envio aceito: o episódio de bloqueio fecha e o próximo volta a avisar.
+  lastCloudPushBlockedNoticeKey = null;
   return successfullySyncedIds;
 };
 
