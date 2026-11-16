@@ -6,6 +6,8 @@ import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
+import { checkCloudPushGuard } from '../utils/cloudPushGuard';
+import type { DedupRow } from '../utils/dedupAssets';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
@@ -173,6 +175,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
   const [isMirroring, setIsMirroring] = useState<boolean>(false);
   const [mirrorProgress, setMirrorProgress] = useState<number>(0);
+  // Guarda de envio: explica na tela por que a base com cópias não sobe.
+  const [cloudPushBlock, setCloudPushBlock] = useState<string[]>([]);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   // SRE ISOLAMENTO: tenant ativo do usuário logado — as estatísticas do Gestor
   // são escopadas a ele (nunca à contagem global, que poderia expor dados de
@@ -214,6 +218,19 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         addLog(`[SRE_CLOUD] Nenhum ativo do contrato ${activeTenantid || 'global'} para espelhar. Nada enviado.`);
         return;
       }
+
+      // GUARDA DE ENVIO: a nuvem guarda uma linha por tenantid + filial +
+      // etiqueta. Enviar daqui uma base com cópias grava os dois `primarykey`
+      // de cada grupo e as cópias voltam para todos os dispositivos — e a
+      // nuvem não guarda `_is_synced`, então nenhum pull posterior consegue
+      // distinguir a linha legítima. Sem limpeza local, o envio não acontece.
+      const cloudGuard = checkCloudPushGuard(baseParaEspelhar as unknown as DedupRow[]);
+      if (cloudGuard.blocked) {
+        setCloudPushBlock(cloudGuard.message);
+        cloudGuard.message.forEach((line) => addLog(`[SRE_CLOUD] ${line}`));
+        return;
+      }
+      setCloudPushBlock([]);
 
       // REGRA DE CONTRATO (tenant 100% da base): os tenantids vêm EXCLUSIVAMENTE
       // da própria base carregada (zero valor fixo / zero fallback hard-coded).
@@ -1052,6 +1069,21 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
               </span>
             </button>
           </div>
+          {cloudPushBlock.length > 0 && (
+            <div
+              role="alert"
+              className="w-full md:basis-full rounded-xl border border-rose-800/60 bg-rose-950/30 px-3 py-2.5 space-y-1"
+            >
+              {cloudPushBlock.map((line, index) => (
+                <p
+                  key={`cloud-push-block-${index}`}
+                  className={`font-mono break-words ${index === 0 ? 'text-[10px] font-black text-rose-300 uppercase tracking-wider' : 'text-[9px] text-rose-100'}`}
+                >
+                  {line}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

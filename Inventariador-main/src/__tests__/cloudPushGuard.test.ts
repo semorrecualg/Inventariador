@@ -1,0 +1,149 @@
+import { describe, it, expect } from 'vitest';
+import { auditCloudPush, checkCloudPushGuard } from '../utils/cloudPushGuard';
+import type { DedupRow } from '../utils/dedupAssets';
+
+const row = (over: Partial<DedupRow> & { primarykey: string }): DedupRow => ({
+  tenantid: 'CICOPAL',
+  filial: '010101 CICOPAL GO',
+  etiqueta: '007222',
+  _conferido: 0,
+  _is_synced: 0,
+  ...over
+});
+
+/**
+ * A guarda existe porque a nuvem é consolidada (uma linha por tenantid +
+ * filial + etiqueta) e um envio de aparelho com 12 636 linhas recria as
+ * 1 195 cópias para todos os dispositivos.
+ */
+describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () => {
+  it('libera o envio quando a base tem uma linha por identidade', () => {
+    const rows = [
+      row({ primarykey: 'A' }),
+      row({ primarykey: 'B', etiqueta: '007223' }),
+      row({ primarykey: 'C', tenantid: 'CARPER', filial: '010401 CARPER BA' })
+    ];
+
+    const guard = checkCloudPushGuard(rows);
+    expect(guard.blocked).toBe(false);
+    expect(guard.message).toEqual([]);
+    expect(guard.audit).toMatchObject({ total: 3, identities: 3, groupsWithCopies: 0, copies: 0 });
+  });
+
+  it('bloqueia quando duas linhas partilham tenantid + filial + etiqueta', () => {
+    const rows = [
+      row({ primarykey: 'A' }),
+      row({ primarykey: 'B' }),
+      row({ primarykey: 'C', etiqueta: '007223' })
+    ];
+
+    const guard = checkCloudPushGuard(rows);
+    expect(guard.blocked).toBe(true);
+    expect(guard.audit).toMatchObject({ total: 3, identities: 2, groupsWithCopies: 1, copies: 1 });
+    const texto = guard.message.join(' | ');
+    expect(texto).toContain('ENVIO BLOQUEADO');
+    expect(texto).toContain('1 cópia(s) repetida(s) em 1 grupo(s)');
+    expect(texto).toContain('3 linhas para 2 ativos distintos');
+    expect(texto).toContain('LIMPAR CÓPIAS');
+  });
+
+  it('conta várias cópias do mesmo grupo e mostra o total de linhas', () => {
+    const rows = [
+      row({ primarykey: 'A' }),
+      row({ primarykey: 'B' }),
+      row({ primarykey: 'C' }),
+      row({ primarykey: 'D', etiqueta: '007223' })
+    ];
+
+    const guard = checkCloudPushGuard(rows);
+    expect(guard.blocked).toBe(true);
+    expect(guard.audit.identities).toBe(2);
+    expect(guard.audit.copies).toBe(2);
+    expect(guard.audit.groupsWithCopies).toBe(1);
+    expect(guard.message[0]).toContain('2 cópia(s) repetida(s)');
+  });
+
+  it('normaliza filial/etiqueta/tenantid como a limpeza (caixa, acentos, hífen, espaços)', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: 'cicopal', filial: '010101 CICOPAL GO', etiqueta: '007222' }),
+      row({ primarykey: 'B', tenantid: ' CICOPAL ', filial: '010101  cicopal-go ', etiqueta: ' 007222 ' })
+    ];
+
+    expect(checkCloudPushGuard(rows).blocked).toBe(true);
+    expect(auditCloudPush(rows).identities).toBe(1);
+  });
+
+  it('não considera cópia a mesma etiqueta em contrato diferente', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: 'CICOPAL' }),
+      row({ primarykey: 'B', tenantid: 'CARPER' })
+    ];
+
+    const guard = checkCloudPushGuard(rows);
+    expect(guard.blocked).toBe(false);
+    expect(guard.audit.identities).toBe(2);
+  });
+
+  it('não bloqueia por linhas sem etiqueta (não têm identidade)', () => {
+    const rows = [
+      row({ primarykey: 'A', etiqueta: '' }),
+      row({ primarykey: 'B', etiqueta: undefined }),
+      row({ primarykey: 'C', etiqueta: '007222' })
+    ];
+
+    const guard = checkCloudPushGuard(rows);
+    expect(guard.blocked).toBe(false);
+    expect(guard.audit.withoutIdentity).toBe(2);
+    expect(guard.audit.identities).toBe(1);
+  });
+
+  it('discrimina os números por filial, como o relatório da limpeza', () => {
+    const rows = [
+      row({ primarykey: 'A', filial: '010101 CICOPAL GO', etiqueta: '0001' }),
+      row({ primarykey: 'B', filial: '010101 CICOPAL GO', etiqueta: '0002' }),
+      row({ primarykey: 'C', filial: '010101 CICOPAL GO', etiqueta: '0002' }),
+      row({ primarykey: 'D', filial: '010401 CARPER BA', etiqueta: '0003' })
+    ];
+
+    const audit = auditCloudPush(rows);
+    expect(audit.perFilial).toHaveLength(2);
+    expect(audit.perFilial[0]).toMatchObject({
+      filial: '010101 CICOPAL GO',
+      rows: 3,
+      identities: 2,
+      copies: 1
+    });
+    expect(audit.perFilial[1]).toMatchObject({
+      filial: '010401 CARPER BA',
+      rows: 1,
+      identities: 1,
+      copies: 0
+    });
+  });
+
+  it('reproduz o incidente real: 12 636 linhas / 11 441 identidades bloqueiam o envio', () => {
+    const rows: DedupRow[] = [];
+    // 11 441 identidades = 10 784 ativos únicos + 657 grupos com cópias.
+    for (let i = 0; i < 10784; i += 1) {
+      rows.push(row({ primarykey: `S${i}`, etiqueta: `E${i}` }));
+    }
+    // 538 grupos com 3 cópias + 119 com 2 = 657 grupos e 1 195 linhas a mais.
+    for (let g = 0; g < 538; g += 1) {
+      for (let c = 0; c < 3; c += 1) rows.push(row({ primarykey: `T${g}-${c}`, etiqueta: `T${g}` }));
+    }
+    for (let g = 0; g < 119; g += 1) {
+      for (let c = 0; c < 2; c += 1) rows.push(row({ primarykey: `D${g}-${c}`, etiqueta: `D${g}` }));
+    }
+
+    const guard = checkCloudPushGuard(rows);
+    expect(rows).toHaveLength(12636);
+    expect(guard.blocked).toBe(true);
+    expect(guard.audit).toMatchObject({
+      total: 12636,
+      identities: 11441,
+      groupsWithCopies: 657,
+      copies: 1195
+    });
+    expect(guard.message[0]).toContain('1195 cópia(s) repetida(s) em 657 grupo(s)');
+  });
+});
