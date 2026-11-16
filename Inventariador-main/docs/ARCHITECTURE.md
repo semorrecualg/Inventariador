@@ -16,7 +16,7 @@ PWA mobile-first para **auditoria física de ativos imobilizados em campo** (con
 | Roteamento | React Router (`HashRouter`) — compatível com `file://` no Capacitor |
 | Estado | React local no `App.tsx` (máquina de telas) + Zustand (`stores/`) |
 | Persistência local | **Dexie.js (IndexedDB)** — banco `InventoryLocalStore` (tabelas em §7) |
-| Nuvem (híbrida) | **Supabase** (Postgres multi-tenant, schema padronizado `tenantid` + `filial`) + Gemini (`@google/genai`) — ver §10 |
+| Nuvem (híbrida) | **Supabase** (Postgres multi-tenant, schema padronizado `tenantid` + `filial`) — ver §10 |
 | Testes | Vitest (36 arquivos / 366 testes) — ver §13 |
 | CI | GitHub Actions (APK Android) + PWA |
 
@@ -392,7 +392,6 @@ LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTOR
 
 | Variável | Uso | Obrigatória? |
 |---|---|---|
-| `GEMINI_API_KEY` | Insights AI (`geminiService`) — lida via `process.env` | não (desliga o recurso) |
 | `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` / `VITE_SUPABASE_SCHEMA` | Cloud mode (`SUPABASE_PLUS`) — schema multi-tenant padronizado | não |
 | `VITE_ADMIN_EMAIL` | Override do e-mail admin (default `semorr@gmail.com`) | não |
 | `APP_URL` / `SHARED_APP_URL` | `vite.config.ts` `define` | não |

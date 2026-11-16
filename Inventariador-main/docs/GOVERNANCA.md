@@ -60,7 +60,6 @@ na raiz do repositório é erro — os órfãos herdados foram removidos.
 | `VITE_ADMIN_EMAIL` | obrigatória | `vars` (fallback `semorr@gmail.com`) | idem | não |
 | `VITE_ENVIRONMENT` | `development` / `production` | default | `production` | não |
 | `VITE_PROTHEUS_API_URL` | opcional | — | — | não |
-| `GEMINI_API_KEY` | opcional, **sem** prefixo `VITE_` | secret | — | **sim** |
 
 **Modo do banco** é derivado, nunca configurado à mão:
 `isInternalMode = !(VITE_SUPABASE_URL && VITE_SUPABASE_ANON_KEY)`.
@@ -85,7 +84,7 @@ Arquivos de ambiente:
    **publishable key** `sb_publishable_...` (formato atual) ou anon key JWT (projetos
    antigos) — e `VITE_ADMIN_EMAIL`. Ela é pública por design do Supabase; a proteção
    real é **RLS** (§ 7).
-2. **Secret** (nunca no cliente, nunca em `VITE_*`): `service_role`, `GEMINI_API_KEY`,
+2. **Secret** (nunca no cliente, nunca em `VITE_*`): `service_role`,
    senhas, tokens de CI. Vai em *Settings → Secrets* (GitHub) ou no `.env` local.
 3. `service_role` **jamais** em variável `VITE_*`: tudo que tem esse prefixo é embutido
    no JS público. Uma `service_role` no front = banco inteiro exposto.
