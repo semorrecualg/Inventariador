@@ -55,6 +55,49 @@ Supabase `public` (26/26 colunas canônicas) e com risco zero de perda de dados.
 - **Testes:** 185 (novos `migrationV5`, `assetRepository.where`; baseline `schemaBaseline`
   atualizado para verno 5). Gate: `tsc -b --noEmit` ✓ · `vitest run` 185/185 ✓.
 
+## [2.7.5] — 2026-11-16
+
+### Summary
+
+Correção da âncora da unidade operacional e da posição dos ativos. APK de campo
+`gbr-kardek-v2.7.5-20261116.apk` (release `v2.7.5`, commit `8c09673`), assinado com a
+chave fixa de `keystore/debug.keystore` — instala por cima do 2.7.4 sem desinstalar.
+
+### GPS: a posição do ativo deixou de ser inventada
+
+- `FIXAR ÂNCORA GPS` configura a **unidade**; a âncora não é copiada para os ativos.
+- Bypass administrativo/offline deixou de gravar a âncora da unidade no ativo e de
+  anunciar "POSIÇÃO FIXADA!" sem leitura real.
+- `UnitConfigurator` abre sem coordenada (Brasília fica como centro visual do mapa).
+- Portão único `persistableAssetGps` recusa bypass/âncora/zero/NaN antes de gravar GPS;
+  o administrador lê o sensor como qualquer operador.
+- A linha global do `inventory_config` já não zera a âncora da filial.
+
+### Âncoras apagadas na nuvem não voltam pelo cache do aparelho
+
+- `src/utils/revokedAnchors.ts` revoga **MATRIZ** e **010101 CICOPAL GO** pela chave
+  *unidade + coordenada exacta* (tolerância 1e-6).
+- `fetchUnitConfigs` filtra as revogadas e limpa o `local_unit_configs`;
+  `collectGpsAnchorsFromStorage` ignora-as; `saveUnitConfig` recusa a coordenada revogada.
+- Reposicionar a filial noutro ponto grava normalmente.
+
+### `unit_configs` é a fonte canônica da âncora
+
+- A linha de `unit_configs` vence o `inventory_config` quando tem coordenada real; o
+  `inventory_config` fica como compatibilidade de leitura para APKs antigos.
+- `saveUnitConfigFlags` deixou de escrever `lat: 0` numa gravação só de flags.
+
+### Infra
+
+- `versionCode` 20705.
+- Removido o `android-build.yml` duplicado dentro do app (ignorado pelo GitHub, disparava
+  APK em cada push); o workflow real continua sob demanda (Run workflow, tag `v*`, `/apk`).
+
+### Gates
+
+- `lint` · `tsc --noEmit` · `npm test` (88 ficheiros, 840 testes) · `npm run build` ·
+  `check-docs` · `verify:governanca` — todos verdes.
+
 ## [2.6.0] — 2026-07-24
 
 ### Summary
