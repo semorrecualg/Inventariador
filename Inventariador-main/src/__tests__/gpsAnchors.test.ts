@@ -209,6 +209,35 @@ describe('âncora fixada → liberação da unidade (pipeline do App)', () => {
   });
 });
 
+describe('âncoras revogadas (apagadas na nuvem em 2026-11-16)', () => {
+  it('não conta a âncora revogada que ficou no localStorage do aparelho', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_010101 CICOPAL GO': JSON.stringify({
+        filial: '010101 CICOPAL GO', lat: -15.7942, lng: -47.8825, source: 'manual'
+      })
+    });
+    expect(collectGpsAnchorsFromStorage(local, makeStorage()).has('010101 CICOPAL GO')).toBe(false);
+  });
+
+  it('conta a mesma unidade depois de reposicionada noutro ponto', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_010101 CICOPAL GO': JSON.stringify({
+        filial: '010101 CICOPAL GO', lat: -16.68, lng: -49.25, source: 'manual'
+      })
+    });
+    expect(collectGpsAnchorsFromStorage(local, makeStorage()).has('010101 CICOPAL GO')).toBe(true);
+  });
+
+  it('não conta par de sessão com a coordenada revogada', () => {
+    const session = makeStorage({
+      'gps_lat_MATRIZ': '-16.7067189',
+      'gps_lng_MATRIZ': '-49.1064217',
+      'unit_gps_config_MATRIZ': JSON.stringify({ source: 'manual' })
+    });
+    expect(collectGpsAnchorsFromStorage(makeStorage(), session).has('MATRIZ')).toBe(false);
+  });
+});
+
 describe('mergeUnitConfigIntoList (contrato onUpdateConfigs)', () => {
   it('adiciona config quando a unidade não existe na lista', () => {
     const result = mergeUnitConfigIntoList(
