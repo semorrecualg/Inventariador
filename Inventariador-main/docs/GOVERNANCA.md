@@ -206,8 +206,10 @@ planeadas («a criar», «Criar» em checklist, «planejada», «nunca foi criad
 aceites **só quando o marcador está colado à referência** (antes ou depois dela):
 a palavra solta noutro ponto da linha não isenta nada.
 
-`verify:governanca` checa, em sequência: estrutura do repo → branch/limpeza/fast-forward vs `origin/main`
-→ presença das variáveis → REST + AUTH do Supabase → tabelas essenciais.
+`verify:governanca` checa, em sequência: estrutura do repo → **versão do `package.json`
+com entrada no `CHANGELOG.md`** (falha se faltar — governança § 9.1) →
+branch/limpeza/fast-forward vs `origin/main` → presença das variáveis → REST + AUTH do
+Supabase → tabelas essenciais.
 **Nunca imprime valores de chaves**, apenas presença.
 
 Saída: `0` = governança íntegra · `1` = pelo menos uma falha (com o motivo).

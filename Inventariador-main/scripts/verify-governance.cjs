@@ -11,6 +11,7 @@
  *
  * Regras (docs/GOVERNANCA.md § 8):
  *   - nunca imprime valores de chaves, apenas presença;
+ *   - a versão do package.json tem de ter entrada no CHANGELOG (governança § 9.1);
  *   - exit 0 = íntegro, exit 1 = pelo menos uma falha.
  */
 
@@ -123,6 +124,33 @@ function checkStructure() {
   }
   ok('estrutura', `app em Inventariador-main/ · versão ${pkg.version || '?'}`);
   return pkg;
+}
+
+function checkChangelog(pkg) {
+  if (!pkg || !pkg.version) {
+    warn('changelog', 'versão do package.json indisponível — entrada no CHANGELOG não verificada');
+    return;
+  }
+  const changelogPath = path.join(APP_DIR, 'CHANGELOG.md');
+  let raw;
+  try {
+    raw = fs.readFileSync(changelogPath, 'utf8');
+  } catch {
+    fail('changelog', 'Inventariador-main/CHANGELOG.md ausente — a governança § 9.1 exige a entrada da versão');
+    return;
+  }
+  const version = String(pkg.version).trim();
+  // Cabeçalhos aceites: "## [2.7.5] — 2026-11-16", "## 2.7.5", "## [v2.7.5]".
+  const versions = [...raw.matchAll(/^##\s+\[?v?(\d+\.\d+\.\d+)\]?/gm)].map((m) => m[1]);
+  if (versions.includes(version)) {
+    ok('changelog', `versão ${version} tem entrada no CHANGELOG (governança § 9.1)`);
+    return;
+  }
+  fail(
+    'changelog',
+    `versão ${version} do package.json sem entrada em CHANGELOG.md — ` +
+      `acrescente "## [${version}] — AAAA-MM-DD" antes do merge (governança § 9.1)`,
+  );
 }
 
 function checkGit() {
@@ -252,7 +280,8 @@ async function main() {
   console.log(`app: ${APP_DIR}`);
   console.log(`repo: ${REPO_DIR}\n`);
 
-  checkStructure();
+  const pkg = checkStructure();
+  checkChangelog(pkg);
   checkGit();
   const env = checkEnv();
   await checkSupabase(env);
