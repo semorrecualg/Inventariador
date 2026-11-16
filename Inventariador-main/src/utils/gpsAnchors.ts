@@ -20,19 +20,17 @@ export const hasRealAnchor = (lat: unknown, lng: unknown): boolean =>
   Number(lat) !== 0 && Number(lng) !== 0;
 
 /**
- * Âncora que pode ser contada como LEITURA DE SENSOR.
+ * Âncora CONFIGURADA para a unidade — qualquer proveniência.
  *
- * Exige coordenadas válidas e proveniência diferente de `manual`. O pino
- * posicionado por clique/arraste no mapa (`source: 'manual'`) continua sendo
- * âncora para a geocerca, mas NÃO libera unidade, não entra em `unitsWithGps`
- * nem alimenta o mapa de calor.
- *
- * `source` ausente é registro legado (anterior à proveniência): continua
- * contando como sensor para não travar unidades já configuradas. Só um
- * `manual` explícito é excluído.
+ * `FIXAR ÂNCORA GPS` grava `source: 'manual'` (o pino foi colocado à mão no
+ * mapa, que é o caminho normal no desktop e em campo sem fix), e esse é um ato
+ * administrativo legítimo: a filial fica configurada e o inventário é liberado.
+ * A proveniência separa apenas leitura de sensor (`isRealAnchorRecord`), nunca
+ * a configuração da unidade operacional.
  */
-export const isRealAnchorRecord = (record: AnchorRecordFields | null | undefined): boolean =>
-  !!record && record.source !== 'manual' && hasRealAnchor(record.lat, record.lng);
+export const isConfiguredAnchorRecord = (
+  record: AnchorRecordFields | null | undefined
+): boolean => !!record && hasRealAnchor(record.lat, record.lng);
 
 /** JSON de storage sem derrubar a varredura quando o valor é inválido. */
 const readJson = (
@@ -54,9 +52,10 @@ const readJson = (
  *
  * Chaves lidas:
  *  - localStorage:  `kardek_gps_ancora_<unidade>` (JSON { filial/unit_id, lat, lng, source })
- *  - sessionStorage: `gps_lat_<unidade>` + `gps_lng_<unidade>`, com a proveniência
- *    lida de `unit_gps_config_<unidade>` (gravada no salvamento). Rascunho sem
- *    config salva é posicionamento manual e não conta como sensor.
+ *    — gravado só pelo `FIXAR ÂNCORA GPS`; qualquer proveniência configura a filial.
+ *  - sessionStorage: `gps_lat_<unidade>` + `gps_lng_<unidade>`, aceites apenas
+ *    quando existe `unit_gps_config_<unidade>` (prova de que a âncora foi SALVA).
+ *    Rascunho de clique no mapa não conta.
  *
  * Recebe os storages por parâmetro (interface mínima) para ser testável com
  * mocks sem depender de jsdom. Qualquer falha de storage é silenciosa.
@@ -73,7 +72,7 @@ export const collectGpsAnchorsFromStorage = (
       if (key && key.startsWith('kardek_gps_ancora_')) {
         const rec = readJson(local, key);
         const uId = rec?.filial || rec?.unit_id || rec?._unitid;
-        if (uId && isRealAnchorRecord(rec)) {
+        if (uId && isConfiguredAnchorRecord(rec)) {
           anchors.add(normalizeKey(String(uId)));
         }
       }
@@ -87,10 +86,10 @@ export const collectGpsAnchorsFromStorage = (
         const unit = key.slice('gps_lat_'.length);
         const lat = session.getItem(key);
         const lng = session.getItem(`gps_lng_${unit}`);
-        const saved = readJson(session, `unit_gps_config_${unit}`);
-        // Sem config salva não há como provar leitura de sensor: rascunho = manual.
-        const source = saved ? saved.source : 'manual';
-        if (unit && isRealAnchorRecord({ lat, lng, source })) {
+        // Sem config salva é rascunho de clique no mapa: a âncora não foi fixada
+        // e a unidade continua sem configuração.
+        if (!readJson(session, `unit_gps_config_${unit}`)) continue;
+        if (unit && isConfiguredAnchorRecord({ lat, lng })) {
           anchors.add(normalizeKey(unit));
         }
       }

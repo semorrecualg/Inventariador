@@ -31,8 +31,8 @@ interface UnitConfiguratorProps {
   onUpdateConfigs?: (configs: UnitConfig[]) => void;
   onNavigate?: (screen: AppScreen) => void;
   initialUnit?: string | null;
-  /** Bypass offline: chamado quando o auditor aplica coordenadas padrão e a campanha de contingência é aberta. */
-  onBypassApplied?: (config: UnitConfig) => void;
+  /** Bypass offline: chamado com a UNIDADE quando a campanha de contingência é aberta — sem coordenada nenhuma. */
+  onBypassApplied?: (unit: string) => void;
 }
 
 // ============================================================================
@@ -193,8 +193,10 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   const [configs, setConfigs] = useState<UnitConfig[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
   const [currentConfig, setCurrentConfig] = useState<Partial<UnitConfig>>({
-    lat: BRASILIA_DEFAULT.lat,
-    lng: BRASILIA_DEFAULT.lng,
+    // SEM coordenada inicial: o formulário nasce vazio e o SALVAR fica
+    // desabilitado até alguém marcar a posição (clique/arraste ou leitura do
+    // sensor). Brasília é só o centro visual do mapa (BRASILIA_CENTER), nunca
+    // uma âncora pronta a gravar.
     radius_meters: 500,
     is_active: true
   });
@@ -466,13 +468,12 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       setMessage({ text: 'POSIÇÃO FIXADA PELO HARDWARE DO DISPOSITIVO!', type: 'success' });
       mapClickRef.current(lat, lng, 'sensor');
     } catch (err) {
-      // Fallback suave: permissão negada/política no Desktop → câmera para Brasília-DF (zoom nacional)
-      logger.warn('>>> [GPS Fallback] Hardware inacessível ou permissão negada no Desktop. Aplicando centro canônico (Brasília-DF):', err);
-      const { lat: fbLat, lng: fbLng } = safeLatLngPair({ lat: BRASILIA_DEFAULT.lat, lng: BRASILIA_DEFAULT.lng });
-      setCurrentConfig(prev => ({ ...prev, lat: fbLat, lng: fbLng }));
-      flyTo(fbLat, fbLng, DEFAULT_ZOOM);
-      setMessage({ text: 'MODO DESKTOP/POLÍTICA: ÂNCORA CANÔNICA (BRASÍLIA, DF) APLICADA.', type: 'success' });
-      mapClickRef.current(fbLat, fbLng);
+      // Sem leitura de hardware NÃO há âncora: a câmera vai para o centro visual
+      // do país e o operador marca a posição no mapa. Antes este catch aplicava
+      // Brasília como âncora no primeiro clique em "MINHA POSIÇÃO" no desktop.
+      logger.warn('>>> [GPS Fallback] Hardware inacessível ou permissão negada no Desktop. Sem âncora aplicada:', err);
+      flyTo(BRASILIA_DEFAULT.lat, BRASILIA_DEFAULT.lng, DEFAULT_ZOOM);
+      setMessage({ text: 'SEM LEITURA DE GPS. TOQUE NO MAPA PARA MARCAR A POSIÇÃO DA UNIDADE.', type: 'error' });
     }
   };
 
@@ -642,9 +643,15 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   const loadConfigs = useCallback(async () => {
     setLoading(true);
     const data = await fetchUnitConfigs(user.tenantid);
-    // Guarda Defensiva: registros do banco local com coordenadas nulas/NaN são
-    // higienizados para o canônico (Brasília) em vez de propagar undefined ao mapa
-    const sanitized = (data || []).map(cfg => ({ ...cfg, ...safeLatLngPair(cfg) }));
+    // Só entra na lista quem TEM coordenada utilizável: registro sem âncora (nulo,
+    // NaN ou zero) é descartado. Antes o sanitizador preenchia-o com Brasília e a
+    // unidade sem âncora aparecia com um pino pronto — bastava SALVAR para gravar a
+    // coordenada canônica como âncora. O formulário fica vazio e o SALVAR travado.
+    const sanitized = (data || [])
+      .filter(cfg => cfg.lat !== undefined && cfg.lng !== undefined &&
+        !isNaN(Number(cfg.lat)) && !isNaN(Number(cfg.lng)) &&
+        Number(cfg.lat) !== 0 && Number(cfg.lng) !== 0)
+      .map(cfg => ({ ...cfg, ...safeLatLngPair(cfg) }));
     setConfigs(sanitized);
     setLoading(false);
   }, [user?.tenantid]);
@@ -664,9 +671,17 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       return c.unit_id.trim().toUpperCase() === unit.trim().toUpperCase();
     });
 
-    if (sessionLat && sessionLng) {
-      // Guarda Defensiva: rascunhos de sessão podem conter 'null'/'NaN' — sanitiza antes de tocar o mapa
-      const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: Number(sessionLat), lng: Number(sessionLng) });
+    const draftLat = Number(sessionLat);
+    const draftLng = Number(sessionLng);
+    const draftValid = !!sessionLat && !!sessionLng && Number.isFinite(draftLat) && Number.isFinite(draftLng) &&
+      draftLat !== 0 && draftLng !== 0;
+    const existingLat = Number(existing?.lat);
+    const existingLng = Number(existing?.lng);
+    const existingValid = !!existing && existing.lat !== undefined && existing.lng !== undefined &&
+      Number.isFinite(existingLat) && Number.isFinite(existingLng) && existingLat !== 0 && existingLng !== 0;
+
+    if (draftValid) {
+      const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: draftLat, lng: draftLng });
       const cfg = {
         tenantid: user.tenantid,
         unit_id: unit,
@@ -679,20 +694,20 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       // Rascunho não guarda proveniência: só pode ter vindo de posicionamento no mapa.
       anchorSourceRef.current = 'manual';
       flyTo(cfg.lat, cfg.lng, UNIT_ZOOM);
-    } else if (existing) {
-      // Guarda Defensiva: registro do IndexedDB/SQLite pode estar parcialmente corrompido
+    } else if (existing && existingValid) {
       const { lat: safeLat, lng: safeLng } = safeLatLngPair(existing);
       const safeExisting = { ...existing, lat: safeLat, lng: safeLng };
       setCurrentConfig(safeExisting);
       anchorSourceRef.current = existing.source ?? 'manual';
       flyTo(safeExisting.lat, safeExisting.lng, UNIT_ZOOM);
     } else {
+      // Unidade sem âncora (ou rascunho inválido): formulário SEM coordenada. O
+      // mapa apenas voa para o centro visual do país — Brasília não é a posição
+      // da filial e não pode virar âncora por um clique em SALVAR.
       setCurrentConfig({
         tenantid: user.tenantid,
         unit_id: unit,
-        lat: BRASILIA_DEFAULT.lat,
-        lng: BRASILIA_DEFAULT.lng,
-        radius_meters: 500,
+        radius_meters: existing?.radius_meters || 500,
         is_active: true
       });
       anchorSourceRef.current = 'manual';
@@ -800,24 +815,15 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
         flyTo(newLat, newLng, UNIT_ZOOM);
         setMessage({ text: `CENTRALIZADO EM: ${searchQuery}`, type: 'success' });
       } else {
-        // Fallback contingência Brasília, DF
-        const defaultLat = BRASILIA_DEFAULT.lat;
-        const defaultLng = BRASILIA_DEFAULT.lng;
-        if (selectedUnit) {
-          setCurrentConfig(prev => ({ ...prev, lat: defaultLat, lng: defaultLng }));
-        }
-        flyTo(defaultLat, defaultLng, DEFAULT_ZOOM);
-        setMessage({ text: `CONVERTIDO PARA BRASÍLIA, DF (REGISTRO LOCAL ENCONTRADO SEM GPS / LOCALIZAÇÃO DESCONHECIDA)`, type: 'success' });
+        // Sem resultado: a câmera volta ao centro visual do país, sem definir
+        // coordenada — buscar um lugar inexistente não pode virar âncora.
+        flyTo(BRASILIA_DEFAULT.lat, BRASILIA_DEFAULT.lng, DEFAULT_ZOOM);
+        setMessage({ text: `SEM COORDENADAS PARA "${searchQuery}". TOQUE NO MAPA PARA MARCAR A POSIÇÃO.`, type: 'error' });
       }
     } catch (err: unknown) {
-      logger.warn('Erro na busca de localização, aplicando contingência Brasília:', err);
-      const defaultLat = BRASILIA_DEFAULT.lat;
-      const defaultLng = BRASILIA_DEFAULT.lng;
-      if (selectedUnit) {
-        setCurrentConfig(prev => ({ ...prev, lat: defaultLat, lng: defaultLng }));
-      }
-      flyTo(defaultLat, defaultLng, DEFAULT_ZOOM);
-      setMessage({ text: `MÉTODO DE CONTINGÊNCIA ATIVADO: BRASÍLIA, DF`, type: 'success' });
+      logger.warn('Erro na busca de localização; nenhuma coordenada foi aplicada:', err);
+      flyTo(BRASILIA_DEFAULT.lat, BRASILIA_DEFAULT.lng, DEFAULT_ZOOM);
+      setMessage({ text: 'BUSCA INDISPONÍVEL. TOQUE NO MAPA PARA MARCAR A POSIÇÃO DA UNIDADE.', type: 'error' });
     } finally {
       setSearching(false);
     }
@@ -960,53 +966,27 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   };
 
   // ==========================================================================
-  // BYPASS DE SEGURANÇA TEMPORÁRIO (Diretiva 5)
-  // Se o usuário clicar no botão e o mapa falhar ou se ele salvar, o app grava
-  // uma coordenada fictícia padrão (Brasília canônica) no IndexedDB (Dexie) e
-  // define a flag de Campanha aberta para o auditor avançar na esteira operacional.
+  // BYPASS DE SEGURANÇA TEMPORÁRIO (Diretiva 5) — SEM COORDENADA
+  // Abre a campanha/esteira de contingência da filial sem gravar coordenada
+  // nenhuma. A âncora continua em falta ("FALTA ÂNCORA GPS") e nenhum ativo
+  // recebe GPS inventado. Antes o bypass gravava Brasília como âncora no
+  // SQLite/Dexie/localStorage e na nuvem — era o último caminho que fabricava
+  // coordenada.
   // ==========================================================================
-  const handleOfflineBypass = async () => {
+  const handleOfflineBypass = () => {
     const unit = selectedUnitRef.current || selectedUnit || initialUnit;
     if (!unit) {
       setMessage({ text: 'SELECIONE UMA UNIDADE ANTES DE APLICAR O BYPASS.', type: 'error' });
       return;
     }
 
-    // Guarda Defensiva: estrutura canônica explícita exigida pelo safeLngLat
-    const { lat: safeLat, lng: safeLng } = safeLatLngPair({ lat: BRASILIA_DEFAULT.lat, lng: BRASILIA_DEFAULT.lng });
-
-    const bypassConfig: UnitConfig = {
-      tenantid: user?.tenantid || '',
-      filial: unit,
-      unit_id: unit,
-      lat: safeLat,
-      lng: safeLng,
-      radius_meters: currentConfig.radius_meters || 500,
-      is_active: true,
-      updated_by: user?.email || 'auditor',
-      updated_at: new Date().toISOString()
-    };
-    // Registro defensivo para leitores subsequentes: { lat, lng } + array [lng, lat]
-    const bypassRecord = { ...bypassConfig, coordenadas: [safeLng, safeLat] as [number, number] };
-
     setSaving(true);
-    setMessage({ text: 'BYPASS OFFLINE: COORDENADAS PADRÃO (BRASÍLIA, DF) SENDO GRAVADAS...', type: 'success' });
-    setCurrentConfig(prev => ({ ...prev, lat: bypassConfig.lat, lng: bypassConfig.lng, unit_id: unit }));
-    flyTo(bypassConfig.lat, bypassConfig.lng, UNIT_ZOOM);
+    setMessage({ text: 'BYPASS OFFLINE: ABRINDO A CAMPANHA SEM ÂNCORA GPS...', type: 'success' });
 
     try {
-      // 1) Persistência canônica: SQLite físico + espelho Dexie (IndexedDB) + localStorage
-      const ok = await saveUnitConfig(bypassConfig);
-      const saved = ok === true || (typeof ok === 'string' && ok.includes('sucesso'));
-      logger.info(`>>> [GPS Bypass] Persistência da coordenada padrão ${saved ? 'confirmada' : 'com aviso'}: ${String(ok)}`);
-
-      // 2) Flags preventivas de âncora e campanha aberta (esteira operacional liberada)
-      localStorage.setItem(`kardek_gps_ancora_${unit}`, JSON.stringify(bypassRecord));
-      sessionStorage.setItem(`unit_gps_config_${unit}`, JSON.stringify(bypassRecord));
-      sessionStorage.setItem('last_configured_gps_unit', unit);
-      // Estrutura canônica explícita para as telas subsequentes relerem sem quebrar
-      sessionStorage.setItem(`gps_lat_${unit}`, String(safeLat));
-      sessionStorage.setItem(`gps_lng_${unit}`, String(safeLng));
+      // Só flags de campanha: nenhuma chave de GPS é escrita (nem `kardek_gps_ancora_*`,
+      // nem `gps_lat_/gps_lng_`, nem `unit_gps_config_*`), então a unidade continua sem
+      // âncora e o inventário herda "FALTA ÂNCORA GPS".
       const campaignFlag = `BYPASS_${unit}_${Date.now()}`;
       setBypassCampaignId(campaignFlag);
       sessionStorage.setItem(`kardek_campaign_open_${unit}`, campaignFlag);
@@ -1015,34 +995,22 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
       localStorage.setItem('campaign_bypass_open', 'true');
       sessionStorage.setItem('kardek_campaign_open', campaignFlag);
 
-      // 3) Estado local sincronizado E notifica o pai com a MESMA lista já atualizada.
-      // FIX(CRITICO): a closure antiga (`configs`) não tinha a âncora recém-gravada e
-      // deixava o botão GPS em 'SEM ÂNCORA' após voltar para a lista de unidades.
-      const updatedConfigs = mergeUnitConfigIntoList(configs, bypassConfig);
-      setConfigs(updatedConfigs);
-      if (typeof onUpdateConfigs === 'function') {
-        onUpdateConfigs(updatedConfigs);
-      }
+      // NÃO toca em `justSaved`: o rótulo do botão de âncora ("POSIÇÃO FIXADA!")
+      // é exclusivo do handleSave. Aqui nada foi fixado — só a campanha abriu.
+      setMessage({
+        text: 'BYPASS ATIVADO: CAMPANHA DE CONTINGÊNCIA ABERTA. A FILIAL CONTINUA EM FALTA ÂNCORA GPS.',
+        type: 'success'
+      });
+      logger.info(`>>> [GPS Bypass] Campanha ${campaignFlag} aberta para ${unit} sem gravar coordenada.`);
 
-      setJustSaved(true);
-      setTimeout(() => setJustSaved(false), 3000);
-      setMessage({ text: 'BYPASS ATIVADO: ÂNCORA PADRÃO GRAVADA E CAMPANHA DE CONTINGÊNCIA ABERTA!', type: 'success' });
-
-      // 4) Avança na esteira operacional (App abre a flag de campanha e navega)
+      // Avança na esteira operacional (App abre a flag de campanha e navega).
       if (typeof onBypassApplied === 'function') {
-        onBypassApplied(bypassConfig);
+        onBypassApplied(unit);
       }
     } catch (err: unknown) {
       const se = err as Error;
-      logger.error('>>> [GPS Bypass] Falha na persistência do bypass:', err);
-      // Mesmo com erro, o flag de campanha é aberto para não travar o auditor (simulação local)
-      const campaignFlag = `BYPASS_${unit}_${Date.now()}`;
-      sessionStorage.setItem('campaign_bypass_open', 'true');
-      sessionStorage.setItem(`kardek_campaign_open_${unit}`, campaignFlag);
-      setMessage({ text: `BYPASS PARCIAL: ${se.message || 'falha de persistência'} — CAMPANHA ABERTA PARA SIMULAÇÃO LOCAL.`, type: 'success' });
-      if (typeof onBypassApplied === 'function') {
-        onBypassApplied(bypassConfig);
-      }
+      logger.error('>>> [GPS Bypass] Falha ao abrir a campanha de contingência:', err);
+      setMessage({ text: `BYPASS PARCIAL: ${se.message || 'falha ao abrir a campanha'}.`, type: 'error' });
     } finally {
       setSaving(false);
     }
@@ -1333,7 +1301,7 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
             onClick={handleOfflineBypass}
             disabled={saving}
             className="w-full py-3.5 text-white rounded-xl font-black uppercase text-[8px] tracking-[0.15em] shadow-xl hover:scale-[1.01] transition-all disabled:opacity-40 flex items-center justify-center space-x-2 pointer-events-auto bg-slate-800 hover:bg-slate-700 border border-slate-600"
-            title="Aplica coordenadas padrão (Brasília, DF), grava no dispositivo e abre a campanha de contingência"
+            title="Abre a campanha de contingência SEM gravar coordenada — a filial fica em FALTA ÂNCORA GPS até alguém marcar o pino"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
             <span>Bypass Offline</span>

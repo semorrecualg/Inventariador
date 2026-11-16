@@ -10,7 +10,7 @@ import { validateAndPushRoute, registerToastCallback } from './services/Navigati
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
-import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
+import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
@@ -41,7 +41,7 @@ import Labeling from './components/Labeling';
 import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
 import localforage from 'localforage';
-import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
+import { getCurrentLocation, persistableAssetGps, shouldAttemptAssetGpsCapture, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
 import UnitSelector from './components/UnitSelector';
 import AddressSelector from './components/AddressSelector';
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -111,7 +111,8 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
+import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
+import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isSyncLockStuck } from './services/syncQueueGuards';
 import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
@@ -1774,6 +1775,20 @@ useEffect(() => {
     };
   }, [setHistory]);
 
+  // GUARDA DE ENVIO (utils/cloudPushGuard): a nuvem recusa um payload com
+  // cópias locais. O aviso sobe para a barra de sincronização em vez de ficar
+  // só no console — sem isso o operador veria "PENDENTE NUVEM" para sempre.
+  useEffect(() => {
+    const handleCloudPushBlocked = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      const message = detail?.message || 'Envio à nuvem bloqueado: a base local tem cópias repetidas.';
+      // Mesmo aviso repetido não volta a mexer no estado.
+      setSyncError(prev => (prev === message ? prev : message));
+    };
+    window.addEventListener('gbr_cloud_push_blocked', handleCloudPushBlocked);
+    return () => window.removeEventListener('gbr_cloud_push_blocked', handleCloudPushBlocked);
+  }, []);
+
   useEffect(() => {
     // Check inicial
     const initialCheck = checkRuntimeIntegrity();
@@ -2523,34 +2538,11 @@ useEffect(() => {
     }
   }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode, setHistory, pushScreen]);
 
-  // Efeito de reparo automático de GPS para ativos conferidos sem coordenadas
-  useEffect(() => {
-    const inv = inventoryRef.current;
-    if (inv.assets.length > 0 && inv.unitConfigs && inv.unitConfigs.length > 0) {
-      let hasRepaired = false;
-      const repairedAssets = inv.assets.map(a => {
-        const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-        if (isConferido && (!a.latitude || !a.longitude)) {
-          const unitId = a.filial || a._unidade;
-          const config = inv.unitConfigs?.find(c => c.unit_id === unitId);
-          // Só âncora com leitura de sensor posiciona o ativo: o pino manual não
-          // pode virar ponto no mapa de calor (não é leitura de sensor).
-          if (config && isRealAnchorRecord(config)) {
-            hasRepaired = true;
-            return { ...a, latitude: config.lat, longitude: config.lng };
-          }
-        }
-        return a;
-      });
-
-      if (hasRepaired) {
-        logger.info('>>> [GPS] Reparo automático de coordenadas aplicado a ativos conferidos sem GPS.');
-        const repairedState = { ...inv, assets: repairedAssets };
-        setInventory(prev => ({ ...prev, assets: repairedAssets }));
-        saveInventory(repairedState);
-      }
-    }
-  }, [inventory.assets, inventory.unitConfigs]);
+  // NÃO existe preenchimento automático do GPS dos ativos a partir da âncora da
+  // unidade. `assets.latitude/longitude` (nuvem: gps_lat/gps_lng) só é gravado
+  // na conferência do inventário: se estava vazio, continua vazio. Repartir a
+  // âncora pela base inteira inventava coordenadas para ativos que nunca foram
+  // lidos e ia parar à nuvem no envio seguinte.
 
   const currentUnitConfig = useMemo(() => {
     if (!selectedUnit || !inventory.unitConfigs) return null;
@@ -2611,7 +2603,11 @@ useEffect(() => {
           });
         }
       } catch (err) {
-        setSyncError('Erro ao enviar alterações locais');
+        // Bloqueio por cópias é política, não falha: o operador tem de ver o
+        // número e a instrução de LIMPAR CÓPIAS, não um "erro" genérico.
+        setSyncError(
+          err instanceof CloudPushPolicyError ? err.message : 'Erro ao enviar alterações locais'
+        );
         logger.error('Push error:', err);
         throw err;
       } finally {
@@ -5154,6 +5150,9 @@ useEffect(() => {
   const cloudQueueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushCloudQueueRef = useRef<() => Promise<void>>(async () => {});
   const CLOUD_FLUSH_DELAY_MS = 1200;
+  // Guarda de cópias (utils/cloudPushGuard): enquanto a base local tiver cópias
+  // a fila fica retida e o recuo cresce — 1,2 s só repetia o mesmo aviso.
+  const cloudBlockedBackoffRef = useRef<number>(0);
 
   const scheduleCloudFlush = useCallback((delayMs: number = CLOUD_FLUSH_DELAY_MS) => {
     if (cloudQueueTimerRef.current) return;
@@ -5182,6 +5181,10 @@ useEffect(() => {
       const synced = await syncAssetsToCloudAndMark(pending, user?.tenantid);
       const syncedSet = new Set(synced.map(String));
       if (syncedSet.size > 0) {
+        // Envio aceito: o episódio de bloqueio fecha — o próximo recomeça o
+        // recuo e volta a avisar. (Sem ids aceitos nada foi enviado: offline.)
+        cloudBlockedBackoffRef.current = 0;
+        resetCloudPushBlockedNotice();
         const mark = (a: Asset) => (syncedSet.has(String(a.id)) ? { ...a, _is_synced: 1 } : a);
         // Patch local do estado: sem setRefreshVersion, sem reler a base inteira.
         setInventory(prev => ({ ...prev, assets: prev.assets.map(mark) }));
@@ -5196,8 +5199,18 @@ useEffect(() => {
         if (navigator.onLine) scheduleCloudFlush();
       }
     } catch (err) {
-      logger.warn('>>> [Sync Queue] Lote não enviado; mantido em fila para nova tentativa:', err);
       pending.forEach(a => cloudQueueRef.current.set(String(a.id), a));
+      if (err instanceof CloudPushPolicyError) {
+        // Política, não rede: a fila espera em vez de repetir a cada 1,2 s.
+        const delay = nextCloudPushBlockedBackoff(cloudBlockedBackoffRef.current);
+        cloudBlockedBackoffRef.current = delay;
+        logger.warn(
+          `>>> [Sync Queue] Envio bloqueado por cópias locais; nova tentativa em ${Math.round(delay / 1000)} s.`
+        );
+        if (navigator.onLine) scheduleCloudFlush(delay);
+        return;
+      }
+      logger.warn('>>> [Sync Queue] Lote não enviado; mantido em fila para nova tentativa:', err);
       // Recuo: 5 s para não martelar a nuvem em erro persistente.
       if (navigator.onLine) scheduleCloudFlush(5000);
     }
@@ -5210,7 +5223,8 @@ useEffect(() => {
   const queueCloudSync = useCallback((assets: Asset[]) => {
     if (!databaseMode.startsWith('SUPABASE') || assets.length === 0) return;
     assets.forEach(a => cloudQueueRef.current.set(String(a.id), a));
-    scheduleCloudFlush();
+    // Com um bloqueio ativo, a fila respeita o recuo em vez de o atropelar.
+    scheduleCloudFlush(cloudBlockedBackoffRef.current || undefined);
   }, [databaseMode, scheduleCloudFlush]);
 
   // Reenvia a fila quando a rede volta e fecha o timer no desmonte.
@@ -5446,35 +5460,28 @@ useEffect(() => {
   const enrichAssetWithGps = useCallback(async (baseAsset: Asset, alreadySynced = false) => {
     try {
       const metrics = await telemetryService.getDeviceMetrics();
-      const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
       const isGpsBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
 
-      // null = sem leitura válida e precisa; nunca gravamos 0,0 inventado.
+      // Sem leitura real não há coordenada: a âncora da unidade não é GPS do
+      // ativo. O PERFIL já não decide nada aqui — admin/master lê o sensor como
+      // qualquer operador; só o bypass explícito (`gbr_gps_bypass`) e a bateria
+      // crítica dispensam a captura. E `persistableAssetGps` recusa qualquer
+      // posição marcada como bypass (âncora), venha de onde vier.
       let loc: import('./utils/gpsUtils').GpsLocation | null = null;
-      if (isAdmin || isGpsBypassed) {
-        if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-          loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-        }
-      } else if (metrics.battery > 5) {
+      if (shouldAttemptAssetGpsCapture({ bypassed: isGpsBypassed, battery: metrics.battery })) {
         loc = await Promise.race([
           getCurrentLocation(),
           new Promise<null>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
         ]).catch(e => {
-          logger.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
-          if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-            return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-          }
+          logger.warn('>>> [GPS] Falha na captura rápida; registro segue sem coordenada:', e);
           return null;
         });
       } else {
-        logger.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de', metrics.battery, '% ou inferior!');
-        if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-          loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-        }
+        logger.info('>>> [GPS] Captura dispensada (bypass explícito ou bateria crítica): registro segue sem coordenada.');
       }
 
       const { convertAltitudeToFloor } = await import('./utils/gpsUtils');
-      if (!loc) {
+      if (!loc || !persistableAssetGps(loc)) {
         queueCloudSync([baseAsset]);
         return;
       }
@@ -5515,7 +5522,7 @@ useEffect(() => {
       logger.warn('>>> [GPS] Captura em background falhou; envio do registro segue sem coordenadas:', e);
       queueCloudSync([baseAsset]);
     }
-  }, [currentUnitConfig, queueCloudSync, user]);
+  }, [queueCloudSync, user]);
 
   const updateAsset = useCallback(async (updatedAsset: Asset) => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
@@ -5877,27 +5884,19 @@ useEffect(() => {
       origin = TransactionOrigin.ACCOUNT_RECONCILIATION;
     }
 
-    let gpsCoords: { lat?: number; lng?: number } = {};
+    // Sem leitura real não há coordenada a aplicar: a âncora da unidade não é
+    // GPS do ativo. O merge abaixo só escreve latitude/longitude quando existe
+    // fix — coordenada vazia continua vazia, e a que já existia não é apagada.
+    let gpsCoords: { lat: number; lng: number } | null = null;
     try {
       const metrics = await telemetryService.getDeviceMetrics();
       if (metrics.battery > 5) {
-        const loc = await getCurrentLocation();
-        if (loc) {
-          gpsCoords = { lat: loc.lat, lng: loc.lng };
-        } else if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
-          gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
-        }
+        gpsCoords = persistableAssetGps(await getCurrentLocation());
       } else {
         logger.warn('>>> [GPS Lote] Bloqueio crítico de GPS por bateria de', metrics.battery, '% ou inferior!');
-        if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
-          gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
-        }
       }
     } catch (e) {
-      logger.warn('GPS não capturado para lote, tentando fallback da unidade:', e);
-      if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
-        gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
-      }
+      logger.warn('GPS não capturado para lote; segue sem coordenada:', e);
     }
 
     // 1. CALCULAMOS OS NOVOS OBJETOS (MERGE NÃO DESTRUTIVO)
@@ -5907,8 +5906,7 @@ useEffect(() => {
         const updates: Asset & Record<string, unknown> = { 
           ...a, 
           ...(manualUpdates || {}), 
-          latitude: gpsCoords.lat, 
-          longitude: gpsCoords.lng,
+          ...(gpsCoords ? { latitude: gpsCoords.lat, longitude: gpsCoords.lng } : {}),
           _origemTransacao: origin // Aplica o código fixo
         };
         
@@ -6045,7 +6043,7 @@ useEffect(() => {
     } finally {
       setIsProcessing(false);
     }
-  }, [inventoryLocation, determineTag, user, databaseMode, history, currentUnitConfig, inventory.assets, queueCloudSync]);
+  }, [inventoryLocation, determineTag, user, databaseMode, history, inventory.assets, queueCloudSync]);
 
   const handleUpdateScannerMode = useCallback((mode: ScannerMode) => {
     setInventory(prev => ({ ...prev, scannerMode: mode }));
@@ -6562,13 +6560,14 @@ useEffect(() => {
       typeof localStorage !== 'undefined' ? localStorage : null
     );
 
-    // Pré-cálculo das unidades com âncora contável como leitura de sensor.
-    // Pino posicionado manualmente no mapa (source: 'manual') NÃO conta aqui —
-    // e é daqui que saem a liberação da unidade e o chip de GPS.
+    // Pré-cálculo das unidades com âncora CONFIGURADA — é daqui que saem a
+    // liberação da unidade e o chip de GPS. O pino fixado à mão no mapa
+    // (`source: 'manual'`) conta: FIXAR ÂNCORA GPS é o ato administrativo que
+    // configura a filial. A proveniência (`source`) não decide mais nada aqui.
     const unitsWithGps = new Set<string>();
     unitConfigs.forEach(c => {
       const uId = c.filial || c._unitid || c.unit_id;
-      if (uId && isRealAnchorRecord(c)) {
+      if (uId && isConfiguredAnchorRecord(c)) {
         const norm = normalizeKey(uId);
         unitsWithGps.add(norm);
       }
@@ -7752,10 +7751,11 @@ useEffect(() => {
               onUpdateConfigs={handleUpdateUnitConfigs}
               onNavigate={pushScreen}
               initialUnit={screenParams?.unitName || selectedUnit}
-              onBypassApplied={(cfg) => {
-                // Bypass de seguranca (Fase Ancora GPS): grava coordenada padrao e abre a
-                // flag de Campanha para liberar a esteira operacional (ADDRESS_SELECTION > INVENTORY).
-                const unitKey = cfg?.unit_id || selectedUnit || ("UNIDADE");
+              onBypassApplied={(unit) => {
+                // Bypass de seguranca (Fase Ancora GPS): abre a campanha para liberar a
+                // esteira operacional (ADDRESS_SELECTION > INVENTORY) SEM gravar coordenada —
+                // a filial segue em FALTA ANCORA GPS e nenhum ativo recebe GPS inventado.
+                const unitKey = unit || selectedUnit || ("UNIDADE");
                 const bypassCampaignId = `BYPASS_${unitKey}_${Date.now()}`;
                 setInventory(prev => ({ ...prev, currentCampaignId: bypassCampaignId }));
                 sessionStorage.setItem("kardek_campaign_open", bypassCampaignId);

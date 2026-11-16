@@ -116,9 +116,10 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     );
 
     // Espera o load assíncrono de configs + seed do currentConfig — polling com o
-    // MARCADOR DOM correto: o HUD exibe currentConfig.lat em texto. O estado inicial
-    // do componente já nasce com Brasília (-15.794200), então esperar só o botão não
-    // garante o seed: clicando cedo, o handleSave grava Brasília e descarta os rascunhos.
+    // MARCADOR DOM correto: o HUD exibe currentConfig.lat em texto. O formulário
+    // nasce SEM coordenada (Brasília é só centro visual), então o rascunho de
+    // sessão é a única fonte de posição: espera o HUD mostrar o rascunho antes de
+    // clicar, senão o handleSave recusa gravar ("marque a posição no mapa").
     const fixar = await until(() =>
       container.textContent?.includes('-16.706719')
         ? Array.from(container.querySelectorAll('button')).find((b) =>
@@ -153,5 +154,105 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
     // Limite explícito: os dois `until(...)` acima podem esperar até 6 s cada,
     // então o padrão de 5 s do Vitest matava o teste num runner lento (CI) antes
     // de o helper desistir. O teste não trava — ele só precisa de mais folga.
+  }, 20000);
+
+  it('nasce SEM coordenada: SALVAR desabilitado e nenhuma âncora gravada', async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    vi.mocked(saveUnitConfig).mockClear();
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      root.render(
+        React.createElement(UnitConfigurator, {
+          user: ADMIN,
+          units: ['010105 CICOPAL PA'],
+          onBack: () => {},
+          initialUnit: '010105 CICOPAL PA'
+        })
+      );
+
+      const fixar = await until(() =>
+        Array.from(container.querySelectorAll('button')).find((b) =>
+          (b.textContent || '').toUpperCase().includes('FIXAR ÂNCORA GPS')
+        )
+      );
+      expect(fixar).toBeTruthy();
+      // Unidade sem âncora e sem rascunho: formulário vazio, botão travado.
+      expect(fixar!.disabled).toBe(true);
+      expect(container.textContent).toContain('AGUARDANDO GPS');
+
+      // Brasília é só o centro visual do mapa: clicar não grava coordenada alguma.
+      fixar!.click();
+      await new Promise((r) => setTimeout(r, 200));
+      expect(vi.mocked(saveUnitConfig)).not.toHaveBeenCalled();
+    } finally {
+      root.unmount();
+      container.remove();
+    }
+  }, 20000);
+
+  it('BYPASS OFFLINE abre a campanha sem gravar coordenada nenhuma', async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    vi.mocked(saveUnitConfig).mockClear();
+
+    const unit = '010105 CICOPAL PA';
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    const applied: string[] = [];
+    try {
+      root.render(
+        React.createElement(UnitConfigurator, {
+          user: ADMIN,
+          units: [unit],
+          onBack: () => {},
+          initialUnit: unit,
+          onBypassApplied: (u: string) => { applied.push(u); }
+        })
+      );
+
+      const bypass = await until(() =>
+        Array.from(container.querySelectorAll('button')).find((b) =>
+          (b.textContent || '').toUpperCase().includes('BYPASS OFFLINE')
+        )
+      );
+      expect(bypass).toBeTruthy();
+      bypass!.click();
+      await new Promise((r) => setTimeout(r, 200));
+
+      // Nenhuma coordenada em lado nenhum: nem gravação, nem chaves de âncora.
+      expect(vi.mocked(saveUnitConfig)).not.toHaveBeenCalled();
+      expect(localStorage.getItem(`kardek_gps_ancora_${unit}`)).toBeNull();
+      expect(sessionStorage.getItem(`unit_gps_config_${unit}`)).toBeNull();
+      expect(sessionStorage.getItem(`gps_lat_${unit}`)).toBeNull();
+      expect(sessionStorage.getItem(`gps_lng_${unit}`)).toBeNull();
+
+      // A esteira abre: flags de campanha gravadas e App notificado.
+      expect(localStorage.getItem('campaign_bypass_open')).toBe('true');
+      expect(sessionStorage.getItem('campaign_bypass_open')).toBe('true');
+      expect(localStorage.getItem(`kardek_campaign_open_${unit}`)).toMatch(/^BYPASS_/);
+      expect(sessionStorage.getItem('kardek_campaign_open')).toMatch(/^BYPASS_/);
+      expect(applied).toEqual([unit]);
+      expect(container.textContent).toContain('FALTA ÂNCORA GPS');
+
+      // Nada foi fixado: o botão de âncora não pode dizer "POSIÇÃO FIXADA!".
+      expect(container.textContent).not.toContain('POSIÇÃO FIXADA');
+      const fixar = Array.from(container.querySelectorAll('button')).find((b) =>
+        (b.textContent || '').toUpperCase().includes('FIXAR ÂNCORA GPS')
+      );
+      expect(fixar).toBeTruthy();
+      expect(fixar!.disabled).toBe(true);
+    } finally {
+      root.unmount();
+      container.remove();
+    }
   }, 20000);
 });

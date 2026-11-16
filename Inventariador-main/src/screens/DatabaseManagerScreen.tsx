@@ -6,6 +6,7 @@ import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
+import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
@@ -173,6 +174,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
   const [isMirroring, setIsMirroring] = useState<boolean>(false);
   const [mirrorProgress, setMirrorProgress] = useState<number>(0);
+  // Guarda de envio: explica na tela por que a base com cópias não sobe.
+  const [cloudPushBlock, setCloudPushBlock] = useState<string[]>([]);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   // SRE ISOLAMENTO: tenant ativo do usuário logado — as estatísticas do Gestor
   // são escopadas a ele (nunca à contagem global, que poderia expor dados de
@@ -194,6 +197,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     try {
       setIsMirroring(true);
       setMirrorProgress(1);
+      setCloudPushBlock([]);
       addLog(`[SRE_CLOUD] Iniciando espelhamento em massa da base local para a Nuvem (Supabase)...`);
 
       const ativos = await db.ativos.toArray();
@@ -239,9 +243,16 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setMirrorProgress(100);
       addLog(`[SRE_CLOUD] Espelhamento concluído: ${syncedIds.length} ativos sincronizados na Nuvem (Supabase).`);
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
-      console.error("[SRE_CLOUD] Erro no espelhamento em massa:", err);
+      if (err instanceof CloudPushPolicyError) {
+        // A guarda vive no serviço (`syncAssetsToCloud`), não aqui: este ecrã só
+        // apresenta as linhas do mesmo erro, para não haver duas regras.
+        setCloudPushBlock(err.lines);
+        err.lines.forEach((line) => addLog(`[SRE_CLOUD] ${line}`));
+      } else {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
+        console.error("[SRE_CLOUD] Erro no espelhamento em massa:", err);
+      }
     } finally {
       setIsMirroring(false);
       setMirrorProgress(0);
@@ -1052,6 +1063,21 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
               </span>
             </button>
           </div>
+          {cloudPushBlock.length > 0 && (
+            <div
+              role="alert"
+              className="w-full md:basis-full rounded-xl border border-rose-800/60 bg-rose-950/30 px-3 py-2.5 space-y-1"
+            >
+              {cloudPushBlock.map((line, index) => (
+                <p
+                  key={`cloud-push-block-${index}`}
+                  className={`font-mono break-words ${index === 0 ? 'text-[10px] font-black text-rose-300 uppercase tracking-wider' : 'text-[9px] text-rose-100'}`}
+                >
+                  {line}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

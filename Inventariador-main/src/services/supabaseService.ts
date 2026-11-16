@@ -18,6 +18,8 @@ import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpo
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
+import { checkCloudPushGuard, findIdentityConflicts, CloudPushBlockedError, CloudPushIdentityConflictError } from '../utils/cloudPushGuard';
+import type { DedupRow } from '../utils/dedupAssets';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -955,10 +957,125 @@ export const signInWithMagicLink = async (email: string) => {
  */
 let assetsIdMode: 'key' | 'uuid' = 'key';
 
+/**
+ * Assinatura do último aviso de envio bloqueado. A fila da nuvem volta a tentar
+ * com recuo; sem isto, cada tentativa repetia as mesmas quatro linhas de aviso.
+ * Só volta a avisar quando os números mudam ou quando um envio é aceito.
+ */
+let lastCloudPushBlockedNoticeKey: string | null = null;
+
+/** Rearranque do aviso (fim de episódio, testes). */
+export const resetCloudPushBlockedNotice = (): void => {
+  lastCloudPushBlockedNoticeKey = null;
+};
+
+
+/**
+ * Avisa UMA vez por episódio de bloqueio. A fila da nuvem volta a tentar com
+ * recuo; sem isto, cada tentativa repetia as mesmas linhas no terminal.
+ */
+const announceBlockedOnce = (lines: string[]): void => {
+  if (lines.length === 0) return;
+  if (lines[0] === lastCloudPushBlockedNoticeKey) return;
+  lines.forEach((line) => logger.warn(`>>> [Supabase] ${line}`));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gbr_cloud_push_blocked', {
+      detail: { message: lines[0] }
+    }));
+  }
+  lastCloudPushBlockedNoticeKey = lines[0];
+};
+
+type CloudIdentityRow = {
+  tenantid?: string | null;
+  filial?: string | null;
+  etiqueta?: string | null;
+  primarykey?: string | null;
+};
+
+/**
+ * Identidades do lote que já existem na nuvem. A consulta é LIMITADA às
+ * etiquetas do lote (índice por etiqueta): o push delta paga um SELECT pequeno e
+ * nunca um download da tabela inteira — é essa a diferença entre comparar e
+ * penalizar o delta.
+ */
+const fetchCloudIdentities = async (rows: Record<string, unknown>[]): Promise<CloudIdentityRow[]> => {
+  if (!supabase) return [];
+  const etiquetas = [...new Set(rows.map((row) => String(row.etiqueta ?? '').trim()).filter(Boolean))];
+  if (etiquetas.length === 0) return []; // sem etiqueta não há identidade
+  const tenants = [
+    ...new Set(rows.map((row) => String(row.tenantid ?? '').trim().toUpperCase()).filter(Boolean))
+  ];
+  // Lotes pequenos de etiquetas: o URL do PostgREST não pode crescer sem limite
+  // num lote de 500 linhas. Para o delta (1 etiqueta) continua a ser um SELECT.
+  const IDENTITY_LOOKUP_CHUNK = 200;
+  const slices: string[][] = [];
+  for (let i = 0; i < etiquetas.length; i += IDENTITY_LOOKUP_CHUNK) {
+    slices.push(etiquetas.slice(i, i + IDENTITY_LOOKUP_CHUNK));
+  }
+
+  const responses = await Promise.all(
+    slices.map((slice) =>
+      supabase
+        .from('assets')
+        .select('tenantid,filial,etiqueta,primarykey')
+        .in('tenantid', tenants)
+        .in('etiqueta', slice)
+    )
+  );
+
+  const found: CloudIdentityRow[] = [];
+  for (const { data, error } of responses) {
+    if (error) {
+      // Falha de leitura não bloqueia o envio: o upsert por (tenantid, id) decide.
+      logger.warn(
+        `>>> [Supabase] Verificação de identidade indisponível no lote: ${describeSupabaseError(error)}`
+      );
+      return [];
+    }
+    found.push(...((data || []) as CloudIdentityRow[]));
+  }
+  return found;
+};
+
+/**
+ * Recusa o lote antes do upsert quando a identidade já está na nuvem com outro
+ * `primarykey`: gravar criaria uma segunda linha para o mesmo ativo.
+ */
+const assertCloudIdentities = async (rows: Record<string, unknown>[]): Promise<void> => {
+  const cloudRows = await fetchCloudIdentities(rows);
+  if (cloudRows.length === 0) return;
+  const conflicts = findIdentityConflicts(
+    rows as unknown as DedupRow[],
+    cloudRows as unknown as DedupRow[]
+  );
+  if (conflicts.length === 0) return;
+  const error = new CloudPushIdentityConflictError(conflicts);
+  announceBlockedOnce(error.lines);
+  throw error;
+};
+
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<string[]> => {
   if (!assets || assets.length === 0) {
     logger.error('>>> [Supabase] Fluxo Bloqueado: Ação explícita de sincronia abortada. Array de ativos nulo ou vazio detectado.');
     throw new SupabaseNetworkException('Ação Bloqueada: Não há ativos gravados no disco local para espelhamento Delta.');
+  }
+
+  // GUARDA DE ENVIO — ponto único por onde passam TODOS os caminhos de envio:
+  // a carga em massa do Gestor, o autosave de fundo (`saveInventory`), o push
+  // delta de boot (`pushLocalChanges`), a fila da nuvem (`flushCloudQueue`) e
+  // os envios de uma linha (conferência, unitização, restauro, exclusão).
+  //
+  // A tabela `assets` guarda uma linha por tenantid + filial + etiqueta. Um
+  // payload com duas linhas da mesma identidade (`primarykey` diferentes) grava
+  // as duas — é assim que as 1.195 cópias voltam para todos os dispositivos,
+  // uma linha de cada vez, mesmo com a nuvem já consolidada. O envio é recusado
+  // antes de tocar na rede; nada é perdido, os ativos ficam por sincronizar.
+  const cloudPushGuard = checkCloudPushGuard(assets as unknown as DedupRow[]);
+  if (cloudPushGuard.blocked) {
+    announceBlockedOnce(cloudPushGuard.message);
+    // Erro de política: os chamadores fazem recuo em vez de nova tentativa.
+    throw new CloudPushBlockedError(cloudPushGuard.audit);
   }
 
   if (!supabase || !navigator.onLine) {
@@ -1159,6 +1276,10 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     const start = batchIndex * CHUNK_SIZE;
     const chunk = assets.slice(start, start + CHUNK_SIZE);
     const { rows, keys } = buildPayload(chunk);
+    // Identidade na nuvem: um `primarykey` novo para uma identidade existente é
+    // uma cópia — o upsert por (tenantid, id) não a impede. A consulta é
+    // limitada às etiquetas deste lote e corre antes de qualquer escrita.
+    await assertCloudIdentities(rows);
     const lote = batchIndex + 1;
 
     try {
@@ -1234,6 +1355,8 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     );
   }
 
+  // Envio aceito: o episódio de bloqueio fecha e o próximo volta a avisar.
+  lastCloudPushBlockedNoticeKey = null;
   return successfullySyncedIds;
 };
 
@@ -3695,6 +3818,45 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
 };
 
 /**
+ * Converte uma linha de `inventory_config` na config DA FILIAL dela.
+ *
+ * Devolve `null` quando a linha não é de filial (a linha `config_<tenant>` tem
+ * `filial` e `data` nulos) ou quando `data` não traz coordenada utilizável. Era
+ * isto que faltava: essas linhas caíam na filial da sessão e sobrescreviam a
+ * config com `lat/lng = 0`, deixando a unidade em "FALTA ÂNCORA GPS" mesmo com
+ * a âncora gravada no aparelho ou em outro dispositivo.
+ */
+export const mapInventoryConfigRow = (
+  item: Record<string, unknown>,
+  fallbackTenantid?: string
+): UnitConfig | null => {
+  const raw = item.data;
+  const itemData = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+  if (!itemData || !hasRealAnchor(itemData.lat, itemData.lng)) return null;
+
+  const filial = String(
+    item.filial || item.unit_id || item._unitid ||
+    itemData.filial || itemData.unit_id || itemData._unitid || ''
+  ).trim();
+  if (!filial) return null;
+
+  const tenantid = String(
+    item.tenantid || resolveTenantId(itemData) || fallbackTenantid || ''
+  ).trim();
+
+  return {
+    ...(itemData as unknown as UnitConfig),
+    filial,
+    unit_id: filial,
+    ...(tenantid ? { tenantid } : {}),
+    lat: Number(itemData.lat),
+    lng: Number(itemData.lng),
+    radius_meters: Number(itemData.radius_meters ?? 0),
+    is_active: itemData.is_active !== false
+  } as UnitConfig;
+};
+
+/**
  * Busca as configurações de geofencing combinando Local e Nuvem
  */
 export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
@@ -3852,33 +4014,28 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
 
       if (data && !error) {
         data.forEach((item: Record<string, unknown>) => {
-          const itemData = item.data as Record<string, unknown> | undefined;
-          const tenantidResolved = String(item.tenantid || (itemData && resolveTenantId(itemData)) || tenantid);
-          const filialUnit = String(item.filial || item._unitid || (itemData && (itemData.filial || itemData._unitid || itemData.unit_id)) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '');
-          
-          configs[filialUnit] = {
-            ...(itemData || {}),
-            filial: filialUnit,
-            tenantid: tenantidResolved,
-            unit_id: filialUnit,
-            lat: Number((itemData && itemData.lat) ?? 0),
-            lng: Number((itemData && itemData.lng) ?? 0),
-            radius_meters: Number((itemData && itemData.radius_meters) ?? 0),
-            is_active: !itemData || itemData.is_active !== false
-          } as UnitConfig;
+          const mapped = mapInventoryConfigRow(item, tenantid);
+          // Linha sem âncora (ex.: `config_<tenant>`, com `data` nulo) não é
+          // configuração de filial: não cria nem substitui config nenhuma.
+          if (!mapped) return;
+          configs[String(mapped.filial)] = mapped;
         });
-        
+
         // Atualiza o local com o que veio da nuvem, mas preserva dados locais mais recentes
         const updatedLocal = { ...localData };
-        data.forEach((item: Record<string, unknown>) => { 
+        data.forEach((item: Record<string, unknown>) => {
+          const mapped = mapInventoryConfigRow(item, tenantid);
+          if (!mapped) return; // linha global/sem âncora nunca entra no cache de filial
           const cloudTime = new Date(String(item.updated_at || '') || 0).getTime();
-          const itemKey = String(item.filial || item.unit_key || `${item.tenantid || tenantid}_${item.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || ''}`);
+          // Mesma chave do `saveUnitConfig` (tenant_filial) — antes a linha da
+          // nuvem era gravada com outra chave e o cache local não a encontrava.
+          const itemKey = `${String(mapped.tenantid || tenantid)}_${String(mapped.filial)}`.replace(/\s+/g, '_');
           const localItem = localData[itemKey];
           const localTime = localItem ? new Date(String(localItem.updated_at || '') || 0).getTime() : 0;
-          
+
           // Só sobrescreve se o dado da nuvem for realmente mais novo
           if (cloudTime >= localTime) {
-            updatedLocal[itemKey] = item.data || item; 
+            updatedLocal[itemKey] = mapped;
           }
         });
         localStorage.setItem('local_unit_configs', JSON.stringify(updatedLocal));
