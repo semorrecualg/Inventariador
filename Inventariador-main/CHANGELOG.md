@@ -98,6 +98,133 @@ chave fixa de `keystore/debug.keystore` — instala por cima do 2.7.4 sem desins
 - `lint` · `tsc --noEmit` · `npm test` (88 ficheiros, 840 testes) · `npm run build` ·
   `check-docs` · `verify:governanca` — todos verdes.
 
+## [2.7.4] — 2026-11-12
+
+> Entrada reconstruída a partir dos squashes em `main`; a versão não teve tag nem release.
+
+### Summary
+
+Fecha a contagem lenta das unidades, devolve a conferência à fila da nuvem, permite escolher
+a âncora no mapa por clique/arrasto e sanea o espelho local de ativos.
+
+### Unidades e conferência
+
+- #50–#52 — contagem de ativos por unidade numa só passagem; lista de filiais presa ao
+  utilizador e ao contrato; carga inicial exige a filial e nunca baixa o contrato inteiro.
+- `_is_synced` zerado no ponto único de gravação; delta aceita o checkpoint do contrato como piso da filial; o selo
+  "Sincronizado" só aparece em ativo conferido.
+- Envio da conferência do aparelho religado ao Supabase; variações do rótulo da unidade
+  aceitas e descarte de pendentes auditado.
+
+### Inventário
+
+- Rótulo `RAD` único por unidade e aparelho, com contador; registro adotado ganha identidade
+  `rad_NNNNNN` e `subreg`.
+- Cópia para item novo usa lista branca e `rad_recno`; "não localizado" copia os dados em vez
+  de adotar outra unidade.
+- Lote por plaqueta ou registro num só modal; lote manual renomeado para seleção manual e
+  passa a exigir endereço.
+- Módulo INVENTARIADOR travado em unidade não liberada.
+
+### Base e ativos
+
+- Chave canônica única em todos os caminhos de escrita, com guardião suave de duplicidade por
+  `sn1_recno` do Protheus.
+- Limpeza de cópias repetidas por contrato, filial e etiqueta, com registro em auditoria e
+  recálculo da unidade.
+- Gestor de Base: relatório de recno separado e exportação em CSV.
+
+### Mapa e GPS
+
+- #58 e #59 — âncora escolhida por clique e arrasto no mapa.
+
+### Modo de base e campanhas
+
+- Um único `getDatabaseMode` como resolver do modo, usado por campanhas, snapshots, fila de
+  fotos e `updateCampaignStatus`.
+- Exclusão de campanha deixa de "não fazer nada" e a permissão fica unificada no cartão e na
+  ficha; laudo sempre gravado no aparelho, com leitura de fallback local.
+
+## [2.7.3] — 2026-11-09
+
+> Entrada reconstruída a partir dos squashes em `main`; a versão não teve tag nem release.
+
+### Summary
+
+Ficha do ativo, etiquetagem e tags de auditoria; cabeçalho do inventário com telemetria;
+sincronização em lotes paralelos.
+
+- `#32` — liberação da unidade lê a campanha do banco persistido.
+- `#33`/`#34` — documentação: migração das colunas de `tenant` para `tenantid` e fluxograma do
+  login na nuvem e download da base.
+- `#35`/`#36` — tags de auditoria, lista dos ativos do endereço, ficha do ativo consolidada e
+  etiquetagem.
+- `#37` — ativo localizado pela busca de patrimônio.
+- `#38` — painel único de preferências do inventário.
+- `#39` — busca por foto removida (sem assets de OCR).
+- `#40`–`#43` — telemetria no cabeçalho em marquee, endereço numa linha, confirmação em barra
+  na base do card e endereço/progresso acima da barra de busca.
+- `#44` — sincronização em lotes paralelos, com a fila de nuvem fora do caminho visual.
+- `#45`/`#46` — espelhamento adaptado ao `id` uuid do schema remoto; Gestor de Base conta os
+  três espelhos locais e limpa o espelho virtual.
+- `#47` — correções da unidade operacional, da configuração e do APK.
+- `#48` — conferência em lote volta a ficar pendente de nuvem até subir.
+- `#49` — testes do `syncConfigToCloud` deixam de depender das credenciais do ambiente.
+
+## [2.7.2] — 2026-11-08
+
+> Entrada reconstruída a partir dos squashes em `main`; a versão não teve tag nem release.
+
+### Summary
+
+O build do APK passa a falhar em vez de publicar um APK inútil.
+
+- `#29` — o build falha quando a URL do Supabase é inutilizável.
+- `#30` — o build falha quando a credencial não fica embutida no APK.
+- `#31` — versão para 2.7.2.
+
+## [2.7.1] — 2026-11-08
+
+> Entrada reconstruída a partir dos squashes em `main`; a versão não teve tag nem release.
+
+### Summary
+
+Contrato de trabalho único (base, filial, auditor) e assinatura estável do APK.
+
+- `#19` — o contrato vem da base e libera o dono global.
+- `#20` — carga de planilha passa a operar na base local.
+- `#21` — saída para o Gestor de Base quando não há contrato.
+- `#22` — coluna `filial` exibida exactamente como veio da planilha.
+- `#23` — auditor criado com contrato e filial, mantendo a sessão.
+- `#24`/`#26`/`#27` — a mesma chave de assinatura em todos os builds: keystore criado antes do
+  build, fixo e verificado (sem ele o Android recusa a instalação por cima).
+- `#28` — contrato de trabalho único, liberação por âncora/campanha e admin; sobe a versão
+  para 2.7.1.
+
+## [2.7.0] — 2026-11-08
+
+> Entrada reconstruída a partir dos squashes em `main`. Foi a primeira versão 2.7 e a única
+> da série com tag e release até à 2.7.5.
+
+### Summary
+
+Primeira versão da série 2.7: CI e APK confiáveis, boot e autenticação estáveis, e a
+documentação de arquitetura que os builds seguintes usaram. O período entre a 2.6.0 e esta
+versão tem 137 commits, boa parte aplicada directamente em `main` — os PRs abaixo são os que
+ficaram registados como squash.
+
+- `#9` — admin email e URL do Supabase no workflow.
+- `#11` — `AGENTS.md` com a regra de entrega no GitHub.
+- `#12`/`#15` — correcção dos nomes e da sintaxe de secrets nos workflows.
+- `#13` — o APK deixa de crashar quando a URL do Supabase está malformada.
+- `#14` — chip CAMPANHA ao activar em modo offline.
+- `#16` — documentação do fluxo build-time até `isInternalMode`.
+- `#17` — o build falha quando faltam as credenciais do Supabase.
+- `#18` — versão para 2.7.0.
+- Trabalho directo em `main` no mesmo período: hardening do workflow Android (Java 21 e
+  Gradle 8.11), remoção do `android-build.yml` duplicado dentro do app (`c6e0198`), auto-flush
+  no `useBufferController` e correcções de boot/login/imports.
+
 ## [2.6.0] — 2026-07-24
 
 ### Summary
