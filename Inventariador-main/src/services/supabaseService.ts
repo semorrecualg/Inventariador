@@ -19,7 +19,6 @@ import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
 import { checkCloudPushGuard, findIdentityConflicts, CloudPushBlockedError, CloudPushIdentityConflictError } from '../utils/cloudPushGuard';
-import type { CloudPushAudit } from '../utils/cloudPushGuard';
 import type { DedupRow } from '../utils/dedupAssets';
 
 export class SupabaseNetworkException extends Error {
@@ -975,13 +974,13 @@ export const resetCloudPushBlockedNotice = (): void => {
  * Avisa UMA vez por episódio de bloqueio. A fila da nuvem volta a tentar com
  * recuo; sem isto, cada tentativa repetia as mesmas linhas no terminal.
  */
-const announceBlockedOnce = (lines: string[], audit: CloudPushAudit | null): void => {
+const announceBlockedOnce = (lines: string[]): void => {
   if (lines.length === 0) return;
   if (lines[0] === lastCloudPushBlockedNoticeKey) return;
   lines.forEach((line) => logger.warn(`>>> [Supabase] ${line}`));
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('gbr_cloud_push_blocked', {
-      detail: { message: lines[0], audit }
+      detail: { message: lines[0] }
     }));
   }
   lastCloudPushBlockedNoticeKey = lines[0];
@@ -1052,7 +1051,7 @@ const assertCloudIdentities = async (rows: Record<string, unknown>[]): Promise<v
   );
   if (conflicts.length === 0) return;
   const error = new CloudPushIdentityConflictError(conflicts);
-  announceBlockedOnce(error.lines, null);
+  announceBlockedOnce(error.lines);
   throw error;
 };
 
@@ -1074,7 +1073,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   // antes de tocar na rede; nada é perdido, os ativos ficam por sincronizar.
   const cloudPushGuard = checkCloudPushGuard(assets as unknown as DedupRow[]);
   if (cloudPushGuard.blocked) {
-    announceBlockedOnce(cloudPushGuard.message, cloudPushGuard.audit);
+    announceBlockedOnce(cloudPushGuard.message);
     // Erro de política: os chamadores fazem recuo em vez de nova tentativa.
     throw new CloudPushBlockedError(cloudPushGuard.audit);
   }

@@ -223,13 +223,10 @@ export class CloudPushPolicyError extends Error {
 
 /** A base local ainda tem cópias (mesma identidade duas vezes no payload). */
 export class CloudPushBlockedError extends CloudPushPolicyError {
-  readonly audit: CloudPushAudit;
-
   constructor(audit: CloudPushAudit) {
     const lines = formatCloudPushAudit(audit);
     super(lines[0] ?? 'Envio bloqueado por cópias locais.', lines);
     this.name = 'CloudPushBlockedError';
-    this.audit = audit;
   }
 }
 

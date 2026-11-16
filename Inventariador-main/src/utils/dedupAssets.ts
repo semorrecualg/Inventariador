@@ -1,4 +1,5 @@
 import { normalizeKey } from './schema';
+import { hasUsableTag } from './etiquetaGroup';
 
 /**
  * Identidade de um ativo para efeitos de limpeza de cópias:
@@ -27,10 +28,14 @@ export interface DedupRow {
 }
 
 export const assetIdentityKey = (row: DedupRow): string => {
+  // Placeholder (`ETIQUETAR`, `SEM ETIQUETA`, `0`, `S/N`) não identifica ativo:
+  // a unitarização cria vários filhos com `etiqueta = 'ETIQUETAR'` e cada um é
+  // um ativo distinto. Tratá-los como cópias apagava-os na limpeza e bloqueava
+  // o envio — sem etiqueta utilizável, a linha fica fora do agrupamento.
+  if (!hasUsableTag(row.etiqueta)) return '';
   const tenant = String(row.tenantid ?? '').trim().toUpperCase();
   const filial = normalizeKey(row.filial_raw || row.filial);
   const etiqueta = normalizeKey(row.etiqueta);
-  if (!etiqueta) return '';
   return `${tenant}|${filial}|${etiqueta}`;
 };
 

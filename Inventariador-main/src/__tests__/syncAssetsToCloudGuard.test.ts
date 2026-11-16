@@ -285,6 +285,21 @@ describe('syncAssetsToCloud — identidade já existente na nuvem com outro prim
     expect(result).toEqual(['A']);
   });
 
+  it('deixa passar filhos de unitarização ainda com etiqueta ETIQUETAR', async () => {
+    const stubs = stubTables([cloudRow({ primarykey: 'FILHO-ANTIGO', etiqueta: 'ETIQUETAR' })]);
+
+    const result = await syncAssetsToCloud(
+      [
+        asset({ id: 'PAI', primarykey: 'PAI', etiqueta: '007222' }),
+        asset({ id: 'U1', primarykey: 'U1', etiqueta: 'ETIQUETAR' })
+      ],
+      'CICOPAL'
+    );
+
+    expect(stubs.upsert).toHaveBeenCalledTimes(1);
+    expect(result.sort()).toEqual(['PAI', 'U1']);
+  });
+
   it('avisa uma só vez por episódio também no conflito de identidade', async () => {
     stubTables([cloudRow()]);
     const blocked = collectBlocked();

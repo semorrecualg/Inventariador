@@ -9,7 +9,7 @@ import {
   CLOUD_PUSH_BLOCKED_BASE_BACKOFF_MS,
   CLOUD_PUSH_BLOCKED_MAX_BACKOFF_MS
 } from '../utils/cloudPushGuard';
-import type { DedupRow } from '../utils/dedupAssets';
+import { assetIdentityKey, type DedupRow } from '../utils/dedupAssets';
 
 const row = (over: Partial<DedupRow> & { primarykey: string }): DedupRow => ({
   tenantid: 'CICOPAL',
@@ -128,6 +128,27 @@ describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () =
       identities: 1,
       copies: 0
     });
+  });
+
+  it('não trata placeholders como identidade (filhos de unitarização)', () => {
+    expect(assetIdentityKey(row({ primarykey: 'U1', etiqueta: 'ETIQUETAR' }))).toBe('');
+    expect(assetIdentityKey(row({ primarykey: 'U2', etiqueta: ' sem etiqueta ' }))).toBe('');
+    expect(assetIdentityKey(row({ primarykey: 'U3', etiqueta: '0' }))).toBe('');
+    expect(assetIdentityKey(row({ primarykey: 'U4', etiqueta: 'S/N' }))).toBe('');
+  });
+
+  it('deixa passar o payload da unitarização (filhos ainda com ETIQUETAR)', () => {
+    const rows = [
+      row({ primarykey: 'PAI', etiqueta: '007222' }),
+      row({ primarykey: 'U1', etiqueta: 'ETIQUETAR' }),
+      row({ primarykey: 'U2', etiqueta: 'ETIQUETAR' }),
+      row({ primarykey: 'U3', etiqueta: 'ETIQUETAR' })
+    ];
+
+    const guard = checkCloudPushGuard(rows);
+    expect(guard.blocked).toBe(false);
+    expect(guard.audit.identities).toBe(1);
+    expect(guard.audit.withoutIdentity).toBe(3);
   });
 
   it('deteta a linha cuja identidade já está na nuvem com outro primarykey', () => {
