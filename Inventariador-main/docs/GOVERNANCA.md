@@ -197,6 +197,7 @@ nunca entra em variável `VITE_*`.
 npm run verify:governanca              # git + env + Supabase (rede)
 npm run verify:governanca -- --offline # só git + env (uso em modo INTERNAL)
 npm run verify:governanca -- --use-example  # testa o host do .env.example
+npm run verify:governanca -- --ci          # gate de PR (estrutura + changelog, sem ambiente)
 npm run check:docs                     # links e referências dos docs (roda no CI)
 ```
 
@@ -211,6 +212,11 @@ com entrada no `CHANGELOG.md`** (falha se faltar — governança § 9.1) →
 branch/limpeza/fast-forward vs `origin/main` → presença das variáveis → REST + AUTH do
 Supabase → tabelas essenciais.
 **Nunca imprime valores de chaves**, apenas presença.
+
+`--ci` é o modo usado no `ci.yml`: valida **estrutura** e **versão ↔ CHANGELOG**,
+ignora ambiente/Supabase (o próprio `ci.yml` valida as credenciais no passo seguinte)
+e trata "branch atrás de `main`" como aviso — num PR isso é normal. Sem `--ci`, os
+dois continuam a falhar.
 
 Saída: `0` = governança íntegra · `1` = pelo menos uma falha (com o motivo).
 

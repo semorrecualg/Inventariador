@@ -49,6 +49,13 @@ jobs:
       - name: Docs (links e referências)
         run: npm run check:docs
 
+      # Governança §9.1: a versão do package.json tem de ter entrada no CHANGELOG.
+      # `--ci` é o modo desenhado para este job: verifica estrutura e versão ↔
+      # CHANGELOG, ignora ambiente/Supabase (o passo "Validar credenciais" trata
+      # disso e falha se faltarem secrets) e trata branch atrás de main como aviso.
+      - name: Governança (versão ↔ CHANGELOG)
+        run: npm run verify:governanca -- --offline --ci
+
       - name: Typecheck
         run: npx tsc --noEmit
 
