@@ -10,9 +10,10 @@ import { resolverEscopoEspelhamento } from '../services/mirrorScope';
 import { lerBaseLocalUnificada } from '../services/localBaseSource';
 import { assinarLinhasSre, lerLinhasSre } from '../services/sreMonitor';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
+import { resetLocalBaseForFreshLoad } from '../services/localBaseReset';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
-import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download } from 'lucide-react';
+import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download, RefreshCw } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const data = await DatabaseLoaderService.extrairDadosDaPlanilha(file);
@@ -734,6 +735,39 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     }
   };
 
+  /**
+   * Prepara o dispositivo para uma nova carga depois de a nuvem ser reiniciada:
+   * limpa o inventário local, o espelho virtual e as flags de migração. Sem
+   * isto, o aparelho reenvia as chaves antigas e o reset da nuvem não serve.
+   */
+  const handlePrepareFreshLoad = async () => {
+    const confirmado = window.confirm(
+      'PREPARAR NOVA CARGA\n\n' +
+      'Isto apaga a base local (ativos, espelhos, endereços e auditoria), o espelho virtual\n' +
+      'e as flags de migração de chaves.\n\n' +
+      'Use DEPOIS de reiniciar a base da nuvem e ANTES de carregar a planilha. Continuar?'
+    );
+    if (!confirmado) return;
+
+    setIsPurging(true);
+    try {
+      const result = await resetLocalBaseForFreshLoad();
+      addLog(
+        `[SRE_RESET] Base local limpa (${result.clearedAssets} ativo(s)) · flags removidas: ${
+          result.clearedFlags.length > 0 ? result.clearedFlags.join(', ') : 'nenhuma (já estavam limpas)'
+        }.`
+      );
+      showRecoveryToast('🧹 PRONTO PARA NOVA CARGA: base local e flags de migração limpas.', 'blue');
+      loadStats();
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      addLog(`[SRE ERROR] Falha ao preparar a nova carga: ${errMsg}`);
+      showRecoveryToast('❌ NÃO FOI POSSÍVEL LIMPAR A BASE LOCAL.', 'red');
+    } finally {
+      setIsPurging(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col p-6 font-sans">
       {/* 1. Header do Gestor */}
@@ -1069,6 +1103,28 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           >
             <Trash2 size={14} />
             <span>{isPurging ? "EXECUTANDO PURGA..." : assetCount === 0 ? "BASE JÁ HIGIENIZADA" : "ZERAR BASE DE DADOS"}</span>
+          </button>
+        </div>
+
+        {/* Preparação para nova carga — reset da nuvem → base local limpa */}
+        <div className="p-5 bg-amber-950/20 border border-amber-900/40 rounded-2xl flex flex-col md:flex-row md:items-center gap-4">
+          <div className="p-3 bg-amber-950/40 text-amber-400 rounded-full border border-amber-900/30 shrink-0">
+            <RefreshCw className="w-6 h-6" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-xs font-black uppercase text-amber-200 tracking-wider">Preparar Nova Carga</h3>
+            <p className="text-[10px] text-amber-200/70 font-bold uppercase tracking-wide mt-1 leading-relaxed">
+              Limpa a base local, o espelho virtual e as flags de migração de chaves.
+              Use depois de reiniciar a base da nuvem e antes de carregar a planilha.
+            </p>
+          </div>
+          <button
+            disabled={isUploading || isPurging}
+            onClick={handlePrepareFreshLoad}
+            className="flex items-center justify-center space-x-2 px-5 py-3 font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg border bg-amber-600 hover:bg-amber-700 text-white cursor-pointer border-amber-500/30 active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={14} />
+            <span>{isPurging ? 'PREPARANDO...' : 'LIMPAR BASE LOCAL E FLAGS'}</span>
           </button>
         </div>
 
