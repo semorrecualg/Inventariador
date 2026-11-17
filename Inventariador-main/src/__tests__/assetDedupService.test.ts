@@ -70,6 +70,13 @@ describe('assetDedupService — diagnóstico de cópias (não apaga nada)', () =
     expect(report.tables.map((t) => t.table)).toEqual(['local_assets', 'ativos', 'assets']);
     expect(report.perFilial[0]).toMatchObject({ before: 6, after: 3, removed: 3 });
 
+    // O rótulo não chama "identidades" às linhas sem etiqueta: 3 linhas após a
+    // soma = 2 identidades distintas + 1 linha sem etiqueta.
+    const texto = formatDedupReport(report).join('\n');
+    expect(texto).toContain('Identidades distintas (tenantid+filial+etiqueta): 2');
+    expect(texto).toContain('linhas sem etiqueta (fora do agrupamento, contadas uma a uma): 1');
+    expect(texto).not.toContain('identidade(s)');
+
     // Nada foi apagado, em nenhum dos três espelhos.
     expect(await db.local_assets.count()).toBe(6);
     expect(await db.ativos.count()).toBe(6);

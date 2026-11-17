@@ -137,16 +137,22 @@ export async function previewAssetDuplicateCleanup(): Promise<DedupReport> {
 
 /** Linhas do relatório, para o log do Gestor de Base. */
 export function formatDedupReport(report: DedupReport): string[] {
+  // `after` é uma projeção de LINHAS: soma cada linha sem etiqueta como se fosse
+  // uma identidade própria. Essas linhas não têm identidade (`assetIdentityKey`
+  // devolve vazio), portanto o rótulo separa as duas contas em vez de chamar
+  // "identidades" a todas — 11 437 identidades + 395 sem etiqueta = 11 832 linhas.
+  const identities = report.after - report.withoutIdentity;
   const lines = [
-    `[DEDUP] ANTES: ${report.before} linhas em local_assets · identidades distintas: ${report.after} · cópias: ${report.removed}`,
-    `[DEDUP] Grupos com cópias (tenantid+filial+etiqueta): ${report.groupsWithCopies} · sem etiqueta (fora da conta): ${report.withoutIdentity}`,
+    `[DEDUP] ANTES: ${report.before} linhas em local_assets · ${report.after} linha(s) após somar identidades · cópias: ${report.removed}`,
+    `[DEDUP] Identidades distintas (tenantid+filial+etiqueta): ${identities} · linhas sem etiqueta (fora do agrupamento, contadas uma a uma): ${report.withoutIdentity}`,
+    `[DEDUP] Grupos com cópias (tenantid+filial+etiqueta): ${report.groupsWithCopies}`,
     '[DEDUP] Diagnóstico apenas: nenhum registo é apagado. Cópias resolvem-se na origem (planilha) e a carga bloqueia quando os números não batem.'
   ];
   report.tables.forEach((table) => {
-    lines.push(`[DEDUP] ${table.table}: ${table.before} linhas · ${table.after} identidade(s) · ${table.removed} cópia(s)`);
+    lines.push(`[DEDUP] ${table.table}: ${table.before} linhas · ${table.after} linha(s) após somar identidades · ${table.removed} cópia(s)`);
   });
   report.perFilial.slice(0, 8).forEach((filial) => {
-    lines.push(`[DEDUP] ${filial.filial}: ${filial.before} linhas · ${filial.after} identidade(s) · ${filial.removed} cópia(s)`);
+    lines.push(`[DEDUP] ${filial.filial}: ${filial.before} linhas · ${filial.after} linha(s) após somar identidades · ${filial.removed} cópia(s)`);
   });
   report.examples.forEach((example) => {
     lines.push(`[DEDUP] ex. identidade "${example.key}" · grafias ${[example.keeper, ...example.removed].map((k) => `"${k}"`).join(', ')}`);

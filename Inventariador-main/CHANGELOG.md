@@ -82,6 +82,18 @@ Supabase `public` (26/26 colunas canônicas) e com risco zero de perda de dados.
 - **Testes:** 185 (novos `migrationV5`, `assetRepository.where`; baseline `schemaBaseline`
   atualizado para verno 5). Gate: `tsc -b --noEmit` ✓ · `vitest run` 185/185 ✓.
 
+## [2.7.8] — 2026-11-17
+
+### Relatório de cópias deixa de contar linhas sem etiqueta como identidades
+
+- **Duas contas no `[DEDUP]`:** o diagnóstico do Gestor de Base passa a mostrar
+  `identidades distintas` (`tenantid + filial + etiqueta`) numa linha e, noutra,
+  as `linhas sem etiqueta`, que ficam fora do agrupamento e entram uma a uma na
+  projeção de linhas. Antes o total de linhas (11 832) era apresentado como se
+  todas fossem identidades — são 11 437 identidades + 395 sem etiqueta.
+- **Sem alteração de dados:** continua a ser leitura pura; nenhum registo é
+  apagado e a contagem de cópias não muda.
+
 ## [2.7.7] — 2026-11-17
 
 ### Protocolo SRE com versão fixa e placar das duas bases
