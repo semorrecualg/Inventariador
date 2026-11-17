@@ -23,7 +23,7 @@ import { AnchorSource, UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { logger } from '../utils/logger';
 import { canonicalRole } from '../utils/roles';
-import { mergeUnitConfigIntoList } from '../utils/gpsAnchors';
+import { findUnitConfigForUnit, mergeUnitConfigIntoList } from '../utils/gpsAnchors';
 
 interface UnitConfiguratorProps {
   user: User;
@@ -178,7 +178,6 @@ function buildGraticuleGeoJSON() {
 
 const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   user,
-  units,
   onBack,
   onUpdateConfigs,
   initialUnit,
@@ -235,13 +234,30 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
   // ==========================================================================
   // MOTOR MAPLIBRE OFFLINE-FIRST
   // ==========================================================================
+  // Destino guardado quando o mapa ainda não está pronto: `mapInstance.current`
+  // só existe depois do evento `load`, e o `flyTo` da unidade escolhida chegava
+  // antes disso — o mapa abria no centro do país mesmo com a âncora gravada.
+  const pendingFocusRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
+
   const flyTo = useCallback((lat: number, lng: number, zoom = UNIT_ZOOM) => {
     const map = mapInstance.current;
-    if (!map) return;
+    if (!map) {
+      pendingFocusRef.current = { lat, lng, zoom };
+      return;
+    }
     // Guarda Defensiva: nunca alimenta o motor com coordenadas indefinidas/NaN
     const [safeLng, safeLat] = safeLngLat({ lat, lng });
     map.flyTo({ center: [safeLng, safeLat], zoom, essential: true, duration: 900 });
   }, []);
+
+  // Aplica o foco que chegou antes de o mapa terminar de carregar.
+  useEffect(() => {
+    if (!mapReady) return;
+    const pending = pendingFocusRef.current;
+    if (!pending) return;
+    pendingFocusRef.current = null;
+    flyTo(pending.lat, pending.lng, pending.zoom);
+  }, [mapReady, flyTo]);
 
   useEffect(() => {
     // Handler de clique no mapa: atualiza coordenadas; marcador/círculo reagem via estado
@@ -667,10 +683,12 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     const sessionLng = sessionStorage.getItem(`kardek_temp_gps_lng_${unit}`);
     const sessionRadius = sessionStorage.getItem(`kardek_temp_gps_radius_${unit}`);
 
-    const existing = configs.find(c => {
-      if (!c.unit_id) return false;
-      return c.unit_id.trim().toUpperCase() === unit.trim().toUpperCase();
-    });
+    // A âncora pode estar gravada em `filial` (canônico), `unit_id` ou `_unitid`
+    // — registros antigos e vindos da nuvem variam no campo. A comparação é
+    // normalizada, então `010101_CICOPAL_GO` e `010101 CICOPAL GO` são a mesma
+    // filial (antes, âncora só com `filial` não era encontrada e o mapa abria
+    // no centro do país).
+    const existing = findUnitConfigForUnit(configs, unit);
 
     const draftLat = Number(sessionLat);
     const draftLng = Number(sessionLng);
@@ -721,14 +739,17 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     loadConfigs();
   }, [user.tenantid, loadConfigs]);
 
+  // Unidade herdada da tela anterior (o cartão do CONTRATO DE TRABALHO manda
+  // `unitName`): seleciona UMA vez, e só depois que as âncoras terminaram de
+  // carregar. Antes o efeito corria no mount com `configs` vazio, não encontrava
+  // a âncora persistida e o formulário/mapa abriam sem posição (centro do país).
+  const initialUnitAppliedRef = useRef<string | null>(null);
   useEffect(() => {
-    // FIX(CRITICO): a unidade ja foi escolhida na tela anterior (UnitSelector) e chega via
-    // initialUnit. Nao dependa de units.includes() (a lista de empresas pode vir vazia ou
-    // divergir do nome escolhido) — auto-seleciona sempre que houver initialUnit.
-    if (initialUnit && selectedUnit !== initialUnit) {
-      handleSelectUnit(initialUnit);
-    }
-  }, [initialUnit, units, loading, selectedUnit, handleSelectUnit]);
+    if (loading || !initialUnit) return;
+    if (initialUnitAppliedRef.current === initialUnit) return;
+    initialUnitAppliedRef.current = initialUnit;
+    handleSelectUnit(initialUnit);
+  }, [initialUnit, loading, handleSelectUnit]);
 
 
 

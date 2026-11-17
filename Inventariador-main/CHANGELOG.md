@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o mapa GPS abre na âncora da filial
+
+- **A unidade era selecionada antes de as âncoras carregarem:** o efeito de
+  `initialUnit` corria no mount, com a lista de configs ainda vazia — a âncora
+  gravada não era encontrada, o formulário abria em branco e o mapa ficava no
+  centro do país. A seleção agora espera o carregamento e acontece uma única vez.
+- **Foco aplicado quando o mapa fica pronto:** se o `flyTo` chegasse antes do
+  evento `load` do MapLibre (mapa sem instância), o destino era perdido e o mapa
+  abria no Brasil. O destino fica guardado e é aplicado assim que o mapa carrega.
+- **Âncora gravada só com `filial` deixou de ser ignorada:** a procura no
+  `UnitConfigurator` só olhava `unit_id`; registros antigos/vindos da nuvem só
+  com `filial` não eram encontrados. `findUnitConfigForUnit` compara os três
+  campos com chave normalizada (caixa, `_`, hífen e acento não separam).
+
 ### Alterado — liberação da filial direto no cartão (sem a UNIDADE OPERACIONAL)
 
 - **Dois botões de estado no próprio cartão da filial:** no CONTRATO DE
