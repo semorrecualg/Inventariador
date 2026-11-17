@@ -79,6 +79,28 @@ describe('campanha aberta', () => {
     expect(findOpenCampaignForFilial(lista, FILIAL, { tenantid: 'CICOPAL' })).toBeUndefined();
     expect(findOpenCampaignForFilial(lista, FILIAL, { tenantid: 'CLIENTETESTE' })?.id).toBe('outro');
   });
+
+  it('campanha SEM tenantid não bloqueia a campanha de um contrato nomeado', () => {
+    const legada = [campanha({ id: 'legada', tenantid: undefined, name: 'Sem contrato' })];
+
+    expect(findOpenCampaignForFilial(legada, FILIAL, { tenantid: 'CICOPAL' })).toBeUndefined();
+    expect(() =>
+      assertNoOpenCampaign(legada, { tenantid: 'CICOPAL', filial: FILIAL })
+    ).not.toThrow();
+  });
+
+  it('campanha de um contrato nomeado não bloqueia a criação sem contrato', () => {
+    const lista = [campanha({ id: 'com-contrato', tenantid: 'CICOPAL' })];
+
+    expect(findOpenCampaignForFilial(lista, FILIAL, { tenantid: '' })).toBeUndefined();
+    expect(() => assertNoOpenCampaign(lista, { tenantid: '', filial: FILIAL })).not.toThrow();
+  });
+
+  it('campanha sem tenantid continua a bloquear outra igualmente sem contrato', () => {
+    const lista = [campanha({ id: 'legada', tenantid: undefined, name: 'Sem contrato' })];
+    const err = erro(() => assertNoOpenCampaign(lista, { filial: FILIAL }));
+    expect(err.code).toBe('CAMPANHA_ABERTA');
+  });
 });
 
 describe('assertNoOpenCampaign', () => {

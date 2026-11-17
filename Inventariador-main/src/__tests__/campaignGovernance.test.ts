@@ -106,6 +106,20 @@ describe('createCampaign — uma campanha aberta por filial', () => {
     ).rejects.toMatchObject({ code: 'CAMPANHA_ABERTA' });
   });
 
+  it('não bloqueia por campanha legada sem tenantid (outro contrato)', async () => {
+    state.campaigns.push(campanhaAberta('camp-legada', { tenantid: '' }));
+    state.campaigns.push(campanhaAberta('camp-outro-contrato', { tenantid: 'CLIENTETESTE' }));
+
+    const criada = await supabaseModule.createCampaign({
+      name: 'Nova',
+      tenantid: TENANT,
+      filial: FILIAL
+    });
+
+    expect(criada?.tenantid).toBe(TENANT);
+    expect(state.saveCampaign).toHaveBeenCalledTimes(1);
+  });
+
   it('deixa criar quando a campanha anterior da filial está encerrada', async () => {
     state.campaigns.push(campanhaAberta('camp-antiga', { status: CampaignStatus.CLOSED }));
 

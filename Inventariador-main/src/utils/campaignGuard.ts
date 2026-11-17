@@ -59,6 +59,12 @@ export const isOpenCampaign = (campaign: Partial<InventoryCampaign> | null | und
 /**
  * Procura a campanha aberta (CREATED ou ACTIVE) da filial — ignora a própria
  * campanha quando `excludeId` é passado (reativação da mesma campanha).
+ *
+ * O contrato é comparado por IGUALDADE, nunca por ausência: filiais homónimas
+ * existem em contratos diferentes, e uma campanha gravada sem `tenantid`
+ * (registo legado/anterior à coluna) é "sem dono" — não pode bloquear a
+ * campanha de um contrato nomeado. O contrário também vale: criar sem contrato
+ * só colide com campanhas igualmente sem contrato.
  */
 export function findOpenCampaignForFilial(
   campaigns: InventoryCampaign[],
@@ -67,13 +73,16 @@ export function findOpenCampaignForFilial(
 ): InventoryCampaign | undefined {
   const alvo = campaignFilialKey({ filial });
   if (!alvo) return undefined;
+  // Sem contrato informado a procura é global (compatibilidade); com contrato
+  // informado — mesmo que vazio — a comparação é por igualdade estrita.
+  const scoped = options.tenantid !== undefined;
   const tenant = campaignTenantKey(options.tenantid);
 
   return campaigns.find((campaign) => {
     if (!isOpenCampaign(campaign)) return false;
     if (options.excludeId && String(campaign.id) === String(options.excludeId)) return false;
     if (campaignFilialKey(campaign) !== alvo) return false;
-    if (tenant && campaignTenantKey(campaign.tenantid) && campaignTenantKey(campaign.tenantid) !== tenant) return false;
+    if (scoped && campaignTenantKey(campaign.tenantid) !== tenant) return false;
     return true;
   });
 }

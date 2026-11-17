@@ -2959,10 +2959,13 @@ const listLocalCampaigns = async (tenantid: string): Promise<InventoryCampaign[]
   try {
     if (!sqliteService.getIsInitialized()) return [];
     const rows = await sqliteService.getCampaigns(tenantid);
+    // O tenantid vai para a guarda COMO ESTÁ na base: preencher aqui o contrato
+    // consultado transformava uma campanha legada sem `tenantid` numa campanha
+    // de todos os contratos e bloqueava a abertura em filiais homónimas.
     return (rows || []).map((row) => ({
       ...row,
       filial: String(row.filial || row.unit_id || row._unitid || ''),
-      tenantid: String(row.tenantid || tenantid),
+      tenantid: String(row.tenantid || ''),
       status: (row.status as CampaignStatus) || CampaignStatus.ACTIVE
     })) as unknown as InventoryCampaign[];
   } catch (err) {
@@ -3199,7 +3202,7 @@ export const fetchAllCampaigns = async (): Promise<InventoryCampaign[]> => {
  */
 export const createCampaign = async (campaign: Partial<InventoryCampaign>): Promise<InventoryCampaign | null> => {
 
-  const tenantVal = campaign.tenantid || campaign.tenantid || campaign.tenantid || '';
+  const tenantVal = String(campaign.tenantid || '').trim();
   const unitVal = campaign.filial || campaign._unitid || campaign.unit_id || '';
 
   // Fase 1 — a campanha é a chave de controlo da filial: sem filial é
@@ -3216,8 +3219,8 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
     ...campaign,
     id: campaign.id || generateUUID(),
     tenantid: tenantVal,
-    unit_id: String(unitVal || '').trim(),
-    filial: String(unitVal || '').trim(),
+    unit_id: filialObrigatoria,
+    filial: filialObrigatoria,
     created_at: new Date().toISOString(),
     status: campaign.status || 'ACTIVE'
   } as InventoryCampaign;
@@ -3242,8 +3245,8 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
       description: newCampaign.description,
       status: newCampaign.status,
       tenantid: tenantVal,
-      filial: unitVal,
-      unit_id: unitVal,
+      filial: filialObrigatoria,
+      unit_id: filialObrigatoria,
       created_by: campaign.created_by,
       start_date: newCampaign.start_date || new Date().toISOString()
     };
