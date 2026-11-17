@@ -220,3 +220,14 @@
     transform: none;
   }
 }
+
+/* Selo de versão (AppVersionStamp): canto inferior direito, mas SOBE quando a
+   tela tem uma barra de ação fixa no rodapé (configuradores, seletores,
+   detalhe do ativo). Sem isso o selo ficava por cima do botão "Aplicar". */
+[data-gbr-version-stamp] {
+  bottom: calc(var(--ion-safe-area-bottom, 0px) + 0.375rem);
+}
+
+body:has(.fixed.bottom-0) [data-gbr-version-stamp] {
+  bottom: calc(var(--ion-safe-area-bottom, 0px) + 8.5rem);
+}

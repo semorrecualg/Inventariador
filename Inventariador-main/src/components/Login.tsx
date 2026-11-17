@@ -9,7 +9,7 @@ import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { safeStringify } from '../services/utils';
 import { localDb } from '../services/localDbService';
 import { demoService } from '../services/demoService';
-import pkg from '../../package.json';
+import { APP_VERSION, APP_VERSION_LABEL } from '../utils/appVersion';
 import { logger } from '../utils/logger';
 import { readSessionTenantId, readLocalTenantId } from '../utils/tenantUtils';
 
@@ -181,7 +181,7 @@ const Login: React.FC<LoginProps> = ({
   };
 
   const handleDemoMode = (): void => {
-    logger.info(`[GBR v${pkg.version}] Inicializando Modo Demo`);
+    logger.info(`[GBR ${APP_VERSION_LABEL}] Inicializando Modo Demo`);
     sessionStorage.setItem('gbr_session_mode', 'DEMO');
     handleDemoLogin();
   };
@@ -915,7 +915,7 @@ const Login: React.FC<LoginProps> = ({
             AUDITORIA INTELIGENTE
           </p>
           <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest font-semibold">
-            VERSÃO {pkg.version} - GBR NATIVE READY
+            VERSÃO {APP_VERSION} - GBR NATIVE READY
           </p>
         </div>
       </div>

@@ -122,7 +122,7 @@ import { demoService } from './services/demoService';
 import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
 import { logger } from './utils/logger';
-import pkg from '../package.json';
+import { APP_VERSION_LABEL } from './utils/appVersion';
 
 export class AppBootstrapError extends Error {
   constructor(message: string) {
@@ -6928,7 +6928,7 @@ useEffect(() => {
           <Building2 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-emerald-500 opacity-50" size={24} />
         </div>
         <div className="flex flex-col items-center space-y-2">
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-emerald-400">Inventariador GBR v{pkg.version}</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-emerald-400">Inventariador GBR {APP_VERSION_LABEL}</p>
           <p className="text-[9px] text-slate-500 font-medium uppercase tracking-[0.2em] animate-pulse">
             Carregando Ecossistema GBR...
           </p>
@@ -7057,7 +7057,7 @@ useEffect(() => {
           setBootError={(errStr) => setBootstrapError(new AppBootstrapError(errStr || 'Erro de Permissão'))} 
         />
         <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
-          <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v{pkg.version} • MOBILE SOBERANO</p>
+          <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR {APP_VERSION_LABEL} • MOBILE SOBERANO</p>
         </footer>
       </div>
     );
@@ -7111,7 +7111,7 @@ useEffect(() => {
                     <span className="text-[7px] font-black uppercase tracking-widest">{isSafeMode ? 'SAFE' : 'RISK'}</span>
                   </div>
                   <div className="px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-600">
-                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">Inventariador GBR v{pkg.version}</span>
+                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">Inventariador GBR {APP_VERSION_LABEL}</span>
                   </div>
                   <div className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center space-x-1 text-indigo-600">
                     <Activity size={10} />
@@ -7147,7 +7147,7 @@ useEffect(() => {
               
               <div className="flex items-center shrink-0">
                 <span className="px-2.5 py-1 bg-slate-900 border border-slate-950 rounded-lg text-white font-extrabold text-[8px] uppercase tracking-widest shadow-sm font-sans">
-                  GBR v{pkg.version}
+                  GBR {APP_VERSION_LABEL}
                 </span>
               </div>
             </div>

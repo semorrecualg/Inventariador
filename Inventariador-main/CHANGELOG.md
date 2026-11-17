@@ -93,7 +93,13 @@ Supabase `public` (26/26 colunas canônicas) e com risco zero de perda de dados.
   todas as telas de uma vez, sem cópia paralela.
 - **Selo global automático:** `AppVersionStamp` é montado no router e aparece em
   todas as telas, no mesmo formato e na mesma posição, sem interceptar toques e
-  sem ficar por cima dos modais (z-index abaixo de `z-[20000]`).
+  sem ficar por cima dos modais (z-index abaixo de `z-[20000]`). Quando a tela
+  tem barra de ação fixa no rodapé (configuradores, seletores, detalhe do ativo),
+  o selo sobe acima dela — deixa de cobrir o botão `Aplicar`.
+- **Telas ligadas ao versionador:** `App`, `Login`, `Consultation` e o Gestor de
+  Base deixam de importar o `package.json` directamente e passam a ler a versão
+  (e a etiqueta) de `utils/appVersion`, incluindo o cabeçalho do pacote de
+  diagnóstico.
 - **Versões chumbadas removidas:** `Protocolo v24.40`, `Field Guard v24.40`,
   `Aplicar v24.40`, `QR Guard v24.40`, `v24.50.2`, `KARDEX DIGITAL v24.50.3`,
   `GBR Auditoria Patrimonial v24.50 Expert`, `Protocolo de Inventário GBR v24`
