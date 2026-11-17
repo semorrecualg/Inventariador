@@ -108,3 +108,71 @@ describe('carga da planilha — dados copiados na íntegra', () => {
     expect(await db.ativos.count()).toBe(1);
   });
 });
+
+/**
+ * FASE 2 — IDENTIDADE INTERNA E CARGA APPEND-ONLY.
+ *
+ * A `primarykey` da planilha passa a ser DADO (`source_primarykey`) e a
+ * identidade do registo é interna. Duas linhas com a mesma chave de origem
+ * deixam de se substituir no `bulkPut`: a planilha N = base N.
+ */
+const carregarVarias = async (linhas: Record<string, unknown>[]): Promise<DexieAsset[]> => {
+  await DatabaseLoaderService.injetarDadosEmLotes(linhas);
+  return (await db.local_assets.toArray()) as unknown as DexieAsset[];
+};
+
+describe('carga da planilha — identidade interna e proveniência', () => {
+  const SEGUNDA = { ...LINHA, descricaodoativo: 'MESA DE REUNIÃO', serial: 'SN 99-2' };
+
+  beforeEach(async () => {
+    await db.local_assets.clear();
+    await db.ativos.clear();
+    await db.assets.clear();
+    await db.audit_logs.clear();
+  });
+
+  it('grava a primarykey da planilha em source_primarykey, sem tocar no dado', async () => {
+    const stored = await carregar();
+    expect(stored.source_primarykey).toBe('008810 CICOPAL');
+    expect(stored.source_row).toBe(1);
+    expect(typeof stored.import_batch).toBe('string');
+    expect(String(stored.import_batch).startsWith('CARGA-')).toBe(true);
+  });
+
+  it('duas linhas com a MESMA primarykey ficam ambas na base', async () => {
+    const rows = await carregarVarias([LINHA, SEGUNDA]);
+
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.primarykey)).size).toBe(2);
+    expect(rows.map((row) => row.source_primarykey)).toEqual([
+      '008810 CICOPAL',
+      '008810 CICOPAL'
+    ]);
+    expect(rows.map((row) => row.source_row).sort()).toEqual([1, 2]);
+    expect(rows.map((row) => row.descricaodoativo).sort()).toEqual([
+      'CADEIRA   GIRATÓRIA (AZUL)',
+      'MESA DE REUNIÃO'
+    ]);
+    // A identidade não é o texto da célula: é canónica/interna.
+    rows.forEach((row) => expect(row.primarykey).not.toBe('008810 CICOPAL'));
+  });
+
+  it('reimportar o arquivo com chave repetida mantém 2 registos e as mesmas chaves', async () => {
+    const primeira = (await carregarVarias([LINHA, SEGUNDA])).map((row) => row.primarykey).sort();
+    const segunda = (await carregarVarias([LINHA, SEGUNDA])).map((row) => row.primarykey).sort();
+
+    expect(segunda).toEqual(primeira);
+    expect(await db.local_assets.count()).toBe(2);
+  });
+
+  it('linha sem primarykey/etiqueta entra com chave derivada e não colide com a vizinha', async () => {
+    const semIdentidade = { ...LINHA, primarykey: '', etiqueta: '', tag: '' };
+    const outra = { ...semIdentidade, descricaodoativo: 'OUTRO ATIVO', serial: 'SN-XYZ' };
+
+    const rows = await carregarVarias([semIdentidade, outra]);
+
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.primarykey)).size).toBe(2);
+    expect(rows.map((row) => row.source_primarykey)).toEqual([null, null]);
+  });
+});
