@@ -48,8 +48,12 @@ const maskUrl = (raw: string): string => {
   }
 };
 
-/** Chaves cujo valor identifica o contrato/tenant — nunca vai cru. */
-const TENANT_KEY_RE = /\b(tenantid|tenant_id|tenant|contrato|contratos)\b("?\s*[:=]\s*"?)([A-Za-z0-9._-]{2,})/gi;
+/**
+ * Chaves cujo valor identifica o contrato/tenant — nunca vai cru.
+ * Aceita o rótulo entre parênteses do painel (`Contrato Ativo (tenantid): …`).
+ */
+const TENANT_KEY_RE =
+  /\b(tenantid|tenant_id|tenant|contrato|contratos)\b("?\s*\)?\s*[:=]\s*"?)([A-Za-z0-9._-]{2,})/gi;
 
 /** Chaves (e o esquema Bearer) cujo valor é credencial. */
 const SECRET_KEY_RE =
@@ -60,8 +64,27 @@ const BEARER_RE = /\b(bearer)\s+([A-Za-z0-9._~+/-]{8,}=*)/gi;
 const EMAIL_RE = /([A-Za-z0-9._%+-]+)@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})/g;
 const URL_RE = /https?:\/\/[^\s"'`<>)\]]+/g;
 const UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
-/** Hash/chave longa (hex/base64url) — identificador opaco, não ajuda o suporte. */
-const LONG_OPAQUE_RE = /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])/g;
+/**
+ * Hash/chave longa (hex/base64url) — identificador opaco, não ajuda o suporte.
+ *
+ * O limite à esquerda é um grupo de captura (e não um lookbehind): Safari em
+ * iOS anterior ao 16.4 não suporta `(?<=…)` e o regex falharia ao compilar no
+ * aparelho, deixando o pacote sair sem redação.
+ */
+const LONG_OPAQUE_RE = /(^|[^A-Za-z0-9_-])([A-Za-z0-9_-]{32,})(?![A-Za-z0-9_-])/g;
+
+/**
+ * Tenant/contrato em texto corrido: «contrato GBR001», «tenant (ABC12)».
+ *
+ * Só apanha códigos em MAIÚSCULAS (`[A-Z]…`), por isso «Contrato Ativo» ou
+ * «contrato de serviço» continuam legíveis; a lista curta evita mascarar
+ * rótulos que não identificam ninguém.
+ */
+const TENANT_PROSE_RE =
+  /\b([Cc]ontratos?|[Tt]enant(?:Id|ID|id|_id)?)\b(\s*(?:[:=]\s*)?\(?\s*)([A-Z][A-Z0-9._-]{2,})(?![A-Za-z0-9._-])/g;
+
+/** Códigos que são rótulo, não identificador de contrato. */
+const NON_TENANT_CODES = new Set(['GLOBAL', 'GERAL', 'TODOS', 'TODAS', 'SEM']);
 
 /**
  * Texto pronto para partilha: e-mails, tenantids/contratos, credenciais,
@@ -83,7 +106,10 @@ export const redactDiagnosticText = (text: string): string => {
 
   // 3. JWT e chaves longas opacas.
   out = out.replace(JWT_RE, `[JWT redigido]`);
-  out = out.replace(LONG_OPAQUE_RE, (match) => `${match.slice(0, 6)}${MASK}`);
+  out = out.replace(
+    LONG_OPAQUE_RE,
+    (_match, prefix: string, value: string) => `${prefix}${value.slice(0, 6)}${MASK}`
+  );
 
   // 4. E-mails (depois das URLs, que já podem conter `user@host`).
   out = out.replace(EMAIL_RE, (_match, local: string, domain: string) => maskEmail(local, domain));
@@ -94,11 +120,14 @@ export const redactDiagnosticText = (text: string): string => {
     `${key}${sep}${maskIdentifier(value)}`
   );
 
-  // 6. UUIDs.
+  // 6. Texto corrido («contrato GBR001»), depois da forma chave=valor para não
+  // apanhar duas vezes o mesmo código.
+  out = out.replace(TENANT_PROSE_RE, (match, key: string, sep: string, value: string) =>
+    NON_TENANT_CODES.has(value.toUpperCase()) ? match : `${key}${sep}${maskIdentifier(value)}`
+  );
+
+  // 7. UUIDs.
   out = out.replace(UUID_RE, (match) => `${match.slice(0, 8)}-${MASK}`);
 
   return out;
 };
-
-/** true quando a redação alterou o texto (para o log do monitor). */
-export const wasRedacted = (original: string, redacted: string): boolean => original !== redacted;
