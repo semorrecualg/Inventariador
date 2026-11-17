@@ -440,7 +440,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       addLog('[F0] Nenhuma linha de base para copiar — clique em Registrar.');
       return;
     }
-    const text = formatPerfBaseline(current);
+    // O snapshot vai para o chat/issue: sai com a mesma redação do pacote de
+    // diagnóstico (tenantid, e-mails, credenciais/URLs), sem deixar de ser JSON.
+    const text = redactDiagnosticText(formatPerfBaseline(current));
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -452,7 +454,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         document.execCommand('copy');
         document.body.removeChild(area);
       }
-      addLog('[F0] Snapshot copiado (JSON). Cole no chat para preencher §6.2.1.');
+      addLog('[F0] Snapshot copiado (JSON, redigido). Cole no chat para preencher §6.2.1.');
     } catch (err) {
       addLog(`[F0] Falha ao copiar snapshot: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -466,7 +468,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       return;
     }
     try {
-      const blob = new Blob([formatPerfBaseline(current)], { type: 'application/json' });
+      const snapshot = redactDiagnosticText(formatPerfBaseline(current));
+      const blob = new Blob([snapshot], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -475,7 +478,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      addLog('[F0] Snapshot exportado em JSON.');
+      addLog('[F0] Snapshot exportado em JSON (redigido).');
     } catch (err) {
       addLog(`[F0] Falha ao exportar snapshot: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -866,6 +869,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <button
               type="button"
               onClick={() => { void copiarLinhaDeBase(); }}
+              title="Copiar snapshot (redigido para partilha)"
               className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
             >
               Copiar
@@ -873,6 +877,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <button
               type="button"
               onClick={exportarLinhaDeBase}
+              title="Exportar snapshot (redigido para partilha)"
               className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
             >
               Exportar
