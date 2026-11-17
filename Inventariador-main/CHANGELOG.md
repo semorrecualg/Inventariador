@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   campanha aberta (`CREATED`/`ACTIVE`) por filial e por contrato — campanha sem
   `tenantid` não bloqueia a de outro contrato —, e campanha com ativos lidos não
   pode ser excluída. A guarda corre nos serviços (vale offline) e o SQL ganhou
-  `CHECK` de filial e índice único parcial (`docs/supabase_campanhas_fase1.sql`).
+  `CHECK` de filial e índice único parcial na migração da Fase 1.
 
 ### Remoção da integração Gemini (código morto e chave exposta ao cliente)
 
