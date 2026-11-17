@@ -3,6 +3,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Info, Sparkles, ShieldCheck, Zap, Palette, MapPin } from 'lucide-react';
 import { AppScreen } from '../types';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 
 interface FloatingHelpProps {
   currentScreen: AppScreen;
@@ -41,7 +42,7 @@ const FloatingHelp: React.FC<FloatingHelpProps> = ({
       default:
         return [
           { icon: <Info size={14} />, text: "Seus dados estão protegidos por criptografia AES-256." },
-          { icon: <ShieldCheck size={14} />, text: "App em conformidade com a LGPD v24.50." }
+          { icon: <ShieldCheck size={14} />, text: `App em conformidade com a LGPD ${APP_VERSION_LABEL}.` }
         ];
     }
   };

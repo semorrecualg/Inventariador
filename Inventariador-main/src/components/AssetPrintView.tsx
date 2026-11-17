@@ -2,6 +2,7 @@
 import React from 'react';
 import { Asset, InventoryCampaign, CampaignStatus } from '../types';
 import { ArrowLeft, Printer, ShieldCheck, AlertCircle } from 'lucide-react';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 
 interface AssetPrintViewProps {
   assets: Asset[];
@@ -245,7 +246,7 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
 
           <div className="text-center space-y-2">
             <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
-                Relatório Gerado via GBR Auditoria Patrimonial v24.50 Expert
+                Relatório Gerado via GBR Auditoria Patrimonial {APP_VERSION_LABEL} Expert
             </p>
             <p className="text-[9px] font-bold text-slate-400 uppercase max-w-lg mx-auto leading-tight italic">
                 &quot;Este laudo reflete a conformidade dos ativos físicos com os registros contábeis, atendendo às diretrizes do CPC 27 e NBC TG 27, validado via auditoria de campo georreferenciada.&quot;
