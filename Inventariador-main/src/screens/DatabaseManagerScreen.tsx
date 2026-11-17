@@ -10,6 +10,7 @@ import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
+import pkg from '../../package.json';
 import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
 import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download, Copy, Check, Maximize2, Minimize2 } from 'lucide-react';
 
@@ -88,6 +89,99 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setTimeout(() => setLogCopied(false), 2000);
     } catch (err) {
       logger.warn('[SRE] Falha ao copiar o log do monitor:', err);
+    }
+  };
+
+  const exportDiagnosticPackage = async () => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+
+    let swState: unknown = { supported: false };
+    try {
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        const sw = navigator.serviceWorker;
+        const regs = await sw.getRegistrations();
+        swState = {
+          supported: true,
+          controller: sw.controller ? { scriptURL: sw.controller.scriptURL, state: sw.controller.state } : null,
+          registrations: regs.map((r) => ({
+            scope: r.scope,
+            active: r.active ? { scriptURL: r.active.scriptURL, state: r.active.state } : null,
+            waiting: r.waiting ? { scriptURL: r.waiting.scriptURL, state: r.waiting.state } : null,
+            installing: r.installing ? { scriptURL: r.installing.scriptURL, state: r.installing.state } : null,
+          })),
+        };
+      } else {
+        swState = { supported: false, reason: 'Service Worker indisponível neste ambiente' };
+      }
+    } catch (err) {
+      swState = { supported: true, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    const currentBaseline = baseline ?? readPerfBaseline();
+    const summaries = collectPerfSummary();
+    const metricsLines = PERF_METRICS.map((name) => {
+      const sum = summaries[name] ?? perfSummaries[name];
+      return `- ${name}: ${fmtPerf(sum)}`;
+    });
+
+    const lines: string[] = [
+      '# Pacote de Diagnóstico — SRE Diagnostics Monitor',
+      '',
+      `- Gerado em: ${now.toISOString()}`,
+      `- Versão da app: ${pkg?.version ?? 'desconhecida'}`,
+      `- Build: mode=${import.meta.env.MODE} prod=${String(import.meta.env.PROD)} dev=${String(import.meta.env.DEV)}`,
+      `- User-Agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'indisponível'}`,
+      '',
+      '## Espelhos (contagens)',
+      '',
+      `- local_assets: ${mirrors.local_assets}`,
+      `- ativos: ${mirrors.ativos}`,
+      `- assets: ${mirrors.assets}`,
+      `- Espelho virtual (sandbox): ${virtualCount}`,
+      `- Ativos exibidos no painel: ${assetCount}`,
+      `- Registros de auditoria: ${logCount}`,
+      '',
+      '## Resumos F0 (amostras locais)',
+      '',
+      ...metricsLines,
+      '',
+      '## Baseline F0',
+      '',
+      '```json',
+      currentBaseline ? formatPerfBaseline(currentBaseline) : JSON.stringify({ status: 'sem baseline registrada' }, null, 2),
+      '```',
+      '',
+      '## Service Worker',
+      '',
+      '```json',
+      JSON.stringify(swState, null, 2),
+      '```',
+      '',
+      '## Log do monitor',
+      '',
+      '```text',
+      consoleLogs.length > 0 ? consoleLogs.join('\n') : '(sem entradas)',
+      '```',
+      '',
+    ];
+
+    const content = lines.join('\n');
+    try {
+      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `diagnostico-sre-${stamp}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      addLog('[SRE] Pacote de diagnóstico exportado (.md).');
+    } catch (err) {
+      logger.warn('[SRE] Falha ao exportar pacote de diagnóstico:', err);
+      addLog(`[SRE] Falha ao exportar pacote de diagnóstico: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -1103,6 +1197,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             </span>
           </div>
           <div className="flex items-center space-x-3">
+            <button type="button" onClick={() => { void exportDiagnosticPackage(); }} className="text-slate-400 hover:text-slate-200 active:scale-95" aria-label="Exportar pacote de diagnóstico" title="Exportar pacote de diagnóstico">
+              <Download size={14} />
+            </button>
             <button type="button" onClick={copyConsoleLogs} className="text-slate-400 hover:text-slate-200 active:scale-95" aria-label="Copiar log">
               {logCopied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
             </button>
