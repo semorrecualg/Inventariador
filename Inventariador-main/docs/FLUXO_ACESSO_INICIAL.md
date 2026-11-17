@@ -189,6 +189,23 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   **Atualizado na Fase 1 (2026-11-17):** o reload deixa de cair no hub — abre o
   contrato com a última escolha pré-selecionada e espera a confirmação.*
 
+- **Biometria obrigatória com fallback explícito — Fase 2 do acesso padronizado
+  (2026-11-17):** a etapa biométrica deixa de ser opcional e deixa de
+  desaparecer. `resolveBiometricStep` (`src/utils/biometricPolicy.ts`) decide,
+  por utilizador e aparelho: (1) perfil `DEMO` → isento; (2) credencial já
+  registada → segue; (3) dispensa já aceite nesta sessão → segue; (4) app
+  nativo/WebView → fallback (o WebAuthn de plataforma não é verificável ali);
+  (5) sem autenticador de plataforma → fallback; (6) caso contrário, cadastro
+  **obrigatório**. O pós-login abre sempre
+  `BiometricRegistration` quando o passo não está resolvido: no modo
+  `required` não há "Pular por enquanto"; no modo `fallback` o motivo é
+  explicado e o utilizador confirma em "Continuar sem biometria neste
+  aparelho", o que grava `BIOMETRIC_FALLBACK` no `audit_logs` (o cadastro
+  concluído grava `BIOMETRIC_REGISTER`). A dispensa vale só para a sessão e é
+  reposta ao trocar de utilizador. Assim o inventário de campo nunca fica
+  bloqueado por hardware, mas nenhuma dispensa é silenciosa. *Testes:
+  `biometricPolicy` e `biometricRegistrationFallback`; a WebView real só se
+  confirma com APK novo (o instalado é anterior a estas correções).*
 - **Etapa 5b:** ✅ **IMPLEMENTADA (2026-08-14)** — delta sync com checkpoint de
   `updated_at` por `[tenantid+filial]`:
   1. **`src/utils/syncCheckpoint.ts`** (novo): checkpoint persistido em

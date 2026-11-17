@@ -1,5 +1,6 @@
 
 import localforage from 'localforage';
+import { Capacitor } from '@capacitor/core';
 import { logger } from '../utils/logger';
 
 const BIOMETRIC_STORE = 'gbr_biometric_credentials';
@@ -9,6 +10,21 @@ const bioStore = localforage.createInstance({
   name: 'GBR_Audit_v24',
   storeName: BIOMETRIC_STORE
 });
+
+/**
+ * Casco nativo (Capacitor/WebView). A biometria de plataforma não é confiável
+ * aqui: o WebView do Android não expõe o autenticador ao WebAuthn e o cadastro
+ * ficaria pendente para sempre. A política da Fase 2 usa isto para abrir o
+ * fallback EXPLÍCITO em vez de saltar a etapa em silêncio.
+ */
+export const isNativeAppShell = (): boolean => {
+  try {
+    return Capacitor.isNativePlatform();
+  } catch (err) {
+    logger.warn('[Biometric] Falha ao detetar o casco nativo:', err);
+    return false;
+  }
+};
 
 export const isBiometricSupported = async (): Promise<boolean> => {
   if (!(window.PublicKeyCredential && 

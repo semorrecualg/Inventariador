@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Acesso padronizado — biometria obrigatória com fallback declarado (Fase 2)
+
+- **A etapa deixou de desaparecer em silêncio:** o passo biométrico só abria
+  quando o aparelho anunciava autenticador de plataforma; no WebView do app
+  nativo ele era simplesmente saltado. Agora a política
+  (`resolveBiometricStep`, em `src/utils/biometricPolicy.ts`) decide entre
+  `register`, `fallback` e `proceed`, e o pós-login abre a tela em todos os
+  casos não resolvidos.
+- **Obrigatória onde é verificável:** aparelho com WebAuthn de plataforma e sem
+  credencial deste utilizador → cadastro obrigatório, **sem "Pular por
+  enquanto"** (`BiometricRegistration` no modo `required`). Só o perfil `DEMO`
+  está isento.
+- **Fallback explícito e auditado:** WebView/Capacitor e hardware sem
+  autenticador → tela de dispensa com o motivo escrito e confirmação em
+  "Continuar sem biometria neste aparelho"; a dispensa é registada em
+  `audit_logs` como `BIOMETRIC_FALLBACK` (o cadastro concluído regista
+  `BIOMETRIC_REGISTER`). Nenhum avanço silencioso e nenhum beco sem saída: se o
+  suporte cair depois da decisão, a tela degrada para o fallback.
+- **Dispensa por sessão:** vale para o login atual (reabrir o login não repete a
+  pergunta), volta a ser exigida na sessão seguinte e é reposta ao trocar de
+  utilizador no mesmo aparelho.
+- **Testes:** `biometricPolicy` (matriz de decisão) e
+  `biometricRegistrationFallback` (tela sem "Pular", fallback explícito e
+  conclusão do cadastro).
+
 ### Acesso padronizado — biometria → contrato → SaaS (Fase 1)
 
 - **O contrato deixa de ser saltado:** a última escolha (`app_last_work_context`)
