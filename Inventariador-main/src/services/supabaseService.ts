@@ -23,6 +23,7 @@ import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
 import { checkCloudPushGuard, findIdentityConflicts, CloudPushBlockedError, CloudPushIdentityConflictError } from '../utils/cloudPushGuard';
 import type { DedupRow } from '../utils/dedupAssets';
+import { assertCampaignHasNoAuditWork, assertNoOpenCampaign, CampaignGovernanceError, requireCampaignFilial } from '../utils/campaignGuard';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -2949,9 +2950,54 @@ export const findAssetGlobally = async (etiqueta: string, tenantid: string): Pro
 };
 
 /**
+ * Campanhas locais do contrato — base das regras de filial única (Fase 1).
+ * Lidas do SQLite para a guarda valer também offline; sem base inicializada
+ * devolve lista vazia (a nuvem não entra aqui de propósito: a criação da
+ * campanha não pode depender da rede).
+ */
+const listLocalCampaigns = async (tenantid: string): Promise<InventoryCampaign[]> => {
+  try {
+    if (!sqliteService.getIsInitialized()) return [];
+    const rows = await sqliteService.getCampaigns(tenantid);
+    // O tenantid vai para a guarda COMO ESTÁ na base: preencher aqui o contrato
+    // consultado transformava uma campanha legada sem `tenantid` numa campanha
+    // de todos os contratos e bloqueava a abertura em filiais homónimas.
+    return (rows || []).map((row) => ({
+      ...row,
+      filial: String(row.filial || row.unit_id || row._unitid || ''),
+      tenantid: String(row.tenantid || ''),
+      status: (row.status as CampaignStatus) || CampaignStatus.ACTIVE
+    })) as unknown as InventoryCampaign[];
+  } catch (err) {
+    logger.warn('>>> [Governance] Falha ao ler campanhas locais para a guarda de filial:', err);
+    return [];
+  }
+};
+
+/**
+ * Ativos com trabalho de auditoria dentro da campanha (`currentCampaignId`).
+ * Excluir campanha com leitura feita apagaria o lastro do laudo.
+ */
+export const campaignAuditWorkCount = async (campaignId: string): Promise<number> => {
+  try {
+    const rows = await db.local_assets
+      .filter((asset) => String((asset as { currentCampaignId?: string | null }).currentCampaignId || '') === String(campaignId))
+      .limit(1)
+      .toArray();
+    return rows.length;
+  } catch (err) {
+    logger.warn('>>> [Governance] Falha ao contar trabalho de auditoria da campanha:', err);
+    return 0;
+  }
+};
+
+/**
  * Exclui uma campanha
  */
 export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
+  // Fase 1 — campanha com leitura feita não se exclui: o laudo perderia o lastro.
+  assertCampaignHasNoAuditWork(await campaignAuditWorkCount(campaignId));
+
   // Mesma regra do fetchCampaigns: um `app_database_mode: INTERNAL` herdado de
   // uma sessão anterior não pode transformar a exclusão em local-only — a
   // campanha continuava na nuvem e voltava na leitura seguinte (merge).
@@ -3156,16 +3202,25 @@ export const fetchAllCampaigns = async (): Promise<InventoryCampaign[]> => {
  */
 export const createCampaign = async (campaign: Partial<InventoryCampaign>): Promise<InventoryCampaign | null> => {
 
-  const tenantVal = campaign.tenantid || campaign.tenantid || campaign.tenantid || '';
+  const tenantVal = String(campaign.tenantid || '').trim();
   const unitVal = campaign.filial || campaign._unitid || campaign.unit_id || '';
+
+  // Fase 1 — a campanha é a chave de controlo da filial: sem filial é
+  // "Negativo!" e, por filial, só pode existir uma campanha aberta (CREATED
+  // também reserva a unidade). A guarda corre antes de gravar qualquer coisa.
+  const filialObrigatoria = requireCampaignFilial(unitVal);
+  assertNoOpenCampaign(await listLocalCampaigns(tenantVal), {
+    tenantid: tenantVal,
+    filial: filialObrigatoria
+  });
 
   // 1. DADO LOCAL PRIMEIRO (Soberania SQL)
   const newCampaign = {
     ...campaign,
     id: campaign.id || generateUUID(),
     tenantid: tenantVal,
-    unit_id: String(unitVal || '').trim(),
-    filial: String(unitVal || '').trim(),
+    unit_id: filialObrigatoria,
+    filial: filialObrigatoria,
     created_at: new Date().toISOString(),
     status: campaign.status || 'ACTIVE'
   } as InventoryCampaign;
@@ -3190,8 +3245,8 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
       description: newCampaign.description,
       status: newCampaign.status,
       tenantid: tenantVal,
-      filial: unitVal,
-      unit_id: unitVal,
+      filial: filialObrigatoria,
+      unit_id: filialObrigatoria,
       created_by: campaign.created_by,
       start_date: newCampaign.start_date || new Date().toISOString()
     };
@@ -3244,6 +3299,16 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
         filial: String(rowExtras.filial || rowExtras._unitid || '')
       };
 
+      // Fase 1 — ativar a campanha também exige filial e respeita a regra de
+      // uma só campanha aberta por filial (a própria campanha não conta).
+      if (status === CampaignStatus.ACTIVE) {
+        assertNoOpenCampaign(await listLocalCampaigns(currentCampaign.tenantid), {
+          tenantid: currentCampaign.tenantid,
+          filial: requireCampaignFilial(currentCampaign.filial),
+          excludeId: campaignId
+        });
+      }
+
       const updated: InventoryCampaign = { 
         ...currentCampaign, 
         status, 
@@ -3268,6 +3333,9 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
       localFound = true;
     }
   } catch (err) {
+    // Guarda de filial (Fase 1): o bloqueio é regra de negócio e tem de chegar
+    // ao ecrã com a mensagem do domínio, não como falha silenciosa do SQLite.
+    if (err instanceof CampaignGovernanceError) throw err;
     logger.error(">>> [SQLite] Erro ao atualizar status localmente:", err);
     return false;
   }
