@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { redactDiagnosticText } from '../utils/diagnosticRedaction';
+import { redactDiagnosticText, redactTenantId } from '../utils/diagnosticRedaction';
+import { formatPerfBaseline, type PerfBaseline } from '../utils/perfMetrics';
 
 /**
  * O pacote de diagnóstico circula fora do aparelho (ticket, chat, suporte).
@@ -132,6 +133,43 @@ describe('redactDiagnosticText — pacote de diagnóstico seguro para partilha',
 
     it('texto vazio continua vazio', () => {
       expect(redactDiagnosticText('')).toBe('');
+    });
+  });
+
+  describe('identificadores isolados', () => {
+    it('mascara o tenantid de uma coluna de CSV com a mesma forma do texto', () => {
+      expect(redactTenantId('CICOPAL')).toBe('CI***');
+      expect(redactTenantId('  gbr001 ')).toBe('GB***');
+      expect(redactTenantId('')).toBe('***');
+      expect(redactTenantId(null)).toBe('***');
+    });
+  });
+
+  describe('linha de base F0', () => {
+    const baseline: PerfBaseline = {
+      at: '2026-11-17T00:36:57.123Z',
+      trigger: 'manual',
+      tenantid: 'CICOPAL',
+      mirrors: { local_assets: 12636, ativos: 12636, assets: 12636, total: 12636 },
+      metrics: {
+        boot: { samples: 3, p50: 1200, p95: 2400, last: 1300 },
+        'pull.full': { samples: 1, p50: 9000, p95: 9000, last: 9000 },
+        'pull.delta': { samples: 2, p50: 300, p95: 500, last: 320 },
+        push: { samples: 0, p50: null, p95: null, last: null }
+      }
+    };
+
+    it('continua a ser JSON válido depois de redigido — dá para colar no ticket', () => {
+      const redacted = redactDiagnosticText(formatPerfBaseline(baseline));
+      expect(() => JSON.parse(redacted)).not.toThrow();
+
+      const parsed = JSON.parse(redacted) as PerfBaseline;
+      expect(parsed.tenantid).toBe('CI***');
+      // O contexto que o suporte usa para preencher §6.2.1 fica intacto.
+      expect(parsed.at).toBe(baseline.at);
+      expect(parsed.trigger).toBe('manual');
+      expect(parsed.mirrors).toEqual(baseline.mirrors);
+      expect(parsed.metrics).toEqual(baseline.metrics);
     });
   });
 });

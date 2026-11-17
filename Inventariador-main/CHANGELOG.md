@@ -82,6 +82,23 @@ Supabase `public` (26/26 colunas canônicas) e com risco zero de perda de dados.
 - **Testes:** 185 (novos `migrationV5`, `assetRepository.where`; baseline `schemaBaseline`
   atualizado para verno 5). Gate: `tsc -b --noEmit` ✓ · `vitest run` 185/185 ✓.
 
+## [2.7.9] — 2026-11-17
+
+### Exportações do Gestor de Base deixam de mostrar o tenantid cru
+
+- **Relatório de recno (CSV):** a coluna `tenantid` sai mascarada (`CICOPAL` →
+  `CI***`), como já acontecia no pacote de diagnóstico; filial, recno, etiqueta e
+  valor continuam legíveis para a conferência no Protheus.
+- **Relatório de cópias (`[DEDUP]`):** a identidade do exemplo
+  (`tenantid|filial|etiqueta`) leva o mesmo tratamento — o contrato sai mascarado
+  e filial/etiqueta ficam legíveis para dizer qual caminho gravou a cópia.
+- **`redactTenantId` em `utils/diagnosticRedaction`:** a máscara de um
+  identificador isolado (coluna de CSV, chave de relatório) passa a ter função
+  própria, com a normalização da base (trim + maiúsculas).
+- **Prova disto mesmo:** a linha de base F0 continua a ser JSON válido depois de
+  redigida (`tenantid` → `CI***`, restantes campos intactos) e o CSV de recno tem
+  teste a exigir `CI***` na coluna do contrato.
+
 ## [2.7.8] — 2026-11-17
 
 ### Relatório de cópias deixa de contar linhas sem etiqueta como identidades

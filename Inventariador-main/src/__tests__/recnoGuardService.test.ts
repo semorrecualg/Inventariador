@@ -237,6 +237,8 @@ describe('recnoGuardService · guardião suave de duplicidade', () => {
       'ORIGENS_DIFERENTES'
     ]);
     expect(rows.map((row) => row[col('grupo')])).toEqual(['R1', 'R1', 'R2', 'R2']);
+    // A coluna do contrato sai mascarada (`CI***`); o resto identifica o ativo.
+    expect(rows[0][col('tenantid')]).toBe('CI***');
     expect(rows[0][col('etiqueta')]).toBe('010101OBRA102820214');
     expect(rows[1][col('etiqueta')]).toBe('010101OBRA102820215');
     expect(rows[0][col('valor')]).toBe('4369.09');

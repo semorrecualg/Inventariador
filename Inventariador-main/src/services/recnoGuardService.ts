@@ -12,6 +12,7 @@ import {
   type RecnoRowSummary
 } from '../utils/recnoGuard';
 import { logger } from '../utils/logger';
+import { redactTenantId } from '../utils/diagnosticRedaction';
 
 /**
  * GUARDIÃO SUAVE DE DUPLICIDADE POR RECNO (serviço)
@@ -280,7 +281,9 @@ export function recnoReportToCsv(report: RecnoReport): string {
     collision.rows.forEach((row) => {
       const values: Record<(typeof RECNO_CSV_COLUMNS)[number], string> = {
         tipo: collision.kind,
-        tenantid: collision.tenantid,
+        // O CSV vai para o Protheus/ticket: o tenantid sai mascarado (`CI***`),
+        // o resto da linha (filial, recno, etiqueta) continua a identificar o ativo.
+        tenantid: redactTenantId(collision.tenantid),
         filial: collision.filial,
         recno: String(collision.recno),
         registro: row.registro,

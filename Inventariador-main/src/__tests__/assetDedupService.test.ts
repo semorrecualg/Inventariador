@@ -110,7 +110,8 @@ describe('assetDedupService — diagnóstico de cópias (não apaga nada)', () =
 
     const report = await previewAssetDuplicateCleanup();
     expect(report.examples[0]).toMatchObject({
-      key: 'CICOPAL|010101 CICOPAL GO|E1'
+      // Tenantid mascarado no relatório; filial/etiqueta continuam legíveis.
+      key: 'CI***|010101 CICOPAL GO|E1'
     });
     expect(report.examples[0].removed.length + 1).toBe(2);
   });

@@ -87,6 +87,14 @@ const TENANT_PROSE_RE =
 const NON_TENANT_CODES = new Set(['GLOBAL', 'GERAL', 'TODOS', 'TODAS', 'SEM']);
 
 /**
+ * Tenantid/contrato isolado — coluna de CSV, chave de relatório — sem rótulo
+ * à volta para as regras de texto apanharem. Mesma máscara (`GB***`), com a
+ * normalização usada na base (trim + maiúsculas).
+ */
+export const redactTenantId = (value: string | null | undefined): string =>
+  maskIdentifier(String(value ?? '').trim().toUpperCase());
+
+/**
  * Texto pronto para partilha: e-mails, tenantids/contratos, credenciais,
  * URLs com parâmetros, UUIDs e hashes opacos ficam mascarados.
  *
