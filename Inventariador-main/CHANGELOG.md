@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Cadastro de acessos — filiais do contrato lidas também da nuvem
+
+- **Lista de filiais sem beco sem saída:** o modal de novo/editar acesso só
+  lia as filiais da base local em disco e mostrava "nenhuma filial na base"
+  mesmo quando o contrato tem filiais publicadas na nuvem (aparelho novo, base
+  ainda não baixada). O modal passa a consultar `fetchUnitNamesFromCloud` (só a
+  coluna `filial`, sem baixar ativos) e a fundir as filiais da nuvem com a base
+  local e as unidades já atribuídas a perfis do contrato.
+- **Mensagem honesta:** enquanto a consulta corre a lista indica "A procurar
+  filiais na nuvem..." e o vazio passa a dizer "Nenhuma filial encontrada",
+  em vez de afirmar que não existe filial na base.
+
 ### Poda de papéis RBAC — GESTOR excluído, AUXILIARY_AUDITOR fundido em AUDITOR
 
 - **Papéis vivos:** `ADMIN`, `MASTER`, `AUDITOR` e `USER`, mais os fluxos de

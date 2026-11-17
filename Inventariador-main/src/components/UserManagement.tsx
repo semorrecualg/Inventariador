@@ -31,7 +31,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { isAdminEmail } from '../utils/authUtils';
 import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
 import { validateStrongPassword, validateQuickLoginPassword, STRONG_PASSWORD_RULE_LABELS } from '../utils/passwordPolicy';
-import { provisionUserInAuth, resetPassword, deleteUserFromCloud, ProvisionResult } from '../services/supabaseService';
+import { provisionUserInAuth, resetPassword, deleteUserFromCloud, fetchUnitNamesFromCloud, isInternalMode, ProvisionResult } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { logger } from '../utils/logger';
 
@@ -136,15 +136,11 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     return map;
   }, [knownContracts]);
 
-  /**
-   * Unidades oferecidas para um contrato: filiais da base local (fonte primária)
-   * + unidades já atribuídas a perfis do mesmo contrato. A base é lida direto do
-   * disco (não do inventário carregado em memória), então o cadastro funciona
-   * mesmo sem nenhuma unidade aberta no momento.
-   */
-  const unitsForTenant = (tenantidRaw: string): string[] => {
-    const key = String(tenantidRaw || '').trim().toUpperCase();
-    if (!key) return [];
+  // Filiais do contrato na nuvem que a base local pode não ter (ver efeito abaixo).
+  const [cloudFiliaisByTenant, setCloudFiliaisByTenant] = useState<Record<string, string[]>>({});
+  const [cloudFiliaisLoading, setCloudFiliaisLoading] = useState(false);
+
+  const mergeUnitLabels = (key: string, lists: Array<ArrayLike<string>>): string[] => {
     const merged = new Map<string, string>();
     const push = (unit: unknown) => {
       const label = String(unit || '').trim();
@@ -153,9 +149,26 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       if (dedupe === key) return;
       if (!merged.has(dedupe)) merged.set(dedupe, label);
     };
-    (baseFiliaisByTenant.get(key) || []).forEach(push);
-    Array.from(unitsByTenant.get(key) || new Set<string>()).forEach(push);
+    lists.forEach((list) => Array.from(list).forEach(push));
     return Array.from(merged.values()).sort((a, b) => a.localeCompare(b));
+  };
+
+  /**
+   * Unidades oferecidas para um contrato: filiais da base local em disco
+   * (fonte primária) + unidades já atribuídas a perfis do mesmo contrato +
+   * filiais publicadas no contrato na nuvem. A base local pode não ter o
+   * contrato (aparelho novo, base ainda não baixada); sem a parte da nuvem o
+   * cadastro afirmava "nenhuma filial na base" para um contrato que tem filiais
+   * e ficava impossível atribuir a filial ao auditor.
+   */
+  const unitsForTenant = (tenantidRaw: string): string[] => {
+    const key = String(tenantidRaw || '').trim().toUpperCase();
+    if (!key) return [];
+    return mergeUnitLabels(key, [
+      baseFiliaisByTenant.get(key) || [],
+      Array.from(unitsByTenant.get(key) || new Set<string>()),
+      cloudFiliaisByTenant[key] || [],
+    ]);
   };
 
   /** Adiciona ao escopo uma filial digitada à mão (base ainda não carregada). */
@@ -219,6 +232,33 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+
+  // Filiais publicadas no contrato, lidas só da coluna `filial` da nuvem (não
+  // baixa ativos). Sem isto a lista do cadastro dependia exclusivamente da base
+  // local e um aparelho sem a base baixada não conseguia atribuir filial.
+  useEffect(() => {
+    if (!isAddModalOpen && !isEditModalOpen) return;
+    const tenant = String((isAddModalOpen ? newTenantid : editTenantid) || '').trim().toUpperCase();
+    if (!tenant || isInternalMode) return;
+    let alive = true;
+    setCloudFiliaisLoading(true);
+    fetchUnitNamesFromCloud(tenant)
+      .then((names) => {
+        if (!alive) return;
+        const labels = names.map((n) => String(n || '').trim()).filter(Boolean);
+        if (labels.length === 0) return;
+        setCloudFiliaisByTenant((prev) => ({ ...prev, [tenant]: labels }));
+      })
+      .catch((err) => {
+        logger.warn('[UserManagement] Falha ao listar filiais do contrato na nuvem:', err);
+      })
+      .finally(() => {
+        if (alive) setCloudFiliaisLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isAddModalOpen, isEditModalOpen, newTenantid, editTenantid]);
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -709,7 +749,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   }
                   {unitsForTenant(editTenantid).length === 0 && (
                     <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">
-                      {editTenantid ? 'Nenhuma filial na base — digite abaixo' : 'Aguardando Grupo Empresarial...'}
+                      {editTenantid
+                        ? (cloudFiliaisLoading ? 'A procurar filiais na nuvem...' : 'Nenhuma filial encontrada — digite abaixo')
+                        : 'Aguardando Grupo Empresarial...'}
                     </p>
                   )}
                 </div>
@@ -996,7 +1038,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                       }
                       {unitsForTenant(newTenantid).length === 0 && (
                         <p className="text-[10px] text-ink-muted text-center py-4 uppercase font-bold tracking-widest">
-                          Nenhuma filial na base para {newTenantid} — digite abaixo
+                          {cloudFiliaisLoading
+                            ? 'A procurar filiais na nuvem...'
+                            : `Nenhuma filial encontrada para ${newTenantid} — digite abaixo`}
                         </p>
                       )}
                     </>
