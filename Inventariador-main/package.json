@@ -24,6 +24,7 @@
     "test:e2e:install": "npx playwright install --with-deps"
   },
   "dependencies": {
+    "@aparajita/capacitor-biometric-auth": "8.0.2",
     "@capacitor-community/sqlite": "^6.0.0",
     "@capacitor/android": "^6.2.1",
     "@capacitor/app": "^6.0.0",

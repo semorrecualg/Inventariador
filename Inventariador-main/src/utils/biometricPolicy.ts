@@ -31,13 +31,21 @@ export type BiometricReason =
   | 'device-without-authenticator'
   | 'registration-failed';
 
+/**
+ * O que o plugin nativo respondeu neste aparelho (Fase 2b).
+ * `unknown` = fora do casco nativo ou o plugin não respondeu.
+ */
+export type BiometryStatus = 'available' | 'unavailable' | 'unknown';
+
 export interface BiometricContext {
   /** `isUserVerifyingPlatformAuthenticatorAvailable()` (WebAuthn de plataforma). */
   supported: boolean;
   /** Já existe credencial deste utilizador neste aparelho. */
   registered: boolean;
-  /** App nativo (Capacitor/WebView) — a biometria de plataforma não é confiável aqui. */
+  /** App nativo (Capacitor/WebView) — usa o plugin, não o WebAuthn. */
   isNativeApp: boolean;
+  /** Resposta do plugin nativo; só conta quando `isNativeApp` é verdadeiro. */
+  nativeBiometry?: BiometryStatus;
   /** O utilizador já aceitou a dispensa nesta sessão (não re-perguntar). */
   fallbackAccepted: boolean;
   role: string | null | undefined;
@@ -79,9 +87,11 @@ export const biometricReasonText = (reason: BiometricReason): string => REASON_T
  *   1. DEMO é o único perfil isento (decisão de produto da Fase 2).
  *   2. Credencial existente dispensa o passo, mesmo no casco nativo.
  *   3. Dispensa já aceite vale para a sessão inteira (não reabre em loop).
- *   4. Casco nativo (WebView) → fallback: o WebAuthn não é verificável ali.
- *   5. Sem autenticador de plataforma → fallback com motivo de hardware.
- *   6. Caso contrário, o cadastro é obrigatório.
+ *   4. Casco nativo com plugin disponível → cadastro (nativo, Fase 2b).
+ *   5. Casco nativo sem biometria utilizável → fallback com o motivo do plugin
+ *      (hardware) ou, se o plugin não respondeu, o motivo do WebView.
+ *   6. Sem autenticador de plataforma → fallback com motivo de hardware.
+ *   7. Caso contrário, o cadastro é obrigatório.
  */
 export const resolveBiometricStep = (ctx: BiometricContext): BiometricDecision => {
   if (canonicalRole(ctx.role) === UserRole.DEMO) {
@@ -94,7 +104,16 @@ export const resolveBiometricStep = (ctx: BiometricContext): BiometricDecision =
     return { step: 'proceed', reason: 'fallback-accepted-session' };
   }
   if (ctx.isNativeApp) {
-    return { step: 'fallback', reason: 'webview-without-webauthn' };
+    if (ctx.nativeBiometry === 'available') {
+      return { step: 'register', reason: 'credential-required' };
+    }
+    return {
+      step: 'fallback',
+      reason:
+        ctx.nativeBiometry === 'unavailable'
+          ? 'device-without-authenticator'
+          : 'webview-without-webauthn'
+    };
   }
   if (!ctx.supported) {
     return { step: 'fallback', reason: 'device-without-authenticator' };

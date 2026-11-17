@@ -71,6 +71,34 @@ describe('resolveBiometricStep — fallback declarado', () => {
     });
   });
 
+  it('no casco nativo com o plugin disponível exige o cadastro nativo (Fase 2b)', () => {
+    expect(
+      resolveBiometricStep(context({ isNativeApp: true, nativeBiometry: 'available' }))
+    ).toEqual({ step: 'register', reason: 'credential-required' });
+  });
+
+  it('no casco nativo sem biometria utilizável usa o motivo de hardware do plugin', () => {
+    expect(
+      resolveBiometricStep(context({ isNativeApp: true, nativeBiometry: 'unavailable' }))
+    ).toEqual({ step: 'fallback', reason: 'device-without-authenticator' });
+  });
+
+  it('sem resposta do plugin mantém o fallback do WebView (nunca finge suporte)', () => {
+    expect(
+      resolveBiometricStep(
+        context({ isNativeApp: true, supported: true, nativeBiometry: 'unknown' })
+      )
+    ).toEqual({ step: 'fallback', reason: 'webview-without-webauthn' });
+  });
+
+  it('a credencial nativa registada liberta o passo antes do plugin ser consultado', () => {
+    expect(
+      resolveBiometricStep(
+        context({ isNativeApp: true, nativeBiometry: 'available', registered: true })
+      )
+    ).toEqual({ step: 'proceed', reason: 'credential-registered' });
+  });
+
   it('abre o fallback no dispositivo sem autenticador de plataforma', () => {
     expect(resolveBiometricStep(context({ supported: false }))).toEqual({
       step: 'fallback',

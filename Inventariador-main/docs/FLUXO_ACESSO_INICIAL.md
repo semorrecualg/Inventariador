@@ -194,9 +194,10 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   desaparecer. `resolveBiometricStep` (`src/utils/biometricPolicy.ts`) decide,
   por utilizador e aparelho: (1) perfil `DEMO` → isento; (2) credencial já
   registada → segue; (3) dispensa já aceite nesta sessão → segue; (4) app
-  nativo/WebView → fallback (o WebAuthn de plataforma não é verificável ali);
-  (5) sem autenticador de plataforma → fallback; (6) caso contrário, cadastro
-  **obrigatório**. O pós-login abre sempre
+  nativo com o plugin a responder `available` → cadastro nativo; (5) app nativo
+  sem biometria utilizável → fallback com o motivo do plugin e, se o plugin não
+  responder, fallback do WebView; (6) sem autenticador de plataforma →
+  fallback; (7) caso contrário, cadastro **obrigatório**. O pós-login abre sempre
   `BiometricRegistration` quando o passo não está resolvido: no modo
   `required` não há "Pular por enquanto"; no modo `fallback` o motivo é
   explicado e o utilizador confirma em "Continuar sem biometria neste
@@ -209,6 +210,15 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   bloqueado por hardware, mas nenhuma dispensa é silenciosa. *Testes:
   `biometricPolicy` e `biometricRegistrationFallback`; a WebView real só se
   confirma com APK novo (o instalado é anterior a estas correções).*
+- **Biometria nativa no APK — Fase 2b (2026-11-17):** no casco Capacitor a
+  etapa usa `@aparajita/capacitor-biometric-auth@8.0.2` (linha do Capacitor 6):
+  `checkNativeBiometry()` (`src/services/biometricService.ts`) traduz a resposta
+  em `available` / `unavailable` / `unknown`; o registo pede o prompt do sistema
+  antes de gravar a marca (`method: 'native'`) e o login com biometria passa a
+  funcionar no APK. A marca nativa não autentica no navegador (nem o contrário).
+  Sem plugin a responder, a política mantém o fallback declarado da Fase 2 — o
+  utilizador nunca fica preso. *Testes: `biometricNativeService`; o prompt real
+  só se confirma num APK novo.*
 - **Etapa 5b:** ✅ **IMPLEMENTADA (2026-08-14)** — delta sync com checkpoint de
   `updated_at` por `[tenantid+filial]`:
   1. **`src/utils/syncCheckpoint.ts`** (novo): checkpoint persistido em

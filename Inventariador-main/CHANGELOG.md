@@ -37,6 +37,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `biometricRegistrationFallback` (tela sem "Pular", fallback explícito e
   conclusão do cadastro).
 
+### Acesso padronizado — biometria nativa no APK (Fase 2b)
+
+- **O WebView deixou de ser um beco:** o cadastro e o login biométrico no app
+  nativo passam pelo plugin `@aparajita/capacitor-biometric-auth@8.0.2` (linha
+  do Capacitor 6), em vez de depender do WebAuthn — que o WebView do Android não
+  expõe ao autenticador.
+- **A política pergunta antes de decidir:** `resolveBiometricStep` recebe
+  `nativeBiometry` (`available` / `unavailable` / `unknown`). Disponível →
+  cadastro nativo obrigatório; indisponível → fallback com motivo de hardware;
+  sem resposta (plugin ausente ou falhou) → fallback do WebView. Nenhum suporte
+  é presumido.
+- **A marca pertence ao casco:** a credencial nativa grava `method: 'native'` e
+  só autentica no app; no navegador continua a WebAuthn (`method: 'webauthn'`,
+  ou credenciais antigas sem `method`). O prompt do sistema confirma o registo
+  antes de a marca ser gravada.
+- **Login com biometria no APK:** `Login`/`LoginFlow` deixam de esconder o botão
+  quando o WebAuthn não existe; a verificação de suporte passa a consultar o
+  plugin no casco nativo.
+- **Testes:** `biometricNativeService` (plugin disponível, indisponível, falha,
+  registo, recusa e autenticação) e a matriz de `biometricPolicy` alargada aos
+  três estados nativos.
+
 ### Acesso padronizado — biometria → contrato → SaaS (Fase 1)
 
 - **O contrato deixa de ser saltado:** a última escolha (`app_last_work_context`)
