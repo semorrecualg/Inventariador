@@ -4,7 +4,7 @@ import { showRecoveryToast as originalShowRecoveryToast } from '../services/Navi
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
-import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
+import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
 import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
@@ -13,7 +13,8 @@ import { logger } from '../utils/logger';
 import pkg from '../../package.json';
 import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
 import { redactDiagnosticText } from '../utils/diagnosticRedaction';
-import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download, Copy, Check, Maximize2, Minimize2 } from 'lucide-react';
+import { SRE_PROTOCOL_LINE, CLOUD_STATE_LABEL, formatBasesLine, type CloudBaseCount } from '../utils/sreProtocol';
+import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download, Copy, Check, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const data = await DatabaseLoaderService.extrairDadosDaPlanilha(file);
@@ -69,6 +70,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     originalShowRecoveryToast(message, type);
   };
   const [assetCount, setAssetCount] = useState<number>(0);
+  // Placar do protocolo SRE: total lido AGORA na Nuvem (só leitura).
+  const [cloudBase, setCloudBase] = useState<CloudBaseCount>({ state: 'loading', count: null });
   // Contra-prova física: cada espelho é contado em separado, para o painel poder
   // explicar uma diferença em vez de a esconder num único número.
   const [mirrors, setMirrors] = useState<{ local_assets: number; ativos: number; assets: number }>({ local_assets: 0, ativos: 0, assets: 0 });
@@ -87,7 +90,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     try {
       // O log vai para o chat/ticket: sai com a mesma redação do pacote de
       // diagnóstico (e-mails, tenantids, credenciais/URLs mascarados).
-      await navigator.clipboard.writeText(redactDiagnosticText(consoleLogs.join('\n')));
+      const text = [SRE_PROTOCOL_LINE, formatBasesLine(assetCount, cloudBase), ...consoleLogs].join('\n');
+      await navigator.clipboard.writeText(redactDiagnosticText(text));
       setLogCopied(true);
       setTimeout(() => setLogCopied(false), 2000);
     } catch (err) {
@@ -130,6 +134,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     });
 
     const lines: string[] = [
+      SRE_PROTOCOL_LINE,
+      `- Bases: ${formatBasesLine(assetCount, cloudBase)}`,
+      '',
       '# Pacote de Diagnóstico — SRE Diagnostics Monitor',
       '',
       `- Gerado em: ${now.toISOString()}`,
@@ -145,6 +152,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       `- assets: ${mirrors.assets}`,
       `- Espelho virtual (sandbox): ${virtualCount}`,
       `- Ativos exibidos no painel: ${assetCount}`,
+      `- Base na Nuvem (Supabase, lida agora): ${cloudBase.count ?? '—'} (${CLOUD_STATE_LABEL[cloudBase.state]})`,
       `- Registros de auditoria: ${logCount}`,
       '',
       '## Resumos F0 (amostras locais)',
@@ -305,6 +313,28 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     } catch { /* ignore */ }
   }, []);
 
+  /** Protocolo SRE: lê o total da Nuvem (só leitura) para o placar da tela. */
+  const loadCloudCount = useCallback(async () => {
+    if (isInternalMode) {
+      setCloudBase({ state: 'internal', count: null, message: 'Supabase não configurado neste ambiente.' });
+      return;
+    }
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setCloudBase({ state: 'offline', count: null, message: 'Aparelho sem conexão.' });
+      return;
+    }
+    setCloudBase(prev => ({ state: 'loading', count: prev.count }));
+    try {
+      const count = await countCloudAssets(activeTenantid || null);
+      setCloudBase({ state: 'online', count });
+      addLog(`[SRE_BASES] Nuvem (Supabase) do contrato ${activeTenantid || 'GLOBAL'}: ${count} registo(s) na tabela assets (leitura online).`);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      setCloudBase({ state: 'error', count: null, message: errMsg });
+      addLog(`[SRE_BASES] Falha ao ler a base da Nuvem (nada foi alterado): ${errMsg}`);
+    }
+  }, [activeTenantid, addLog]);
+
   const enviarBaseParaNuvem = async () => {
     try {
       setIsMirroring(true);
@@ -354,6 +384,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
       setMirrorProgress(100);
       addLog(`[SRE_CLOUD] Espelhamento concluído: ${syncedIds.length} ativos sincronizados na Nuvem (Supabase).`);
+      // O placar LOCAL × SUPABASE tem de refletir o que acabou de subir.
+      void loadCloudCount();
     } catch (err: unknown) {
       if (err instanceof CloudPushPolicyError) {
         // A guarda vive no serviço (`syncAssetsToCloud`), não aqui: este ecrã só
@@ -490,6 +522,12 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   useEffect(() => {
     loadStats();
   }, [loadStats]);
+
+  // Placar do protocolo SRE: lê a Nuvem no boot e sempre que o contrato ativo
+  // (escopo da contagem) muda. Só leitura — nunca envia nem apaga.
+  useEffect(() => {
+    void loadCloudCount();
+  }, [loadCloudCount]);
 
   // ── Limpeza de cópias repetidas (mesmo tenantid + filial + etiqueta) ──
   // O mesmo conjunto pode ser gravado várias vezes com `primarykey` diferente,
@@ -810,6 +848,47 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           <span>Contrato Ativo (tenantid):</span>
           <span className="font-black text-indigo-200">{activeTenantid || 'GLOBAL / SEM CONTRATO'}</span>
         </div>
+      </div>
+
+      {/* 2b. Protocolo SRE — versão fixa + placar LOCAL × SUPABASE (online) */}
+      <div className="mb-6 p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center space-x-2 text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+              <span className="text-emerald-400">🛰️</span>
+              <span>Protocolo fixo de comunicação</span>
+            </div>
+            <p className="mt-1.5 font-mono text-[11px] font-black uppercase text-emerald-300 tracking-wide break-all">
+              {SRE_PROTOCOL_LINE}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { void loadCloudCount(); }}
+            disabled={cloudBase.state === 'loading'}
+            title="Reler o total da Nuvem (só leitura)"
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-sky-900/40 hover:bg-sky-900/70 disabled:bg-slate-900 disabled:text-slate-600 text-sky-200 text-[8px] font-black uppercase tracking-widest border border-sky-800/60 transition-all cursor-pointer shrink-0"
+          >
+            <RefreshCw size={12} className={cloudBase.state === 'loading' ? 'animate-spin' : ''} />
+            <span>Atualizar</span>
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <div className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
+            <div className="text-[8px] font-bold text-slate-500 uppercase tracking-wider">Base local</div>
+            <div className="text-sm font-black font-mono text-emerald-300 mt-0.5">{assetCount}</div>
+            <div className="text-[8px] font-mono text-slate-500 uppercase tracking-wider">registos no aparelho</div>
+          </div>
+          <div className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
+            <div className="text-[8px] font-bold text-slate-500 uppercase tracking-wider">Supabase</div>
+            <div className="text-sm font-black font-mono text-sky-300 mt-0.5">{cloudBase.count ?? '—'}</div>
+            <div className="text-[8px] font-mono text-slate-500 uppercase tracking-wider">{CLOUD_STATE_LABEL[cloudBase.state]}</div>
+          </div>
+        </div>
+        <p className="mt-2 text-[8px] font-mono uppercase tracking-wider break-all text-slate-500">
+          {formatBasesLine(assetCount, cloudBase)}
+          {cloudBase.message ? ` · ${cloudBase.message}` : ''}
+        </p>
       </div>
 
       {/* 3. Painel de Status */}
@@ -1200,6 +1279,13 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           </div>
         </div>
         
+        {/* Protocolo fixo: a versão é sempre a PRIMEIRA linha do SRE. */}
+        <div className="px-4 py-1.5 bg-slate-950 border-b border-slate-900 font-mono text-[9px] uppercase tracking-wider flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="font-black text-emerald-300 break-all">{SRE_PROTOCOL_LINE}</span>
+          <span className="text-slate-600">·</span>
+          <span className="text-sky-300 break-all">{formatBasesLine(assetCount, cloudBase)}</span>
+        </div>
+
         <div className={`p-4 font-mono text-[9px] leading-relaxed text-emerald-400 bg-slate-950/90 overflow-y-auto space-y-1 ${isLogExpanded ? 'flex-1 text-xs' : 'h-[120px]'}`}>
           {consoleLogs.map((log, index) => (
             <div key={index} className="whitespace-pre-wrap">{log}</div>
