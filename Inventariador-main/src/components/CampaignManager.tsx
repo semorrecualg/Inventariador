@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   AlertCircle
 } from 'lucide-react';
-import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
+import { User, InventoryCampaign, CampaignStatus, AppScreen, type CampaignOpenIntent } from '../types';
 import { isAdminUser, userHasPermission } from '../services/rbacService';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot, fetchCampaigns, fetchAllCampaigns, campaignAuditWorkCount } from '../services/supabaseService';
 import { CampaignGovernanceError, requireCampaignFilial } from '../utils/campaignGuard';
@@ -36,6 +36,12 @@ interface CampaignManagerProps {
   campaigns?: InventoryCampaign[];
   onRefresh?: () => void;
   initialUnit?: string | null;
+  /**
+   * Intenção do botão CAMPANHA do cartão da filial: `OPEN` abre direto a
+   * campanha ativa da unidade; `CREATE` já mostra o cadastro. Ausente nas
+   * entradas legadas (painel do admin, lista central de campanhas).
+   */
+  initialAction?: CampaignOpenIntent | null;
   tenantid?: string | null;
   unitId?: string | null;
   databaseMode?: string;
@@ -50,12 +56,16 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   campaigns = [],
   onRefresh,
   initialUnit,
+  initialAction,
   tenantid: propsTenantid
 }) => {
   // Aberto a partir da unidade (chip CAMPANHA → `initialUnit`): o formulário de
   // cadastro já nasce aberto e vinculado àquela filial, em vez de exigir o +
-  // dentro da lista de campanhas.
-  const [isCreating, setIsCreating] = useState(!!initialUnit);
+  // dentro da lista de campanhas. Com `initialAction` explícito, o cartão da
+  // filial decide: campanha ativa → ficha da campanha; sem campanha → cadastro.
+  const [isCreating, setIsCreating] = useState(
+    initialAction === 'CREATE' || (!initialAction && !!initialUnit)
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [newCampaignName, setNewCampaignName] = useState('');
@@ -82,6 +92,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   // Sincronização Local para Resposta Instantânea v25.50
   const [localCampaigns, setLocalCampaigns] = useState<InventoryCampaign[]>(campaigns);
+  // A leitura da filial terminou? `initialAction === 'OPEN'` só decide depois
+  // disso — com a lista ainda vazia o cadastro abriria por engano.
+  const [hasLoadedCampaigns, setHasLoadedCampaigns] = useState(false);
 
   // Campanhas já excluídas nesta sessão. O `campaigns` que vem do App só é
   // recarregado pelo refresh; enquanto isso, ele ainda traz a campanha apagada
@@ -157,6 +170,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       return campaigns;
     } finally {
       setIsRefreshing(false);
+      setHasLoadedCampaigns(true);
     }
   }, [initialUnit, propsTenantid, campaigns, user, withoutDeleted]);
 
@@ -439,7 +453,7 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     }
   };
 
-  const handleSelectCampaign = async (campaign: InventoryCampaign) => {
+  const handleSelectCampaign = React.useCallback(async (campaign: InventoryCampaign) => {
     setSelectedCampaign(campaign);
     // Governança: tenant vem do perfil do usuário (fluxo de dados), sem fallback fixo.
     const tenantid = user?.tenantid || '';
@@ -450,7 +464,36 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       setStats(campaignStats);
       setStatsLoading(false);
     }
-  };
+  }, [user]);
+
+  // Botão CAMPANHA do cartão da filial (`initialAction`):
+  //  · `OPEN`   → a campanha ATIVA daquela filial abre já na ficha, sem passar
+  //               pela lista;
+  //  · `CREATE` → o cadastro nasce aberto (estado inicial de `isCreating`);
+  //  · `OPEN` sem campanha gravada nesta filial → cadastro, senão o utilizador
+  //               cairia numa lista vazia depois de tocar no botão vermelho.
+  const initialActionAppliedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (initialAction !== 'OPEN' || initialActionAppliedRef.current) return;
+    if (!hasLoadedCampaigns) return;
+
+    const filial = (initialUnit || '').trim().toUpperCase();
+    const candidates = localCampaigns.filter(c => {
+      if (!filial) return true;
+      const own = String(c.filial || c.unit_id || c._unitid || '').trim().toUpperCase();
+      return own === filial;
+    });
+    const activeCampaign =
+      candidates.find(c => String(c.id) === String(currentCampaignId)) ||
+      candidates.find(c => String(c.status).toUpperCase() === CampaignStatus.ACTIVE);
+
+    initialActionAppliedRef.current = true;
+    if (activeCampaign) {
+      handleSelectCampaign(activeCampaign);
+    } else if (candidates.length === 0) {
+      setIsCreating(true);
+    }
+  }, [initialAction, hasLoadedCampaigns, localCampaigns, initialUnit, currentCampaignId, handleSelectCampaign]);
 
   const getStatusBadge = (status: CampaignStatus) => {
     switch (status) {

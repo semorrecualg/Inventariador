@@ -108,7 +108,11 @@ describe('CONTRATO DE TRABALHO · liberação da unidade no cartão', () => {
     fireEvent.click(unitCard());
 
     expect(onOpenAdmin).toHaveBeenCalledTimes(1);
-    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.CAMPAIGN_MANAGEMENT, { unitName: FILIAL });
+    // Campanha pendente: a tela abre já no cadastro daquela filial.
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.CAMPAIGN_MANAGEMENT, {
+      unitName: FILIAL,
+      campaignAction: 'CREATE'
+    });
   });
 
   it('admin: campanha já definida — o toque no cartão abre a ÂNCORA (vice-versa)', () => {
@@ -140,13 +144,29 @@ describe('CONTRATO DE TRABALHO · liberação da unidade no cartão', () => {
     expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.UNIT_CONFIGURATOR, { unitName: FILIAL });
   });
 
-  it('admin: o botão da campanha abre a gestão de campanhas daquela filial', () => {
+  it('admin: o botão da campanha vermelho abre o cadastro daquela filial', () => {
     const { onOpenAdmin } = renderSelector(UserRole.ADMIN);
 
     fireEvent.click(campaignAction());
 
     expect(onOpenAdmin).toHaveBeenCalledTimes(1);
-    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.CAMPAIGN_MANAGEMENT, { unitName: FILIAL });
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.CAMPAIGN_MANAGEMENT, {
+      unitName: FILIAL,
+      campaignAction: 'CREATE'
+    });
+  });
+
+  it('admin: o botão da campanha verde abre direto a campanha ativa daquela filial', () => {
+    const { onOpenAdmin } = renderSelector(UserRole.ADMIN, campaignOnlyMap);
+
+    expect(campaignAction().getAttribute('data-state')).toBe('ok');
+    fireEvent.click(campaignAction());
+
+    expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.CAMPAIGN_MANAGEMENT, {
+      unitName: FILIAL,
+      campaignAction: 'OPEN'
+    });
   });
 
   it('admin: botões vermelhos com a unidade pendente', () => {

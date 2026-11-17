@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   com `filial` não eram encontrados. `findUnitConfigForUnit` compara os três
   campos com chave normalizada (caixa, `_`, hífen e acento não separam).
 
+### Alterado — botão CAMPANHA abre a campanha ativa ou o cadastro
+
+- **Botão 📣 verde abre a campanha da filial:** com campanha criada e ativa, o
+  toque no botão `Campanha` do cartão leva direto à ficha dessa campanha
+  (`initialAction: 'OPEN'`), sem passar pela lista.
+- **Botão 📣 vermelho abre o cadastro:** sem campanha ativa na filial, a gestão
+  de campanhas já nasce no formulário de cadastro daquela unidade
+  (`initialAction: 'CREATE'`); se a leitura não trouxer nenhuma campanha, o
+  cadastro abre na mesma, em vez de uma lista vazia.
+
 ### Alterado — liberação da filial direto no cartão (sem a UNIDADE OPERACIONAL)
 
 - **Dois botões de estado no próprio cartão da filial:** no CONTRATO DE

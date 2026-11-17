@@ -449,17 +449,24 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                     const campaignReady = release?.hasCampaign === true;
                     // Sem leitura da unidade, o botão continua acionável e nasce
                     // vermelho: configurar é sempre seguro.
-                    const openRelease = (screen: AppScreen) =>
+                    // O botão da CAMPANHA leva a intenção junto: com campanha
+                    // ativa a tela abre na campanha da filial; sem campanha, já
+                    // no cadastro (botão vermelho).
+                    const campaignParams: NavigationParams = {
+                      unitName: opt.filial,
+                      campaignAction: campaignReady ? 'OPEN' : 'CREATE'
+                    };
+                    const openRelease = (screen: AppScreen, params?: NavigationParams) =>
                       (event: React.SyntheticEvent) => {
                         event.stopPropagation();
                         setSelectedFilial(opt.filial);
-                        onOpenAdmin?.(screen, { unitName: opt.filial });
+                        onOpenAdmin?.(screen, params || { unitName: opt.filial });
                       };
-                    const releaseKeyDown = (screen: AppScreen) =>
+                    const releaseKeyDown = (screen: AppScreen, params?: NavigationParams) =>
                       (event: React.KeyboardEvent) => {
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
-                          openRelease(screen)(event);
+                          openRelease(screen, params)(event);
                         }
                       };
                     return (
@@ -478,7 +485,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                           if (isAdmin && pending) {
                             onOpenAdmin?.(
                               anchorReady ? AppScreen.CAMPAIGN_MANAGEMENT : AppScreen.UNIT_CONFIGURATOR,
-                              { unitName: opt.filial }
+                              anchorReady ? campaignParams : { unitName: opt.filial }
                             );
                           }
                         }}
@@ -547,8 +554,8 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                                 : `Criar campanha de ${opt.label}`}
                               data-testid={`unit-campaign-action-${opt.filial}`}
                               data-state={campaignReady ? 'ok' : 'pending'}
-                              onClick={openRelease(AppScreen.CAMPAIGN_MANAGEMENT)}
-                              onKeyDown={releaseKeyDown(AppScreen.CAMPAIGN_MANAGEMENT)}
+                              onClick={openRelease(AppScreen.CAMPAIGN_MANAGEMENT, campaignParams)}
+                              onKeyDown={releaseKeyDown(AppScreen.CAMPAIGN_MANAGEMENT, campaignParams)}
                               className={`w-8 h-8 rounded-lg border flex items-center justify-center flex-shrink-0 cursor-pointer active:scale-95 transition-all ${
                                 campaignReady
                                   ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'

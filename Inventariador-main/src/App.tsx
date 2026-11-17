@@ -7927,6 +7927,7 @@ useEffect(() => {
               campaigns={campaigns}
               onRefresh={refreshCampaigns}
               initialUnit={screenParams?.unitName || selectedUnit}
+              initialAction={screenParams?.campaignAction}
               tenantid={currentTenantid}
               unitId={currentUnitId}
               databaseMode={databaseMode}
