@@ -1204,18 +1204,21 @@ const Inventory: React.FC<InventoryProps> = ({
   const handleConfirmSearchBatch = () => {
     const pendingInSearch = filteredAssets.filter(a => !a._conferido);
     if (pendingInSearch.length === 0) return;
+    // Lote = mesma etiqueta consultada. Sem 2+ pendentes com essa plaqueta não
+    // há lote: a busca por registro continua a listar, mas não confere em bloco.
     const grupo = findBatchGroup(pendingInSearch[0], allAssets, selectedUnit || activeFilialKey);
-    const alvo = grupo.length >= 2 ? grupo : pendingInSearch;
-    setBatchGroup(alvo);
-    setBatchCheckedIds(new Set(alvo.map(a => String(a.id)).filter(Boolean)));
+    if (grupo.length < 2) return;
+    setBatchGroup(grupo);
+    setBatchCheckedIds(new Set(grupo.map(a => String(a.id)).filter(Boolean)));
     setCommittedSearch('');
     setDisplayValue('');
   };
 
   /**
-   * Leitura digitada: quando o código digitado forma lote (plaqueta ou registro
-   * repetido), abre o modal automaticamente — antes o resultado só aparecia
-   * como lista filtrada e o auditor tinha de conferir um a um.
+   * Leitura digitada: quando o código digitado é a ETIQUETA de 2+ pendentes,
+   * abre o modal automaticamente. Busca por registro não abre lote — registro
+   * repetido junta plaquetas diferentes, que é justamente o que não pode entrar
+   * no mesmo lote.
    */
   useEffect(() => {
     const term = normalizeKeyFast(committedSearch || '');
@@ -1223,9 +1226,7 @@ const Inventory: React.FC<InventoryProps> = ({
     const daUnidade = allAssets.filter(a => belongsToUnit(a, activeFilialKey));
     const alvo = daUnidade.find(a => {
       if (a._conferido) return false;
-      const etq = normalizeKeyFast(a.etiqueta || '');
-      const reg = normalizeKeyFast(a.registro || '');
-      return etq === term || reg === term;
+      return normalizeKeyFast(a.etiqueta || '') === term;
     });
     if (!alvo) return;
     const grupo = findBatchGroup(alvo, allAssets, selectedUnit || activeFilialKey);
@@ -1575,7 +1576,7 @@ const Inventory: React.FC<InventoryProps> = ({
           document.body
         )}
 
-      {/* Modal de Conferência em Lote — plaqueta OU registro repetido (clique e leitura) */}
+      {/* Modal de Conferência em Lote — mesma ETIQUETA consultada (clique e leitura) */}
       {batchGroup.length > 0 && createPortal(
         <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md animate-fadeIn">
           <div className="bg-white w-full max-w-md rounded-[2rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn flex flex-col max-h-[90vh]">
