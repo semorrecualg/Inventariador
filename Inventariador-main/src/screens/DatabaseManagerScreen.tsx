@@ -12,6 +12,7 @@ import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type 
 import { logger } from '../utils/logger';
 import pkg from '../../package.json';
 import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
+import { redactDiagnosticText } from '../utils/diagnosticRedaction';
 import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download, Copy, Check, Maximize2, Minimize2 } from 'lucide-react';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -133,6 +134,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       `- Versão da app: ${pkg?.version ?? 'desconhecida'}`,
       `- Build: mode=${import.meta.env.MODE} prod=${String(import.meta.env.PROD)} dev=${String(import.meta.env.DEV)}`,
       `- User-Agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'indisponível'}`,
+      '- Redação: e-mails, tenantids/contratos, UUIDs, hashes longos e credenciais (URL/parâmetros) mascarados',
       '',
       '## Espelhos (contagens)',
       '',
@@ -167,7 +169,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       '',
     ];
 
-    const content = lines.join('\n');
+    // O pacote circula fora do aparelho: sai sempre redigido (formas e
+    // contagens preservadas, identidade e credenciais mascaradas).
+    const content = redactDiagnosticText(lines.join('\n'));
     try {
       const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -178,7 +182,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      addLog('[SRE] Pacote de diagnóstico exportado (.md).');
+      addLog('[SRE] Pacote de diagnóstico exportado (.md, redigido para partilha).');
     } catch (err) {
       logger.warn('[SRE] Falha ao exportar pacote de diagnóstico:', err);
       addLog(`[SRE] Falha ao exportar pacote de diagnóstico: ${err instanceof Error ? err.message : String(err)}`);
