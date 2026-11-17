@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Acesso padronizado — biometria → contrato → SaaS (Fase 1)
+
+- **O contrato deixa de ser saltado:** a última escolha (`app_last_work_context`)
+  já não navega direto para o hub no pós-login. Passa a abrir o seletor de
+  contrato com contrato, filial e módulo pré-selecionados e só avança quando o
+  utilizador confirma em "Acessar o Módulo" (`resolveWorkContextPreselection`).
+- **INVENTARIADOR exige filial:** o botão de acesso fica bloqueado enquanto não
+  houver filial escolhida, com o motivo escrito; CONTROLE DE ATIVO continua a
+  entrar sem filial. Evita o vaivém `/unit` ↔ `/contexto` do auditor quando o
+  contrato ainda não tem filiais na base (`canConfirmWorkContext`).
+- **Hub exige contexto ativo:** `MAIN_MENU` ("Auditoria Inteligente", `#/menu`)
+  devolve ao contrato quando não há unidade ativa
+  (`shouldReturnHubToWorkContext`), exceto nos painéis de governança abertos a
+  partir do contrato com `openPanel`.
+- **Testes:** `accessFlowStandardization` cobre a pré-seleção (incluindo escolha
+  revogada e módulo proibido ao auditor), a exigência de filial e o gate do hub.
+
 ### Cadastro de acessos — filiais do contrato lidas também da nuvem
 
 - **Lista de filiais sem beco sem saída:** o modal de novo/editar acesso só

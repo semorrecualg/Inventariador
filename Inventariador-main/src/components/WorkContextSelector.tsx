@@ -20,7 +20,9 @@ import { isFieldAuditorRole } from '../utils/roles';
 import {
   WorkContext,
   type FilialOption,
+  type WorkContextPreselection,
   buildFilialOptions,
+  canConfirmWorkContext,
   groupContextsByTenant,
   normalizeWorkTenant,
   normalizeWorkFilial
@@ -57,6 +59,12 @@ interface WorkContextSelectorProps {
    * de cada unidade desta tela — o painel não a duplica.
    */
   onOpenAdmin?: (screen: AppScreen, params?: NavigationParams) => void;
+  /**
+   * Fase 1 (acesso padronizado): a ÚLTIMA ESCOLHA do usuário chega aqui apenas
+   * como PRÉ-SELEÇÃO (contrato/filial/módulo já apontados) — o seletor deixou de
+   * ser saltado no pós-login. O utilizador confirma em "Acessar o Módulo".
+   */
+  initialSelection?: WorkContextPreselection | null;
 }
 
 /**
@@ -78,7 +86,8 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   onLogout,
   onOpenDatabase,
   unitRelease,
-  onOpenAdmin
+  onOpenAdmin,
+  initialSelection
 }) => {
   const groups = groupContextsByTenant(contexts);
 
@@ -95,17 +104,21 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
 
   const selectedTenantBaseline = activeGroup?.tenantid || '';
 
-  const [selectedModule, setSelectedModule] = useState<AppModule | null>(null);
+  // Fase 1: a escolha anterior NÃO salta mais o contrato — entra como
+  // pré-seleção (já validada contra a autorização atual em
+  // `resolveWorkContextPreselection`).
+  const preselectedTenant = initialSelection ? normalizeWorkTenant(initialSelection.tenantid) : '';
+  const [selectedModule, setSelectedModule] = useState<AppModule | null>(initialSelection?.module ?? null);
   // null = ainda não escolheu explicitamente (a tela pré-seleciona a filial do
   // perfil ou a primeira disponível). '' é uma escolha REAL: contrato inteiro.
-  const [selectedFilial, setSelectedFilial] = useState<string | null>(null);
+  const [selectedFilial, setSelectedFilial] = useState<string | null>(initialSelection?.filial || null);
 
   // DONO GLOBAL (admin sem contrato no perfil): o contrato vem da BASE — o
   // tenantid é a primeira coluna dos ativos. Liberado somente pelo gate
   // administrativo; um usuário comum nunca vê os contratos de outros clientes.
   const isGlobalAdmin = !activeGroup && canAccessDatabaseManager(user);
   const [baseContracts, setBaseContracts] = useState<ContractSummary[]>([]);
-  const [manualTenant, setManualTenant] = useState('');
+  const [manualTenant, setManualTenant] = useState(preselectedTenant);
 
   // Catálogo de contratos/filiais da base local: alimenta as opções de filial
   // de TODOS os perfis (leitura local, sem rede).
@@ -123,7 +136,9 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     };
   }, []);
 
-  const selectedTenant = selectedTenantBaseline || manualTenant;
+  // Contrato escolhido pelo utilizador (pré-seleção da última escolha ou toque
+  // num cartão) sobrepõe-se ao contrato do perfil.
+  const selectedTenant = manualTenant || selectedTenantBaseline;
 
   const isAuditor = isFieldAuditorRole(user.role);
   // AUDITOR DE CAMPO: quem não administra a unidade. O admin/master configura a
@@ -188,7 +203,14 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   // o card e o badge continuam abrindo a Unidade Operacional, onde ele define a
   // âncora e a campanha que liberam a unidade.
   const blockedByRelease = selectedModule === AppModule.INVENTORY && !!chosenPending;
-  const canProceed = !!selectedTenant && !!selectedModule && !blockedByRelease;
+  // Fase 1: INVENTARIADOR exige FILIAL escolhida (ver `canConfirmWorkContext`).
+  const missingFilialForInventory =
+    selectedModule === AppModule.INVENTORY && !String(chosenFilial || '').trim();
+  const canProceed =
+    !!selectedTenant &&
+    !!selectedModule &&
+    !blockedByRelease &&
+    canConfirmWorkContext(selectedModule, chosenFilial);
 
   const getTenantIdentity = (tenantid: string) => {
     const hash = tenantid.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
@@ -629,6 +651,13 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
           <ShieldCheck size={15} />
           Acessar o Módulo
         </button>
+        {missingFilialForInventory && (
+          <p className="text-[9px] font-extrabold uppercase tracking-wider text-amber-600 text-center leading-relaxed">
+            {filialOptions.length === 0
+              ? 'Este contrato ainda não tem filial na base. Cadastre a filial na Unidade Operacional ou use CONTROLE DE ATIVO, que não exige endereço de campo.'
+              : 'Escolha a filial para entrar no INVENTARIADOR.'}
+          </p>
+        )}
         {blockedByRelease && (
           <p className="text-[9px] font-extrabold uppercase tracking-wider text-amber-600 text-center leading-relaxed">
             {isAdmin
