@@ -143,7 +143,8 @@ describe('assetDedupService — limpeza de cópias na base local', () => {
     // a cópia (`ARQUIVO1` vs `arquivo1`, `ALT-...`, com/sem espaços).
     expect(delta.examples.length).toBeGreaterThan(0);
     expect(delta.examples[0]).toMatchObject({
-      key: 'CICOPAL|010101 CICOPAL GO|E1',
+      // Tenantid mascarado no relatório; filial/etiqueta continuam legíveis.
+      key: 'CI***|010101 CICOPAL GO|E1',
       keeper: 'A3',
       removed: ['A1', 'A2']
     });

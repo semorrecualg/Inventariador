@@ -1,6 +1,7 @@
 import { db } from './sqliteService';
 import { buildDedupPlan, type DedupRow } from '../utils/dedupAssets';
 import { logger } from '../utils/logger';
+import { redactTenantId } from '../utils/diagnosticRedaction';
 
 /**
  * Limpeza de cópias repetidas de ativos (mesmo `tenantid + filial + etiqueta`).
@@ -126,7 +127,7 @@ export async function previewAssetDuplicateCleanup(): Promise<DedupReport> {
       withoutIdentity = plan.withoutIdentity;
       patched = plan.groups.filter((group) => Object.keys(group.patch).length > 0).length;
       examples = plan.groups.slice(0, 5).map((group) => ({
-        key: group.key,
+        key: redactIdentityKey(group.key),
         keeper: String(group.keeper.primarykey),
         removed: group.removed.map((row) => String(row.primarykey))
       }));
@@ -218,6 +219,16 @@ async function logDedupAudit(report: DedupReport): Promise<string> {
   });
   return auditId;
 }
+
+/**
+ * Identidade do grupo no relatório (`tenantid|filial|etiqueta`): o tenantid sai
+ * mascarado como no pacote de diagnóstico — o relatório é copiado para tickets —
+ * e filial/etiqueta ficam legíveis para dizer qual caminho gravou a cópia.
+ */
+const redactIdentityKey = (key: string): string => {
+  const [tenant, ...rest] = key.split('|');
+  return [redactTenantId(tenant), ...rest].join('|');
+};
 
 /** Linhas do relatório, para o log do Gestor de Base. */
 export function formatDedupReport(report: DedupReport): string[] {
