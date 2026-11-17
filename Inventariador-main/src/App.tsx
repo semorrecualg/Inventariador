@@ -114,7 +114,7 @@ import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudI
 import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isSyncLockStuck } from './services/syncQueueGuards';
-import { isBiometricSupported, hasBiometricRegistered, isNativeAppShell } from './services/biometricService';
+import { checkNativeBiometry, isBiometricSupported, hasBiometricRegistered, isNativeAppShell } from './services/biometricService';
 import {
   BIOMETRIC_FALLBACK_ACTION,
   BIOMETRIC_REGISTER_ACTION,
@@ -3753,12 +3753,20 @@ useEffect(() => {
         let biometricDecision: BiometricDecision;
         try {
           const bioSupported = await isBiometricSupported();
+          const isNativeApp = isNativeAppShell();
+          // Fase 2b: no casco nativo quem responde é o plugin — e a resposta
+          // entra na política (disponível → cadastro nativo; indisponível →
+          // fallback com o motivo real; sem resposta → fallback do WebView).
+          const nativeFacts = isNativeApp
+            ? await checkNativeBiometry()
+            : { status: 'unknown' as const };
           const bioUser = String(user.username || user.email || '').toLowerCase().trim();
           const bioRegistered = !!bioUser && (await hasBiometricRegistered(bioUser));
           biometricDecision = resolveBiometricStep({
             supported: bioSupported,
             registered: bioRegistered,
-            isNativeApp: isNativeAppShell(),
+            isNativeApp,
+            nativeBiometry: nativeFacts.status,
             fallbackAccepted: false,
             role: user.role
           });
@@ -7376,7 +7384,9 @@ useEffect(() => {
                 logAuditEvent({
                   user_email: user?.email || 'unknown',
                   action: BIOMETRIC_REGISTER_ACTION,
-                  details: 'Biometria registada neste aparelho (autenticador de plataforma).',
+                  details: isNativeAppShell()
+                    ? 'Biometria registada neste aparelho (plugin nativo).'
+                    : 'Biometria registada neste aparelho (autenticador de plataforma).',
                   tenantid: user?.tenantid || ''
                 });
                 popScreen();
