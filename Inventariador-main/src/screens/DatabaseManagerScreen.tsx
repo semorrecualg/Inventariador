@@ -85,7 +85,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
   const copyConsoleLogs = async () => {
     try {
-      await navigator.clipboard.writeText(consoleLogs.join('\n'));
+      // O log vai para o chat/ticket: sai com a mesma redação do pacote de
+      // diagnóstico (e-mails, tenantids, credenciais/URLs mascarados).
+      await navigator.clipboard.writeText(redactDiagnosticText(consoleLogs.join('\n')));
       setLogCopied(true);
       setTimeout(() => setLogCopied(false), 2000);
     } catch (err) {
@@ -1204,7 +1206,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <button type="button" onClick={() => { void exportDiagnosticPackage(); }} className="text-slate-400 hover:text-slate-200 active:scale-95" aria-label="Exportar pacote de diagnóstico" title="Exportar pacote de diagnóstico">
               <Download size={14} />
             </button>
-            <button type="button" onClick={copyConsoleLogs} className="text-slate-400 hover:text-slate-200 active:scale-95" aria-label="Copiar log">
+            <button type="button" onClick={copyConsoleLogs} className="text-slate-400 hover:text-slate-200 active:scale-95" aria-label="Copiar log (redigido para partilha)" title="Copiar log (redigido para partilha)">
               {logCopied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
             </button>
             <button type="button" onClick={() => setIsLogExpanded(v => !v)} className="text-slate-400 hover:text-slate-200 active:scale-95" aria-label={isLogExpanded ? 'Fechar tela cheia' : 'Abrir em tela cheia'}>
