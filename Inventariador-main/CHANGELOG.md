@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Carga sem perda de registos e campanha como chave de controlo da filial
+
+- **Carga literal e reconciliada:** a planilha entra copiada campo a campo
+  (`_sourceRow`), com datas/valores também tipados, e a carga termina exigindo
+  `planilha N = base N` por filial — se uma chave repetida substituir outra linha,
+  a carga bloqueia em vez de reportar sucesso.
+- **Identidade interna do ativo (Fase 2):** `primarykey`/`id` passam a ser uma
+  chave interna derivada (chave de origem única → chave canónica; chave repetida →
+  derivada de chave + conteúdo), com a `primarykey` da planilha preservada em
+  `source_primarykey` e a proveniência em `source_row`/`import_batch`. Nenhuma
+  linha é descartada e reimportar o mesmo arquivo não duplica nem perde registos.
+- **Campanha = controlo do inventário (Fase 1):** campanha exige filial, só uma
+  campanha aberta (`CREATED`/`ACTIVE`) por filial e por contrato — campanha sem
+  `tenantid` não bloqueia a de outro contrato —, e campanha com ativos lidos não
+  pode ser excluída. A guarda corre nos serviços (vale offline) e o SQL ganhou
+  `CHECK` de filial e índice único parcial na migração da Fase 1.
+
 ### Remoção da integração Gemini (código morto e chave exposta ao cliente)
 
 - Saem o serviço de IA, o assistente, o modal de chat e o cartão de insight (este
@@ -64,6 +81,66 @@ Supabase `public` (26/26 colunas canônicas) e com risco zero de perda de dados.
   e `.eq('TAG_INVENTARIO')` realinhado ao contrato do `public` (`fetchCampaignStats`).
 - **Testes:** 185 (novos `migrationV5`, `assetRepository.where`; baseline `schemaBaseline`
   atualizado para verno 5). Gate: `tsc -b --noEmit` ✓ · `vitest run` 185/185 ✓.
+
+## [2.7.9] — 2026-11-17
+
+### Exportações do Gestor de Base deixam de mostrar o tenantid cru
+
+- **Relatório de recno (CSV):** a coluna `tenantid` sai mascarada (`CICOPAL` →
+  `CI***`), como já acontecia no pacote de diagnóstico; filial, recno, etiqueta e
+  valor continuam legíveis para a conferência no Protheus.
+- **Relatório de cópias (`[DEDUP]`):** a identidade do exemplo
+  (`tenantid|filial|etiqueta`) leva o mesmo tratamento — o contrato sai mascarado
+  e filial/etiqueta ficam legíveis para dizer qual caminho gravou a cópia.
+- **`redactTenantId` em `utils/diagnosticRedaction`:** a máscara de um
+  identificador isolado (coluna de CSV, chave de relatório) passa a ter função
+  própria, com a normalização da base (trim + maiúsculas).
+- **Prova disto mesmo:** a linha de base F0 continua a ser JSON válido depois de
+  redigida (`tenantid` → `CI***`, restantes campos intactos) e o CSV de recno tem
+  teste a exigir `CI***` na coluna do contrato.
+
+## [2.7.8] — 2026-11-17
+
+### Relatório de cópias deixa de contar linhas sem etiqueta como identidades
+
+- **Duas contas no `[DEDUP]`:** o diagnóstico do Gestor de Base passa a mostrar
+  `identidades distintas` (`tenantid + filial + etiqueta`) numa linha e, noutra,
+  as `linhas sem etiqueta`, que ficam fora do agrupamento e entram uma a uma na
+  projeção de linhas. Antes o total de linhas (11 832) era apresentado como se
+  todas fossem identidades — são 11 437 identidades + 395 sem etiqueta.
+- **Sem alteração de dados:** continua a ser leitura pura; nenhum registo é
+  apagado e a contagem de cópias não muda.
+
+## [2.7.7] — 2026-11-17
+
+### Protocolo SRE com versão fixa e placar das duas bases
+
+- **Versão na primeira linha:** o Gestor de Base de Dados abre com
+  `INVENTARIADOR v2.7.7 · SRE · GESTOR DE BASE DE DADOS` na tela e no terminal
+  SRE; a mesma linha vai à frente do log copiado e do pacote de diagnóstico
+  exportado, para que chat e ticket identifiquem sempre o build.
+- **Placar LOCAL × SUPABASE (online):** um cartão mostra o total de registos do
+  contrato no aparelho e o total lido agora na tabela `assets` da Nuvem
+  (`count: exact`, só leitura), com estado `ONLINE`/`OFFLINE`/`NÃO CONFIGURADO`.
+  O botão `ATUALIZAR` repete a consulta; nada é enviado, alterado ou apagado, e
+  os dois totais seguem também no log copiado e no pacote `.md`.
+
+## [2.7.6] — 2026-11-17
+
+### Envio à nuvem deixa de recusar etiquetas repetidas da planilha
+
+- **Guarda por registo, não por identidade:** a tabela `assets` guarda uma linha
+  por `(tenantid, primarykey)`. Duas linhas da planilha com a mesma etiqueta
+  (`tenantid + filial + etiqueta`) são registos distintos e passam a subir as
+  duas; o bloqueio fica reservado ao MESMO registo repetido no payload, que o
+  upsert por `(tenantid, id)` não consegue gravar (ON CONFLICT ... cannot affect
+  row a second time).
+- **Identidade repetida vira diagnóstico:** o Gestor de Base continua a mostrar
+  quantas linhas partilham a etiqueta e o terminal avisa uma vez, mas o envio
+  segue — exigir "limpar cópias" era pedir para apagar registos.
+- **Identidade já presente na nuvem com outro `primarykey`** deixa de recusar o
+  lote (passa a aviso): a segunda linha legítima da planilha chegava depois da
+  primeira e ficava bloqueada.
 
 ## [2.7.5] — 2026-11-16
 

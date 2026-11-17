@@ -19,7 +19,8 @@ import {
 } from 'lucide-react';
 import { User, InventoryCampaign, CampaignStatus, AppScreen } from '../types';
 import { isAdminUser, userHasPermission } from '../services/rbacService';
-import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot, fetchCampaigns, fetchAllCampaigns } from '../services/supabaseService';
+import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot, fetchCampaigns, fetchAllCampaigns, campaignAuditWorkCount } from '../services/supabaseService';
+import { CampaignGovernanceError, requireCampaignFilial } from '../utils/campaignGuard';
 import { localDb } from '../services/localDbService';
 import { db } from '../services/sqliteService';
 import { Device } from '@capacitor/device';
@@ -190,6 +191,16 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
 
   const handleCreateCampaign = async () => {
     if (!newCampaignName) return;
+
+    // Fase 1 — campanha sem filial é "Negativo!": a campanha é o âmbito de
+    // trabalho do auditor em campo e sem filial não delimita unidade nenhuma.
+    try {
+      requireCampaignFilial(newCampaignUnit || initialUnit || '');
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Negativo! Campanha exige filial.');
+      setTimeout(() => setErrorMessage(null), 5000);
+      return;
+    }
     
     // SISTEMA DE PREVENÇÃO DE CORRUPÇÃO (v2.6 Core): Validação de Bateria do Ecossistema
     interface BatteryManager {
@@ -281,8 +292,10 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       }
     } catch (err) {
       logger.error('Erro ao criar campanha:', err);
-      setErrorMessage('Erro técnico ao criar campanha');
-      setTimeout(() => setErrorMessage(null), 3000);
+      // Guarda de filial/campanha aberta: a mensagem do domínio vai para o ecrã
+      // tal como escrita ("Negativo! ..."), em vez de "erro técnico".
+      setErrorMessage(err instanceof CampaignGovernanceError ? err.message : 'Erro técnico ao criar campanha');
+      setTimeout(() => setErrorMessage(null), 5000);
     } finally {
       setIsSaving(false);
     }
@@ -320,6 +333,18 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       setIsConfirmDeleteOpen(false);
       setDeletingCampaignId(null);
       setIsBatteryAlertOpen(true);
+      return;
+    }
+
+    // Fase 1 — campanha com trabalho de auditoria não se exclui (o laudo
+    // perderia o lastro). A guarda também vive no serviço; aqui corre antes de
+    // apagar o registo local, para o ecrã não ficar sem a campanha.
+    const trabalhoNaCampanha = await campaignAuditWorkCount(String(campaignId));
+    if (trabalhoNaCampanha > 0) {
+      setIsConfirmDeleteOpen(false);
+      setDeletingCampaignId(null);
+      setErrorMessage('Negativo! Esta campanha já tem trabalho de auditoria registado e não pode ser excluída. Encerre-a para preservar o laudo.');
+      setTimeout(() => setErrorMessage(null), 6000);
       return;
     }
 
@@ -405,7 +430,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
       }
     } catch (err) {
       logger.error('>>> [Database] Falha crítica na conexão:', err);
-      setErrorMessage('Erro de rede: Banco indisponível');
+      setErrorMessage(
+        err instanceof CampaignGovernanceError ? err.message : 'Erro de rede: Banco indisponível'
+      );
       setTimeout(() => setErrorMessage(null), 3000);
     } finally {
       setUpdatingStatusId(null);

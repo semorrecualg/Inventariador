@@ -2601,7 +2601,7 @@ useEffect(() => {
         }
       } catch (err) {
         // Bloqueio por cópias é política, não falha: o operador tem de ver o
-        // número e a instrução de LIMPAR CÓPIAS, não um "erro" genérico.
+        // número e a instrução de DIAGNÓSTICO DE CÓPIAS, não um "erro" genérico.
         setSyncError(
           err instanceof CloudPushPolicyError ? err.message : 'Erro ao enviar alterações locais'
         );

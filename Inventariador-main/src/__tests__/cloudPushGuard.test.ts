@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   auditCloudPush,
   checkCloudPushGuard,
+  findDuplicateRecords,
   findIdentityConflicts,
-  formatCloudPushAudit,
   formatCloudPushIdentityConflicts,
+  formatDuplicateRecords,
+  formatIdentityCopiesNotice,
   nextCloudPushBlockedBackoff,
   CLOUD_PUSH_BLOCKED_BASE_BACKOFF_MS,
   CLOUD_PUSH_BLOCKED_MAX_BACKOFF_MS
@@ -21,9 +23,10 @@ const row = (over: Partial<DedupRow> & { primarykey: string }): DedupRow => ({
 });
 
 /**
- * A guarda existe porque a nuvem é consolidada (uma linha por tenantid +
- * filial + etiqueta) e um envio de aparelho com 12 636 linhas recria as
- * 1 195 cópias para todos os dispositivos.
+ * A nuvem guarda uma linha por (tenantid, primarykey). Duas linhas da planilha
+ * com a mesma etiqueta são registos distintos e sobem as duas; o que a guarda
+ * recusa é o mesmo registo (tenantid + primarykey) repetido no payload, que o
+ * upsert por (tenantid, id) não consegue gravar.
  */
 describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () => {
   it('libera o envio quando a base tem uma linha por identidade', () => {
@@ -39,50 +42,71 @@ describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () =
     expect(guard.audit).toMatchObject({ total: 3, identities: 3, groupsWithCopies: 0, copies: 0 });
   });
 
-  it('bloqueia quando duas linhas partilham tenantid + filial + etiqueta', () => {
+  it('libera duas linhas da planilha com a mesma etiqueta e primarykeys distintas', () => {
     const rows = [
-      row({ primarykey: 'A' }),
-      row({ primarykey: 'B' }),
-      row({ primarykey: 'C', etiqueta: '007223' })
+      row({ primarykey: '01010100000003480050' }),
+      row({ primarykey: '01010100000003480051' })
     ];
 
     const guard = checkCloudPushGuard(rows);
+    expect(guard.blocked).toBe(false);
+    expect(guard.message).toEqual([]);
+    expect(guard.audit).toMatchObject({ total: 2, identities: 1, groupsWithCopies: 1, copies: 1 });
+    expect(guard.message).not.toContain('ENVIO BLOQUEADO');
+  });
+
+  it('bloqueia o mesmo registo (tenantid + primarykey) enviado duas vezes', () => {
+    const rows = [row({ primarykey: 'A' }), row({ primarykey: 'A', etiqueta: '007999' })];
+
+    const guard = checkCloudPushGuard(rows);
     expect(guard.blocked).toBe(true);
-    expect(guard.audit).toMatchObject({ total: 3, identities: 2, groupsWithCopies: 1, copies: 1 });
+    expect(guard.duplicates).toEqual([{ tenantid: 'CICOPAL', primarykey: 'A', count: 2 }]);
     const texto = guard.message.join(' | ');
     expect(texto).toContain('ENVIO BLOQUEADO');
-    expect(texto).toContain('1 cópia(s) repetida(s) em 1 grupo(s)');
-    expect(texto).toContain('3 linhas para 2 ativos distintos');
-    expect(texto).toContain('LIMPAR CÓPIAS');
+    expect(texto).toContain('1 linha(s) repetida(s) do mesmo registo em 1 primarykey(s)');
+    expect(texto).toContain('primarykey A: 2 linha(s)');
+    expect(texto).not.toContain('LIMPAR CÓPIAS');
   });
 
-  it('conta várias cópias do mesmo grupo e mostra o total de linhas', () => {
+  it('conta as linhas a mais quando a mesma chave aparece três vezes', () => {
     const rows = [
       row({ primarykey: 'A' }),
-      row({ primarykey: 'B' }),
-      row({ primarykey: 'C' }),
-      row({ primarykey: 'D', etiqueta: '007223' })
+      row({ primarykey: 'A' }),
+      row({ primarykey: 'A' })
     ];
 
-    const guard = checkCloudPushGuard(rows);
-    expect(guard.blocked).toBe(true);
-    expect(guard.audit.identities).toBe(2);
-    expect(guard.audit.copies).toBe(2);
-    expect(guard.audit.groupsWithCopies).toBe(1);
-    expect(guard.message[0]).toContain('2 cópia(s) repetida(s)');
+    expect(findDuplicateRecords(rows)).toEqual([{ tenantid: 'CICOPAL', primarykey: 'A', count: 3 }]);
+    expect(checkCloudPushGuard(rows).message[0]).toContain('2 linha(s) repetida(s)');
   });
 
-  it('normaliza filial/etiqueta/tenantid como a limpeza (caixa, acentos, hífen, espaços)', () => {
+  it('não trata como repetido o mesmo primarykey em contratos diferentes', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: 'CICOPAL' }),
+      row({ primarykey: 'A', tenantid: 'CARPER' })
+    ];
+
+    expect(findDuplicateRecords(rows)).toEqual([]);
+    expect(checkCloudPushGuard(rows).blocked).toBe(false);
+  });
+
+  it('normaliza a caixa do contrato ao comparar a chave', () => {
+    const rows = [row({ primarykey: 'A', tenantid: 'CICOPAL' }), row({ primarykey: 'A', tenantid: ' cicopal ' })];
+
+    expect(findDuplicateRecords(rows)).toEqual([{ tenantid: 'CICOPAL', primarykey: 'A', count: 2 }]);
+  });
+
+  it('normaliza filial/etiqueta/tenantid na identidade (caixa, acentos, hífen, espaços)', () => {
     const rows = [
       row({ primarykey: 'A', tenantid: 'cicopal', filial: '010101 CICOPAL GO', etiqueta: '007222' }),
       row({ primarykey: 'B', tenantid: ' CICOPAL ', filial: '010101  cicopal-go ', etiqueta: ' 007222 ' })
     ];
 
-    expect(checkCloudPushGuard(rows).blocked).toBe(true);
+    expect(checkCloudPushGuard(rows).blocked).toBe(false);
     expect(auditCloudPush(rows).identities).toBe(1);
+    expect(auditCloudPush(rows).copies).toBe(1);
   });
 
-  it('não considera cópia a mesma etiqueta em contrato diferente', () => {
+  it('não considera a mesma identidade em contrato diferente', () => {
     const rows = [
       row({ primarykey: 'A', tenantid: 'CICOPAL' }),
       row({ primarykey: 'B', tenantid: 'CARPER' })
@@ -93,7 +117,7 @@ describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () =
     expect(guard.audit.identities).toBe(2);
   });
 
-  it('não bloqueia por linhas sem etiqueta (não têm identidade)', () => {
+  it('não agrupa linhas sem etiqueta (não têm identidade)', () => {
     const rows = [
       row({ primarykey: 'A', etiqueta: '' }),
       row({ primarykey: 'B', etiqueta: undefined }),
@@ -106,7 +130,7 @@ describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () =
     expect(guard.audit.identities).toBe(1);
   });
 
-  it('discrimina os números por filial, como o relatório da limpeza', () => {
+  it('discrimina os números por filial', () => {
     const rows = [
       row({ primarykey: 'A', filial: '010101 CICOPAL GO', etiqueta: '0001' }),
       row({ primarykey: 'B', filial: '010101 CICOPAL GO', etiqueta: '0002' }),
@@ -151,36 +175,49 @@ describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () =
     expect(guard.audit.withoutIdentity).toBe(3);
   });
 
-  it('deteta a linha cuja identidade já está na nuvem com outro primarykey', () => {
-    const payload = [row({ primarykey: 'COPIA-LOCAL', etiqueta: '007222' }) ];
-    const cloud = [row({ primarykey: 'KEEPER-NUVEM', etiqueta: '007222' })];
+  it('formata o aviso informativo das identidades repetidas, uma vez', () => {
+    const audit = auditCloudPush([row({ primarykey: 'A' }), row({ primarykey: 'B' })]);
+    const linhas = formatIdentityCopiesNotice(audit);
+
+    expect(linhas[0]).toContain('1 linha(s) a mais em 1 grupo(s)');
+    expect(linhas[0]).toContain('2 linhas para 1 identidade(s)');
+    expect(linhas[1]).toContain('registos distintos da planilha');
+    expect(linhas[2]).toContain('010101 CICOPAL GO: 2 linhas · 1 identidade(s) · 1 repetida(s)');
+    // Base sem identidades repetidas: nenhum aviso.
+    expect(formatIdentityCopiesNotice(auditCloudPush([row({ primarykey: 'A' })]))).toEqual([]);
+  });
+
+  it('formata o bloqueio por registo repetido (fonte única)', () => {
+    const duplicates = [{ tenantid: 'CICOPAL', primarykey: 'A', count: 2 }];
+    expect(formatDuplicateRecords(duplicates)[0]).toContain('ENVIO BLOQUEADO');
+    expect(formatDuplicateRecords([])).toEqual([]);
+  });
+
+  it('deteta (só para diagnóstico) a linha cuja identidade já está na nuvem', () => {
+    const payload = [row({ primarykey: 'SEGUNDA-LINHA', etiqueta: '007222' })];
+    const cloud = [row({ primarykey: 'PRIMEIRA-LINHA', etiqueta: '007222' })];
 
     const conflicts = findIdentityConflicts(payload, cloud);
     expect(conflicts).toHaveLength(1);
-    expect(conflicts[0]).toMatchObject({ attempted: 'COPIA-LOCAL', existing: ['KEEPER-NUVEM'] });
-    expect(formatCloudPushIdentityConflicts(conflicts)[0]).toContain('ENVIO BLOQUEADO: 1 ativo(s)');
+    expect(conflicts[0]).toMatchObject({ attempted: 'SEGUNDA-LINHA', existing: ['PRIMEIRA-LINHA'] });
+    expect(formatCloudPushIdentityConflicts(conflicts)[0]).toContain('seguem como registos distintos');
   });
 
   it('não acusa conflito quando o primarykey enviado é o mesmo da nuvem', () => {
-    const payload = [row({ primarykey: 'A' })];
-    const cloud = [row({ primarykey: 'A' })];
-
-    expect(findIdentityConflicts(payload, cloud)).toEqual([]);
+    expect(findIdentityConflicts([row({ primarykey: 'A' })], [row({ primarykey: 'A' })])).toEqual([]);
   });
 
   it('compara a identidade normalizada e separa contratos', () => {
     const payload = [
       row({ primarykey: 'A', tenantid: 'cicopal', filial: '010101  cicopal-go', etiqueta: ' 007222 ' })
     ];
-    // Mesma identidade, outra grafia → conflito.
     expect(
       findIdentityConflicts(payload, [row({ primarykey: 'B', filial: '010101 CICOPAL GO' })])
     ).toHaveLength(1);
-    // Outro contrato → sem conflito.
     expect(findIdentityConflicts(payload, [row({ primarykey: 'B', tenantid: 'CARPER' })])).toEqual([]);
   });
 
-  it('ignora linhas sem etiqueta (não têm identidade)', () => {
+  it('ignora linhas sem etiqueta no diagnóstico de identidade', () => {
     const payload = [row({ primarykey: 'A', etiqueta: '' })];
     const cloud = [row({ primarykey: 'B', etiqueta: '' })];
 
@@ -188,19 +225,11 @@ describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () =
   });
 
   it('lista todos os primarykeys que a nuvem já tem para a identidade', () => {
-    const payload = [row({ primarykey: 'NOVO' })];
-    const cloud = [row({ primarykey: 'X' }), row({ primarykey: 'Y' })];
-
-    const conflicts = findIdentityConflicts(payload, cloud);
+    const conflicts = findIdentityConflicts([row({ primarykey: 'NOVO' })], [
+      row({ primarykey: 'X' }),
+      row({ primarykey: 'Y' })
+    ]);
     expect(conflicts[0].existing.sort()).toEqual(['X', 'Y']);
-  });
-
-  it('formata o mesmo texto que a guarda devolve (fonte única do aviso)', () => {
-    const guard = checkCloudPushGuard([row({ primarykey: 'A' }), row({ primarykey: 'B' })]);
-
-    expect(formatCloudPushAudit(guard.audit)).toEqual(guard.message);
-    // Base limpa: sem aviso nenhum.
-    expect(formatCloudPushAudit(checkCloudPushGuard([row({ primarykey: 'A' })]).audit)).toEqual([]);
   });
 
   it('recua o envio bloqueado: começa em 30 s, dobra e para no teto de 5 min', () => {
@@ -214,29 +243,30 @@ describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () =
     );
   });
 
-  it('reproduz o incidente real: 12 636 linhas / 11 441 identidades bloqueiam o envio', () => {
+  it('reproduz a base real: 12 636 linhas / 11 437 identidades sobem', () => {
     const rows: DedupRow[] = [];
-    // 11 441 identidades = 10 784 ativos únicos + 657 grupos com cópias.
-    for (let i = 0; i < 10784; i += 1) {
-      rows.push(row({ primarykey: `S${i}`, etiqueta: `E${i}` }));
-    }
-    // 538 grupos com 3 cópias + 119 com 2 = 657 grupos e 1 195 linhas a mais.
-    for (let g = 0; g < 538; g += 1) {
+    // 654 grupos com identidade repetida: 150 com 3 linhas + 504 com 2 = 804 a mais.
+    for (let g = 0; g < 150; g += 1) {
       for (let c = 0; c < 3; c += 1) rows.push(row({ primarykey: `T${g}-${c}`, etiqueta: `T${g}` }));
     }
-    for (let g = 0; g < 119; g += 1) {
+    for (let g = 0; g < 504; g += 1) {
       for (let c = 0; c < 2; c += 1) rows.push(row({ primarykey: `D${g}-${c}`, etiqueta: `D${g}` }));
     }
+    // 11 437 identidades - 654 grupos = 10 783 linhas únicas.
+    for (let i = 0; i < 10783; i += 1) rows.push(row({ primarykey: `S${i}`, etiqueta: `E${i}` }));
+    // 395 linhas sem etiqueta utilizável (fora do agrupamento, continuam a subir).
+    for (let i = 0; i < 395; i += 1) rows.push(row({ primarykey: `X${i}`, etiqueta: '' }));
 
     const guard = checkCloudPushGuard(rows);
     expect(rows).toHaveLength(12636);
-    expect(guard.blocked).toBe(true);
+    expect(guard.blocked).toBe(false);
+    expect(guard.duplicates).toEqual([]);
     expect(guard.audit).toMatchObject({
       total: 12636,
-      identities: 11441,
-      groupsWithCopies: 657,
-      copies: 1195
+      identities: 11437,
+      groupsWithCopies: 654,
+      copies: 804,
+      withoutIdentity: 395
     });
-    expect(guard.message[0]).toContain('1195 cópia(s) repetida(s) em 657 grupo(s)');
   });
 });

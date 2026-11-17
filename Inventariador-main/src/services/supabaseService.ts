@@ -21,8 +21,15 @@ import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpo
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
-import { checkCloudPushGuard, findIdentityConflicts, CloudPushBlockedError, CloudPushIdentityConflictError } from '../utils/cloudPushGuard';
+import {
+  checkCloudPushGuard,
+  findIdentityConflicts,
+  formatCloudPushIdentityConflicts,
+  formatIdentityCopiesNotice,
+  CloudPushBlockedError
+} from '../utils/cloudPushGuard';
 import type { DedupRow } from '../utils/dedupAssets';
+import { assertCampaignHasNoAuditWork, assertNoOpenCampaign, CampaignGovernanceError, requireCampaignFilial } from '../utils/campaignGuard';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -967,9 +974,23 @@ let assetsIdMode: 'key' | 'uuid' = 'key';
  */
 let lastCloudPushBlockedNoticeKey: string | null = null;
 
-/** Rearranque do aviso (fim de episódio, testes). */
+/** Ultimo aviso informativo de identidade repetida / ja existente na nuvem. */
+let lastIdentityNoticeKey: string | null = null;
+
+/** Rearranque do aviso (fim de episodio, testes). */
 export const resetCloudPushBlockedNotice = (): void => {
   lastCloudPushBlockedNoticeKey = null;
+  lastIdentityNoticeKey = null;
+};
+
+/**
+ * Aviso INFORMATIVO, uma vez por episodio: linhas distintas da planilha com a
+ * mesma etiqueta seguem para a nuvem e o terminal diz que foram vistas.
+ */
+const announceIdentityOnce = (lines: string[]): void => {
+  if (lines.length === 0 || lines[0] === lastIdentityNoticeKey) return;
+  lines.forEach((line) => logger.warn(`>>> [Supabase] ${line}`));
+  lastIdentityNoticeKey = lines[0];
 };
 
 
@@ -1042,10 +1063,12 @@ const fetchCloudIdentities = async (rows: Record<string, unknown>[]): Promise<Cl
 };
 
 /**
- * Recusa o lote antes do upsert quando a identidade já está na nuvem com outro
- * `primarykey`: gravar criaria uma segunda linha para o mesmo ativo.
+ * Reporta (sem recusar) as linhas cuja identidade ja esta na nuvem com outro
+ * `primarykey`. Duas linhas legitimas da planilha para a mesma etiqueta caem
+ * aqui sempre que a primeira ja subiu; recusar a segunda seria perder registo.
+ * A nuvem guarda uma linha por `(tenantid, primarykey)`, portanto convivem.
  */
-const assertCloudIdentities = async (rows: Record<string, unknown>[]): Promise<void> => {
+const warnIdentityConflicts = async (rows: Record<string, unknown>[]): Promise<void> => {
   const cloudRows = await fetchCloudIdentities(rows);
   if (cloudRows.length === 0) return;
   const conflicts = findIdentityConflicts(
@@ -1053,9 +1076,7 @@ const assertCloudIdentities = async (rows: Record<string, unknown>[]): Promise<v
     cloudRows as unknown as DedupRow[]
   );
   if (conflicts.length === 0) return;
-  const error = new CloudPushIdentityConflictError(conflicts);
-  announceBlockedOnce(error.lines);
-  throw error;
+  announceIdentityOnce(formatCloudPushIdentityConflicts(conflicts));
 };
 
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<string[]> => {
@@ -1069,17 +1090,20 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   // delta de boot (`pushLocalChanges`), a fila da nuvem (`flushCloudQueue`) e
   // os envios de uma linha (conferência, unitização, restauro, exclusão).
   //
-  // A tabela `assets` guarda uma linha por tenantid + filial + etiqueta. Um
-  // payload com duas linhas da mesma identidade (`primarykey` diferentes) grava
-  // as duas — é assim que as 1.195 cópias voltam para todos os dispositivos,
-  // uma linha de cada vez, mesmo com a nuvem já consolidada. O envio é recusado
-  // antes de tocar na rede; nada é perdido, os ativos ficam por sincronizar.
+  // A tabela `assets` guarda uma linha por (tenantid, primarykey). Duas linhas da
+  // planilha com a mesma etiqueta tem `primarykey` diferentes e sao registos
+  // distintos: sobem as duas. O que o envio recusa e o MESMO registo repetido no
+  // payload - o upsert por (tenantid, id) aborta o lote com "ON CONFLICT DO
+  // UPDATE command cannot affect row a second time". Nada e enviado e os ativos
+  // ficam por sincronizar ate o payload vir sem a chave repetida.
   const cloudPushGuard = checkCloudPushGuard(assets as unknown as DedupRow[]);
   if (cloudPushGuard.blocked) {
     announceBlockedOnce(cloudPushGuard.message);
-    // Erro de política: os chamadores fazem recuo em vez de nova tentativa.
-    throw new CloudPushBlockedError(cloudPushGuard.audit);
+    // Erro de politica: os chamadores fazem recuo em vez de nova tentativa.
+    throw new CloudPushBlockedError(cloudPushGuard.duplicates);
   }
+  // Etiquetas repetidas na planilha: informativo, o envio segue.
+  announceIdentityOnce(formatIdentityCopiesNotice(cloudPushGuard.audit));
 
   if (!supabase || !navigator.onLine) {
     logger.warn('>>> [Supabase] Sincronização ignorada: Sem conexão ou Supabase não configurado.');
@@ -1282,7 +1306,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     // Identidade na nuvem: um `primarykey` novo para uma identidade existente é
     // uma cópia — o upsert por (tenantid, id) não a impede. A consulta é
     // limitada às etiquetas deste lote e corre antes de qualquer escrita.
-    await assertCloudIdentities(rows);
+    await warnIdentityConflicts(rows);
     const lote = batchIndex + 1;
 
     try {
@@ -1390,6 +1414,28 @@ export const syncAssetsToCloudAndMark = async (
     }
   }
   return synced;
+};
+
+/**
+ * Placar do SRE: quantos registos existem HOJE na Nuvem (Supabase) para o
+ * contrato ativo. É só leitura (`head: true`, `count: exact`) — não envia, não
+ * altera e não apaga nada. Sem contrato, conta a tabela inteira (dono global).
+ */
+export const countCloudAssets = async (tenantid?: string | null): Promise<number> => {
+  if (isInternalMode) {
+    throw new SupabaseNetworkException('Supabase não configurado neste ambiente.');
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new SupabaseNetworkException('Sem conexão para consultar a Nuvem.');
+  }
+  const tenant = String(tenantid ?? '').trim().toUpperCase();
+  let query = supabase.from('assets').select('id', { count: 'exact', head: true });
+  if (tenant) query = query.eq('tenantid', tenant);
+  const { count, error } = await query;
+  if (error) {
+    throw new SupabaseNetworkException(`Falha ao contar a base da Nuvem: ${error.message || 'Erro de esquema.'}`);
+  }
+  return count || 0;
 };
 
 /**
@@ -2949,9 +2995,54 @@ export const findAssetGlobally = async (etiqueta: string, tenantid: string): Pro
 };
 
 /**
+ * Campanhas locais do contrato — base das regras de filial única (Fase 1).
+ * Lidas do SQLite para a guarda valer também offline; sem base inicializada
+ * devolve lista vazia (a nuvem não entra aqui de propósito: a criação da
+ * campanha não pode depender da rede).
+ */
+const listLocalCampaigns = async (tenantid: string): Promise<InventoryCampaign[]> => {
+  try {
+    if (!sqliteService.getIsInitialized()) return [];
+    const rows = await sqliteService.getCampaigns(tenantid);
+    // O tenantid vai para a guarda COMO ESTÁ na base: preencher aqui o contrato
+    // consultado transformava uma campanha legada sem `tenantid` numa campanha
+    // de todos os contratos e bloqueava a abertura em filiais homónimas.
+    return (rows || []).map((row) => ({
+      ...row,
+      filial: String(row.filial || row.unit_id || row._unitid || ''),
+      tenantid: String(row.tenantid || ''),
+      status: (row.status as CampaignStatus) || CampaignStatus.ACTIVE
+    })) as unknown as InventoryCampaign[];
+  } catch (err) {
+    logger.warn('>>> [Governance] Falha ao ler campanhas locais para a guarda de filial:', err);
+    return [];
+  }
+};
+
+/**
+ * Ativos com trabalho de auditoria dentro da campanha (`currentCampaignId`).
+ * Excluir campanha com leitura feita apagaria o lastro do laudo.
+ */
+export const campaignAuditWorkCount = async (campaignId: string): Promise<number> => {
+  try {
+    const rows = await db.local_assets
+      .filter((asset) => String((asset as { currentCampaignId?: string | null }).currentCampaignId || '') === String(campaignId))
+      .limit(1)
+      .toArray();
+    return rows.length;
+  } catch (err) {
+    logger.warn('>>> [Governance] Falha ao contar trabalho de auditoria da campanha:', err);
+    return 0;
+  }
+};
+
+/**
  * Exclui uma campanha
  */
 export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
+  // Fase 1 — campanha com leitura feita não se exclui: o laudo perderia o lastro.
+  assertCampaignHasNoAuditWork(await campaignAuditWorkCount(campaignId));
+
   // Mesma regra do fetchCampaigns: um `app_database_mode: INTERNAL` herdado de
   // uma sessão anterior não pode transformar a exclusão em local-only — a
   // campanha continuava na nuvem e voltava na leitura seguinte (merge).
@@ -3156,16 +3247,25 @@ export const fetchAllCampaigns = async (): Promise<InventoryCampaign[]> => {
  */
 export const createCampaign = async (campaign: Partial<InventoryCampaign>): Promise<InventoryCampaign | null> => {
 
-  const tenantVal = campaign.tenantid || campaign.tenantid || campaign.tenantid || '';
+  const tenantVal = String(campaign.tenantid || '').trim();
   const unitVal = campaign.filial || campaign._unitid || campaign.unit_id || '';
+
+  // Fase 1 — a campanha é a chave de controlo da filial: sem filial é
+  // "Negativo!" e, por filial, só pode existir uma campanha aberta (CREATED
+  // também reserva a unidade). A guarda corre antes de gravar qualquer coisa.
+  const filialObrigatoria = requireCampaignFilial(unitVal);
+  assertNoOpenCampaign(await listLocalCampaigns(tenantVal), {
+    tenantid: tenantVal,
+    filial: filialObrigatoria
+  });
 
   // 1. DADO LOCAL PRIMEIRO (Soberania SQL)
   const newCampaign = {
     ...campaign,
     id: campaign.id || generateUUID(),
     tenantid: tenantVal,
-    unit_id: String(unitVal || '').trim(),
-    filial: String(unitVal || '').trim(),
+    unit_id: filialObrigatoria,
+    filial: filialObrigatoria,
     created_at: new Date().toISOString(),
     status: campaign.status || 'ACTIVE'
   } as InventoryCampaign;
@@ -3190,8 +3290,8 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
       description: newCampaign.description,
       status: newCampaign.status,
       tenantid: tenantVal,
-      filial: unitVal,
-      unit_id: unitVal,
+      filial: filialObrigatoria,
+      unit_id: filialObrigatoria,
       created_by: campaign.created_by,
       start_date: newCampaign.start_date || new Date().toISOString()
     };
@@ -3244,6 +3344,16 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
         filial: String(rowExtras.filial || rowExtras._unitid || '')
       };
 
+      // Fase 1 — ativar a campanha também exige filial e respeita a regra de
+      // uma só campanha aberta por filial (a própria campanha não conta).
+      if (status === CampaignStatus.ACTIVE) {
+        assertNoOpenCampaign(await listLocalCampaigns(currentCampaign.tenantid), {
+          tenantid: currentCampaign.tenantid,
+          filial: requireCampaignFilial(currentCampaign.filial),
+          excludeId: campaignId
+        });
+      }
+
       const updated: InventoryCampaign = { 
         ...currentCampaign, 
         status, 
@@ -3268,6 +3378,9 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
       localFound = true;
     }
   } catch (err) {
+    // Guarda de filial (Fase 1): o bloqueio é regra de negócio e tem de chegar
+    // ao ecrã com a mensagem do domínio, não como falha silenciosa do SQLite.
+    if (err instanceof CampaignGovernanceError) throw err;
     logger.error(">>> [SQLite] Erro ao atualizar status localmente:", err);
     return false;
   }

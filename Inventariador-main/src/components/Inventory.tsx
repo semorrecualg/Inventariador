@@ -28,7 +28,7 @@ import { normalizeKey } from '../utils/schema';
 import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
-import { findBatchGroup, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
+import { findBatchGroup, findBatchGroupBySearch, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
 import {
   buildCopyForNewItem,
   getDeviceCode,
@@ -1204,31 +1204,26 @@ const Inventory: React.FC<InventoryProps> = ({
   const handleConfirmSearchBatch = () => {
     const pendingInSearch = filteredAssets.filter(a => !a._conferido);
     if (pendingInSearch.length === 0) return;
-    const grupo = findBatchGroup(pendingInSearch[0], allAssets, selectedUnit || activeFilialKey);
-    const alvo = grupo.length >= 2 ? grupo : pendingInSearch;
-    setBatchGroup(alvo);
-    setBatchCheckedIds(new Set(alvo.map(a => String(a.id)).filter(Boolean)));
+    // Lote = mesma etiqueta consultada, por CONTER o código digitado (`0058`
+    // acha `A 005830`) e em qualquer endereço. Sem 2+ pendentes dessa etiqueta
+    // não há lote: a lista continua a mostrar o resultado, mas não confere em bloco.
+    const grupo = findBatchGroupBySearch(committedSearch, allAssets, selectedUnit || activeFilialKey);
+    if (grupo.length < 2) return;
+    setBatchGroup(grupo);
+    setBatchCheckedIds(new Set(grupo.map(a => String(a.id)).filter(Boolean)));
     setCommittedSearch('');
     setDisplayValue('');
   };
 
   /**
-   * Leitura digitada: quando o código digitado forma lote (plaqueta ou registro
-   * repetido), abre o modal automaticamente — antes o resultado só aparecia
-   * como lista filtrada e o auditor tinha de conferir um a um.
+   * Leitura digitada: quando o código digitado casa (por conter) com a ETIQUETA
+   * de 2+ pendentes, abre o modal com todos eles — inclusive os que estão em
+   * outro endereço, que passam a ser conferidos no endereço do inventário.
+   * Busca por registro não abre lote: registro repetido junta plaquetas
+   * diferentes, que é justamente o que não pode entrar no mesmo lote.
    */
   useEffect(() => {
-    const term = normalizeKeyFast(committedSearch || '');
-    if (!term) return;
-    const daUnidade = allAssets.filter(a => belongsToUnit(a, activeFilialKey));
-    const alvo = daUnidade.find(a => {
-      if (a._conferido) return false;
-      const etq = normalizeKeyFast(a.etiqueta || '');
-      const reg = normalizeKeyFast(a.registro || '');
-      return etq === term || reg === term;
-    });
-    if (!alvo) return;
-    const grupo = findBatchGroup(alvo, allAssets, selectedUnit || activeFilialKey);
+    const grupo = findBatchGroupBySearch(committedSearch || '', allAssets, selectedUnit || activeFilialKey);
     if (grupo.length < 2) return;
     setBatchGroup(grupo);
     setBatchCheckedIds(new Set(grupo.map(a => String(a.id)).filter(Boolean)));
@@ -1575,7 +1570,7 @@ const Inventory: React.FC<InventoryProps> = ({
           document.body
         )}
 
-      {/* Modal de Conferência em Lote — plaqueta OU registro repetido (clique e leitura) */}
+      {/* Modal de Conferência em Lote — mesma ETIQUETA consultada (clique e leitura) */}
       {batchGroup.length > 0 && createPortal(
         <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md animate-fadeIn">
           <div className="bg-white w-full max-w-md rounded-[2rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn flex flex-col max-h-[90vh]">
