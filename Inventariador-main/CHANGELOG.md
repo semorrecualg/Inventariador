@@ -82,6 +82,23 @@ Supabase `public` (26/26 colunas canônicas) e com risco zero de perda de dados.
 - **Testes:** 185 (novos `migrationV5`, `assetRepository.where`; baseline `schemaBaseline`
   atualizado para verno 5). Gate: `tsc -b --noEmit` ✓ · `vitest run` 185/185 ✓.
 
+## [2.7.6] — 2026-11-17
+
+### Envio à nuvem deixa de recusar etiquetas repetidas da planilha
+
+- **Guarda por registo, não por identidade:** a tabela `assets` guarda uma linha
+  por `(tenantid, primarykey)`. Duas linhas da planilha com a mesma etiqueta
+  (`tenantid + filial + etiqueta`) são registos distintos e passam a subir as
+  duas; o bloqueio fica reservado ao MESMO registo repetido no payload, que o
+  upsert por `(tenantid, id)` não consegue gravar (ON CONFLICT ... cannot affect
+  row a second time).
+- **Identidade repetida vira diagnóstico:** o Gestor de Base continua a mostrar
+  quantas linhas partilham a etiqueta e o terminal avisa uma vez, mas o envio
+  segue — exigir "limpar cópias" era pedir para apagar registos.
+- **Identidade já presente na nuvem com outro `primarykey`** deixa de recusar o
+  lote (passa a aviso): a segunda linha legítima da planilha chegava depois da
+  primeira e ficava bloqueada.
+
 ## [2.7.5] — 2026-11-16
 
 ### Summary

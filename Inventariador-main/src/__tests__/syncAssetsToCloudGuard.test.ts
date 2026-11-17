@@ -1,19 +1,17 @@
 // @vitest-environment jsdom
 // ============================================================================
-// syncAssetsToCloudGuard.test.ts — a guarda de cópias tem de valer em TODOS os
-// caminhos de envio, não só no botão do Gestor. `syncAssetsToCloud` é o ponto
-// único por onde passam o autosave de fundo, o push delta de boot, a fila da
-// nuvem e os envios de uma linha, por isso é aqui que os testes a prendem.
+// syncAssetsToCloudGuard.test.ts — a guarda de envio tem de valer em TODOS os
+// caminhos (autosave de fundo, push delta de boot, fila da nuvem, botão do
+// Gestor), por isso é em `syncAssetsToCloud` que estes testes a prendem.
 //
-// Duas defesas:
-//  1. payload com duas linhas da mesma identidade (base local com cópias);
-//  2. linha cuja identidade já existe na nuvem com outro `primarykey` — o caso
-//     que o payload sozinho não vê, porque o delta traz uma única linha.
+// Novo critério: a nuvem guarda uma linha por `(tenantid, primarykey)`. Duas
+// linhas da planilha com a mesma etiqueta são registos distintos e sobem as
+// duas; só o MESMO registo repetido no payload bloqueia.
 // ============================================================================
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type * as SupabaseService from '../services/supabaseService';
 import type { Asset } from '../types';
-import { CloudPushBlockedError, CloudPushIdentityConflictError } from '../utils/cloudPushGuard';
+import { CloudPushBlockedError } from '../utils/cloudPushGuard';
 
 vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
@@ -66,9 +64,10 @@ const collectBlocked = () => {
   return { messages, stop: () => window.removeEventListener('gbr_cloud_push_blocked', handler) };
 };
 
-const duplicatePayload = () => [asset({ id: 'A', primarykey: 'A' }), asset({ id: 'B', primarykey: 'B' })];
+/** O mesmo registo (tenantid + primarykey) duas vezes no payload. */
+const repeatedRecordPayload = () => [asset({ id: 'A', primarykey: 'A' }), asset({ id: 'A', primarykey: 'A', etiqueta: '007999' })];
 
-describe('syncAssetsToCloud — guarda de cópias locais', () => {
+describe('syncAssetsToCloud — guarda de registo repetido', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
@@ -89,11 +88,11 @@ describe('syncAssetsToCloud — guarda de cópias locais', () => {
     vi.restoreAllMocks();
   });
 
-  it('recusa o payload com o mesmo tenantid+filial+etiqueta e não chama a nuvem', async () => {
+  it('recusa o payload com o mesmo primarykey duas vezes e não chama a nuvem', async () => {
     const stubs = stubTables();
     const blocked = collectBlocked();
 
-    await expect(syncAssetsToCloud(duplicatePayload(), 'CICOPAL')).rejects.toBeInstanceOf(
+    await expect(syncAssetsToCloud(repeatedRecordPayload(), 'CICOPAL')).rejects.toBeInstanceOf(
       CloudPushBlockedError
     );
 
@@ -102,30 +101,15 @@ describe('syncAssetsToCloud — guarda de cópias locais', () => {
     expect(stubs.select).not.toHaveBeenCalled(); // nem chega a consultar a nuvem
     expect(blocked.messages).toHaveLength(1);
     expect(blocked.messages[0]).toContain('ENVIO BLOQUEADO');
-    expect(blocked.messages[0]).toContain('1 cópia(s) repetida(s) em 1 grupo(s)');
-  });
-
-  it('bloqueia também a cópia introduzida por caixa/espaços diferentes', async () => {
-    const stubs = stubTables();
-
-    await expect(
-      syncAssetsToCloud(
-        [
-          asset({ id: 'A', primarykey: 'A', filial: '010101 CICOPAL GO' }),
-          asset({ id: 'B', primarykey: 'B', filial: '010101  cicopal-go', tenantid: ' cicopal ' })
-        ],
-        'CICOPAL'
-      )
-    ).rejects.toBeInstanceOf(CloudPushBlockedError);
-    expect(stubs.upsert).not.toHaveBeenCalled();
+    expect(blocked.messages[0]).toContain('1 linha(s) repetida(s) do mesmo registo em 1 primarykey(s)');
   });
 
   it('avisa uma só vez por episódio, mesmo com a fila a tentar de novo', async () => {
     stubTables();
     const blocked = collectBlocked();
 
-    await expect(syncAssetsToCloud(duplicatePayload(), 'CICOPAL')).rejects.toBeInstanceOf(CloudPushBlockedError);
-    await expect(syncAssetsToCloud(duplicatePayload(), 'CICOPAL')).rejects.toBeInstanceOf(CloudPushBlockedError);
+    await expect(syncAssetsToCloud(repeatedRecordPayload(), 'CICOPAL')).rejects.toBeInstanceOf(CloudPushBlockedError);
+    await expect(syncAssetsToCloud(repeatedRecordPayload(), 'CICOPAL')).rejects.toBeInstanceOf(CloudPushBlockedError);
     expect(blocked.messages).toHaveLength(1);
     blocked.stop();
   });
@@ -134,39 +118,31 @@ describe('syncAssetsToCloud — guarda de cópias locais', () => {
     const stubs = stubTables();
     const blocked = collectBlocked();
 
-    await expect(syncAssetsToCloud(duplicatePayload(), 'CICOPAL')).rejects.toBeInstanceOf(CloudPushBlockedError);
-    // Limpeza feita: um payload limpo sobe e fecha o episódio.
+    await expect(syncAssetsToCloud(repeatedRecordPayload(), 'CICOPAL')).rejects.toBeInstanceOf(CloudPushBlockedError);
     await syncAssetsToCloud([asset({ id: 'C', primarykey: 'C', etiqueta: '009999' })], 'CICOPAL');
-    await expect(syncAssetsToCloud(duplicatePayload(), 'CICOPAL')).rejects.toBeInstanceOf(CloudPushBlockedError);
+    await expect(syncAssetsToCloud(repeatedRecordPayload(), 'CICOPAL')).rejects.toBeInstanceOf(CloudPushBlockedError);
 
     blocked.stop();
     expect(stubs.upsert).toHaveBeenCalledTimes(1);
     expect(blocked.messages).toHaveLength(2);
   });
 
-  it('avisa de novo quando os números do bloqueio mudam', async () => {
-    stubTables();
-    const blocked = collectBlocked();
+  it('deixa subir duas linhas da planilha com a mesma etiqueta', async () => {
+    const stubs = stubTables();
 
-    await expect(syncAssetsToCloud(duplicatePayload(), 'CICOPAL')).rejects.toBeInstanceOf(CloudPushBlockedError);
-    await expect(
-      syncAssetsToCloud(
-        [
-          asset({ id: 'A', primarykey: 'A' }),
-          asset({ id: 'B', primarykey: 'B' }),
-          asset({ id: 'C', primarykey: 'C', etiqueta: '007223' }),
-          asset({ id: 'D', primarykey: 'D', etiqueta: '007223' })
-        ],
-        'CICOPAL'
-      )
-    ).rejects.toBeInstanceOf(CloudPushBlockedError);
+    const result = await syncAssetsToCloud(
+      [
+        asset({ id: '01010100000003480050', primarykey: '01010100000003480050' }),
+        asset({ id: '01010100000003480051', primarykey: '01010100000003480051' })
+      ],
+      'CICOPAL'
+    );
 
-    blocked.stop();
-    expect(blocked.messages).toHaveLength(2);
-    expect(blocked.messages[1]).toContain('2 cópia(s) repetida(s) em 2 grupo(s)');
+    expect(stubs.upsert).toHaveBeenCalledTimes(1);
+    expect(result.sort()).toEqual(['01010100000003480050', '01010100000003480051']);
   });
 
-  it('deixa passar um payload sem cópias (push delta de uma linha continua a subir)', async () => {
+  it('deixa passar um payload sem repetições (push delta de uma linha)', async () => {
     const stubs = stubTables();
 
     const result = await syncAssetsToCloud([asset({ id: 'A', primarykey: 'A' })], 'CICOPAL');
@@ -216,37 +192,20 @@ describe('syncAssetsToCloud — identidade já existente na nuvem com outro prim
     tenantid: 'CICOPAL',
     filial: '010101 CICOPAL GO',
     etiqueta: '007222',
-    primarykey: 'KEEPER-NUVEM',
+    primarykey: 'PRIMEIRA-LINHA',
     ...over
   });
 
-  it('recusa a linha suja que criaria uma segunda linha para o mesmo ativo', async () => {
+  it('envia a segunda linha da mesma etiqueta em vez de a recusar', async () => {
     const stubs = stubTables([cloudRow()]);
-    const blocked = collectBlocked();
 
-    await expect(
-      syncAssetsToCloud([asset({ id: 'COPIA-LOCAL', primarykey: 'COPIA-LOCAL' })], 'CICOPAL')
-    ).rejects.toBeInstanceOf(CloudPushIdentityConflictError);
+    const result = await syncAssetsToCloud(
+      [asset({ id: 'SEGUNDA-LINHA', primarykey: 'SEGUNDA-LINHA' })],
+      'CICOPAL'
+    );
 
-    blocked.stop();
-    expect(stubs.upsert).not.toHaveBeenCalled();
-    expect(blocked.messages).toHaveLength(1);
-    expect(blocked.messages[0]).toContain('já presente na nuvem sob outro primarykey');
-  });
-
-  it('mostra a identidade e os dois primarykeys no aviso', async () => {
-    stubTables([cloudRow()]);
-
-    try {
-      await syncAssetsToCloud([asset({ id: 'COPIA-LOCAL', primarykey: 'COPIA-LOCAL' })], 'CICOPAL');
-      throw new Error('devia ter bloqueado');
-    } catch (err) {
-      expect(err).toBeInstanceOf(CloudPushIdentityConflictError);
-      const lines = (err as CloudPushIdentityConflictError).lines.join(' | ');
-      expect(lines).toContain('010101 CICOPAL GO · etiqueta 007222');
-      expect(lines).toContain('local COPIA-LOCAL');
-      expect(lines).toContain('nuvem KEEPER-NUVEM');
-    }
+    expect(stubs.upsert).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(['SEGUNDA-LINHA']);
   });
 
   it('deixa passar a linha que é o próprio keeper da nuvem (upsert normal)', async () => {
@@ -256,15 +215,6 @@ describe('syncAssetsToCloud — identidade já existente na nuvem com outro prim
 
     expect(stubs.upsert).toHaveBeenCalledTimes(1);
     expect(result).toEqual(['A']);
-  });
-
-  it('compara a identidade como a limpeza (caixa, acentos, espaços)', async () => {
-    const stubs = stubTables([cloudRow({ tenantid: ' cicopal ', filial: '010101  cicopal-go' })]);
-
-    await expect(
-      syncAssetsToCloud([asset({ id: 'COPIA', primarykey: 'COPIA' })], 'CICOPAL')
-    ).rejects.toBeInstanceOf(CloudPushIdentityConflictError);
-    expect(stubs.upsert).not.toHaveBeenCalled();
   });
 
   it('não penaliza o delta quando a consulta de identidade falha (fail-open)', async () => {
@@ -298,20 +248,5 @@ describe('syncAssetsToCloud — identidade já existente na nuvem com outro prim
 
     expect(stubs.upsert).toHaveBeenCalledTimes(1);
     expect(result.sort()).toEqual(['PAI', 'U1']);
-  });
-
-  it('avisa uma só vez por episódio também no conflito de identidade', async () => {
-    stubTables([cloudRow()]);
-    const blocked = collectBlocked();
-
-    await expect(
-      syncAssetsToCloud([asset({ id: 'COPIA', primarykey: 'COPIA' })], 'CICOPAL')
-    ).rejects.toBeInstanceOf(CloudPushIdentityConflictError);
-    await expect(
-      syncAssetsToCloud([asset({ id: 'COPIA', primarykey: 'COPIA' })], 'CICOPAL')
-    ).rejects.toBeInstanceOf(CloudPushIdentityConflictError);
-
-    blocked.stop();
-    expect(blocked.messages).toHaveLength(1);
   });
 });

@@ -21,7 +21,13 @@ import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpo
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
-import { checkCloudPushGuard, findIdentityConflicts, CloudPushBlockedError, CloudPushIdentityConflictError } from '../utils/cloudPushGuard';
+import {
+  checkCloudPushGuard,
+  findIdentityConflicts,
+  formatCloudPushIdentityConflicts,
+  formatIdentityCopiesNotice,
+  CloudPushBlockedError
+} from '../utils/cloudPushGuard';
 import type { DedupRow } from '../utils/dedupAssets';
 import { assertCampaignHasNoAuditWork, assertNoOpenCampaign, CampaignGovernanceError, requireCampaignFilial } from '../utils/campaignGuard';
 
@@ -968,9 +974,23 @@ let assetsIdMode: 'key' | 'uuid' = 'key';
  */
 let lastCloudPushBlockedNoticeKey: string | null = null;
 
-/** Rearranque do aviso (fim de episódio, testes). */
+/** Ultimo aviso informativo de identidade repetida / ja existente na nuvem. */
+let lastIdentityNoticeKey: string | null = null;
+
+/** Rearranque do aviso (fim de episodio, testes). */
 export const resetCloudPushBlockedNotice = (): void => {
   lastCloudPushBlockedNoticeKey = null;
+  lastIdentityNoticeKey = null;
+};
+
+/**
+ * Aviso INFORMATIVO, uma vez por episodio: linhas distintas da planilha com a
+ * mesma etiqueta seguem para a nuvem e o terminal diz que foram vistas.
+ */
+const announceIdentityOnce = (lines: string[]): void => {
+  if (lines.length === 0 || lines[0] === lastIdentityNoticeKey) return;
+  lines.forEach((line) => logger.warn(`>>> [Supabase] ${line}`));
+  lastIdentityNoticeKey = lines[0];
 };
 
 
@@ -1043,10 +1063,12 @@ const fetchCloudIdentities = async (rows: Record<string, unknown>[]): Promise<Cl
 };
 
 /**
- * Recusa o lote antes do upsert quando a identidade já está na nuvem com outro
- * `primarykey`: gravar criaria uma segunda linha para o mesmo ativo.
+ * Reporta (sem recusar) as linhas cuja identidade ja esta na nuvem com outro
+ * `primarykey`. Duas linhas legitimas da planilha para a mesma etiqueta caem
+ * aqui sempre que a primeira ja subiu; recusar a segunda seria perder registo.
+ * A nuvem guarda uma linha por `(tenantid, primarykey)`, portanto convivem.
  */
-const assertCloudIdentities = async (rows: Record<string, unknown>[]): Promise<void> => {
+const warnIdentityConflicts = async (rows: Record<string, unknown>[]): Promise<void> => {
   const cloudRows = await fetchCloudIdentities(rows);
   if (cloudRows.length === 0) return;
   const conflicts = findIdentityConflicts(
@@ -1054,9 +1076,7 @@ const assertCloudIdentities = async (rows: Record<string, unknown>[]): Promise<v
     cloudRows as unknown as DedupRow[]
   );
   if (conflicts.length === 0) return;
-  const error = new CloudPushIdentityConflictError(conflicts);
-  announceBlockedOnce(error.lines);
-  throw error;
+  announceIdentityOnce(formatCloudPushIdentityConflicts(conflicts));
 };
 
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<string[]> => {
@@ -1070,17 +1090,20 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   // delta de boot (`pushLocalChanges`), a fila da nuvem (`flushCloudQueue`) e
   // os envios de uma linha (conferência, unitização, restauro, exclusão).
   //
-  // A tabela `assets` guarda uma linha por tenantid + filial + etiqueta. Um
-  // payload com duas linhas da mesma identidade (`primarykey` diferentes) grava
-  // as duas — é assim que as 1.195 cópias voltam para todos os dispositivos,
-  // uma linha de cada vez, mesmo com a nuvem já consolidada. O envio é recusado
-  // antes de tocar na rede; nada é perdido, os ativos ficam por sincronizar.
+  // A tabela `assets` guarda uma linha por (tenantid, primarykey). Duas linhas da
+  // planilha com a mesma etiqueta tem `primarykey` diferentes e sao registos
+  // distintos: sobem as duas. O que o envio recusa e o MESMO registo repetido no
+  // payload - o upsert por (tenantid, id) aborta o lote com "ON CONFLICT DO
+  // UPDATE command cannot affect row a second time". Nada e enviado e os ativos
+  // ficam por sincronizar ate o payload vir sem a chave repetida.
   const cloudPushGuard = checkCloudPushGuard(assets as unknown as DedupRow[]);
   if (cloudPushGuard.blocked) {
     announceBlockedOnce(cloudPushGuard.message);
-    // Erro de política: os chamadores fazem recuo em vez de nova tentativa.
-    throw new CloudPushBlockedError(cloudPushGuard.audit);
+    // Erro de politica: os chamadores fazem recuo em vez de nova tentativa.
+    throw new CloudPushBlockedError(cloudPushGuard.duplicates);
   }
+  // Etiquetas repetidas na planilha: informativo, o envio segue.
+  announceIdentityOnce(formatIdentityCopiesNotice(cloudPushGuard.audit));
 
   if (!supabase || !navigator.onLine) {
     logger.warn('>>> [Supabase] Sincronização ignorada: Sem conexão ou Supabase não configurado.');
@@ -1283,7 +1306,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     // Identidade na nuvem: um `primarykey` novo para uma identidade existente é
     // uma cópia — o upsert por (tenantid, id) não a impede. A consulta é
     // limitada às etiquetas deste lote e corre antes de qualquer escrita.
-    await assertCloudIdentities(rows);
+    await warnIdentityConflicts(rows);
     const lote = batchIndex + 1;
 
     try {
