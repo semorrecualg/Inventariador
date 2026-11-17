@@ -88,11 +88,16 @@ describe('BiometricRegistration — Fase 2', () => {
 
   it('degrada para o fallback quando o suporte desaparece depois da decisão', async () => {
     mocks.isBiometricSupported.mockResolvedValue(false);
-    const { onSkip } = await renderScreen({ mode: 'required' });
+    // A política já tinha decidido `credential-required` (aparelho "capaz"):
+    // ao degradar, a tela NÃO pode repetir esse motivo — é falta de hardware.
+    const { onSkip } = await renderScreen({ mode: 'required', reason: 'credential-required' });
 
     const continuar = await waitFor(() =>
       screen.getByRole('button', { name: /Continuar sem biometria neste aparelho/i })
     );
+    expect(screen.getByText(/não tem autenticador biométrico disponível/)).toBeTruthy();
+    expect(screen.queryByText(/Cadastro obrigatório neste aparelho/)).toBeNull();
+
     fireEvent.click(continuar);
     expect(onSkip).toHaveBeenCalledTimes(1);
     expect(onSkip).toHaveBeenCalledWith('device-without-authenticator');

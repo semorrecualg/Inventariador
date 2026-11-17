@@ -66,7 +66,13 @@ const BiometricRegistration: React.FC<BiometricRegistrationProps> = ({
   // depois da decisão, a tela degrada para o fallback em vez de prender o
   // utilizador ou de fingir um cadastro impossível.
   const fallbackMode = mode === 'fallback' || supported === false;
-  const fallbackReason = reason ?? DEFAULT_FALLBACK_REASON;
+  // Se a política pediu o cadastro (`required`) mas o aparelho afinal não
+  // verifica biometria, o motivo real é a falta de hardware — não o
+  // `credential-required` decidido antes de o suporte ser conhecido.
+  const fallbackReason: BiometricReason =
+    mode === 'required' && supported === false
+      ? DEFAULT_FALLBACK_REASON
+      : reason ?? DEFAULT_FALLBACK_REASON;
 
   /** Dispensa explícita — sempre com motivo, para o App auditor. */
   const requestSkip = (skipReason: BiometricReason) => {
