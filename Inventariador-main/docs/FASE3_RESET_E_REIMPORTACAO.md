@@ -30,7 +30,27 @@ psql "$SUPABASE_DB_URL" -f scripts/reset-base-tenant.sql
 
 Em qualquer dos casos o contrato está no próprio ficheiro (linha `CONTRATO`) —
 não há `-v tenantid=` a passar. Contrato vazio aborta sem apagar nada, e a
-mensagem `DEPOIS` tem de mostrar `ativos 0 · campanhas 0 · laudos 0`.
+mensagem `DEPOIS` tem de mostrar `ativos 0 · campanhas 0 · laudos 0 · logs 0`.
+
+**Ordem importa:** os ativos são apagados **antes** dos logs. Um trigger de
+auditoria em `public.assets` grava uma linha em `asset_logs` para cada ativo
+apagado; limpar os logs primeiro fazia essa auditoria do próprio reset voltar a
+encher a tabela (a primeira execução deixou 11.441 logs e zero ativos). A
+execução termina com a contagem de logs já depois do trigger, e o script é
+idempotente: rodar de novo sobre um resíduo de logs limpa-os (sem ativos não há
+trigger para disparar).
+
+Se a mensagem `LOGS RESTANTES` aparecer, é RLS a bloquear o `DELETE` — o
+`SELECT` passa e o `DELETE` apaga 0 linhas sem erro. Nesse caso rode como dono
+da tabela e desative a RLS dentro da mesma transação:
+
+```sql
+begin;
+alter table public.asset_logs disable row level security;
+-- cole aqui o script
+alter table public.asset_logs enable row level security;
+commit;
+```
 
 ## 3. Reset da base local
 
