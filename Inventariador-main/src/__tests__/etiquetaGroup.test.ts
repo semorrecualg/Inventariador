@@ -12,6 +12,7 @@ import {
   addressKey,
   batchLabel,
   findBatchGroup,
+  findBatchGroupBySearch,
   isBaixado,
   isConferido,
   plaquetaKey,
@@ -121,6 +122,49 @@ describe('findBatchGroup — clique e leitura passam a usar a mesma regra', () =
 
     const repetido = findBatchGroup(asset(), [asset(), asset({ id: 'A2' })], unidade);
     expect(repetido.filter(a => a.id === 'A1')).toHaveLength(1);
+  });
+});
+
+describe('findBatchGroupBySearch — busca por trecho da etiqueta', () => {
+  it('acha a etiqueta por conter o trecho digitado e junta irmãos de outros endereços', () => {
+    const grupo = findBatchGroupBySearch('005830', [
+      asset({ id: 'A1', etiqueta: 'A 005830', endereco: 'RUA A' }),
+      asset({ id: 'A2', etiqueta: 'A 005830', endereco: 'RUA B' }),
+      asset({ id: 'A3', etiqueta: 'A 005831', endereco: 'RUA C' })
+    ], unidade);
+    // Traz os dois do endereço do inventário e o de outro endereço; o 005831 fica de fora.
+    expect(grupo.map(a => a.id)).toEqual(['A1', 'A2']);
+  });
+
+  it('ignora separadores do código digitado', () => {
+    const grupo = findBatchGroupBySearch('a0058', [
+      asset({ id: 'A1', etiqueta: 'A 005830' }),
+      asset({ id: 'A2', etiqueta: 'A-005830' })
+    ], unidade);
+    expect(grupo.map(a => a.id)).toEqual(['A1', 'A2']);
+  });
+
+  it('não abre lote quando o trecho casa com etiquetas diferentes', () => {
+    expect(findBatchGroupBySearch('005', [
+      asset({ id: 'A1', etiqueta: 'A 005830' }),
+      asset({ id: 'A2', etiqueta: 'B 005900' })
+    ], unidade)).toEqual([]);
+  });
+
+  it('busca por registro não monta lote de plaquetas diferentes', () => {
+    expect(findBatchGroupBySearch('FISIC2020', [
+      asset({ id: 'A1', etiqueta: 'A 005830', registro: 'FISIC2020' }),
+      asset({ id: 'A2', etiqueta: 'FISIC2020', registro: 'FISIC2020' })
+    ], unidade)).toEqual([]);
+  });
+
+  it('ignora conferidos, baixados e de outra unidade', () => {
+    expect(findBatchGroupBySearch('005830', [
+      asset({ id: 'A1', etiqueta: 'A 005830' }),
+      asset({ id: 'A2', etiqueta: 'A 005830', _conferido: 1 }),
+      asset({ id: 'A3', etiqueta: 'A 005830', status: 'BAIXA' }),
+      asset({ id: 'A4', etiqueta: 'A 005830', filial: '010105 CICOPAL PA' })
+    ], unidade)).toEqual([]);
   });
 });
 

@@ -28,7 +28,7 @@ import { normalizeKey } from '../utils/schema';
 import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
-import { findBatchGroup, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
+import { findBatchGroup, findBatchGroupBySearch, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
 import {
   buildCopyForNewItem,
   getDeviceCode,
@@ -1204,9 +1204,10 @@ const Inventory: React.FC<InventoryProps> = ({
   const handleConfirmSearchBatch = () => {
     const pendingInSearch = filteredAssets.filter(a => !a._conferido);
     if (pendingInSearch.length === 0) return;
-    // Lote = mesma etiqueta consultada. Sem 2+ pendentes com essa plaqueta não
-    // há lote: a busca por registro continua a listar, mas não confere em bloco.
-    const grupo = findBatchGroup(pendingInSearch[0], allAssets, selectedUnit || activeFilialKey);
+    // Lote = mesma etiqueta consultada, por CONTER o código digitado (`0058`
+    // acha `A 005830`) e em qualquer endereço. Sem 2+ pendentes dessa etiqueta
+    // não há lote: a lista continua a mostrar o resultado, mas não confere em bloco.
+    const grupo = findBatchGroupBySearch(committedSearch, allAssets, selectedUnit || activeFilialKey);
     if (grupo.length < 2) return;
     setBatchGroup(grupo);
     setBatchCheckedIds(new Set(grupo.map(a => String(a.id)).filter(Boolean)));
@@ -1215,21 +1216,14 @@ const Inventory: React.FC<InventoryProps> = ({
   };
 
   /**
-   * Leitura digitada: quando o código digitado é a ETIQUETA de 2+ pendentes,
-   * abre o modal automaticamente. Busca por registro não abre lote — registro
-   * repetido junta plaquetas diferentes, que é justamente o que não pode entrar
-   * no mesmo lote.
+   * Leitura digitada: quando o código digitado casa (por conter) com a ETIQUETA
+   * de 2+ pendentes, abre o modal com todos eles — inclusive os que estão em
+   * outro endereço, que passam a ser conferidos no endereço do inventário.
+   * Busca por registro não abre lote: registro repetido junta plaquetas
+   * diferentes, que é justamente o que não pode entrar no mesmo lote.
    */
   useEffect(() => {
-    const term = normalizeKeyFast(committedSearch || '');
-    if (!term) return;
-    const daUnidade = allAssets.filter(a => belongsToUnit(a, activeFilialKey));
-    const alvo = daUnidade.find(a => {
-      if (a._conferido) return false;
-      return normalizeKeyFast(a.etiqueta || '') === term;
-    });
-    if (!alvo) return;
-    const grupo = findBatchGroup(alvo, allAssets, selectedUnit || activeFilialKey);
+    const grupo = findBatchGroupBySearch(committedSearch || '', allAssets, selectedUnit || activeFilialKey);
     if (grupo.length < 2) return;
     setBatchGroup(grupo);
     setBatchCheckedIds(new Set(grupo.map(a => String(a.id)).filter(Boolean)));

@@ -110,6 +110,47 @@ export const findBatchGroup = (
   return group.length >= 2 ? group : [];
 };
 
+/**
+ * Lote a partir do código CONSULTADO na busca (digitado ou lido): todos os
+ * pendentes da unidade cuja ETIQUETA **contém** o termo — não precisa ser
+ * idêntica (`0058` acha `A 005830`, `A005830` também).
+ *
+ * Traz para a tela em andamento os irmãos que estão em OUTROS endereços: o lote
+ * é conferido no endereço do inventário e cada um cai como ADOTADO.
+ *
+ * Só é lote quando todos os encontrados têm a MESMA etiqueta; um termo curto
+ * que casa com etiquetas diferentes devolve `[]` e a lista fica para o auditor
+ * escolher qual grupo abrir.
+ */
+/**
+ * Comparação do campo ETIQUETA: ignora espaços e separadores, como a busca do
+ * ecrã (`A 005830` e `a0058` casam).
+ */
+const buscaKey = (value: unknown): string => normalizeKey(value || '').replace(/[^A-Z0-9]/g, '');
+
+export const findBatchGroupBySearch = (
+  term: string,
+  all: Asset[],
+  unidadeAtual?: string | null
+): Asset[] => {
+  const alvo = buscaKey(term);
+  if (!alvo) return [];
+
+  const unidade = normalizeKey(unidadeAtual || '');
+  const matches = all.filter((candidate) => {
+    if (isBaixado(candidate) || isConferido(candidate)) return false;
+    const unidadeCandidata = unitKey(candidate);
+    if (unidade && unidadeCandidata && unidadeCandidata !== unidade) return false;
+    const etiqueta = buscaKey(candidate.etiqueta);
+    return !!etiqueta && !KEY_PLACEHOLDERS.has(etiqueta) && etiqueta.includes(alvo);
+  });
+  if (matches.length < 2) return [];
+
+  const etiqueta = plaquetaKey(matches[0]);
+  if (!etiqueta || matches.some((candidate) => plaquetaKey(candidate) !== etiqueta)) return [];
+  return matches;
+};
+
 /** Separa quem já está no endereço do inventário de quem vem de outro endereço. */
 export const splitByAddress = (
   group: Asset[],
