@@ -82,6 +82,32 @@ Supabase `public` (26/26 colunas canônicas) e com risco zero de perda de dados.
 - **Testes:** 185 (novos `migrationV5`, `assetRepository.where`; baseline `schemaBaseline`
   atualizado para verno 5). Gate: `tsc -b --noEmit` ✓ · `vitest run` 185/185 ✓.
 
+## [2.7.8] — 2026-11-17
+
+### Relatório de cópias deixa de contar linhas sem etiqueta como identidades
+
+- **Duas contas no `[DEDUP]`:** o diagnóstico do Gestor de Base passa a mostrar
+  `identidades distintas` (`tenantid + filial + etiqueta`) numa linha e, noutra,
+  as `linhas sem etiqueta`, que ficam fora do agrupamento e entram uma a uma na
+  projeção de linhas. Antes o total de linhas (11 832) era apresentado como se
+  todas fossem identidades — são 11 437 identidades + 395 sem etiqueta.
+- **Sem alteração de dados:** continua a ser leitura pura; nenhum registo é
+  apagado e a contagem de cópias não muda.
+
+## [2.7.7] — 2026-11-17
+
+### Protocolo SRE com versão fixa e placar das duas bases
+
+- **Versão na primeira linha:** o Gestor de Base de Dados abre com
+  `INVENTARIADOR v2.7.7 · SRE · GESTOR DE BASE DE DADOS` na tela e no terminal
+  SRE; a mesma linha vai à frente do log copiado e do pacote de diagnóstico
+  exportado, para que chat e ticket identifiquem sempre o build.
+- **Placar LOCAL × SUPABASE (online):** um cartão mostra o total de registos do
+  contrato no aparelho e o total lido agora na tabela `assets` da Nuvem
+  (`count: exact`, só leitura), com estado `ONLINE`/`OFFLINE`/`NÃO CONFIGURADO`.
+  O botão `ATUALIZAR` repete a consulta; nada é enviado, alterado ou apagado, e
+  os dois totais seguem também no log copiado e no pacote `.md`.
+
 ## [2.7.6] — 2026-11-17
 
 ### Envio à nuvem deixa de recusar etiquetas repetidas da planilha

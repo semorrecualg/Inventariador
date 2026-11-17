@@ -1417,6 +1417,28 @@ export const syncAssetsToCloudAndMark = async (
 };
 
 /**
+ * Placar do SRE: quantos registos existem HOJE na Nuvem (Supabase) para o
+ * contrato ativo. É só leitura (`head: true`, `count: exact`) — não envia, não
+ * altera e não apaga nada. Sem contrato, conta a tabela inteira (dono global).
+ */
+export const countCloudAssets = async (tenantid?: string | null): Promise<number> => {
+  if (isInternalMode) {
+    throw new SupabaseNetworkException('Supabase não configurado neste ambiente.');
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new SupabaseNetworkException('Sem conexão para consultar a Nuvem.');
+  }
+  const tenant = String(tenantid ?? '').trim().toUpperCase();
+  let query = supabase.from('assets').select('id', { count: 'exact', head: true });
+  if (tenant) query = query.eq('tenantid', tenant);
+  const { count, error } = await query;
+  if (error) {
+    throw new SupabaseNetworkException(`Falha ao contar a base da Nuvem: ${error.message || 'Erro de esquema.'}`);
+  }
+  return count || 0;
+};
+
+/**
  * REGRA DE OURO (inventariador mobile): baixa a base do tenant da Nuvem para o
  * banco local do dispositivo — paginado (1000/lote), opcionalmente filtrado
  * pelas filiais/unidades operacionais atribuídas ao usuário.
