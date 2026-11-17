@@ -1,4 +1,4 @@
-import pkg from '../../package.json';
+import { APP_VERSION } from './appVersion';
 
 /**
  * Protocolo fixo de comunicação do SRE: a versão do app é a PRIMEIRA linha de
@@ -6,7 +6,7 @@ import pkg from '../../package.json';
  * pacote de diagnóstico). Assim o chat/ticket identifica sempre o build, sem
  * depender do estado da sessão nem de quem escreveu a mensagem.
  */
-export const APP_VERSION = String(pkg?.version ?? 'desconhecida').trim() || 'desconhecida';
+export { APP_VERSION };
 
 /** Primeira linha fixa do SRE. */
 export const SRE_PROTOCOL_LINE = `INVENTARIADOR v${APP_VERSION} · SRE · GESTOR DE BASE DE DADOS`;

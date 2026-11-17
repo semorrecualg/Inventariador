@@ -4,6 +4,7 @@ import { screenToPath } from './routes';
 import { useUiStore } from '../stores/uiStore';
 import { AppScreen, NavigationParams } from '../types';
 import { Loader2 } from 'lucide-react';
+import AppVersionStamp from '../components/AppVersionStamp';
 
 /**
  * Full-screen loading spinner shown while a lazy-loaded route is loading.
@@ -81,6 +82,8 @@ const AppRouter: React.FC = () => {
       <Suspense fallback={<RouteLoadingFallback />}>
         <AppLazy />
       </Suspense>
+      {/* Versionador: um selo só, igual em todas as telas, lido do package.json. */}
+      <AppVersionStamp />
     </>
   );
 };

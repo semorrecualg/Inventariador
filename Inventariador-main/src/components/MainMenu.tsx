@@ -7,6 +7,7 @@ import { isAdminUser, isAuditorUser } from '../services/rbacService';
 import { canAccessDatabaseManager } from '../utils/authUtils';
 import Modal from './Modal';
 import BackButton from './BackButton';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 import { 
   Info,
   Download, 
@@ -1383,7 +1384,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <BackButton onClick={() => setIsDocModalOpen(false)} label="Voltar" />
               <div>
                 <h2 className="text-lg font-black uppercase tracking-tight">Manual do Sistema</h2>
-                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">Inventariador GBR v2.6</p>
+                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">Inventariador GBR {APP_VERSION_LABEL}</p>
               </div>
             </div>
           </div>
@@ -1392,14 +1393,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <div className="max-w-3xl mx-auto prose prose-slate prose-sm prose-emerald">
               <div className="bg-white border border-border rounded-3xl p-6 md:p-10 shadow-sm mb-10 markdown-body">
                 <ReactMarkdown>
-                  {`# Documentação Técnica e Operacional - Inventariador GBR v2.6
+                  {`# Documentação Técnica e Operacional - Inventariador GBR ${APP_VERSION_LABEL}
 
 Este documento serve como o manual oficial e registro técnico de todas as funcionalidades operacionais do sistema de Inventário de Ativo Imobilizado.
 
 ---
 
 ## 1. Visão Geral do Sistema
-O **Inventariador GBR v2.6** é uma solução avançada para gestão de inventário físico de ativos imobilizados, projetada para auditores e gestores de patrimônio. O sistema foca em precisão, rastreabilidade e integração com ERPs (especificamente Protheus SIGAATF).
+O **Inventariador GBR ${APP_VERSION_LABEL}** é uma solução avançada para gestão de inventário físico de ativos imobilizados, projetada para auditores e gestores de patrimônio. O sistema foca em precisão, rastreabilidade e integração com ERPs (especificamente Protheus SIGAATF).
 
 ### 1.1. Pilares do Sistema
 - **Protocolo de Auditoria**: Regras rigorosas de eliminação e tratamento de dados (Ativos vs. Baixados).
@@ -1481,7 +1482,7 @@ O sistema possui um módulo dedicado para comunicação com o ERP TOTVS Protheus
 
 ---
 *Documentação atualizada em: 18 de Março de 2026*
-*Versão do App: 24.50.03*`}
+*Versão do App: ${APP_VERSION_LABEL}*`}
                 </ReactMarkdown>
               </div>
             </div>

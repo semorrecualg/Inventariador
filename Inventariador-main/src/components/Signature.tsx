@@ -8,6 +8,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { generateInventoryBook, generateKardexFichas } from '../utils/reportGenerator';
 import { Loader2, BookOpen, CreditCard } from 'lucide-react';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 
 interface SignatureProps {
   assets: Asset[];
@@ -46,7 +47,7 @@ const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, unitNa
 
     // Header
     doc.setFontSize(18);
-    doc.text('Protocolo de Inventário GBR v24', 105, 20, { align: 'center' });
+    doc.text(`Protocolo de Inventário GBR ${APP_VERSION_LABEL}`, 105, 20, { align: 'center' });
     
     doc.setFontSize(12);
     doc.text(`Unidade Operacional: ${unitName}`, 20, 35);

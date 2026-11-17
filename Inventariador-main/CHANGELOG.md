@@ -82,6 +82,30 @@ Supabase `public` (26/26 colunas canônicas) e com risco zero de perda de dados.
 - **Testes:** 185 (novos `migrationV5`, `assetRepository.where`; baseline `schemaBaseline`
   atualizado para verno 5). Gate: `tsc -b --noEmit` ✓ · `vitest run` 185/185 ✓.
 
+## [2.8.0] — 2026-11-17
+
+### Versionador único: a versão do app em todas as telas, lida do `package.json`
+
+- **Fonte única:** `utils/appVersion.ts` expõe `APP_VERSION`,
+  `APP_VERSION_LABEL` (`v2.8.0`) e `APP_VERSION_STAMP` (`GBR v2.8.0`) a partir do
+  `package.json` — o mesmo número que o APK (`android-build.yml`) e o protocolo
+  do SRE usam. `sreProtocol` passa a importar daqui; um bump de versão atualiza
+  todas as telas de uma vez, sem cópia paralela.
+- **Selo global automático:** `AppVersionStamp` é montado no router e aparece em
+  todas as telas, no mesmo formato e na mesma posição, sem interceptar toques e
+  sem ficar por cima dos modais (z-index abaixo de `z-[20000]`). Quando a tela
+  tem barra de ação fixa no rodapé (configuradores, seletores, detalhe do ativo),
+  o selo sobe acima dela — deixa de cobrir o botão `Aplicar`.
+- **Telas ligadas ao versionador:** `App`, `Login`, `Consultation` e o Gestor de
+  Base deixam de importar o `package.json` directamente e passam a ler a versão
+  (e a etiqueta) de `utils/appVersion`, incluindo o cabeçalho do pacote de
+  diagnóstico.
+- **Versões chumbadas removidas:** `Protocolo v24.40`, `Field Guard v24.40`,
+  `Aplicar v24.40`, `QR Guard v24.40`, `v24.50.2`, `KARDEX DIGITAL v24.50.3`,
+  `GBR Auditoria Patrimonial v24.50 Expert`, `Protocolo de Inventário GBR v24`
+  (PDF de assinatura), o Manual do Sistema (`v2.6` e `24.50.03`) e as legendas do
+  centro de privacidade e da paleta passam a mostrar a versão do build.
+
 ## [2.7.9] — 2026-11-17
 
 ### Exportações do Gestor de Base deixam de mostrar o tenantid cru

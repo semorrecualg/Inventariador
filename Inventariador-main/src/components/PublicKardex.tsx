@@ -10,6 +10,7 @@ import {
   Tag,
   AlertTriangle
 } from 'lucide-react';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 
 interface PublicKardexProps {
   asset: Asset;
@@ -51,7 +52,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
               <TagIcon className={`${meta.color.text} drop-shadow`} size={40} />
             </div>
             <h1 className="text-sm font-black uppercase tracking-[0.3em] text-white/90 mb-1">AUDIT AUTHORITY</h1>
-            <p className="text-[10px] font-black uppercase tracking-widest text-white/60">KARDEX DIGITAL v24.50.3</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-white/60">KARDEX DIGITAL {APP_VERSION_LABEL}</p>
           </div>
         </div>
 

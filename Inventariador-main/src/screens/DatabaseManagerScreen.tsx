@@ -10,7 +10,7 @@ import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
-import pkg from '../../package.json';
+import { APP_VERSION } from '../utils/appVersion';
 import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
 import { redactDiagnosticText } from '../utils/diagnosticRedaction';
 import { SRE_PROTOCOL_LINE, CLOUD_STATE_LABEL, formatBasesLine, type CloudBaseCount } from '../utils/sreProtocol';
@@ -140,7 +140,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       '# Pacote de Diagnóstico — SRE Diagnostics Monitor',
       '',
       `- Gerado em: ${now.toISOString()}`,
-      `- Versão da app: ${pkg?.version ?? 'desconhecida'}`,
+      `- Versão da app: ${APP_VERSION}`,
       `- Build: mode=${import.meta.env.MODE} prod=${String(import.meta.env.PROD)} dev=${String(import.meta.env.DEV)}`,
       `- User-Agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'indisponível'}`,
       '- Redação: e-mails, tenantids/contratos, UUIDs, hashes longos e credenciais (URL/parâmetros) mascarados',

@@ -8,6 +8,7 @@ import { Layers, Info, X, Activity, Database, Map as MapIcon, Box, Cloud, ArrowL
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 import { isValidCoordinate } from '../utils/gpsCore';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 
 interface AssetMapProps {
   assets: Asset[];
@@ -582,7 +583,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
                   <ShieldCheck size={10} className="text-emerald-400" />
                   <span className="text-[8px] font-bold text-emerald-400 uppercase tracking-widest">Safe</span>
                 </div>
-                <span className="text-[8px] font-medium text-white/40 uppercase tracking-widest">v24.50.2</span>
+                <span className="text-[8px] font-medium text-white/40 uppercase tracking-widest">{APP_VERSION_LABEL}</span>
               </div>
             </div>
           </div>
