@@ -114,7 +114,15 @@ import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudI
 import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
 import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
 import { isSyncLockStuck } from './services/syncQueueGuards';
-import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
+import { isBiometricSupported, hasBiometricRegistered, isNativeAppShell } from './services/biometricService';
+import {
+  BIOMETRIC_FALLBACK_ACTION,
+  BIOMETRIC_REGISTER_ACTION,
+  biometricReasonText,
+  resolveBiometricStep,
+  type BiometricDecision,
+  type BiometricReason
+} from './utils/biometricPolicy';
 import { safeStringify } from './services/utils';
 import { determineAssetTag } from './services/tagService';
 
@@ -784,7 +792,13 @@ useEffect(() => {
   // Etapa 2 da trilha única: "segurança biométrica" é um passo da esteira.
   // Fica true quando o usuário registra a biometria OU a dispensa na tela —
   // sem isso, voltar ao LOGIN depois de dispensar reabriria a tela em loop.
+  // Fase 2: a dispensa é POR SESSÃO (este estado) e a tela recebe o modo e o
+  // motivo decididos por `resolveBiometricStep`.
   const [biometricGateDone, setBiometricGateDone] = useState(false);
+  const [biometricRequirement, setBiometricRequirement] = useState<{
+    mode: 'register' | 'fallback';
+    reason: BiometricReason;
+  } | null>(null);
 
   const [sqlDashboardStats, setSqlDashboardStats] = useState<{
     totalAtivos: number;
@@ -3728,21 +3742,38 @@ useEffect(() => {
     const executePostLoginRouting = async () => {
       logger.info(">>> [SRE_NAV] Usuário autenticado consolidado. Iniciando roteamento pós-login sequencial...");
 
-      // ETAPA 2 DA TRILHA ÚNICA (vale para TODOS os perfis): a segurança
-      // biométrica é um passo da esteira, antes do contrato de trabalho —
-      // não um aviso disparado por timer depois do login (o timer corria com
-      // o roteamento e a tela podia ser encoberta).
+      // ETAPA 2 DA TRILHA ÚNICA (Fase 2 do acesso padronizado, vale para TODOS
+      // os perfis exceto DEMO): a segurança biométrica é um passo da esteira,
+      // antes do contrato de trabalho — não um aviso disparado por timer.
+      // Onde o aparelho pode verificar a biometria, o cadastro é OBRIGATÓRIO.
+      // Onde não pode (WebView do app nativo, hardware sem autenticador), a
+      // tela abre na mesma e o acesso segue por uma dispensa EXPLÍCITA — o
+      // passo nunca desaparece em silêncio.
       if (!biometricGateDone) {
-        let biometricPending = false;
+        let biometricDecision: BiometricDecision;
         try {
           const bioSupported = await isBiometricSupported();
           const bioUser = String(user.username || user.email || '').toLowerCase().trim();
-          biometricPending = !!bioSupported && !!bioUser && !(await hasBiometricRegistered(bioUser));
+          const bioRegistered = !!bioUser && (await hasBiometricRegistered(bioUser));
+          biometricDecision = resolveBiometricStep({
+            supported: bioSupported,
+            registered: bioRegistered,
+            isNativeApp: isNativeAppShell(),
+            fallbackAccepted: false,
+            role: user.role
+          });
         } catch (bioErr) {
           logger.warn('[Biometric] Falha ao checar biometria:', bioErr);
+          // Sem conseguir verificar o aparelho, a etapa não é saltada: abre o
+          // fallback com o motivo real e a dispensa fica auditada.
+          biometricDecision = {
+            step: 'fallback',
+            reason: isNativeAppShell() ? 'webview-without-webauthn' : 'device-without-authenticator'
+          };
         }
-        if (biometricPending) {
-          logger.info('>>> [SRE_NAV] Biometria pendente: abrindo a segurança biométrica antes do contrato.');
+        if (biometricDecision.step !== 'proceed') {
+          logger.info(`>>> [SRE_NAV] Passo biométrico (${biometricDecision.step}): ${biometricReasonText(biometricDecision.reason)}`);
+          setBiometricRequirement({ mode: biometricDecision.step, reason: biometricDecision.reason });
           await pushScreen(AppScreen.BIOMETRIC_REGISTRATION);
           return;
         }
@@ -3825,6 +3856,7 @@ useEffect(() => {
   // etapa de segurança volta a ser exigida.
   useEffect(() => {
     setBiometricGateDone(false);
+    setBiometricRequirement(null);
   }, [user?.email]);
 
   // Sincronização automática de usuários com o Supabase e persistência local
@@ -7334,15 +7366,32 @@ useEffect(() => {
           {screen === AppScreen.BIOMETRIC_REGISTRATION && (
             <BiometricRegistration 
               username={user?.username || user?.email || ''} 
+              mode={biometricRequirement?.mode === 'fallback' ? 'fallback' : 'required'}
+              reason={biometricRequirement?.reason}
               onComplete={() => {
                 // Etapa 2 concluída: libera o gate e devolve ao LOGIN, de onde o
                 // dispatcher pós-login retoma a trilha (CONTRATO DE TRABALHO →
                 // hub do módulo → ENDEREÇO), para qualquer perfil.
                 setBiometricGateDone(true);
+                logAuditEvent({
+                  user_email: user?.email || 'unknown',
+                  action: BIOMETRIC_REGISTER_ACTION,
+                  details: 'Biometria registada neste aparelho (autenticador de plataforma).',
+                  tenantid: user?.tenantid || ''
+                });
                 popScreen();
               }}
-              onSkip={() => {
+              onSkip={(skipReason) => {
+                // Fallback da Fase 2: dispensa explícita, válida só nesta sessão
+                // e registada na auditoria com o motivo real — aparelho incapaz
+                // (WebView/sem sensor) ou cadastro obrigatório que falhou.
                 setBiometricGateDone(true);
+                logAuditEvent({
+                  user_email: user?.email || 'unknown',
+                  action: BIOMETRIC_FALLBACK_ACTION,
+                  details: biometricReasonText(skipReason),
+                  tenantid: user?.tenantid || ''
+                });
                 popScreen();
               }}
             />
