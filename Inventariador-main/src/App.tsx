@@ -7381,18 +7381,15 @@ useEffect(() => {
                 });
                 popScreen();
               }}
-              onSkip={() => {
+              onSkip={(skipReason) => {
                 // Fallback da Fase 2: dispensa explícita, válida só nesta sessão
-                // e registada na auditoria com o motivo decidido pela política.
+                // e registada na auditoria com o motivo real — aparelho incapaz
+                // (WebView/sem sensor) ou cadastro obrigatório que falhou.
                 setBiometricGateDone(true);
                 logAuditEvent({
                   user_email: user?.email || 'unknown',
                   action: BIOMETRIC_FALLBACK_ACTION,
-                  details: biometricReasonText(
-                    biometricRequirement?.mode === 'fallback'
-                      ? biometricRequirement.reason
-                      : 'device-without-authenticator'
-                  ),
+                  details: biometricReasonText(skipReason),
                   tenantid: user?.tenantid || ''
                 });
                 popScreen();

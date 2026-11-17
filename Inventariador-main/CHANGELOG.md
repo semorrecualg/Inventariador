@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dispensa por sessão:** vale para o login atual (reabrir o login não repete a
   pergunta), volta a ser exigida na sessão seguinte e é reposta ao trocar de
   utilizador no mesmo aparelho.
+- **Falha do cadastro não prende:** no modo obrigatório, quando o registo falha
+  (recusa do sensor, tempo esgotado), a tela oferece **"Tentar novamente"** e uma
+  saída explícita — "Continuar sem biometria neste aparelho" — que grava
+  `BIOMETRIC_FALLBACK` com o motivo `registration-failed`. Antes deste ajuste o
+  utilizador ficava sem qualquer botão depois do erro.
 - **Testes:** `biometricPolicy` (matriz de decisão) e
   `biometricRegistrationFallback` (tela sem "Pular", fallback explícito e
   conclusão do cadastro).

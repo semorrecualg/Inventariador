@@ -29,15 +29,19 @@ const renderScreen = async (
 ) => {
   const onComplete = vi.fn();
   const onSkip = vi.fn();
-  render(
-    <BiometricRegistration
-      username="auditor"
-      mode="required"
-      onComplete={onComplete}
-      onSkip={onSkip}
-      {...props}
-    />
-  );
+  // O `isBiometricSupported().then(setSupported)` do mount resolve dentro do
+  // act para a suíte não ficar com avisos de atualização fora de act.
+  await act(async () => {
+    render(
+      <BiometricRegistration
+        username="auditor"
+        mode="required"
+        onComplete={onComplete}
+        onSkip={onSkip}
+        {...props}
+      />
+    );
+  });
   return { onComplete, onSkip };
 };
 
@@ -77,6 +81,7 @@ describe('BiometricRegistration — Fase 2', () => {
     );
 
     expect(onSkip).toHaveBeenCalledTimes(1);
+    expect(onSkip).toHaveBeenCalledWith('webview-without-webauthn');
     expect(onComplete).not.toHaveBeenCalled();
     expect(mocks.registerBiometric).not.toHaveBeenCalled();
   });
@@ -90,6 +95,40 @@ describe('BiometricRegistration — Fase 2', () => {
     );
     fireEvent.click(continuar);
     expect(onSkip).toHaveBeenCalledTimes(1);
+    expect(onSkip).toHaveBeenCalledWith('device-without-authenticator');
+  });
+
+  it('no modo obrigatório, a falha do cadastro não prende: há nova tentativa e saída auditada', async () => {
+    mocks.isBiometricSupported.mockResolvedValue(true);
+    mocks.registerBiometric.mockResolvedValue(false);
+    const { onSkip, onComplete } = await renderScreen({ mode: 'required' });
+
+    await waitFor(() => expect(screen.getByText('Cadastrar Biometria')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByText('Cadastrar Biometria'));
+    });
+
+    // A falha mostra a mensagem e as DUAS saídas: repetir ou dispensar.
+    await waitFor(() => expect(screen.getByText(/Não foi possível completar o registro biométrico/)).toBeTruthy());
+    expect(screen.getByRole('button', { name: /Tentar novamente/i })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: /Continuar sem biometria neste aparelho/i })
+    ).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Tentar novamente/i }));
+    });
+    await waitFor(() => expect(mocks.registerBiometric).toHaveBeenCalledTimes(2));
+    // A segunda falha também deixa as duas saídas disponíveis.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Tentar novamente/i })).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', { name: /Continuar sem biometria neste aparelho/i })
+      );
+    });
+    expect(onSkip).toHaveBeenCalledWith('registration-failed');
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it('o cadastro concluído avisa o App (que libera o gate e audita)', async () => {

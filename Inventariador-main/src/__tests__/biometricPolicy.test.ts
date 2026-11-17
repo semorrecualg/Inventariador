@@ -94,6 +94,7 @@ describe('resolveBiometricStep — fallback declarado', () => {
     expect(biometricReasonText('webview-without-webauthn')).toMatch(/WebView/);
     expect(biometricReasonText('device-without-authenticator')).toMatch(/autenticador/);
     expect(biometricReasonText('credential-required')).toMatch(/obrigatório/);
+    expect(biometricReasonText('registration-failed')).toMatch(/auditoria/);
     expect(BIOMETRIC_REGISTER_ACTION).not.toBe(BIOMETRIC_FALLBACK_ACTION);
   });
 });

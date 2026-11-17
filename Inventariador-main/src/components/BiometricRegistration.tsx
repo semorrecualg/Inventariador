@@ -13,8 +13,12 @@ interface BiometricRegistrationProps {
   /** Motivo decidido pela política (`resolveBiometricStep`) — vai para a tela. */
   reason?: BiometricReason;
   onComplete: () => void;
-  /** Dispensa explícita do fallback (registada na auditoria pelo App). */
-  onSkip?: () => void;
+  /**
+   * Saída explícita e auditada da etapa (o App grava `BIOMETRIC_FALLBACK`).
+   * Recebe o motivo: `fallback` quando o aparelho não pode verificar,
+   * `registration-failed` quando o cadastro falhou no modo obrigatório.
+   */
+  onSkip?: (reason: BiometricReason) => void;
 }
 
 const DEFAULT_FALLBACK_REASON: BiometricReason = 'device-without-authenticator';
@@ -63,13 +67,22 @@ const BiometricRegistration: React.FC<BiometricRegistrationProps> = ({
   // utilizador ou de fingir um cadastro impossível.
   const fallbackMode = mode === 'fallback' || supported === false;
   const fallbackReason = reason ?? DEFAULT_FALLBACK_REASON;
-  const handleFallback = () => {
+
+  /** Dispensa explícita — sempre com motivo, para o App auditor. */
+  const requestSkip = (skipReason: BiometricReason) => {
     if (onSkip) {
-      onSkip();
+      onSkip(skipReason);
       return;
     }
     onComplete();
   };
+
+  const handleFallback = () => requestSkip(fallbackReason);
+
+  // Cadastro OBRIGATÓRIO que falhou (recusa do sensor, credencial rejeitada,
+  // tempo esgotado): o utilizador pode tentar outra vez ou sair com uma
+  // dispensa explícita e auditada — a tela nunca vira um beco sem saída.
+  const handleRegistrationFailureExit = () => requestSkip('registration-failed');
 
   if (fallbackMode) {
     return (
@@ -160,15 +173,30 @@ const BiometricRegistration: React.FC<BiometricRegistrationProps> = ({
           </div>
         )}
 
-        {status === 'idle' && (
+        {status === 'error' && (
+          <p className="text-[11px] font-bold text-ink-muted uppercase tracking-wider mb-6 max-w-xs leading-tight">
+            Pode tentar novamente ou continuar sem biometria — a dispensa fica registada na auditoria.
+          </p>
+        )}
+
+        {(status === 'idle' || status === 'error') && (
           <div className="w-full space-y-4">
             <button 
               onClick={handleRegister}
               className="w-full py-4 bg-accent text-white rounded-2xl font-bold uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all flex items-center justify-center gap-3"
             >
               <UserCheck size={20} />
-              Cadastrar Biometria
+              {status === 'error' ? 'Tentar novamente' : 'Cadastrar Biometria'}
             </button>
+
+            {status === 'error' && (
+              <button
+                onClick={handleRegistrationFailureExit}
+                className="w-full py-4 bg-white border border-border text-ink-muted rounded-2xl font-bold uppercase tracking-widest active:scale-95 transition-all"
+              >
+                Continuar sem biometria neste aparelho
+              </button>
+            )}
           </div>
         )}
 

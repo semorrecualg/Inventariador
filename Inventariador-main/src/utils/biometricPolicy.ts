@@ -28,7 +28,8 @@ export type BiometricReason =
   | 'fallback-accepted-session'
   | 'credential-required'
   | 'webview-without-webauthn'
-  | 'device-without-authenticator';
+  | 'device-without-authenticator'
+  | 'registration-failed';
 
 export interface BiometricContext {
   /** `isUserVerifyingPlatformAuthenticatorAvailable()` (WebAuthn de plataforma). */
@@ -61,6 +62,11 @@ const REASON_TEXT: Record<BiometricReason, string> = {
     'O app nativo (WebView) não expõe biometria ao sistema: este acesso segue sem cadastro neste aparelho.',
   'device-without-authenticator':
     'Este dispositivo não tem autenticador biométrico disponível: este acesso segue sem cadastro neste aparelho.',
+  // Não é devolvido por `resolveBiometricStep`: é o motivo da saída explícita
+  // quando o cadastro OBRIGATÓRIO falha na tela (recusa do sensor, tempo
+  // esgotado). Sem esta saída o utilizador ficaria preso no modo obrigatório.
+  'registration-failed':
+    'O cadastro biométrico falhou neste aparelho: este acesso segue sem cadastro, com dispensa registada na auditoria.',
 };
 
 /** Texto único do motivo — usado na tela de fallback e nos detalhes da auditoria. */

@@ -201,7 +201,10 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   `required` não há "Pular por enquanto"; no modo `fallback` o motivo é
   explicado e o utilizador confirma em "Continuar sem biometria neste
   aparelho", o que grava `BIOMETRIC_FALLBACK` no `audit_logs` (o cadastro
-  concluído grava `BIOMETRIC_REGISTER`). A dispensa vale só para a sessão e é
+  concluído grava `BIOMETRIC_REGISTER`). Se o cadastro **obrigatório falhar**
+  (recusa do sensor, tempo esgotado), a tela mantém "Tentar novamente" e oferece
+  a mesma saída explícita, auditada com o motivo `registration-failed` — o modo
+  obrigatório nunca fica sem saída. A dispensa vale só para a sessão e é
   reposta ao trocar de utilizador. Assim o inventário de campo nunca fica
   bloqueado por hardware, mas nenhuma dispensa é silenciosa. *Testes:
   `biometricPolicy` e `biometricRegistrationFallback`; a WebView real só se
