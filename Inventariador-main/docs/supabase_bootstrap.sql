@@ -319,6 +319,19 @@ BEGIN
   END IF;
 END $$;
 
+-- FASE 1 — a campanha é a CHAVE DE CONTROLO da filial: aberta (CREATED ou
+-- ACTIVE) exige filial preenchida. A restrição entra como NOT VALID para não
+-- quebrar bases legadas com campanhas antigas sem filial; toda gravação nova
+-- passa a ser verificada.
+ALTER TABLE public.campaigns DROP CONSTRAINT IF EXISTS campaigns_filial_obrigatoria;
+ALTER TABLE public.campaigns ADD CONSTRAINT campaigns_filial_obrigatoria
+  CHECK (status NOT IN ('CREATED','ACTIVE') OR (filial IS NOT NULL AND btrim(filial) <> '')) NOT VALID;
+
+CREATE INDEX IF NOT EXISTS campaigns_tenant_filial_idx ON public.campaigns (tenantid, filial);
+-- O índice ÚNICO parcial (uma só campanha aberta por filial) falha de propósito
+-- quando a base já tem duplicados, por isso vive no script de migração
+-- docs/supabase_campanhas_fase1.sql — rode-o depois deste.
+
 CREATE TABLE IF NOT EXISTS public.campaign_snapshots (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id text,
