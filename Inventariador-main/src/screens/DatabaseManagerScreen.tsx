@@ -7,7 +7,7 @@ import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clea
 import { syncAssetsToCloud, isInternalMode, logAuditEvent } from '../services/supabaseService';
 import { isAdminUser } from '../utils/authUtils';
 import { CloudPushPolicyError } from '../utils/cloudPushGuard';
-import { previewAssetDuplicateCleanup, applyAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
+import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
 import pkg from '../../package.json';
@@ -536,37 +536,20 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     }
   };
 
-  const handleDedupClick = async (apply: boolean) => {
+  const handleDedupClick = async () => {
     if (dedupRunning) return;
-    if (apply) {
-      const confirmed = window.confirm(
-        'LIMPAR CÓPIAS REPETIDAS?\n\n' +
-        'Só são removidas linhas com a MESMA tenantid + filial + etiqueta.\n' +
-        'A cópia conferida é sempre a que fica, com autor e data de leitura.\n' +
-        'Ativos sem etiqueta não são tocados.\n\n' +
-        'Recomendado: primeiro DIAGNOSTICAR e conferir os números.'
-      );
-      if (!confirmed) return;
-    }
     setDedupRunning(true);
-    addLog(apply
-      ? '[SRE_DEDUP] Aplicando limpeza de cópias (tenantid + filial + etiqueta)...'
-      : '[SRE_DEDUP] Diagnosticando cópias (nada é alterado)...');
+    addLog('[SRE_DEDUP] Diagnosticando cópias (tenantid + filial + etiqueta) — nada é alterado...');
     try {
-      const report = apply ? await applyAssetDuplicateCleanup() : await previewAssetDuplicateCleanup();
+      const report = await previewAssetDuplicateCleanup();
       const lines = formatDedupReport(report);
       lines.forEach(addLog);
       setDedupLines(lines);
-      if (apply) {
-        await loadStats();
-        showRecoveryToast(`Limpeza concluída: ${report.removed} cópia(s) removida(s).`, 'blue');
-      } else {
-        showRecoveryToast(`Diagnóstico: ${report.removed} cópia(s) encontrada(s).`, 'blue');
-      }
+      showRecoveryToast(`Diagnóstico: ${report.removed} cópia(s) encontrada(s) — nenhum registo apagado.`, 'blue');
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       addLog(`[SRE_DEDUP ERROR] ${errMsg}`);
-      showRecoveryToast('Falha na limpeza de cópias — nada foi alterado.', 'red');
+      showRecoveryToast('Falha no diagnóstico de cópias — nada foi alterado.', 'red');
     } finally {
       setDedupRunning(false);
     }
@@ -1001,37 +984,29 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           )}
         </div>
 
-        {/* Limpeza de cópias repetidas: mesmo tenantid + filial + etiqueta */}
+        {/* Diagnóstico de cópias repetidas: mesmo tenantid + filial + etiqueta.
+            A limpeza foi removida — nenhuma linha da base é apagada pelo app. */}
         <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col space-y-3">
           <div className="flex items-center space-x-3">
             <div className="p-3 bg-amber-950/40 text-amber-400 rounded-full border border-amber-900/30">
-              <Trash2 className="w-6 h-6" />
+              <Database className="w-6 h-6" />
             </div>
             <div className="flex-1">
-              <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Cópias Repetidas</h3>
+              <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Diagnóstico de Cópias</h3>
               <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
-                Mesmo contrato + filial + etiqueta gravados mais de uma vez. A conferência é preservada.
+                Mesmo contrato + filial + etiqueta gravados mais de uma vez. Nenhum registo é apagado.
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2">
             <button
               type="button"
               disabled={dedupRunning}
-              onClick={() => handleDedupClick(false)}
+              onClick={() => handleDedupClick()}
               className="flex items-center justify-center space-x-2 px-4 py-3 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-slate-600/30"
             >
               <Database size={14} />
               <span>{dedupRunning ? '...' : 'DIAGNOSTICAR'}</span>
-            </button>
-            <button
-              type="button"
-              disabled={dedupRunning}
-              onClick={() => handleDedupClick(true)}
-              className="flex items-center justify-center space-x-2 px-4 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-amber-500/20"
-            >
-              <Trash2 size={14} />
-              <span>{dedupRunning ? '...' : 'LIMPAR CÓPIAS'}</span>
             </button>
           </div>
           {dedupLines.length > 0 && (

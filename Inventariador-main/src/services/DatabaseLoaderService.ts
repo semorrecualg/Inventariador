@@ -5,8 +5,9 @@ import { db, DexieAsset, invalidateTenantCaseMarker } from './sqliteService';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
-import { normalizeFieldValue, normalizeDateISO, normalizeNumeric } from '../utils/normalize';
+import { normalizeDateISO, normalizeNumeric } from '../utils/normalize';
 import { contentFingerprint, createFallbackKeyAllocator, resolveAssetKey, sanitizeAssetKey } from '../utils/assetKey';
+import { reconcileImport, ImportReconciliationError, type LoadedAssetRef } from '../utils/importReconciliation';
 import { reportRecnoCollisions } from './recnoGuardService';
 
 export interface AtivoPlanilha {
@@ -82,6 +83,54 @@ const CONTRACT_HEADERS = [
 ];
 
 const CONTRACT_HEADERS_TEXT = CONTRACT_HEADERS.join(';');
+
+/**
+ * CÓPIA LITERAL DA PLANILHA — regra da carga.
+ *
+ * O valor é gravado EXATAMENTE como está na célula: sem `trim`, sem mudança de
+ * caixa, sem expurgo de espaços/separadores e sem colapso de espaços duplos.
+ * Antes, `etiqueta`/`tag` passavam por `sanitizeAssetKey` e `008810 CICOPAL`
+ * entrava na base como `008810CICOPAL` — o registo deixava de ser a cópia do
+ * arquivo e não voltava 1:1 para o ERP.
+ *
+ * A identidade do registo continua a ser a chave canónica (`primarykey`
+ * calculada por `resolveAssetKey`), que é interna e não substitui o dado.
+ */
+const literalText = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null;
+  return String(value);
+};
+
+/** Linha da planilha copiada campo a campo, com os 21 cabeçalhos do contrato. */
+const sourceRowLiteral = (row: Record<string, unknown>): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const header of CONTRACT_HEADERS) {
+    const value = getRowValue(row, header);
+    out[header] = value === null || value === undefined ? '' : String(value);
+  }
+  return out;
+};
+
+/**
+ * Valor de aquisição para a coluna numérica. Aceita número, `1.234,56`,
+ * `R$ 1.234,56` e `1234.56`. O texto original fica em `_sourceRow.vlraquisic`;
+ * aqui só se evita gravar `0` para um valor que a planilha trazia.
+ */
+const parseAssetValue = (raw: unknown): { value: number; invalid: boolean } => {
+  if (raw === null || raw === undefined || raw === '') return { value: 0, invalid: false };
+  if (typeof raw === 'number') return Number.isNaN(raw) ? { value: 0, invalid: true } : { value: raw, invalid: false };
+
+  const cleanStr = String(raw).replace(/[R$\s]/gi, '');
+  let value: number;
+  if (cleanStr.includes(',') && cleanStr.includes('.')) {
+    value = parseFloat(cleanStr.replace(/\./g, '').replace(/,/g, '.'));
+  } else if (cleanStr.includes(',')) {
+    value = parseFloat(cleanStr.replace(/,/g, '.'));
+  } else {
+    value = parseFloat(cleanStr);
+  }
+  return Number.isNaN(value) ? { value: 0, invalid: true } : { value, invalid: false };
+};
 
 function normalizeHeaderKey(value: unknown): string {
   return String(value ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '');
@@ -170,6 +219,71 @@ export class DatabaseLoaderService {
     }
   }
 
+  /**
+   * RECONCILIAÇÃO DA CARGA (planilha × base, por filial).
+   *
+   * Lê de volta da base as chaves que esta carga mandou gravar e exige
+   * `planilha N = base N`. Se o `bulkPut` substituiu uma linha (chave repetida
+   * no arquivo) ou trocou a filial (mesma chave noutra filial), a carga para
+   * aqui, com o relatório no terminal e em `audit_logs` — em vez de devolver
+   * "sucesso" contando linhas que não ficaram na base.
+   */
+  private static async verifyLoadedRows(carregadas: LoadedAssetRef[]): Promise<void> {
+    if (carregadas.length === 0) return;
+
+    const found: LoadedAssetRef[] = [];
+    const READ_CHUNK = 500;
+    const unique = new Map<string, [string, string]>();
+    for (const ref of carregadas) {
+      unique.set(`${ref.tenantid}\u0000${ref.primarykey}`, [ref.tenantid, ref.primarykey]);
+    }
+    const keys = Array.from(unique.values());
+
+    for (let i = 0; i < keys.length; i += READ_CHUNK) {
+      const lote = keys.slice(i, i + READ_CHUNK);
+      const rows = (await db.local_assets
+        .where('[tenantid+primarykey]')
+        .anyOf(lote)
+        .toArray()) as unknown as DexieAsset[];
+      rows.forEach((row) => {
+        found.push({
+          tenantid: String(row.tenantid ?? ''),
+          filial: String(row.filial_raw || row.filial || ''),
+          primarykey: String(row.primarykey ?? '')
+        });
+      });
+    }
+
+    const report = reconcileImport(carregadas, found);
+    report.lines.forEach((line) => (report.ok ? logger.info(line) : logger.error(line)));
+
+    try {
+      await db.audit_logs.put({
+        id: `RECON_${Date.now()}_${Math.random().toString(36).slice(2, 9).toUpperCase()}`,
+        usuario: 'CARGA_PLANILHA',
+        acao: 'IMPORT_RECONCILIATION',
+        tabela: 'local_assets',
+        registro_id: String(report.planilha),
+        details: report.lines.join(' · '),
+        delta: JSON.stringify({
+          ok: report.ok,
+          planilha: report.planilha,
+          gravadas: report.gravadas,
+          distinctKeys: report.distinctKeys,
+          duplicateKeys: report.duplicateKeys,
+          missing: report.missing,
+          wrongFilial: report.wrongFilial,
+          perFilial: report.perFilial
+        }),
+        updated_at: new Date().toISOString()
+      });
+    } catch (auditErr) {
+      logger.warn('[CARGA] Falha ao registar a reconciliação em audit_logs:', auditErr);
+    }
+
+    if (!report.ok) throw new ImportReconciliationError(report);
+  }
+
   static async extrairDadosDaPlanilha(file: Blob): Promise<unknown[]> {
     const reader = new FileReader();
     const dataBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
@@ -200,6 +314,8 @@ export class DatabaseLoaderService {
     let registrosProcessados = 0;
     // Chaves derivadas (linhas sem identidade) contam por carga inteira, não por lote.
     const allocateFallbackKey = createFallbackKeyAllocator();
+    // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
+    const carregadas: LoadedAssetRef[] = [];
 
     for (let i = 0; i < dadosBrutos.length; i += this.CHUNK_SIZE) {
       const loteBruto = dadosBrutos.slice(i, i + this.CHUNK_SIZE) as Record<string, unknown>[];
@@ -219,9 +335,11 @@ export class DatabaseLoaderService {
         // Coluna canônica da planilha: 'endereco' (posição 11 do contrato). O nome 'codigo_endereco'
         // era lido antes e NÃO existe no contrato → gravava endereco: null para todos os ativos,
         // deixando o AddressSelector vazio. Fallbacks aceitos para tolerância de nomes de coluna.
-        const codEnd = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição', 'codigo_endereco'));
-        const tagSanitizada = sanitizeAssetKey(row.tag) || sanitizeAssetKey(row.etiqueta) || pk;
-        
+        const codEnd = literalText(getRowValue(row, 'endereco', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição', 'codigo_endereco'));
+        // Texto exato da etiqueta (espaços e caixa preservados). A chave `pk`
+        // continua canónica — é identidade interna, não o dado do cliente.
+        const etiquetaLiteral = literalText(getRowValue(row, 'tag')) || literalText(getRowValue(row, 'etiqueta')) || pk;
+
         return {
           id: pk,
           primarykey: pk,
@@ -230,25 +348,27 @@ export class DatabaseLoaderService {
           // `filial_raw` guarda o texto exato da planilha para exibição.
           filial: rawFilial.toUpperCase(),
           filial_raw: rawFilial,
-          status: normalizeFieldValue('status', getRowValue(row, 'status')) ?? 'Pendente',
-          etiqueta: tagSanitizada,
-          tag: tagSanitizada,
+          status: literalText(getRowValue(row, 'status')) || 'Pendente',
+          etiqueta: etiquetaLiteral,
+          tag: etiquetaLiteral,
           qt: isNaN(Number(row.qt)) ? 1 : Number(row.qt),
-          descricaodoativo: normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${pk}`,
-          serial: normalizeFieldValue('serial', row.serial),
+          descricaodoativo: literalText(getRowValue(row, 'descricaodoativo', 'descricao', 'item')) || `Ativo N-${pk}`,
+          serial: literalText(row.serial),
           dataaqusic: normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic')),
-          cnpj: normalizeFieldValue('cnpj', row.cnpj),
-          nomefornecedor: normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor')),
-          notafiscal: normalizeFieldValue('notafiscal', row.notafiscal),
+          cnpj: literalText(row.cnpj),
+          nomefornecedor: literalText(getRowValue(row, 'nomefornecedor', 'fornecedor')),
+          notafiscal: literalText(row.notafiscal),
           endereco: codEnd || null,
-          registro: normalizeFieldValue('registro', row.registro),
-          subreg: normalizeFieldValue('subreg', row.subreg),
+          registro: literalText(row.registro),
+          subreg: literalText(row.subreg),
           databaixa: normalizeDateISO(getRowValue(row, 'databaixa')),
-          contacontabil: normalizeFieldValue('contacontabil', row.contacontabil),
-          centrodecusto: normalizeFieldValue('centrodecusto', row.centrodecusto),
-          vlraquisic: isNaN(Number(row.vlraquisic)) ? 0 : Number(row.vlraquisic),
+          contacontabil: literalText(row.contacontabil),
+          centrodecusto: literalText(row.centrodecusto),
+          vlraquisic: parseAssetValue(row.vlraquisic).value,
           sn1_recno: normalizeNumeric(row.sn1_recno),
           sn3_recno: normalizeNumeric(row.sn3_recno),
+          // Cópia literal da linha inteira (inclui datas e valores como escritos).
+          _sourceRow: sourceRowLiteral(row),
           _is_synced: 0,
           _is_deleted: 0,
           _conferido: 0,
@@ -265,6 +385,12 @@ export class DatabaseLoaderService {
         };
       });
 
+      loteHigienizado.forEach((asset) => carregadas.push({
+        tenantid: asset.tenantid,
+        filial: asset.filial_raw || asset.filial,
+        primarykey: asset.primarykey
+      }));
+
       // Transação ACID atômica por bloco para mitigar Race Conditions
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
         await db.ativos.bulkPut(loteHigienizado);
@@ -278,6 +404,7 @@ export class DatabaseLoaderService {
       }
       logger.info(`[SRE_LOADER] Lote injetado. Progresso: ${registrosProcessados}/${dadosBrutos.length}`);
     }
+    await DatabaseLoaderService.verifyLoadedRows(carregadas);
     await DatabaseLoaderService.reportRecnoAfterLoad();
     return registrosProcessados;
   }
@@ -345,6 +472,8 @@ export class DatabaseLoaderService {
 
     let totalInseridos = 0;
     let batchIndex = 0;
+    // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
+    const carregadas: LoadedAssetRef[] = [];
 
     // FASE 1 (SRE): Escrita silenciosa usando o handle global isolado (sem abrir popup)
     try {
@@ -380,24 +509,25 @@ export class DatabaseLoaderService {
           const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
           const finalId = primarykeyVal || tagSanitizada
             || allocateFallbackKey(finalTenantid, finalFilial, contentFingerprint(row as Record<string, unknown>));
-          const itemDesc = normalizeFieldValue(
-            'descricaodoativo',
+          // Dado do cliente: literal. Só a chave (`finalId`) é canónica.
+          const etiquetaLiteral = literalText(getRowValue(row, 'etiqueta', 'tag')) || finalId;
+          const itemDesc = literalText(
             getRowValue(row, 'descricaodoativo', 'descricao', 'item')
-          ) ?? `Ativo N-${finalId}`;
-          const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${finalId}`);
+          ) || `Ativo N-${finalId}`;
+          const finalRegistro = literalText(getRowValue(row, 'registro')) || `REG-${finalId}`;
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
-          const contaContabil = normalizeFieldValue('contacontabil', getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA');
-          const statusVal = normalizeFieldValue('status', getRowValue(row, 'status') || 'Pendente') ?? 'Pendente';
+          const contaContabil = literalText(getRowValue(row, 'contacontabil', 'conta_contabil')) || 'SEM CONTA';
+          const statusVal = literalText(getRowValue(row, 'status')) || 'Pendente';
 
-          const serialVal = normalizeFieldValue('serial', getRowValue(row, 'serial', 'serial_number'));
+          const serialVal = literalText(getRowValue(row, 'serial', 'serial_number'));
           const dataaqVal = normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic'));
-          const cnpjVal = normalizeFieldValue('cnpj', getRowValue(row, 'cnpj'));
-          const fornecedorVal = normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor'));
-          const nfVal = normalizeFieldValue('notafiscal', getRowValue(row, 'notafiscal'));
-          const finalEndereco = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
-          const subregVal = normalizeFieldValue('subreg', getRowValue(row, 'subreg'));
+          const cnpjVal = literalText(getRowValue(row, 'cnpj'));
+          const fornecedorVal = literalText(getRowValue(row, 'nomefornecedor', 'fornecedor'));
+          const nfVal = literalText(getRowValue(row, 'notafiscal'));
+          const finalEndereco = literalText(getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
+          const subregVal = literalText(getRowValue(row, 'subreg'));
           const databaixaVal = normalizeDateISO(getRowValue(row, 'databaixa'));
-          const centrodecustoVal = normalizeFieldValue('centrodecusto', getRowValue(row, 'centrodecusto', 'centro_custo'));
+          const centrodecustoVal = literalText(getRowValue(row, 'centrodecusto', 'centro_custo'));
           const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
           const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
           const sn1RecnoVal = normalizeNumeric(sn1RecnoRaw);
@@ -443,8 +573,8 @@ export class DatabaseLoaderService {
             filial: finalFilial,
             filial_raw: finalFilialRaw,
             status: statusVal,
-            etiqueta: tagSanitizada,
-            tag: tagSanitizada,
+            etiqueta: etiquetaLiteral,
+            tag: etiquetaLiteral,
             qt: Number(finalQt || 1),
             descricaodoativo: itemDesc,
             serial: serialVal || null,
@@ -462,6 +592,8 @@ export class DatabaseLoaderService {
             vlraquisic: vlrAquisicSanitizado,
             sn1_recno: sn1RecnoVal,
             sn3_recno: sn3RecnoVal,
+            // Cópia literal da linha inteira (inclui datas e valores como escritos).
+            _sourceRow: sourceRowLiteral(row as Record<string, unknown>),
             _is_synced: 0,
             _is_deleted: 0,
             _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
@@ -480,6 +612,12 @@ export class DatabaseLoaderService {
 
           assetsToInsert.push(assetObj);
         }
+
+        assetsToInsert.forEach((asset) => carregadas.push({
+          tenantid: asset.tenantid,
+          filial: asset.filial_raw || asset.filial,
+          primarykey: asset.primarykey
+        }));
 
         // Transação ACID atômica do Dexie com Fail-Fast
         try {
@@ -536,6 +674,7 @@ export class DatabaseLoaderService {
       // Isolamento restabelecido sem dependência de sqliteService
     }
 
+    await DatabaseLoaderService.verifyLoadedRows(carregadas);
     await DatabaseLoaderService.reportRecnoAfterLoad();
     return totalInseridos;
   }
@@ -622,6 +761,8 @@ export class DatabaseLoaderService {
 
     const totalRows = totalPlanilha;
     let totalInserted = 0;
+    // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
+    const carregadas: LoadedAssetRef[] = [];
 
     // FASE 1 (SRE): Escrita silenciosa usando o handle global isolado (sem abrir popup)
     try {
@@ -655,21 +796,23 @@ export class DatabaseLoaderService {
           const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
           const finalId = primarykeyVal || tagSanitizada
             || allocateFallbackKey(finalTenantid, finalFilial, contentFingerprint(row as Record<string, unknown>));
-          const itemDesc = normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${finalId}`;
-          const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${finalId}`);
+          // Dado do cliente: literal. Só a chave (`finalId`) é canónica.
+          const etiquetaLiteral = literalText(getRowValue(row, 'etiqueta', 'tag')) || finalId;
+          const itemDesc = literalText(getRowValue(row, 'descricaodoativo', 'descricao', 'item')) || `Ativo N-${finalId}`;
+          const finalRegistro = literalText(getRowValue(row, 'registro')) || `REG-${finalId}`;
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
-          const contaContabil = normalizeFieldValue('contacontabil', getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA');
-          const statusVal = normalizeFieldValue('status', getRowValue(row, 'status') || 'Pendente') ?? 'Pendente';
+          const contaContabil = literalText(getRowValue(row, 'contacontabil', 'conta_contabil')) || 'SEM CONTA';
+          const statusVal = literalText(getRowValue(row, 'status')) || 'Pendente';
 
-          const serialVal = normalizeFieldValue('serial', getRowValue(row, 'serial', 'serial_number'));
+          const serialVal = literalText(getRowValue(row, 'serial', 'serial_number'));
           const dataaqVal = normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic'));
-          const cnpjVal = normalizeFieldValue('cnpj', getRowValue(row, 'cnpj'));
-          const fornecedorVal = normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor'));
-          const nfVal = normalizeFieldValue('notafiscal', getRowValue(row, 'notafiscal'));
-          const finalEndereco = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
-          const subregVal = normalizeFieldValue('subreg', getRowValue(row, 'subreg'));
+          const cnpjVal = literalText(getRowValue(row, 'cnpj'));
+          const fornecedorVal = literalText(getRowValue(row, 'nomefornecedor', 'fornecedor'));
+          const nfVal = literalText(getRowValue(row, 'notafiscal'));
+          const finalEndereco = literalText(getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
+          const subregVal = literalText(getRowValue(row, 'subreg'));
           const databaixaVal = normalizeDateISO(getRowValue(row, 'databaixa'));
-          const centrodecustoVal = normalizeFieldValue('centrodecusto', getRowValue(row, 'centrodecusto', 'centro_custo'));
+          const centrodecustoVal = literalText(getRowValue(row, 'centrodecusto', 'centro_custo'));
 
           const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
           const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
@@ -711,8 +854,8 @@ export class DatabaseLoaderService {
             filial: finalFilial,
             filial_raw: finalFilialRaw,
             status: statusVal,
-            etiqueta: tagSanitizada,
-            tag: tagSanitizada,
+            etiqueta: etiquetaLiteral,
+            tag: etiquetaLiteral,
             qt: Number(finalQt || 1),
             descricaodoativo: itemDesc,
             serial: serialVal || null,
@@ -730,6 +873,8 @@ export class DatabaseLoaderService {
             vlraquisic: vlrAquisicSanitizado,
             sn1_recno: sn1RecnoVal,
             sn3_recno: sn3RecnoVal,
+            // Cópia literal da linha inteira (inclui datas e valores como escritos).
+            _sourceRow: sourceRowLiteral(row as Record<string, unknown>),
             _is_synced: 0,
             _is_deleted: 0,
             _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
@@ -748,6 +893,12 @@ export class DatabaseLoaderService {
 
           assetsToInsert.push(assetObj);
         }
+
+        assetsToInsert.forEach((asset) => carregadas.push({
+          tenantid: asset.tenantid,
+          filial: asset.filial_raw || asset.filial,
+          primarykey: asset.primarykey
+        }));
 
         // DESCARGA NO ARMAZENAMENTO LOCAL (Transação ACID atômica com Fail-Fast)
         try {
@@ -797,6 +948,7 @@ export class DatabaseLoaderService {
       rawExcelData = null;
     }
 
+    await DatabaseLoaderService.verifyLoadedRows(carregadas);
     await DatabaseLoaderService.reportRecnoAfterLoad();
     return totalInserted;
   }

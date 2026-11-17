@@ -52,6 +52,14 @@ export interface DexieAsset {
   _is_unitized: number; // 0 or 1
   _is_divergent_baixa: number; // 0 or 1
   _history: string | null;
+  /**
+   * Cópia LITERAL da linha da planilha (21 colunas do contrato), do jeito que
+   * está escrita: sem trim, sem mudança de caixa, sem expurgo e sem colapso de
+   * espaços. É o que garante o retorno 1:1 ao ERP, inclusive para datas e
+   * valores que a app guarda também em formato tipado (`dataaqusic`,
+   * `databaixa`, `vlraquisic`).
+   */
+  _sourceRow?: Record<string, string> | null;
   DE_PARA: string | null;
   _photoUrl: string | null;
   gps_lat: number | null;

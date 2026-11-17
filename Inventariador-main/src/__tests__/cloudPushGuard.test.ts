@@ -53,7 +53,8 @@ describe('cloudPushGuard — bloqueio do envio da base local para a nuvem', () =
     expect(texto).toContain('ENVIO BLOQUEADO');
     expect(texto).toContain('1 cópia(s) repetida(s) em 1 grupo(s)');
     expect(texto).toContain('3 linhas para 2 ativos distintos');
-    expect(texto).toContain('LIMPAR CÓPIAS');
+    expect(texto).toContain('DIAGNÓSTICO DE CÓPIAS');
+    expect(texto).not.toContain('LIMPAR CÓPIAS');
   });
 
   it('conta várias cópias do mesmo grupo e mostra o total de linhas', () => {
