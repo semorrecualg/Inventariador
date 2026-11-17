@@ -125,7 +125,7 @@ export function formatCloudPushAudit(audit: CloudPushAudit): string[] {
   return [
     `ENVIO BLOQUEADO: ${audit.copies} cópia(s) repetida(s) em ${audit.groupsWithCopies} grupo(s) — ${audit.total} linhas para ${audit.identities} ativos distintos (tenantid + filial + etiqueta).`,
     'A nuvem guarda uma linha por identidade: enviar esta base recria as cópias em todos os dispositivos.',
-    'Execute CÓPRIAS REPETIDAS → LIMPAR CÓPIAS (a conferência é preservada) e confira os três espelhos antes de enviar.',
+    'Execute GESTOR DE BASE → DIAGNÓSTICO DE CÓPIAS e reimporte a planilha corrigida: a carga bloqueia quando planilha e base não batem e nenhum registo é apagado pelo app.',
     ...audit.perFilial.map(
       (f) => `${f.filial}: ${f.rows} linhas · ${f.identities} identidade(s) · ${f.copies} cópia(s)`
     )
@@ -191,7 +191,7 @@ export function formatCloudPushIdentityConflicts(conflicts: CloudPushIdentityCon
 
   const lines = [
     `ENVIO BLOQUEADO: ${conflicts.length} ativo(s) com identidade (tenantid + filial + etiqueta) já presente na nuvem sob outro primarykey.`,
-    'Enviar gravaria uma segunda linha para o mesmo ativo. Puxe a base para adotar as linhas da nuvem, ou execute CÓPIAS REPETIDAS → LIMPAR CÓPIAS antes de enviar.'
+    'Enviar gravaria uma segunda linha para o mesmo ativo. Puxe a base para adotar as linhas da nuvem, ou corrija a planilha e reimporte — o app não apaga registos.'
   ];
 
   conflicts.slice(0, 5).forEach((conflict) => {
@@ -246,7 +246,8 @@ export class CloudPushIdentityConflictError extends CloudPushPolicyError {
  * Recuo do envio bloqueado por cópias.
  *
  * A fila da nuvem volta a tentar sozinha; sem recuo, um bloqueio que só o
- * operador resolve (LIMPAR CÓPIAS) repetia o aviso a cada 1,2 s. Os valores
+ * operador resolve (planilha corrigida e reimportada) repetia o aviso a cada
+ * 1,2 s. Os valores
  * crescem até ao teto e voltam a zero no primeiro envio aceito.
  */
 export const CLOUD_PUSH_BLOCKED_BASE_BACKOFF_MS = 30_000;

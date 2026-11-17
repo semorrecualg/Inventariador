@@ -7,6 +7,7 @@ import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
 import { normalizeFieldValue, normalizeDateISO, normalizeNumeric } from '../utils/normalize';
 import { contentFingerprint, createFallbackKeyAllocator, resolveAssetKey, sanitizeAssetKey } from '../utils/assetKey';
+import { reconcileImport, ImportReconciliationError, type LoadedAssetRef } from '../utils/importReconciliation';
 import { reportRecnoCollisions } from './recnoGuardService';
 
 export interface AtivoPlanilha {
@@ -170,6 +171,71 @@ export class DatabaseLoaderService {
     }
   }
 
+  /**
+   * RECONCILIAÇÃO DA CARGA (planilha × base, por filial).
+   *
+   * Lê de volta da base as chaves que esta carga mandou gravar e exige
+   * `planilha N = base N`. Se o `bulkPut` substituiu uma linha (chave repetida
+   * no arquivo) ou trocou a filial (mesma chave noutra filial), a carga para
+   * aqui, com o relatório no terminal e em `audit_logs` — em vez de devolver
+   * "sucesso" contando linhas que não ficaram na base.
+   */
+  private static async verifyLoadedRows(carregadas: LoadedAssetRef[]): Promise<void> {
+    if (carregadas.length === 0) return;
+
+    const found: LoadedAssetRef[] = [];
+    const READ_CHUNK = 500;
+    const unique = new Map<string, [string, string]>();
+    for (const ref of carregadas) {
+      unique.set(`${ref.tenantid}\u0000${ref.primarykey}`, [ref.tenantid, ref.primarykey]);
+    }
+    const keys = Array.from(unique.values());
+
+    for (let i = 0; i < keys.length; i += READ_CHUNK) {
+      const lote = keys.slice(i, i + READ_CHUNK);
+      const rows = (await db.local_assets
+        .where('[tenantid+primarykey]')
+        .anyOf(lote)
+        .toArray()) as unknown as DexieAsset[];
+      rows.forEach((row) => {
+        found.push({
+          tenantid: String(row.tenantid ?? ''),
+          filial: String(row.filial_raw || row.filial || ''),
+          primarykey: String(row.primarykey ?? '')
+        });
+      });
+    }
+
+    const report = reconcileImport(carregadas, found);
+    report.lines.forEach((line) => (report.ok ? logger.info(line) : logger.error(line)));
+
+    try {
+      await db.audit_logs.put({
+        id: `RECON_${Date.now()}_${Math.random().toString(36).slice(2, 9).toUpperCase()}`,
+        usuario: 'CARGA_PLANILHA',
+        acao: 'IMPORT_RECONCILIATION',
+        tabela: 'local_assets',
+        registro_id: String(report.planilha),
+        details: report.lines.join(' · '),
+        delta: JSON.stringify({
+          ok: report.ok,
+          planilha: report.planilha,
+          gravadas: report.gravadas,
+          distinctKeys: report.distinctKeys,
+          duplicateKeys: report.duplicateKeys,
+          missing: report.missing,
+          wrongFilial: report.wrongFilial,
+          perFilial: report.perFilial
+        }),
+        updated_at: new Date().toISOString()
+      });
+    } catch (auditErr) {
+      logger.warn('[CARGA] Falha ao registar a reconciliação em audit_logs:', auditErr);
+    }
+
+    if (!report.ok) throw new ImportReconciliationError(report);
+  }
+
   static async extrairDadosDaPlanilha(file: Blob): Promise<unknown[]> {
     const reader = new FileReader();
     const dataBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
@@ -200,6 +266,8 @@ export class DatabaseLoaderService {
     let registrosProcessados = 0;
     // Chaves derivadas (linhas sem identidade) contam por carga inteira, não por lote.
     const allocateFallbackKey = createFallbackKeyAllocator();
+    // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
+    const carregadas: LoadedAssetRef[] = [];
 
     for (let i = 0; i < dadosBrutos.length; i += this.CHUNK_SIZE) {
       const loteBruto = dadosBrutos.slice(i, i + this.CHUNK_SIZE) as Record<string, unknown>[];
@@ -265,6 +333,12 @@ export class DatabaseLoaderService {
         };
       });
 
+      loteHigienizado.forEach((asset) => carregadas.push({
+        tenantid: asset.tenantid,
+        filial: asset.filial_raw || asset.filial,
+        primarykey: asset.primarykey
+      }));
+
       // Transação ACID atômica por bloco para mitigar Race Conditions
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
         await db.ativos.bulkPut(loteHigienizado);
@@ -278,6 +352,7 @@ export class DatabaseLoaderService {
       }
       logger.info(`[SRE_LOADER] Lote injetado. Progresso: ${registrosProcessados}/${dadosBrutos.length}`);
     }
+    await DatabaseLoaderService.verifyLoadedRows(carregadas);
     await DatabaseLoaderService.reportRecnoAfterLoad();
     return registrosProcessados;
   }
@@ -345,6 +420,8 @@ export class DatabaseLoaderService {
 
     let totalInseridos = 0;
     let batchIndex = 0;
+    // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
+    const carregadas: LoadedAssetRef[] = [];
 
     // FASE 1 (SRE): Escrita silenciosa usando o handle global isolado (sem abrir popup)
     try {
@@ -481,6 +558,12 @@ export class DatabaseLoaderService {
           assetsToInsert.push(assetObj);
         }
 
+        assetsToInsert.forEach((asset) => carregadas.push({
+          tenantid: asset.tenantid,
+          filial: asset.filial_raw || asset.filial,
+          primarykey: asset.primarykey
+        }));
+
         // Transação ACID atômica do Dexie com Fail-Fast
         try {
           await db.transaction('rw', [db.local_assets, db.ativos, db.assets, db.audit_logs], async () => {
@@ -536,6 +619,7 @@ export class DatabaseLoaderService {
       // Isolamento restabelecido sem dependência de sqliteService
     }
 
+    await DatabaseLoaderService.verifyLoadedRows(carregadas);
     await DatabaseLoaderService.reportRecnoAfterLoad();
     return totalInseridos;
   }
@@ -622,6 +706,8 @@ export class DatabaseLoaderService {
 
     const totalRows = totalPlanilha;
     let totalInserted = 0;
+    // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
+    const carregadas: LoadedAssetRef[] = [];
 
     // FASE 1 (SRE): Escrita silenciosa usando o handle global isolado (sem abrir popup)
     try {
@@ -749,6 +835,12 @@ export class DatabaseLoaderService {
           assetsToInsert.push(assetObj);
         }
 
+        assetsToInsert.forEach((asset) => carregadas.push({
+          tenantid: asset.tenantid,
+          filial: asset.filial_raw || asset.filial,
+          primarykey: asset.primarykey
+        }));
+
         // DESCARGA NO ARMAZENAMENTO LOCAL (Transação ACID atômica com Fail-Fast)
         try {
           await db.transaction('rw', [db.local_assets, db.ativos, db.assets, db.audit_logs], async () => {
@@ -797,6 +889,7 @@ export class DatabaseLoaderService {
       rawExcelData = null;
     }
 
+    await DatabaseLoaderService.verifyLoadedRows(carregadas);
     await DatabaseLoaderService.reportRecnoAfterLoad();
     return totalInserted;
   }
