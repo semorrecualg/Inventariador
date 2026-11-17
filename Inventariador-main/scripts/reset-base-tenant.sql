@@ -1,9 +1,13 @@
 -- ============================================================================
 -- reset-base-tenant.sql — RESET DA BASE DE UM CONTRATO (Fase 3)
 --
--- Uso (⚠ destrutivo e irreversível — faça backup antes):
+-- ONDE CORRER: SQL Editor do Supabase (cole o ficheiro inteiro) ou `psql`.
+-- Não usa meta-comandos do psql, por isso funciona também no editor web.
 --
---   psql "$SUPABASE_DB_URL" -v tenantid=CICOPAL -f scripts/reset-base-tenant.sql
+-- ⚠ DESTRUTIVO E IRREVERSÍVEL. Faça backup/snapshot do projeto antes.
+--
+-- COMO USAR: troque o valor da linha marcada "CONTRATO" abaixo e execute.
+-- Sem contrato válido o script aborta sem apagar nada (raise exception).
 --
 -- O QUE É APAGADO (só do contrato indicado):
 --   • public.asset_logs         — trilha dos ativos deste contrato;
@@ -19,54 +23,72 @@
 --
 -- A comparação do contrato ignora caixa e espaços (`CICOPAL` = ` cicopal `),
 -- porque a carga grava o `tenantid` em maiúsculas e há linhas legadas com
--- espaços. As tabelas sem FK entre si: a ordem dos DELETE só mantém a lógica.
+-- espaços. As tabelas não têm FK entre si: a ordem dos DELETE só mantém a lógica.
 -- ============================================================================
-\set ON_ERROR_STOP on
 
-\if :{?tenantid}
-\else
-  \echo 'ERRO: informe o contrato. Ex.: psql ... -v tenantid=CICOPAL -f scripts/reset-base-tenant.sql'
-  \quit 3
-\endif
+-- ▼▼▼ CONTRATO — troque CICOPAL pelo contrato a limpar ▼▼▼
+select set_config('gbr.reset_tenant', 'CICOPAL', false) as contrato;
 
-\echo '>>> Contrato:', :'tenantid'
+do $$
+declare
+  v_tenant     text := upper(btrim(coalesce(current_setting('gbr.reset_tenant', true), '')));
+  v_ativos     bigint := 0;
+  v_campanhas  bigint := 0;
+  v_laudos     bigint := 0;
+  v_logs       bigint := 0;
+begin
+  if v_tenant = '' then
+    raise exception 'Contrato vazio: defina o tenantid na primeira linha do script (set_config).';
+  end if;
 
-BEGIN;
+  -- Fotografia ANTES.
+  select count(*) into v_ativos from public.assets a
+   where upper(btrim(coalesce(a.tenantid, ''))) = v_tenant;
+  select count(*) into v_campanhas from public.campaigns c
+   where upper(btrim(coalesce(c.tenantid, ''))) = v_tenant;
+  select count(*) into v_laudos from public.campaign_snapshots s
+   where upper(btrim(coalesce(s.tenantid, ''))) = v_tenant;
+  -- `tenant_id` legado é lido por JSON para não falhar se a coluna não existir.
+  select count(*) into v_logs from public.asset_logs l
+   where upper(btrim(coalesce(to_jsonb(l)->>'tenantid', to_jsonb(l)->>'tenant_id', ''))) = v_tenant;
 
--- Fotografia ANTES (vai para o terminal; serve de prova do reset).
-SELECT 'ANTES' AS fase,
-       (SELECT count(*) FROM public.assets
-         WHERE upper(btrim(coalesce(tenantid, ''))) = upper(btrim(:'tenantid'))) AS ativos,
-       (SELECT count(*) FROM public.campaigns
-         WHERE upper(btrim(coalesce(tenantid, ''))) = upper(btrim(:'tenantid'))) AS campanhas,
-       (SELECT count(*) FROM public.campaign_snapshots
-         WHERE upper(btrim(coalesce(tenantid, ''))) = upper(btrim(:'tenantid'))) AS laudos,
-       (SELECT count(*) FROM public.asset_logs
-         WHERE upper(btrim(coalesce(tenantid, tenant_id, ''))) = upper(btrim(:'tenantid'))) AS logs;
+  raise notice 'ANTES  contrato=%  ativos=%  campanhas=%  laudos=%  logs=%',
+    v_tenant, v_ativos, v_campanhas, v_laudos, v_logs;
 
-DELETE FROM public.campaign_snapshots
- WHERE upper(btrim(coalesce(tenantid, ''))) = upper(btrim(:'tenantid'));
+  delete from public.campaign_snapshots s
+   where upper(btrim(coalesce(s.tenantid, ''))) = v_tenant;
+  get diagnostics v_laudos = row_count;
 
-DELETE FROM public.asset_logs
- WHERE upper(btrim(coalesce(tenantid, tenant_id, ''))) = upper(btrim(:'tenantid'));
+  delete from public.asset_logs l
+   where upper(btrim(coalesce(to_jsonb(l)->>'tenantid', to_jsonb(l)->>'tenant_id', ''))) = v_tenant;
+  get diagnostics v_logs = row_count;
 
-DELETE FROM public.assets
- WHERE upper(btrim(coalesce(tenantid, ''))) = upper(btrim(:'tenantid'));
+  delete from public.assets a
+   where upper(btrim(coalesce(a.tenantid, ''))) = v_tenant;
+  get diagnostics v_ativos = row_count;
 
-DELETE FROM public.campaigns
- WHERE upper(btrim(coalesce(tenantid, ''))) = upper(btrim(:'tenantid'));
+  delete from public.campaigns c
+   where upper(btrim(coalesce(c.tenantid, ''))) = v_tenant;
+  get diagnostics v_campanhas = row_count;
+
+  raise notice 'DEPOIS contrato=%  apagados: ativos=%  campanhas=%  laudos=%  logs=%',
+    v_tenant, v_ativos, v_campanhas, v_laudos, v_logs;
+end $$;
 
 -- Fotografia DEPOIS: tudo a zero é o estado esperado antes de reimportar.
-SELECT 'DEPOIS' AS fase,
-       (SELECT count(*) FROM public.assets
-         WHERE upper(btrim(coalesce(tenantid, ''))) = upper(btrim(:'tenantid'))) AS ativos,
-       (SELECT count(*) FROM public.campaigns
-         WHERE upper(btrim(coalesce(tenantid, ''))) = upper(btrim(:'tenantid'))) AS campanhas,
-       (SELECT count(*) FROM public.campaign_snapshots
-         WHERE upper(btrim(coalesce(tenantid, ''))) = upper(btrim(:'tenantid'))) AS laudos,
-       (SELECT count(*) FROM public.asset_logs
-         WHERE upper(btrim(coalesce(tenantid, tenant_id, ''))) = upper(btrim(:'tenantid'))) AS logs;
+select 'DEPOIS' as fase,
+       (select count(*) from public.assets a
+         where upper(btrim(coalesce(a.tenantid, ''))) =
+               upper(btrim(coalesce(current_setting('gbr.reset_tenant', true), '')))) as ativos,
+       (select count(*) from public.campaigns c
+         where upper(btrim(coalesce(c.tenantid, ''))) =
+               upper(btrim(coalesce(current_setting('gbr.reset_tenant', true), '')))) as campanhas,
+       (select count(*) from public.campaign_snapshots s
+         where upper(btrim(coalesce(s.tenantid, ''))) =
+               upper(btrim(coalesce(current_setting('gbr.reset_tenant', true), '')))) as laudos,
+       (select count(*) from public.asset_logs l
+         where upper(btrim(coalesce(to_jsonb(l)->>'tenantid', to_jsonb(l)->>'tenant_id', ''))) =
+               upper(btrim(coalesce(current_setting('gbr.reset_tenant', true), '')))) as logs;
 
-COMMIT;
-
-\echo '>>> Reset concluído. Reimporte a planilha no Gestor de Base e confira "planilha N · base N".'
+-- Depois desta execução: Gestor de Base → ZERAR BASE DE DADOS → reimportar a
+-- planilha e conferir "planilha N · base N" (docs/FASE3_RESET_E_REIMPORTACAO.md).

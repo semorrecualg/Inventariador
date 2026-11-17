@@ -17,11 +17,20 @@ O reset abaixo é **irreversível**.
 em `unit_configs`, `locations`, `audit_logs` nem `user_permissions` — são
 cadastro, não inventário.
 
+**No Supabase (SQL Editor):** abra `scripts/reset-base-tenant.sql`, troque o
+contrato na linha marcada `CONTRATO` (`select set_config('gbr.reset_tenant', 'CICOPAL', false)`)
+e cole o ficheiro inteiro no SQL Editor. Não usa meta-comandos do `psql`, por isso
+roda tal como está no editor web.
+
+**No terminal:**
+
 ```bash
-psql "$SUPABASE_DB_URL" -v tenantid=CICOPAL -f scripts/reset-base-tenant.sql
+psql "$SUPABASE_DB_URL" -f scripts/reset-base-tenant.sql
 ```
 
-A saída tem de mostrar `ativos 0 · campanhas 0 · laudos 0` na fase `DEPOIS`.
+Em qualquer dos casos o contrato está no próprio ficheiro (linha `CONTRATO`) —
+não há `-v tenantid=` a passar. Contrato vazio aborta sem apagar nada, e a
+mensagem `DEPOIS` tem de mostrar `ativos 0 · campanhas 0 · laudos 0`.
 
 ## 3. Reset da base local
 
