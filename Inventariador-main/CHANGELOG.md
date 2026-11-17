@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Carga sem perda de registos e campanha como chave de controlo da filial
+
+- **Carga literal e reconciliada:** a planilha entra copiada campo a campo
+  (`_sourceRow`), com datas/valores também tipados, e a carga termina exigindo
+  `planilha N = base N` por filial — se uma chave repetida substituir outra linha,
+  a carga bloqueia em vez de reportar sucesso.
+- **Identidade interna do ativo (Fase 2):** `primarykey`/`id` passam a ser uma
+  chave interna derivada (chave de origem única → chave canónica; chave repetida →
+  derivada de chave + conteúdo), com a `primarykey` da planilha preservada em
+  `source_primarykey` e a proveniência em `source_row`/`import_batch`. Nenhuma
+  linha é descartada e reimportar o mesmo arquivo não duplica nem perde registos.
+- **Campanha = controlo do inventário (Fase 1):** campanha exige filial, só uma
+  campanha aberta (`CREATED`/`ACTIVE`) por filial e por contrato — campanha sem
+  `tenantid` não bloqueia a de outro contrato —, e campanha com ativos lidos não
+  pode ser excluída. A guarda corre nos serviços (vale offline) e o SQL ganhou
+  `CHECK` de filial e índice único parcial na migração da Fase 1.
+
 ### Remoção da integração Gemini (código morto e chave exposta ao cliente)
 
 - Saem o serviço de IA, o assistente, o modal de chat e o cartão de insight (este

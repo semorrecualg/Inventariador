@@ -6,7 +6,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
 import { normalizeDateISO, normalizeNumeric } from '../utils/normalize';
-import { contentFingerprint, createFallbackKeyAllocator, resolveAssetKey, sanitizeAssetKey } from '../utils/assetKey';
+import { createAssetIdentityAllocator, newImportBatchId, sourcePrimarykeyOf, type AssetIdentityCandidate } from '../utils/assetIdentity';
 import { reconcileImport, ImportReconciliationError, type LoadedAssetRef } from '../utils/importReconciliation';
 import { reportRecnoCollisions } from './recnoGuardService';
 
@@ -94,7 +94,7 @@ const CONTRACT_HEADERS_TEXT = CONTRACT_HEADERS.join(';');
  * arquivo e não voltava 1:1 para o ERP.
  *
  * A identidade do registo continua a ser a chave canónica (`primarykey`
- * calculada por `resolveAssetKey`), que é interna e não substitui o dado.
+ * calculada por `utils/assetIdentity`), que é interna e não substitui o dado.
  */
 const literalText = (value: unknown): string | null => {
   if (value === null || value === undefined) return null;
@@ -312,26 +312,38 @@ export class DatabaseLoaderService {
     // Carga nova pode reintroduzir tenantid não canónico: invalida o marcador.
     await invalidateTenantCaseMarker();
     let registrosProcessados = 0;
-    // Chaves derivadas (linhas sem identidade) contam por carga inteira, não por lote.
-    const allocateFallbackKey = createFallbackKeyAllocator();
+    // Fase 2 — identidade INTERNA + proveniência da linha (source_row/import_batch).
+    const importBatch = newImportBatchId();
+    const identityCandidate = (row: Record<string, unknown>): AssetIdentityCandidate => ({
+      tenantid: String(getRowValue(row, 'tenantid') || '').trim().toUpperCase(),
+      filial: mirrorFilial(row.filial),
+      sourcePrimarykey: getRowValue(row, 'primarykey'),
+      etiqueta: getRowValue(row, 'etiqueta', 'tag'),
+      tag: getRowValue(row, 'tag'),
+      row
+    });
+    // O arquivo inteiro é pré-contado: uma base repetida deixa de ser identidade.
+    const identities = createAssetIdentityAllocator()
+      .prime((dadosBrutos as Record<string, unknown>[]).map(identityCandidate));
     // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
     const carregadas: LoadedAssetRef[] = [];
 
     for (let i = 0; i < dadosBrutos.length; i += this.CHUNK_SIZE) {
       const loteBruto = dadosBrutos.slice(i, i + this.CHUNK_SIZE) as Record<string, unknown>[];
       
-      const loteHigienizado: DexieAsset[] = loteBruto.map((row) => {
+      const loteHigienizado: DexieAsset[] = loteBruto.map((row, rowIndex) => {
         // REGRA DE CONTRATO (planilha): o tenantid NUNCA tem valor fixo/fallback.
         // Ele vem EXCLUSIVAMENTE da coluna 'tenantid' (Índice 0) da planilha.
         const tenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
         const rawFilial = mirrorFilial(row.filial);
-        // Chave canônica única (utils/assetKey): primarykey → etiqueta → tag →
-        // derivada do conteúdo. Antes esta carga olhava só `primarykey` e caía num
-        // `ALT-<aleatório>`: cada importação criava linhas novas para o mesmo ativo.
-        const pk = resolveAssetKey(
-          { primarykey: row.primarykey, etiqueta: row.etiqueta, tag: row.tag },
-          () => allocateFallbackKey(tenantid, rawFilial, contentFingerprint(row))
-        );
+        // Fase 2 — identidade INTERNA: `primarykey` da planilha quando ela é
+        // única no arquivo; repetida recebe chave derivada (pk + conteúdo) para
+        // a segunda linha NÃO substituir a primeira. `source_primarykey` guarda
+        // o texto literal da célula.
+        const identityInput = identityCandidate(row);
+        const identity = identities.allocate(identityInput);
+        const pk = identity.primarykey;
+        const sourcePrimarykey = sourcePrimarykeyOf(identityInput.sourcePrimarykey);
         // Coluna canônica da planilha: 'endereco' (posição 11 do contrato). O nome 'codigo_endereco'
         // era lido antes e NÃO existe no contrato → gravava endereco: null para todos os ativos,
         // deixando o AddressSelector vazio. Fallbacks aceitos para tolerância de nomes de coluna.
@@ -369,6 +381,9 @@ export class DatabaseLoaderService {
           sn3_recno: normalizeNumeric(row.sn3_recno),
           // Cópia literal da linha inteira (inclui datas e valores como escritos).
           _sourceRow: sourceRowLiteral(row),
+          source_primarykey: sourcePrimarykey,
+          source_row: i + rowIndex + 1,
+          import_batch: importBatch,
           _is_synced: 0,
           _is_deleted: 0,
           _conferido: 0,
@@ -472,6 +487,18 @@ export class DatabaseLoaderService {
 
     let totalInseridos = 0;
     let batchIndex = 0;
+    // Fase 2 — identidade INTERNA + proveniência (source_row/import_batch).
+    const importBatch = newImportBatchId();
+    const identityCandidate = (row: Record<string, unknown>): AssetIdentityCandidate => ({
+      tenantid: String(getRowValue(row, 'tenantid') || '').trim().toUpperCase(),
+      filial: mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId),
+      sourcePrimarykey: getRowValue(row, 'primarykey'),
+      etiqueta: getRowValue(row, 'etiqueta', 'tag'),
+      tag: getRowValue(row, 'tag'),
+      row
+    });
+    const identities = createAssetIdentityAllocator()
+      .prime((rawRows as unknown as Record<string, unknown>[]).map(identityCandidate));
     // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
     const carregadas: LoadedAssetRef[] = [];
 
@@ -493,22 +520,22 @@ export class DatabaseLoaderService {
     try {
       // Processamento em lotes de 1000 (Chunking)
       const totalRows = rawRows.length;
-      const allocateFallbackKey = createFallbackKeyAllocator();
       for (let i = 0; i < totalRows; i += this.BATCH_SIZE) {
         batchIndex++;
         const chunk = rawRows.slice(i, Math.min(i + this.BATCH_SIZE, totalRows));
         const assetsToInsert: DexieAsset[] = [];
         const correctionsToLog: { id: string; originalValue: unknown }[] = [];
 
-        for (const row of chunk) {
+        for (let chunkIndex = 0; chunkIndex < chunk.length; chunkIndex++) {
+          const row = chunk[chunkIndex];
           const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
           const finalFilial = finalFilialRaw.toUpperCase();
           const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
-          // Chave canônica única (utils/assetKey) — a mesma de todos os caminhos.
-          const primarykeyVal = sanitizeAssetKey(getRowValue(row, 'primarykey'));
-          const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
-          const finalId = primarykeyVal || tagSanitizada
-            || allocateFallbackKey(finalTenantid, finalFilial, contentFingerprint(row as Record<string, unknown>));
+          // Fase 2 — identidade INTERNA (mesmo algoritmo em todos os caminhos):
+          // `primarykey` única vira a chave; repetida recebe chave derivada.
+          const identityInput = identityCandidate(row as Record<string, unknown>);
+          const finalId = identities.allocate(identityInput).primarykey;
+          const sourcePrimarykey = sourcePrimarykeyOf(identityInput.sourcePrimarykey);
           // Dado do cliente: literal. Só a chave (`finalId`) é canónica.
           const etiquetaLiteral = literalText(getRowValue(row, 'etiqueta', 'tag')) || finalId;
           const itemDesc = literalText(
@@ -594,6 +621,9 @@ export class DatabaseLoaderService {
             sn3_recno: sn3RecnoVal,
             // Cópia literal da linha inteira (inclui datas e valores como escritos).
             _sourceRow: sourceRowLiteral(row as Record<string, unknown>),
+            source_primarykey: sourcePrimarykey,
+            source_row: i + chunkIndex + 1,
+            import_batch: importBatch,
             _is_synced: 0,
             _is_deleted: 0,
             _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
@@ -761,6 +791,16 @@ export class DatabaseLoaderService {
 
     const totalRows = totalPlanilha;
     let totalInserted = 0;
+    // Fase 2 — identidade INTERNA + proveniência (source_row/import_batch).
+    const importBatch = newImportBatchId();
+    const identityCandidate = (row: Record<string, unknown>): AssetIdentityCandidate => ({
+      tenantid: String(getRowValue(row, 'tenantid') || '').trim().toUpperCase(),
+      filial: mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId),
+      sourcePrimarykey: getRowValue(row, 'primarykey'),
+      etiqueta: getRowValue(row, 'etiqueta', 'tag'),
+      tag: getRowValue(row, 'tag'),
+      row
+    });
     // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
     const carregadas: LoadedAssetRef[] = [];
 
@@ -781,21 +821,23 @@ export class DatabaseLoaderService {
 
     try {
       const BATCH_SIZE = 200;
-      const allocateFallbackKey = createFallbackKeyAllocator();
+      const identityRows: Record<string, unknown>[] = rawExcelData;
+      const identities = createAssetIdentityAllocator().prime(identityRows.map(identityCandidate));
       for (let i = 0; i < totalRows; i += BATCH_SIZE) {
         const chunk = rawExcelData.slice(i, Math.min(i + BATCH_SIZE, totalRows));
         const assetsToInsert: DexieAsset[] = [];
         const correctionsToLog: { id: string; originalValue: unknown }[] = [];
 
-        for (const row of chunk) {
+        for (let chunkIndex = 0; chunkIndex < chunk.length; chunkIndex++) {
+          const row = chunk[chunkIndex];
           const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
           const finalFilial = finalFilialRaw.toUpperCase();
           const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
-          // Chave canônica única (utils/assetKey) — a mesma de todos os caminhos.
-          const primarykeyVal = sanitizeAssetKey(getRowValue(row, 'primarykey'));
-          const tagSanitizada = sanitizeAssetKey(getRowValue(row, 'etiqueta', 'tag'));
-          const finalId = primarykeyVal || tagSanitizada
-            || allocateFallbackKey(finalTenantid, finalFilial, contentFingerprint(row as Record<string, unknown>));
+          // Fase 2 — identidade INTERNA (mesmo algoritmo em todos os caminhos):
+          // `primarykey` única vira a chave; repetida recebe chave derivada.
+          const identityInput = identityCandidate(row as Record<string, unknown>);
+          const finalId = identities.allocate(identityInput).primarykey;
+          const sourcePrimarykey = sourcePrimarykeyOf(identityInput.sourcePrimarykey);
           // Dado do cliente: literal. Só a chave (`finalId`) é canónica.
           const etiquetaLiteral = literalText(getRowValue(row, 'etiqueta', 'tag')) || finalId;
           const itemDesc = literalText(getRowValue(row, 'descricaodoativo', 'descricao', 'item')) || `Ativo N-${finalId}`;
@@ -875,6 +917,9 @@ export class DatabaseLoaderService {
             sn3_recno: sn3RecnoVal,
             // Cópia literal da linha inteira (inclui datas e valores como escritos).
             _sourceRow: sourceRowLiteral(row as Record<string, unknown>),
+            source_primarykey: sourcePrimarykey,
+            source_row: i + chunkIndex + 1,
+            import_batch: importBatch,
             _is_synced: 0,
             _is_deleted: 0,
             _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,

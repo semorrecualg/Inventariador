@@ -5,7 +5,6 @@ import { db } from '../services/sqliteService';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import {
   reconcileImport,
-  ImportReconciliationError,
   type LoadedAssetRef
 } from '../utils/importReconciliation';
 
@@ -128,17 +127,16 @@ describe('carga da planilha — portão planilha N · base N', () => {
     ]);
   });
 
-  it('carga com chave repetida no arquivo para e explica (não apaga nem finge sucesso)', async () => {
-    await expect(
-      DatabaseLoaderService.injetarDadosEmLotes([
-        planilhaRow('010101 CICOPAL GO', 'A1'),
-        planilhaRow('010101 CICOPAL GO', 'A1')
-      ])
-    ).rejects.toBeInstanceOf(ImportReconciliationError);
+  it('chave repetida no arquivo fica com as duas linhas (identidade interna, Fase 2)', async () => {
+    const gravadas = await DatabaseLoaderService.injetarDadosEmLotes([
+      planilhaRow('010101 CICOPAL GO', 'A1'),
+      planilhaRow('010101 CICOPAL GO', 'A1')
+    ]);
 
-    // Nada foi apagado: as duas linhas da planilha continuam a ser uma chave só.
-    expect(await db.local_assets.count()).toBe(1);
+    // A identidade do registo é interna: a segunda linha não substitui a primeira.
+    expect(gravadas).toBe(2);
+    expect(await db.local_assets.count()).toBe(2);
     const recon = (await db.audit_logs.toArray()).find((log) => log.acao === 'IMPORT_RECONCILIATION');
-    expect(JSON.parse(String(recon?.delta))).toMatchObject({ ok: false, planilha: 2, gravadas: 1 });
+    expect(JSON.parse(String(recon?.delta))).toMatchObject({ ok: true, planilha: 2, gravadas: 2 });
   });
 });

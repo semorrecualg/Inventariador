@@ -60,6 +60,16 @@ export interface DexieAsset {
    * `databaixa`, `vlraquisic`).
    */
   _sourceRow?: Record<string, string> | null;
+  /**
+   * Fase 2 — a coluna `primarykey` da planilha, exatamente como escrita. É a
+   * ORIGEM do registo; a identidade do ativo é interna (`primarykey`/`id`), para
+   * duas linhas com a mesma chave de origem não se substituírem na carga.
+   */
+  source_primarykey?: string | null;
+  /** Linha da planilha que originou o registo (1 = primeira linha de dados). */
+  source_row?: number | null;
+  /** Carga (`CARGA-…`) que gravou o registo — rastreio de reimportações. */
+  import_batch?: string | null;
   DE_PARA: string | null;
   _photoUrl: string | null;
   gps_lat: number | null;
