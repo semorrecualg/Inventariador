@@ -117,9 +117,12 @@ isOwnerEmail(email)                        // email == VITE_ADMIN_EMAIL (case-in
   **Banco de Dados** (DATABASE_MANAGER — gate adicional `canAccessDatabaseManager`).
 - **Campanhas de Inventário** (`CAMPAIGN_MANAGEMENT`) e a **UNIDADE OPERACIONAL**
   (âncora GPS) não têm entrada solta no painel. O caminho é contextual: no
-  CONTRATO DE TRABALHO (`WorkContextSelector`), o card da unidade (ou o badge
-  "Âncora e Campanha") abre a tela da unidade já filtrada naquela filial, onde
-  ficam as duas configurações — âncora GPS e campanha por unidade.
+  CONTRATO DE TRABALHO (`WorkContextSelector`), o badge "Âncora e Campanha" de
+  cada unidade abre a tela da unidade já filtrada naquela filial, onde ficam as
+  duas configurações — âncora GPS e campanha por unidade. O **card da filial é
+  escolha, não navegação** — inclusive para ADMIN/MASTER: marcar a filial nunca
+  abre a configuração, para não quebrar a trilha filial → módulo → "Acessar o
+  Módulo".
 - Grid de módulos: **CONCILIAÇÃO POR CONTAS** e **ASSINATURA DIGITAL** gated por
   `isAuditor` (Trilha B); INVENTÁRIO / FICHA / ETIQUETAR / CONSULTA livres (Trilha C).
 

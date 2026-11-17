@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — escolher a filial não abre mais a UNIDADE OPERACIONAL
+
+- **O cartão da filial voltou a ser escolha, não navegação:** no CONTRATO DE
+  TRABALHO, o toque na unidade chamava `onOpenAdmin(UNIT_SELECTION)` para
+  ADMIN/MASTER — então um master com a unidade já liberada (âncora GPS +
+  campanha ACTIVE) era jogado na tela de configuração ao apenas selecionar onde
+  ia trabalhar, quebrando a trilha filial → módulo → "Acessar o Módulo". O
+  cartão agora só marca a filial, em todos os perfis.
+- **A configuração continua acessível:** o badge "Âncora e Campanha" abre a
+  UNIDADE OPERACIONAL já filtrada naquela filial (`unitName` em parâmetro), que
+  antes abria sem escopo e obrigava a procurar a unidade de novo.
+
 ### Acesso padronizado — biometria obrigatória com fallback declarado (Fase 2)
 
 - **A etapa deixou de desaparecer em silêncio:** o passo biométrico só abria

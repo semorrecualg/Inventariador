@@ -446,14 +446,15 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                         key={opt.filial}
                         type="button"
                         onClick={() => {
-                          // Registra a escolha (o retorno do configurador cai com a
-                          // filial certa) e, para ADMIN/MASTER, abre a configuração
-                          // desta unidade — âncora GPS + campanha — já com a filial
-                          // em parâmetro. O auditor apenas escolhe onde vai inventariar.
+                          // ESCOLHA, não navegação: o toque só marca a filial com
+                          // que o usuário vai trabalhar — a barra inferior leva ao
+                          // módulo escolhido. Antes, para ADMIN/MASTER, o cartão
+                          // abria a UNIDADE OPERACIONAL e quebrava a trilha
+                          // filial → módulo → ACESSAR (o admin caía na tela de
+                          // configuração ao tentar apenas escolher onde trabalhar).
+                          // A configuração de âncora e campanha continua no badge
+                          // "Âncora e Campanha" de cada unidade.
                           setSelectedFilial(opt.filial);
-                          if (isAdmin) {
-                            onOpenAdmin?.(AppScreen.UNIT_SELECTION, { unitName: opt.filial });
-                          }
                         }}
                         aria-pressed={isChosen}
                         className={`w-full bg-white rounded-2xl px-4 py-3.5 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] ${
@@ -495,13 +496,13 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                               data-testid={`unit-release-action-${opt.filial}`}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onOpenAdmin?.(AppScreen.UNIT_SELECTION);
+                                onOpenAdmin?.(AppScreen.UNIT_SELECTION, { unitName: opt.filial });
                               }}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                   e.preventDefault();
                                   e.stopPropagation();
-                                  onOpenAdmin?.(AppScreen.UNIT_SELECTION);
+                                  onOpenAdmin?.(AppScreen.UNIT_SELECTION, { unitName: opt.filial });
                                 }
                               }}
                               className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0 cursor-pointer hover:bg-amber-100 active:scale-95 transition-all"

@@ -3,11 +3,11 @@
 // workContextUnitReleaseAction.test.tsx — configuração da UNIDADE OPERACIONAL
 // a partir do CONTRATO DE TRABALHO.
 //
-// Regra do produto: a configuração da unidade (âncora GPS + campanha por
-// unidade) só tem entrada contextual. No contrato de trabalho, clicar no CARD
-// da unidade — ou no badge "Âncora e Campanha" — abre a Unidade Operacional já
-// com a filial em parâmetro. O auditor não configura: para ele o card continua
-// sendo só a escolha de onde vai inventariar.
+// Regra do produto: o CARD da unidade é ESCOLHA, nunca navegação. Em todos os
+// perfis — inclusive ADMIN/MASTER — o toque apenas marca a filial; a trilha é
+// filial → módulo → "Acessar o Módulo". A configuração da unidade (âncora GPS +
+// campanha) tem entrada pelo badge "Âncora e Campanha", que abre a Unidade
+// Operacional já com a filial em parâmetro.
 // ============================================================================
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
@@ -77,13 +77,14 @@ const chooseModule = (label: 'INVENTARIADOR' | 'CONTROLE DE ATIVO') =>
 describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
   afterEach(() => cleanup());
 
-  it('admin: clicar no CARD da unidade abre a configuração com a filial em parâmetro', () => {
+  it('admin: clicar no CARD da unidade só escolhe a filial — não navega', () => {
     const { onOpenAdmin } = renderSelector(UserRole.ADMIN);
 
     fireEvent.click(unitCard());
 
-    expect(onOpenAdmin).toHaveBeenCalledTimes(1);
-    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.UNIT_SELECTION, { unitName: FILIAL });
+    // O clique não pode tirar o admin da trilha filial → módulo → ACESSAR.
+    expect(onOpenAdmin).not.toHaveBeenCalled();
+    expect(unitCard().getAttribute('aria-pressed')).toBe('true');
   });
 
   it('admin: o badge de âncora e campanha também abre (com o mesmo destino)', () => {
@@ -93,7 +94,7 @@ describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
     fireEvent.click(badge);
 
     expect(onOpenAdmin).toHaveBeenCalledTimes(1);
-    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.UNIT_SELECTION);
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.UNIT_SELECTION, { unitName: FILIAL });
   });
 
   it('admin: o badge se identifica como a entrada de âncora e campanha', () => {
