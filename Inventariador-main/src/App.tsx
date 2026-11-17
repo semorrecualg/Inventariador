@@ -17,6 +17,7 @@ import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } f
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, isAuditorUser, userHasPermission } from './services/rbacService';
+import { canonicalRole, isFieldAuditorRole } from './utils/roles';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -184,10 +185,9 @@ const checkIsAdmin = (u: User | null | undefined) => {
     } catch { /* ignore */ }
   }
 
-  const roleStr = String(role || '').toUpperCase();
+  const roleStr = canonicalRole(role);
   return roleStr === 'ADMIN' || 
          roleStr === 'MASTER' || 
-         roleStr === 'GESTOR' || 
          !!isAdm || 
          email === ADMIN_EMAIL.toLowerCase();
 };
@@ -6471,7 +6471,7 @@ useEffect(() => {
 
     const userTenant = user?.tenantid || '';
     const userUnits = user?.units || (userTenant ? [userTenant] : []);
-    const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
+    const isAuditor = isFieldAuditorRole(user?.role);
     const assets = inventory.assets;
     
     if (assets.length === 0) {
@@ -7553,7 +7553,7 @@ useEffect(() => {
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
               isAdmin={isAdminUser(user) || canAccessDatabaseManager(user)}
-              isAuditor={!!(user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
+              isAuditor={!!(isFieldAuditorRole(user?.role) || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
               onNavigate={pushScreen}
    onLoadDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
    databaseMode={databaseMode}
@@ -7564,7 +7564,7 @@ useEffect(() => {
        // Se estiver no modo nuvem, mostramos todas para permitir o primeiro sync
        // No modo local, mostramos todas as unidades encontradas na base
        const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
-                  const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
+                  const isAuditor = isFieldAuditorRole(user?.role);
                   
                   if (isAdmin) return true; // Admin vê tudo que foi detectado
                   

@@ -25,8 +25,9 @@ describe('rbacService — Matriz de Governança RBAC (Relatório Canônico)', ()
     });
   });
 
-  describe('TRILHA B — Auditoria e Concordância (AUDITOR / AUXILIARY_AUDITOR)', () => {
-    it.each(['AUDITOR', 'AUXILIARY_AUDITOR'])('%s acessa auditoria mas NÃO gestão', (role) => {
+  describe('TRILHA B — Auditoria e Concordância (AUDITOR)', () => {
+    it('AUDITOR acessa auditoria mas NÃO gestão', () => {
+      const role = 'AUDITOR';
       expect(hasPermission(role, 'view_reconciliation')).toBe(true);
       expect(hasPermission(role, 'view_impairment')).toBe(true);
       expect(hasPermission(role, 'view_audit_logs')).toBe(true);
@@ -81,10 +82,22 @@ describe('rbacService — Matriz de Governança RBAC (Relatório Canônico)', ()
   });
 
   describe('Perfis especiais e desconhecidos', () => {
-    it('DEMO/MOBILE_SINGLE/GESTOR mantêm paridade com comportamento legado (acesso amplo)', () => {
+    it('DEMO/MOBILE_SINGLE mantêm paridade com comportamento legado (acesso amplo)', () => {
       expect(hasPermission('DEMO', 'manage_campaigns')).toBe(true);
       expect(hasPermission('MOBILE_SINGLE', 'sign_documents')).toBe(true);
-      expect(hasPermission('GESTOR', 'manage_database')).toBe(true);
+    });
+
+    it('GESTOR deixou de ser papel: não concede governança (remapeado para ADMIN na nuvem)', () => {
+      expect(hasPermission('GESTOR', 'manage_database')).toBe(false);
+      expect(isAdminRole('GESTOR')).toBe(false);
+      expect(getRolePermissions('GESTOR').has('field_inventory')).toBe(true);
+    });
+
+    it('AUXILIARY_AUDITOR legado é lido como AUDITOR (fusão, sem perda de acesso)', () => {
+      expect(hasPermission('AUXILIARY_AUDITOR', 'view_audit_logs')).toBe(true);
+      expect(hasPermission('AUXILIARY_AUDITOR', 'manage_users')).toBe(false);
+      expect(isAuditorRole('AUXILIARY_AUDITOR')).toBe(true);
+      expect(isAdminRole('AUXILIARY_AUDITOR')).toBe(false);
     });
 
     it('papel desconhecido cai no fallback de operação de campo (nunca fica sem acesso)', () => {

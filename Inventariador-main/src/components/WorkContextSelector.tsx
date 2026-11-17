@@ -14,8 +14,9 @@ import {
 } from 'lucide-react';
 import BackButton from './BackButton';
 import type { NavigationParams, User } from '../types';
-import { AppModule, AppScreen, UserRole } from '../types';
+import { AppModule, AppScreen } from '../types';
 import { isAdminUser } from '../services/rbacService';
+import { isFieldAuditorRole } from '../utils/roles';
 import {
   WorkContext,
   type FilialOption,
@@ -124,7 +125,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
 
   const selectedTenant = selectedTenantBaseline || manualTenant;
 
-  const isAuditor = user.role === UserRole.AUDITOR || user.role === UserRole.AUXILIARY_AUDITOR;
+  const isAuditor = isFieldAuditorRole(user.role);
   // AUDITOR DE CAMPO: quem não administra a unidade. O admin/master configura a
   // unidade (âncora + campanha) e libera o inventário — para ele esta tela não
   // muda nada.

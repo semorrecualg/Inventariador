@@ -25,6 +25,7 @@
 
 import type { User } from '../types';
 import { AppModule } from '../types';
+import { isFieldAuditorRole } from './roles';
 
 export interface WorkContext {
   tenantid: string;
@@ -250,8 +251,7 @@ export function isValidLastContext(
   user?: { role?: string; tenantid?: string; units?: string[]; filial?: string } | null
 ): boolean {
   if (!stored) return false;
-  const roleUpper = String(user?.role || '').toUpperCase();
-  if (roleUpper === 'AUDITOR' || roleUpper === 'AUXILIARY_AUDITOR') {
+  if (isFieldAuditorRole(user?.role)) {
     if (stored.module === AppModule.ASSET_CONTROL) return false;
   }
 

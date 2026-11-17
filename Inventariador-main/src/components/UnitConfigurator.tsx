@@ -22,6 +22,7 @@ import * as turf from '@turf/turf';
 import { AnchorSource, UnitConfig, User, AppScreen } from '../types';
 import { fetchUnitConfigs, saveUnitConfig } from '../services/supabaseService';
 import { logger } from '../utils/logger';
+import { canonicalRole } from '../utils/roles';
 import { mergeUnitConfigIntoList } from '../utils/gpsAnchors';
 
 interface UnitConfiguratorProps {
@@ -845,16 +846,16 @@ const UnitConfigurator: React.FC<UnitConfiguratorProps> = ({
     setSaving(true);
     setMessage(null);
 
-    // Determina se o usuário é Administrador, Master ou Gestor
+    // Determina se o usuário é Administrador ou Master
     const checkIsAdmin = (): boolean => {
-      const roleUpper = user?.role?.toUpperCase();
-      if (roleUpper === 'ADMIN' || roleUpper === 'MASTER' || roleUpper === 'GESTOR' || user?.isAdmin || user?.is_admin) return true;
+      const roleUpper = canonicalRole(user?.role);
+      if (roleUpper === 'ADMIN' || roleUpper === 'MASTER' || user?.isAdmin || user?.is_admin) return true;
       try {
         const userStr = sessionStorage.getItem('app_current_user');
         if (userStr) {
           const u = JSON.parse(userStr);
-          const uRole = u.role?.toUpperCase();
-          if (uRole === 'ADMIN' || uRole === 'MASTER' || uRole === 'GESTOR' || u.isAdmin === true || u.is_admin === true) {
+          const uRole = canonicalRole(u.role);
+          if (uRole === 'ADMIN' || uRole === 'MASTER' || u.isAdmin === true || u.is_admin === true) {
             return true;
           }
         }

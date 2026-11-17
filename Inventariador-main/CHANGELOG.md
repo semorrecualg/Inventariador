@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Poda de papéis RBAC — GESTOR excluído, AUXILIARY_AUDITOR fundido em AUDITOR
+
+- **Papéis vivos:** `ADMIN`, `MASTER`, `AUDITOR` e `USER`, mais os fluxos de
+  licença `DEMO`/`MOBILE_SINGLE`. `GESTOR` (nunca atribuível, só tratado por
+  comparação de string) e `AUXILIARY_AUDITOR` saem do enum `UserRole` e do
+  seletor da tela de Acessos.
+- **Sem perda de acesso:** `docs/supabase_migracao_papeis_legados.sql` remapeia
+  `GESTOR → ADMIN` e `AUXILIARY_AUDITOR → AUDITOR` em `user_permissions`; o
+  cliente lê a grafia legada `AUXILIARY_AUDITOR` como `AUDITOR`
+  (`src/utils/roles.ts`) até o dispositivo sincronizar.
+- **Gates inline:** GPS/geocerca, filiais e rotas deixam de listar papéis por
+  string e passam por `canonicalRole`/`isFieldAuditorRole`.
+- **Testes:** matriz RBAC, escopo de unidades e contexto de trabalho atualizados
+  — o papel legado continua a ser lido como auditor e `GESTOR` já não concede
+  governança.
+
 ### Carga sem perda de registos e campanha como chave de controlo da filial
 
 - **Carga literal e reconciliada:** a planilha entra copiada campo a campo

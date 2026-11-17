@@ -3,7 +3,6 @@ export enum UserRole {
   ADMIN = 'ADMIN',
   MASTER = 'MASTER',
   AUDITOR = 'AUDITOR',
-  AUXILIARY_AUDITOR = 'AUXILIARY_AUDITOR',
   USER = 'USER', // OPERADOR de campo (Trilha C)
   DEMO = 'DEMO',
   MOBILE_SINGLE = 'MOBILE_SINGLE'

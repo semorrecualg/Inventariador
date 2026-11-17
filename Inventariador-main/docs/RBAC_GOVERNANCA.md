@@ -26,14 +26,25 @@ por papel, com as Trilhas A/B/C do módulo INVENTARIADOR.
 ## 2. Papéis (enum `UserRole` em `src/types.ts`)
 
 ```
-ADMIN · MASTER · AUDITOR · AUXILIARY_AUDITOR · USER (novo) · DEMO · MOBILE_SINGLE
+ADMIN · MASTER · AUDITOR · USER · DEMO · MOBILE_SINGLE
 ```
 
 - **ADMIN / MASTER** — governança total (Trilhas A + B + C).
-- **AUDITOR / AUXILIARY_AUDITOR** — auditoria e concordância + operação de campo (B + C).
+- **AUDITOR** — auditoria e concordância + operação de campo (B + C).
 - **USER** — operador de campo (Trilha C): inventário, etiquetagem, consulta, busca ativa.
-- **DEMO / MOBILE_SINGLE / GESTOR** — mantêm **paridade com o comportamento legado**
-  (acesso amplo), para não regredir os fluxos existentes.
+- **DEMO / MOBILE_SINGLE** — fluxos de licença (degustação e single-device), com
+  **paridade com o comportamento legado** (acesso amplo), para não regredir os
+  fluxos existentes.
+
+### Papéis legados (leitura apenas)
+
+`GESTOR` e `AUXILIARY_AUDITOR` deixaram de existir como papéis: `GESTOR` (nunca
+atribuível, só sobrevivia por comparação de string) é remapeado para `ADMIN` e
+`AUXILIARY_AUDITOR` é fundido em `AUDITOR`. Os dados antigos são remapeados por
+`docs/supabase_migracao_papeis_legados.sql`; o cliente lê a grafia legada
+`AUXILIARY_AUDITOR` como `AUDITOR` em `src/utils/roles.ts`, para um dispositivo
+offline não perder acesso antes de sincronizar. Nenhum dos dois é selecionável
+na tela de Acessos.
 - **Flags legados** `is_admin` / `isAdmin` e o **email do proprietário**
   (`VITE_ADMIN_EMAIL`) concedem acesso total em qualquer papel.
 
@@ -50,7 +61,7 @@ type UserPermission =
   | 'manage_users'            // Gerenciamento de Acessos e Usuários
   | 'configure_units'         // Configurador e Sincronizador de Filiais
   | 'manage_database'         // Gerenciamento e Limpeza do Banco de Dados
-  // TRILHA B — Auditoria e Concordância (AUDITOR / AUXILIARY_AUDITOR / ADMIN)
+  // TRILHA B — Auditoria e Concordância (AUDITOR / ADMIN)
   | 'view_reconciliation'     // Conciliação e Reconciliação Contábil
   | 'view_impairment'         // Relatório de Recuperabilidade / Impairment
   | 'view_audit_logs'         // Trilha de Auditoria e Logs de Alteração
@@ -69,8 +80,8 @@ type UserPermission =
 | Papel | Trilha A | Trilha B | Trilha C |
 |---|---|---|---|
 | `ADMIN` / `MASTER` | ✅ todas | ✅ todas | ✅ todas |
-| `DEMO` / `MOBILE_SINGLE` / `GESTOR` | ✅ (paridade legada) | ✅ | ✅ |
-| `AUDITOR` / `AUXILIARY_AUDITOR` | ❌ | ✅ todas | ✅ todas |
+| `DEMO` / `MOBILE_SINGLE` | ✅ (paridade legada) | ✅ | ✅ |
+| `AUDITOR` | ❌ | ✅ todas | ✅ todas |
 | `USER` (Operador) | ❌ | ❌ | ✅ todas |
 | Papel desconhecido | ❌ | ❌ | ✅ (fallback operacional — nunca fica sem acesso) |
 
@@ -140,7 +151,8 @@ isOwnerEmail(email)                        // email == VITE_ADMIN_EMAIL (case-in
   **sem** gestão; Trilha C (USER) só campo.
 - Soberania: email do proprietário com role USER continua com acesso total;
   flags `is_admin`/`isAdmin` garantem acesso.
-- Paridade legada: DEMO / MOBILE_SINGLE / GESTOR com acesso amplo.
+- Paridade legada: DEMO / MOBILE_SINGLE com acesso amplo; a grafia legada
+  `AUXILIARY_AUDITOR` é lida como `AUDITOR` e `GESTOR` não concede governança.
 - Fallback: papel desconhecido → operação de campo; `null`/`undefined` → negado
   para governança.
 

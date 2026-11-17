@@ -31,15 +31,15 @@ describe('isUnitInScope — restrição de unidades do perfil', () => {
     expect(isUnitInScope(user, '010103_CICOPAL_SP', 'CICOPAL')).toBe(true);
   });
 
-  it('AUXILIARY_AUDITOR segue a mesma regra', () => {
+  it('AUXILIARY_AUDITOR legado é lido como AUDITOR (mesma regra)', () => {
     const user = { role: 'AUXILIARY_AUDITOR', tenantid: 'CICOPAL', units: ['010102 CICOPAL MG'] };
     expect(isAuditorScope(user)).toBe(true);
     expect(isUnitInScope(user, '010102 CICOPAL MG', 'CICOPAL')).toBe(true);
     expect(isUnitInScope(user, '010103 CICOPAL SP', 'CICOPAL')).toBe(false);
   });
 
-  it('admin e gestor operam o contrato inteiro (sem trava)', () => {
-    for (const role of ['ADMIN', 'MASTER', 'GESTOR']) {
+  it('admin e master operam o contrato inteiro (sem trava)', () => {
+    for (const role of ['ADMIN', 'MASTER']) {
       const user = { role, tenantid: 'CICOPAL', units: ['010103 CICOPAL SP'] };
       expect(isAuditorScope(user)).toBe(false);
       expect(isUnitInScope(user, '010102 CICOPAL MG', 'CICOPAL')).toBe(true);

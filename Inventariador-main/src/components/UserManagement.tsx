@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { User, UserRole, DatabaseMode } from '../types';
+import { canonicalRole } from '../utils/roles';
 import { safeStringify } from '../services/utils';
 import Modal from './Modal';
 import BackButton from './BackButton';
@@ -240,7 +241,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       showModal("Contrato Obrigatório", "Informe o contrato (tenantid) que este acesso vai inventariar.", "error");
       return;
     }
-    if ((newRole === UserRole.AUDITOR || newRole === UserRole.AUXILIARY_AUDITOR) && newUnits.length === 0) {
+    if (newRole === UserRole.AUDITOR && newUnits.length === 0) {
       showModal("Filial Obrigatória", "Marque — ou digite — pelo menos uma unidade operacional (filial) para o auditor.", "error");
       return;
     }
@@ -370,7 +371,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setEditName(user.name || '');
     setEditEmail(user.email);
     setEditPassword(''); // Senha vazia por padrão ao editar para não sobrescrever se não for alterada
-    setEditRole(user.role || (user.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR));
+    setEditRole(canonicalRole(user.role || (user.isAdmin ? UserRole.ADMIN : UserRole.AUDITOR)) as UserRole);
     setEditTenantid(user.tenantid || '');
     const currentUnits = user.units || (user.unitid ? [user.unitid] : []);
     setEditUnits(currentUnits);
@@ -820,13 +821,6 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                   </button>
                   <button 
                     type="button"
-                    onClick={() => setEditRole(UserRole.AUXILIARY_AUDITOR)}
-                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${editRole === UserRole.AUXILIARY_AUDITOR ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
-                  >
-                    Aux. Audit.
-                  </button>
-                  <button 
-                    type="button"
                     onClick={() => setEditRole(UserRole.USER)}
                     className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${editRole === UserRole.USER ? 'bg-white text-slate-700 shadow-sm border border-border' : 'text-ink-muted'}`}
                   >
@@ -1103,13 +1097,6 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
                     className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${newRole === UserRole.AUDITOR ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
                   >
                     Auditor
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => setNewRole(UserRole.AUXILIARY_AUDITOR)}
-                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all ${newRole === UserRole.AUXILIARY_AUDITOR ? 'bg-white text-accent shadow-sm border border-border' : 'text-ink-muted'}`}
-                  >
-                    Aux. Audit.
                   </button>
                   <button 
                     type="button"
