@@ -23,6 +23,7 @@ import { AppScreen, DatabaseMode, NavigationParams, UnitConfig } from '../types'
 import * as turf from '@turf/turf';
 import { localDb, readVirtualSnapshot } from '../services/localDbService';
 import { resolveTenantId } from '../utils/tenantUtils';
+import { canonicalRole } from '../utils/roles';
 import { findHomonymUnits } from '../utils/unitContextUtils';
 import { normalizeKey } from '../utils/schema';
 import { isAdminEmail } from '../utils/authUtils';
@@ -339,15 +340,15 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
 
   // Cálculo de geocerca real em metros do ponto âncora com Turf.js
   const getGeofenceStatus = (filialName: string) => {
-    // 1. Verificação de Bypass Administrativo (admin email ou roles ADMIN/MASTER/GESTOR)
+    // 1. Verificação de Bypass Administrativo (admin email ou roles ADMIN/MASTER)
     let isBypass = false;
     try {
       const storedUser = sessionStorage.getItem('app_current_user');
       if (storedUser) {
         const parsedUser = JSON.parse(storedUser) as { email?: string; role?: string };
         const email = (parsedUser.email || '').toLowerCase().trim();
-        const role = (parsedUser.role || '').toUpperCase().trim();
-        if (isAdminEmail(email) || role === 'ADMIN' || role === 'MASTER' || role === 'GESTOR') {
+        const role = canonicalRole(parsedUser.role);
+        if (isAdminEmail(email) || role === 'ADMIN' || role === 'MASTER') {
           isBypass = true;
         }
       }

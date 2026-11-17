@@ -170,16 +170,24 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
      em `app_last_work_context`; a validação cobre autorização por contexto E a regra
      do dono/admin sem units (autorizado para qualquer filial do próprio contrato,
      sem depender da base carregar) + bloqueio de CONTROLE DE ATIVO para auditor.
-  2. **Auto-aplicar pós-login** (`App.tsx` `executePostLoginRouting`): com última
-     escolha válida, o seletor é pulado e o usuário vai direto ao módulo da filial;
-     troca disponível pelo botão **"Trocar filial/contrato"** no header do hub.
+  2. **Pré-seleção no seletor — Fase 1 do acesso padronizado (2026-11-17):**
+     *substitui o auto-aplicar.* Com última escolha válida, `executePostLoginRouting`
+     (`App.tsx`) **não navega**: entrega `resolveWorkContextPreselection(...)` como
+     `initialSelection` ao seletor de contrato, que abre com contrato/filial/módulo
+     apontados e exige a confirmação em **"Acessar o Módulo"**. Toda a entrada
+     segue a mesma esteira: biometria → contrato → SaaS. O hub (`#/menu`) passou a
+     exigir unidade ativa (`shouldReturnHubToWorkContext`) e INVENTARIADOR passou a
+     exigir filial (`canConfirmWorkContext`); a troca continua no botão
+     **"Trocar filial/contrato"** no header do hub.
   3. **Dedup estendido** (`src/utils/syncDedup.ts`): pull do contrato inteiro
      (`tenantid|`) agora cobre qualquer filial dele — reentrada não re-baixa a filial
      escolhida; o `handleWorkContextModuleSelect` pula o sync quando o pull já foi
      feito e a base local tem dados.
-  *Validação: 321/321 testes (6 novos) · TSC limpo · runtime no preview: seleção
-  010201 SNACKS PA/INVENTORY → reload → cai direto no hub (`#/menu`), sem seletor,
-  sem nova carga; botão Trocar → seletor com as 5 filiais.*
+  *Validação original: 321/321 testes (6 novos) · TSC limpo · runtime no preview:
+  seleção 010201 SNACKS PA/INVENTORY → reload → cai direto no hub (`#/menu`), sem
+  seletor, sem nova carga; botão Trocar → seletor com as 5 filiais.*
+  **Atualizado na Fase 1 (2026-11-17):** o reload deixa de cair no hub — abre o
+  contrato com a última escolha pré-selecionada e espera a confirmação.*
 
 - **Etapa 5b:** ✅ **IMPLEMENTADA (2026-08-14)** — delta sync com checkpoint de
   `updated_at` por `[tenantid+filial]`:

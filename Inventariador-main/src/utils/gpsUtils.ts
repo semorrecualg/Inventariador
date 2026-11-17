@@ -1,5 +1,6 @@
 import { Geolocation } from '@capacitor/geolocation';
 import { logger } from './logger';
+import { canonicalRole } from './roles';
 import { GPS_ACCURACY, GpsJitterFilter, isPreciseFix, isValidCoordinate, toGpsFix } from './gpsCore';
 
 /**
@@ -136,10 +137,10 @@ export async function getCurrentDeviceLocation(
     ? { lat: Number(unitAnchorCoordinates?.lat), lng: Number(unitAnchorCoordinates?.lng) }
     : null;
 
-  const roleUpper = (userRole || '').toUpperCase();
-  const isAdmin = ['ADMIN', 'MASTER', 'GESTOR'].includes(roleUpper);
+  const roleUpper = canonicalRole(userRole);
+  const isAdmin = roleUpper === 'ADMIN' || roleUpper === 'MASTER';
 
-  // 4. Se o usuário possuir perfil administrativo (ADMIN, MASTER, GESTOR), garanta o bypass síncrono definitivo da validação
+  // 4. Se o usuário possuir perfil administrativo (ADMIN, MASTER), garanta o bypass síncrono definitivo da validação
   if (isAdmin && finalAnchor) {
     logger.info(">>> [SRE GPS Bypass] Perfil administrativo detectado. Aplicando bypass síncrono definitivo.");
     showFloatingBypassToast(finalAnchor.lat, finalAnchor.lng, 'Soberania Admin (Ativa)');
@@ -297,8 +298,8 @@ export const startAutonomousTracking = async () => {
               const savedUserStr = sessionStorage.getItem('app_current_user');
               if (savedUserStr) {
                 const u = JSON.parse(savedUserStr);
-                const r = (u.role || '').toUpperCase();
-                if (r === 'ADMIN' || r === 'MASTER' || r === 'GESTOR' || u.is_admin === true || u.isAdmin === true) {
+                const r = canonicalRole(u.role);
+                if (r === 'ADMIN' || r === 'MASTER' || u.is_admin === true || u.isAdmin === true) {
                   isAdmin = true;
                 }
               }

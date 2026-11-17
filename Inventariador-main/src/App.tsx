@@ -17,6 +17,7 @@ import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } f
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, isAuditorUser, userHasPermission } from './services/rbacService';
+import { canonicalRole, isFieldAuditorRole } from './utils/roles';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -59,9 +60,9 @@ import ModuleSelector from './components/ModuleSelector';
 import AssetControlModule from './components/AssetControlModule';
 import TenantWorkSelector from './components/TenantWorkSelector';
 import WorkContextSelector from './components/WorkContextSelector';
-import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, SupabaseUserProfile } from './utils/routingUtils';
+import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturnHubToWorkContext, SupabaseUserProfile } from './utils/routingUtils';
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
-import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, isValidLastContext } from './utils/workContextUtils';
+import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
@@ -184,10 +185,9 @@ const checkIsAdmin = (u: User | null | undefined) => {
     } catch { /* ignore */ }
   }
 
-  const roleStr = String(role || '').toUpperCase();
+  const roleStr = canonicalRole(role);
   return roleStr === 'ADMIN' || 
          roleStr === 'MASTER' || 
-         roleStr === 'GESTOR' || 
          !!isAdm || 
          email === ADMIN_EMAIL.toLowerCase();
 };
@@ -2522,6 +2522,18 @@ useEffect(() => {
       return;
     }
     
+    // HUB ("Auditoria Inteligente", #/menu) exige CONTEXTO ATIVO — Fase 1 da
+    // padronização do acesso. O hub era a única tela isenta da trava de unidade
+    // e virava destino de qualquer atalho sem filial (URL directa, reentrada,
+    // pós-troca de senha). Os PAINÉIS DE GOVERNAÇA abertos a partir do contrato
+    // (`openPanel`) ficam isentos: não leem a unidade e já têm RBAC próprio.
+    if (user && shouldReturnHubToWorkContext(screen, selectedUnit, !!menuPanelToOpen)) {
+      logger.warn('>>> [RouteGuard] Hub sem contexto ativo: devolvendo ao contrato de trabalho.');
+      setScreenParams(null);
+      pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
+      return;
+    }
+
     if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
       const campaignId = inventory.currentCampaignId;
       // Alinhado à regra de Soberania Admin, se a unidade física ou string literal existir e for compatível com a filial ativa,
@@ -2533,7 +2545,7 @@ useEffect(() => {
         setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
       }
     }
-  }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode, setHistory, pushScreen]);
+  }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode, setHistory, pushScreen, menuPanelToOpen]);
 
   // NÃO existe preenchimento automático do GPS dos ativos a partir da âncora da
   // unidade. `assets.latitude/longitude` (nuvem: gps_lat/gps_lng) só é gravado
@@ -3706,12 +3718,6 @@ useEffect(() => {
     return map;
   }, [inventory.assets]);
 
-  // Ref para o handler de contexto (Etapa 4 — "lembrar escolha"): o dispatcher
-  // pós-login fica declarado ANTES do useCallback que aplica a escolha; a ref
-  // sincronizada evita o erro de uso antes da declaração (TDZ) e mantém o
-  // dispatcher sempre com a identidade mais recente do handler.
-  const applyWorkContextRef = useRef<((ctx: WorkContext, module: AppModule) => Promise<void>) | null>(null);
-
   // 🚀 SEQUENTIAL POST-LOGIN ROUTING DISPATCHER (DESACOPLAMENTO SRE v4.90)
   useEffect(() => {
     if (!isUserAuthenticated || !user) return;
@@ -3748,26 +3754,11 @@ useEffect(() => {
       // contrato selecionado (isolamento SRE por contrato).
       const workContexts = buildWorkContexts(user, users, workContextFiliais);
 
-      // ETAPA 4 (FLUXO_ACESSO_INICIAL): "lembrar escolha" — se o usuário já
-      // escolheu contrato+filial+módulo numa sessão anterior e a escolha
-      // continua autorizada (valida contra a lista atual de contextos e o
-      // papel), pula o seletor e vai direto para o módulo daquela filial.
-      // A troca fica disponível pelo botão "Trocar" no hub (MainMenu).
-      const lastCtx = readLastWorkContext();
-      if (workContexts.length > 0 && isValidLastContext(lastCtx, workContexts, user)) {
-        logger.info(`>>> [SRE_NAV] Etapa 4: última escolha válida (${String(lastCtx?.tenantid)}/${String(lastCtx?.filial || 'TODAS')} · ${String(lastCtx?.module)}). Pulando seletor de contexto.`);
-        if (applyWorkContextRef.current) {
-          await applyWorkContextRef.current(
-            { tenantid: String(lastCtx?.tenantid), filial: String(lastCtx?.filial || '') },
-            lastCtx?.module as AppModule
-          );
-        } else {
-          // Sem handler pronto (borda rara) → mantém o seletor como fallback seguro.
-          await pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
-        }
-        return;
-      }
-
+      // ETAPA 4 REVISADA (Fase 1 do acesso padronizado): a última escolha NÃO
+      // salta mais o contrato. Ela entra no seletor apenas como PRÉ-SELEÇÃO
+      // (`resolveWorkContextPreselection` → `initialSelection`), e o utilizador
+      // confirma em "Acessar o Módulo". Assim todo o acesso segue a mesma
+      // esteira: biometria → contrato → SaaS.
       // FLUXO ÚNICO DE ACESSO: a autenticação não escolhe mais filial — a tela
       // de contrato de trabalho (/contexto) faz contrato + filial + módulo para
       // todo perfil com contrato autorizado.
@@ -4331,11 +4322,6 @@ useEffect(() => {
     await pushScreen(resolveModuleEntryScreen(module, newFilial));
   }, [user, databaseMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
 
-  // Sincroniza a ref usada pelo dispatcher pós-login (Etapa 4).
-  useEffect(() => {
-    applyWorkContextRef.current = handleWorkContextModuleSelect;
-  }, [handleWorkContextModuleSelect]);
-
   // HUB → INVENTÁRIO: última porta antes do endereço físico. O auditor só passa
   // se a unidade ATIVA estiver liberada (âncora GPS + campanha configuradas
   // pelo admin/master). Reavalia aqui porque o mapa de liberação pode ficar
@@ -4367,6 +4353,16 @@ useEffect(() => {
 
   // Contextos de trabalho do usuário logado (fonte do seletor)
   const workContexts = useMemo(() => buildWorkContexts(user, users, workContextFiliais), [user, users, workContextFiliais]);
+
+  // Etapa 4 revisada: a última escolha chega ao CONTRATO como pré-seleção —
+  // nunca como navegação automática. Recalculada a cada entrada na tela para
+  // apanhar alterações de autorização feitas pelo admin entretanto.
+  const workContextPreselection = useMemo(
+    () => screen === AppScreen.WORK_CONTEXT_SELECTION
+      ? resolveWorkContextPreselection(readLastWorkContext(), workContexts, user)
+      : null,
+    [screen, workContexts, user]
+  );
 
   // 1. Auth Listener para Supabase (Magic Link, Convites, Sessão)
   useEffect(() => {
@@ -6471,7 +6467,7 @@ useEffect(() => {
 
     const userTenant = user?.tenantid || '';
     const userUnits = user?.units || (userTenant ? [userTenant] : []);
-    const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
+    const isAuditor = isFieldAuditorRole(user?.role);
     const assets = inventory.assets;
     
     if (assets.length === 0) {
@@ -7553,7 +7549,7 @@ useEffect(() => {
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
               isAdmin={isAdminUser(user) || canAccessDatabaseManager(user)}
-              isAuditor={!!(user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
+              isAuditor={!!(isFieldAuditorRole(user?.role) || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
               onNavigate={pushScreen}
    onLoadDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
    databaseMode={databaseMode}
@@ -7564,7 +7560,7 @@ useEffect(() => {
        // Se estiver no modo nuvem, mostramos todas para permitir o primeiro sync
        // No modo local, mostramos todas as unidades encontradas na base
        const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
-                  const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
+                  const isAuditor = isFieldAuditorRole(user?.role);
                   
                   if (isAdmin) return true; // Admin vê tudo que foi detectado
                   
@@ -7694,6 +7690,7 @@ useEffect(() => {
               user={user}
               contexts={workContexts}
               unitRelease={unitReleaseMap}
+              initialSelection={workContextPreselection}
               onSelect={handleWorkContextModuleSelect}
               onOpenAdmin={(target, params) => pushScreen(target, params)}
               onOpenDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}

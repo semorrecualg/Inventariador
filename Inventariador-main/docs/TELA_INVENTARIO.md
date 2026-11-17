@@ -186,7 +186,7 @@ Regras de cálculo (`determineAssetTag`, na ordem):
 
 | # | Check | Comportamento |
 |---|---|---|
-| 1 | **Geofence / GPS** (`GPSComplianceGuard`) | valida lat/lng contra `UnitConfig.radius_meters` (Turf); fora do raio não abre a tela (perfis ADMIN/MASTER/GESTOR têm bypass) |
+| 1 | **Geofence / GPS** (`GPSComplianceGuard`) | valida lat/lng contra `UnitConfig.radius_meters` (Turf); fora do raio não abre a tela (perfis ADMIN/MASTER têm bypass) |
 | 2 | **Âncora GPS da unidade** (`unitConfig` nulo) | fase A bloqueia abertura de localidade e criação de local, exceto bypass `isAdminEmail` |
 | 3 | **Fila de sincronização** (`isSyncLocked` em `App.tsx`) | acima de `MAX_SYNC_QUEUE_SIZE` a tela é substituída por "Sistema Bloqueado" (exceto admin) |
 | 4 | **Motor Dexie** | enquanto `sqliteService` não inicializa → tela "RE-INICIALIZANDO SISTEMA GBR" |

@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Acesso padronizado — biometria → contrato → SaaS (Fase 1)
+
+- **O contrato deixa de ser saltado:** a última escolha (`app_last_work_context`)
+  já não navega direto para o hub no pós-login. Passa a abrir o seletor de
+  contrato com contrato, filial e módulo pré-selecionados e só avança quando o
+  utilizador confirma em "Acessar o Módulo" (`resolveWorkContextPreselection`).
+- **INVENTARIADOR exige filial:** o botão de acesso fica bloqueado enquanto não
+  houver filial escolhida, com o motivo escrito; CONTROLE DE ATIVO continua a
+  entrar sem filial. Evita o vaivém `/unit` ↔ `/contexto` do auditor quando o
+  contrato ainda não tem filiais na base (`canConfirmWorkContext`).
+- **Hub exige contexto ativo:** `MAIN_MENU` ("Auditoria Inteligente", `#/menu`)
+  devolve ao contrato quando não há unidade ativa
+  (`shouldReturnHubToWorkContext`), exceto nos painéis de governança abertos a
+  partir do contrato com `openPanel`.
+- **Testes:** `accessFlowStandardization` cobre a pré-seleção (incluindo escolha
+  revogada e módulo proibido ao auditor), a exigência de filial e o gate do hub.
+
+### Cadastro de acessos — filiais do contrato lidas também da nuvem
+
+- **Lista de filiais sem beco sem saída:** o modal de novo/editar acesso só
+  lia as filiais da base local em disco e mostrava "nenhuma filial na base"
+  mesmo quando o contrato tem filiais publicadas na nuvem (aparelho novo, base
+  ainda não baixada). O modal passa a consultar `fetchUnitNamesFromCloud` (só a
+  coluna `filial`, sem baixar ativos) e a fundir as filiais da nuvem com a base
+  local e as unidades já atribuídas a perfis do contrato.
+- **Mensagem honesta:** enquanto a consulta corre a lista indica "A procurar
+  filiais na nuvem..." e o vazio passa a dizer "Nenhuma filial encontrada",
+  em vez de afirmar que não existe filial na base.
+
+### Poda de papéis RBAC — GESTOR excluído, AUXILIARY_AUDITOR fundido em AUDITOR
+
+- **Papéis vivos:** `ADMIN`, `MASTER`, `AUDITOR` e `USER`, mais os fluxos de
+  licença `DEMO`/`MOBILE_SINGLE`. `GESTOR` (nunca atribuível, só tratado por
+  comparação de string) e `AUXILIARY_AUDITOR` saem do enum `UserRole` e do
+  seletor da tela de Acessos.
+- **Sem perda de acesso:** `docs/supabase_migracao_papeis_legados.sql` remapeia
+  `GESTOR → ADMIN` e `AUXILIARY_AUDITOR → AUDITOR` em `user_permissions`; o
+  cliente lê a grafia legada `AUXILIARY_AUDITOR` como `AUDITOR`
+  (`src/utils/roles.ts`) até o dispositivo sincronizar.
+- **Gates inline:** GPS/geocerca, filiais e rotas deixam de listar papéis por
+  string e passam por `canonicalRole`/`isFieldAuditorRole`.
+- **Testes:** matriz RBAC, escopo de unidades e contexto de trabalho atualizados
+  — o papel legado continua a ser lido como auditor e `GESTOR` já não concede
+  governança.
+
 ### Carga sem perda de registos e campanha como chave de controlo da filial
 
 - **Carga literal e reconciliada:** a planilha entra copiada campo a campo

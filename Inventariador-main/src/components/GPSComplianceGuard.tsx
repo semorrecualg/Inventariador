@@ -4,6 +4,7 @@ import { ShieldAlert, Loader2 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { UnitConfig } from '../types';
 import { isAdminEmail } from '../utils/authUtils';
+import { canonicalRole } from '../utils/roles';
 import { getCurrentDeviceLocation } from '../utils/gpsUtils';
 import { logger } from '../utils/logger';
 import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
@@ -39,20 +40,19 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
   // Determina se o usuário é Administrador de forma robusta
   const checkIsAdmin = (): boolean => {
     // 1. Pelo prop userRole
-    const roleUpper = userRole?.toUpperCase();
-    if (roleUpper === 'ADMIN' || roleUpper === 'MASTER' || roleUpper === 'GESTOR') return true;
+    const roleUpper = canonicalRole(userRole);
+    if (roleUpper === 'ADMIN' || roleUpper === 'MASTER') return true;
 
     // 2. Pelo seu perfil local no localStorage ou sessionStorage
     try {
       const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('app_current_user') || sessionStorage.getItem('user') || localStorage.getItem('user');
       if (userStr) {
         const u = JSON.parse(userStr);
-        const uRole = u.role?.toUpperCase();
+        const uRole = canonicalRole(u.role);
         const uEmail = u.email?.toLowerCase();
         if (
           uRole === 'ADMIN' ||
           uRole === 'MASTER' ||
-          uRole === 'GESTOR' ||
           u.isAdmin === true ||
           u.is_admin === true ||
           isAdminEmail(uEmail)
@@ -75,8 +75,8 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
     try {
       const storedRole = sessionStorage.getItem('userRole') || localStorage.getItem('userRole') || sessionStorage.getItem('role') || localStorage.getItem('role');
       if (storedRole) {
-        const rUpper = storedRole.toUpperCase();
-        if (rUpper === 'ADMIN' || rUpper === 'MASTER' || rUpper === 'GESTOR') return true;
+        const rUpper = canonicalRole(storedRole);
+        if (rUpper === 'ADMIN' || rUpper === 'MASTER') return true;
       }
     } catch { /* ignore */ }
 
