@@ -10,7 +10,9 @@ import {
   Calculator,
   ChevronRight,
   Check,
-  Lock
+  Lock,
+  MapPin,
+  Megaphone
 } from 'lucide-react';
 import BackButton from './BackButton';
 import type { NavigationParams, User } from '../types';
@@ -54,9 +56,9 @@ interface WorkContextSelectorProps {
   /**
    * Navegação administrativa a partir do próprio CONTRATO DE TRABALHO: as
    * liberações exclusivas de ADMIN/MASTER (filiais, campanhas, campos, QR,
-   * base de dados, cargas, licenças). A UNIDADE OPERACIONAL (âncora GPS +
-   * campanha que liberam o inventário) é aberta pelo badge "Âncora e Campanha"
-   * de cada unidade desta tela — o painel não a duplica.
+   * base de dados, cargas, licenças). A liberação da unidade (âncora GPS +
+   * campanha) é aberta pelos dois botões de cada cartão desta tela — o painel
+   * não a duplica e o formulário intermediário não é mais necessário.
    */
   onOpenAdmin?: (screen: AppScreen, params?: NavigationParams) => void;
   /**
@@ -200,8 +202,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   // INVENTÁRIO — vale para TODOS os perfis, inclusive o admin (bug real: o
   // admin escolhia a unidade "AGUARDANDO LIBERAÇÃO", escolhia INVENTARIADOR e
   // caía na Auditoria Inteligente). O admin não perde o caminho de configuração:
-  // o card e o badge continuam abrindo a Unidade Operacional, onde ele define a
-  // âncora e a campanha que liberam a unidade.
+  // o cartão e os dois botões dele abrem diretamente a âncora e a campanha.
   const blockedByRelease = selectedModule === AppModule.INVENTORY && !!chosenPending;
   // Fase 1: INVENTARIADOR exige FILIAL escolhida (ver `canConfirmWorkContext`).
   const missingFilialForInventory =
@@ -441,20 +442,45 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                       ? describeUnitReleaseMissing(release)
                       : '';
                     const released = !!release?.released;
+                    // Estado de cada uma das DUAS configurações que liberam a
+                    // unidade — é o que colore os botões do cartão (vermelho =
+                    // pendente, verde = OK).
+                    const anchorReady = release?.hasAnchor === true;
+                    const campaignReady = release?.hasCampaign === true;
+                    // Sem leitura da unidade, o botão continua acionável e nasce
+                    // vermelho: configurar é sempre seguro.
+                    const openRelease = (screen: AppScreen) =>
+                      (event: React.SyntheticEvent) => {
+                        event.stopPropagation();
+                        setSelectedFilial(opt.filial);
+                        onOpenAdmin?.(screen, { unitName: opt.filial });
+                      };
+                    const releaseKeyDown = (screen: AppScreen) =>
+                      (event: React.KeyboardEvent) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          openRelease(screen)(event);
+                        }
+                      };
                     return (
                       <button
                         key={opt.filial}
                         type="button"
                         onClick={() => {
-                          // ESCOLHA, não navegação: o toque só marca a filial com
-                          // que o usuário vai trabalhar — a barra inferior leva ao
-                          // módulo escolhido. Antes, para ADMIN/MASTER, o cartão
-                          // abria a UNIDADE OPERACIONAL e quebrava a trilha
-                          // filial → módulo → ACESSAR (o admin caía na tela de
-                          // configuração ao tentar apenas escolher onde trabalhar).
-                          // A configuração de âncora e campanha continua no badge
-                          // "Âncora e Campanha" de cada unidade.
+                          // ESCOLHA, não navegação — com uma exceção: ADMIN/
+                          // MASTER numa unidade AGUARDANDO LIBERAÇÃO. Aí o toque
+                          // leva direto ao que falta (a âncora primeiro; com a
+                          // âncora já fixada, a campanha), sem passar pelo
+                          // formulário da UNIDADE OPERACIONAL. Unidade liberada
+                          // (ou auditor) segue só marcando a filial, para não
+                          // quebrar a trilha filial → módulo → ACESSAR.
                           setSelectedFilial(opt.filial);
+                          if (isAdmin && pending) {
+                            onOpenAdmin?.(
+                              anchorReady ? AppScreen.CAMPAIGN_MANAGEMENT : AppScreen.UNIT_CONFIGURATOR,
+                              { unitName: opt.filial }
+                            );
+                          }
                         }}
                         aria-pressed={isChosen}
                         className={`w-full bg-white rounded-2xl px-4 py-3.5 flex items-center justify-between shadow-sm border transition-all cursor-pointer active:scale-[0.98] ${
@@ -480,43 +506,65 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                             </p>
                           </div>
                         </div>
-                        {pending ? (
-                          isAdmin ? (
-                            /* BADGE "ÂNCORA E CAMPANHA" (admin/master): abre a UNIDADE
-                               OPERACIONAL — a tela que configura âncora GPS + campanha e
-                               com isso libera o inventário. Antes era só decorativo (o
-                               caminho era Painel Completo → Unidade Operacional) e o
-                               clique não fazia nada. `stopPropagation` impede que o
-                               clique selecione a filial em vez de abrir a config. */
+                        {isAdmin ? (
+                          /* LIBERAÇÃO NO PRÓPRIO CARTÃO (admin/master): um botão
+                             para a ÂNCORA GPS e outro para a CAMPANHA, cada um
+                             com o estado real da unidade — vermelho = pendente,
+                             verde = OK. Abrem a configuração diretamente na
+                             filial, sem o formulário intermediário da UNIDADE
+                             OPERACIONAL. `stopPropagation` impede que o clique
+                             dispare também o toque do cartão. */
+                          <div className="flex items-center space-x-1.5 flex-shrink-0">
                             <div
                               role="button"
                               tabIndex={0}
-                              title="Âncora e campanha que liberam o inventário"
-                              aria-label={`Configurar âncora e campanha de ${opt.label}`}
-                              data-testid={`unit-release-action-${opt.filial}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onOpenAdmin?.(AppScreen.UNIT_SELECTION, { unitName: opt.filial });
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  onOpenAdmin?.(AppScreen.UNIT_SELECTION, { unitName: opt.filial });
-                                }
-                              }}
-                              className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0 cursor-pointer hover:bg-amber-100 active:scale-95 transition-all"
+                              title={anchorReady
+                                ? `Âncora GPS OK · editar ${opt.label}`
+                                : `Âncora GPS pendente · configurar ${opt.label}`}
+                              aria-label={anchorReady
+                                ? `Âncora GPS de ${opt.label} configurada`
+                                : `Definir âncora GPS de ${opt.label}`}
+                              data-testid={`unit-anchor-action-${opt.filial}`}
+                              data-state={anchorReady ? 'ok' : 'pending'}
+                              onClick={openRelease(AppScreen.UNIT_CONFIGURATOR)}
+                              onKeyDown={releaseKeyDown(AppScreen.UNIT_CONFIGURATOR)}
+                              className={`w-8 h-8 rounded-lg border flex items-center justify-center flex-shrink-0 cursor-pointer active:scale-95 transition-all ${
+                                anchorReady
+                                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'
+                                  : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                              }`}
                             >
-                              <Lock size={14} />
+                              <MapPin size={14} />
                             </div>
-                          ) : (
                             <div
-                              className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0"
-                              title="O administrador define âncora e campanha na Unidade Operacional"
+                              role="button"
+                              tabIndex={0}
+                              title={campaignReady
+                                ? `Campanha OK · gerenciar ${opt.label}`
+                                : `Campanha pendente · criar ${opt.label}`}
+                              aria-label={campaignReady
+                                ? `Campanha de ${opt.label} ativa`
+                                : `Criar campanha de ${opt.label}`}
+                              data-testid={`unit-campaign-action-${opt.filial}`}
+                              data-state={campaignReady ? 'ok' : 'pending'}
+                              onClick={openRelease(AppScreen.CAMPAIGN_MANAGEMENT)}
+                              onKeyDown={releaseKeyDown(AppScreen.CAMPAIGN_MANAGEMENT)}
+                              className={`w-8 h-8 rounded-lg border flex items-center justify-center flex-shrink-0 cursor-pointer active:scale-95 transition-all ${
+                                campaignReady
+                                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'
+                                  : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                              }`}
                             >
-                              <Lock size={14} />
+                              <Megaphone size={14} />
                             </div>
-                          )
+                          </div>
+                        ) : pending ? (
+                          <div
+                            className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0"
+                            title="O administrador define âncora e campanha nesta unidade"
+                          >
+                            <Lock size={14} />
+                          </div>
                         ) : isChosen ? (
                           <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
                             <Check size={16} />
@@ -537,7 +585,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                   </p>
                   <p className="text-[8px] font-bold text-amber-600 uppercase tracking-wider leading-relaxed text-center mt-1">
                     {isAdmin
-                      ? 'Configure âncora e campanha na Unidade Operacional para liberar.'
+                      ? 'Toque na filial ou nos botões vermelhos para configurar o que falta.'
                       : 'O administrador define âncora e campanha na Unidade Operacional.'}
                   </p>
                 </div>
@@ -604,8 +652,8 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                 (acessos, filiais, campanhas, campos, QR, base, cargas, licenças,
                 integridade, fotos e Protheus) vivem no PAINEL COMPLETO do hub;
                 manter a lista aqui duplicava cada botão sem acrescentar nenhuma
-                regra. A exceção é a UNIDADE OPERACIONAL (âncora + campanha), que
-                é configurada pelo badge de cada unidade, logo acima. */}
+                regra. A exceção é a liberação da unidade (âncora + campanha),
+                configurada pelos botões de cada cartão, logo acima. */}
             {isAdmin && (
               <div>
                 <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
@@ -662,7 +710,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
         {blockedByRelease && (
           <p className="text-[9px] font-extrabold uppercase tracking-wider text-amber-600 text-center leading-relaxed">
             {isAdmin
-              ? `Unidade aguardando liberação (falta ${chosenPending}). Configure âncora GPS e campanha na Unidade Operacional.`
+              ? `Unidade aguardando liberação (falta ${chosenPending}). Toque na filial para abrir a configuração.`
               : `Unidade aguardando liberação (falta ${chosenPending}). Peça ao administrador para liberar.`}
           </p>
         )}

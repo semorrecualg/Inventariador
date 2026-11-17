@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 // ============================================================================
-// workContextUnitReleaseAction.test.tsx — configuração da UNIDADE OPERACIONAL
-// a partir do CONTRATO DE TRABALHO.
+// workContextUnitReleaseAction.test.tsx — liberação da unidade no CARTÃO.
 //
-// Regra do produto: o CARD da unidade é ESCOLHA, nunca navegação. Em todos os
-// perfis — inclusive ADMIN/MASTER — o toque apenas marca a filial; a trilha é
-// filial → módulo → "Acessar o Módulo". A configuração da unidade (âncora GPS +
-// campanha) tem entrada pelo badge "Âncora e Campanha", que abre a Unidade
-// Operacional já com a filial em parâmetro.
+// Regra do produto: a âncora GPS e a campanha que liberam o inventário são
+// configuradas no PRÓPRIO cartão da filial, por dois botões de estado
+// (vermelho = pendente, verde = OK). Para ADMIN/MASTER, o toque numa unidade
+// "AGUARDANDO LIBERAÇÃO" abre direto o que falta — a âncora se ela ainda não
+// existe; com a âncora fixada, a campanha. O formulário intermediário da
+// UNIDADE OPERACIONAL deixa de ser etapa. Unidade liberada (e auditor) mantém
+// o cartão como ESCOLHA: filial → módulo → "Acessar o Módulo".
 // ============================================================================
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
@@ -25,7 +26,6 @@ vi.mock('../utils/tenantCatalog', () => ({
 
 const FILIAL = '010101 CICOPAL GO';
 const TENANT = 'CICOPAL';
-const BADGE_TITLE = 'Âncora e campanha que liberam o inventário';
 
 const buildUser = (role: UserRole): User =>
   ({
@@ -39,9 +39,19 @@ const buildUser = (role: UserRole): User =>
   }) as unknown as User;
 
 // Mapa de liberação real (âncora e campanha ausentes) — a unidade aparece
-// "AGUARDANDO LIBERAÇÃO", que é o cenário das figuras.
+// "AGUARDANDO LIBERAÇÃO · FALTA ÂNCORA GPS E CAMPANHA", o cenário das figuras.
 const releaseMap = buildUnitReleaseMap([
   { name: FILIAL, tenantid: TENANT, hasAnchor: false, hasCampaign: false }
+]);
+
+// Âncora já fixada, campanha ainda pendente: o toque no cartão vai à campanha.
+const anchorOnlyMap = buildUnitReleaseMap([
+  { name: FILIAL, tenantid: TENANT, hasAnchor: true, hasCampaign: false }
+]);
+
+// Campanha já aberta, âncora pendente: o toque no cartão vai à âncora.
+const campaignOnlyMap = buildUnitReleaseMap([
+  { name: FILIAL, tenantid: TENANT, hasAnchor: false, hasCampaign: true }
 ]);
 
 // Unidade LIBERADA: âncora GPS e campanha configuradas.
@@ -74,43 +84,100 @@ const accessButton = () => screen.getByText('Acessar o Módulo').closest('button
 const chooseModule = (label: 'INVENTARIADOR' | 'CONTROLE DE ATIVO') =>
   fireEvent.click(screen.getByText(label).closest('button') as HTMLButtonElement);
 
-describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
+const anchorAction = () => screen.getByTestId(`unit-anchor-action-${FILIAL}`);
+const campaignAction = () => screen.getByTestId(`unit-campaign-action-${FILIAL}`);
+
+describe('CONTRATO DE TRABALHO · liberação da unidade no cartão', () => {
   afterEach(() => cleanup());
 
-  it('admin: clicar no CARD da unidade só escolhe a filial — não navega', () => {
+  // ── Admin/master: o cartão abre direto o que falta ────────────────────────
+  it('admin: unidade sem âncora — o toque no cartão abre a ÂNCORA GPS da filial', () => {
     const { onOpenAdmin } = renderSelector(UserRole.ADMIN);
 
     fireEvent.click(unitCard());
 
-    // O clique não pode tirar o admin da trilha filial → módulo → ACESSAR.
+    expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.UNIT_CONFIGURATOR, { unitName: FILIAL });
+    // A filial fica escolhida para o retorno à trilha filial → módulo → ACESSAR.
+    expect(unitCard().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('admin: âncora já definida — o toque no cartão abre a CAMPANHA', () => {
+    const { onOpenAdmin } = renderSelector(UserRole.ADMIN, anchorOnlyMap);
+
+    fireEvent.click(unitCard());
+
+    expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.CAMPAIGN_MANAGEMENT, { unitName: FILIAL });
+  });
+
+  it('admin: campanha já definida — o toque no cartão abre a ÂNCORA (vice-versa)', () => {
+    const { onOpenAdmin } = renderSelector(UserRole.ADMIN, campaignOnlyMap);
+
+    fireEvent.click(unitCard());
+
+    expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.UNIT_CONFIGURATOR, { unitName: FILIAL });
+  });
+
+  it('admin: unidade liberada — o toque no cartão só escolhe a filial', () => {
+    const { onOpenAdmin } = renderSelector(UserRole.ADMIN, releasedMap);
+
+    fireEvent.click(unitCard());
+
     expect(onOpenAdmin).not.toHaveBeenCalled();
     expect(unitCard().getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('admin: o badge de âncora e campanha também abre (com o mesmo destino)', () => {
+  // ── Admin/master: os dois botões de estado ────────────────────────────────
+  it('admin: o botão da âncora abre a configuração GPS daquela filial', () => {
     const { onOpenAdmin } = renderSelector(UserRole.ADMIN);
-    const badge = screen.getByTestId(`unit-release-action-${FILIAL}`);
 
-    fireEvent.click(badge);
+    fireEvent.click(anchorAction());
 
+    // Uma única navegação: o clique do botão não dispara o toque do cartão.
     expect(onOpenAdmin).toHaveBeenCalledTimes(1);
-    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.UNIT_SELECTION, { unitName: FILIAL });
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.UNIT_CONFIGURATOR, { unitName: FILIAL });
   });
 
-  it('admin: o badge se identifica como a entrada de âncora e campanha', () => {
+  it('admin: o botão da campanha abre a gestão de campanhas daquela filial', () => {
+    const { onOpenAdmin } = renderSelector(UserRole.ADMIN);
+
+    fireEvent.click(campaignAction());
+
+    expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.CAMPAIGN_MANAGEMENT, { unitName: FILIAL });
+  });
+
+  it('admin: botões vermelhos com a unidade pendente', () => {
     renderSelector(UserRole.ADMIN);
 
-    expect(screen.getByTestId(`unit-release-action-${FILIAL}`).getAttribute('title')).toBe(BADGE_TITLE);
+    for (const action of [anchorAction(), campaignAction()]) {
+      expect(action.getAttribute('data-state')).toBe('pending');
+      expect(action.className).toContain('bg-red-50');
+      expect(action.className).not.toContain('bg-emerald-50');
+    }
+    expect(anchorAction().getAttribute('title')).toContain('pendente');
+    expect(campaignAction().getAttribute('title')).toContain('pendente');
   });
 
-  it('o clique no badge não borbulha para o card da unidade', () => {
-    const { onOpenAdmin } = renderSelector(UserRole.ADMIN);
+  it('admin: botões verdes quando âncora e campanha estão OK', () => {
+    renderSelector(UserRole.ADMIN, releasedMap);
 
-    fireEvent.click(screen.getByTestId(`unit-release-action-${FILIAL}`));
+    for (const action of [anchorAction(), campaignAction()]) {
+      expect(action.getAttribute('data-state')).toBe('ok');
+      expect(action.className).toContain('bg-emerald-50');
+      expect(action.className).not.toContain('bg-red-50');
+    }
+    expect(anchorAction().getAttribute('title')).toContain('OK');
+    expect(campaignAction().getAttribute('title')).toContain('OK');
+  });
 
-    // Uma única navegação: o handler do badge corta a propagação, então o card
-    // não dispara uma segunda abertura.
-    expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+  it('admin: cada botão mostra o seu próprio estado (âncora OK, campanha pendente)', () => {
+    renderSelector(UserRole.ADMIN, anchorOnlyMap);
+
+    expect(anchorAction().getAttribute('data-state')).toBe('ok');
+    expect(campaignAction().getAttribute('data-state')).toBe('pending');
   });
 
   it('auditor: clicar no card NÃO abre configuração (só escolhe a filial)', () => {
@@ -120,6 +187,16 @@ describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
 
     expect(onOpenAdmin).not.toHaveBeenCalled();
     expect(screen.getByText(FILIAL)).toBeTruthy();
+  });
+
+  it('auditor: não recebe os botões de liberação — só a trava', () => {
+    renderSelector(UserRole.AUDITOR);
+
+    expect(screen.queryByTestId(`unit-anchor-action-${FILIAL}`)).toBeNull();
+    expect(screen.queryByTestId(`unit-campaign-action-${FILIAL}`)).toBeNull();
+    expect(
+      screen.getByTitle('O administrador define âncora e campanha nesta unidade')
+    ).toBeTruthy();
   });
 
   // ── Trava do módulo INVENTARIADOR: vale para o ADMIN também ────────────────
@@ -134,7 +211,7 @@ describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
     expect(accessButton().disabled).toBe(true);
     fireEvent.click(accessButton());
     expect(onSelect).not.toHaveBeenCalled();
-    expect(screen.getByText(/Configure âncora GPS e campanha na Unidade Operacional/i)).toBeTruthy();
+    expect(screen.getByText(/Toque na filial para abrir a configuração/i)).toBeTruthy();
   });
 
   it('admin: unidade liberada acessa o módulo INVENTARIADOR', () => {
@@ -173,6 +250,7 @@ describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  // ── Lista de filiais ──────────────────────────────────────────────────────
   it('admin: enxerga também as filiais reais do contrato na base local', async () => {
     vi.mocked(listContracts).mockResolvedValueOnce([
       { tenantid: TENANT, filiais: [FILIAL, '010105 CICOPAL PA', '010201 SNACKS PA'] }
@@ -214,14 +292,5 @@ describe('CONTRATO DE TRABALHO · configuração da unidade', () => {
     // O catálogo carrega no mount; a filial extra nunca aparece para o auditor.
     await screen.findByText('CONTRATO (TENANTID)');
     expect(screen.queryByText('010105 CICOPAL PA')).toBeNull();
-  });
-
-  it('auditor: não recebe o badge acionável — só a trava', () => {
-    renderSelector(UserRole.AUDITOR);
-
-    expect(screen.queryByTestId(`unit-release-action-${FILIAL}`)).toBeNull();
-    expect(
-      screen.getByTitle('O administrador define âncora e campanha na Unidade Operacional')
-    ).toBeTruthy();
   });
 });
