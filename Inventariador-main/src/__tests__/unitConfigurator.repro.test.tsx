@@ -255,4 +255,55 @@ describe('UnitConfigurator mount repro (reading lng)', () => {
       container.remove();
     }
   }, 20000);
+
+  it('abre posicionado na âncora da filial gravada só com `filial` (sem unit_id)', async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    // Registro como vem da nuvem/SQLite antigo: sem `unit_id`, só `filial`.
+    const unit = '010105 CICOPAL PA';
+    localStorage.setItem('local_unit_configs', JSON.stringify({
+      [`CICOPAL_${unit}`]: {
+        tenantid: 'CICOPAL',
+        filial: unit,
+        lat: -16.706719,
+        lng: -49.106422,
+        radius_meters: 500,
+        is_active: true,
+        source: 'manual'
+      }
+    }));
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      root.render(
+        React.createElement(UnitConfigurator, {
+          user: ADMIN,
+          units: [unit],
+          onBack: () => {},
+          initialUnit: unit
+        })
+      );
+
+      // O HUD só mostra coordenada quando a âncora da filial é aplicada — a tela
+      // abria em branco porque a unidade era selecionada antes de as configs
+      // chegarem e a procura ignorava registros sem `unit_id`.
+      const applied = await until(() =>
+        container.textContent?.includes('-16.706719') ? true : undefined
+      );
+      expect(applied).toBe(true);
+      expect(container.textContent).not.toContain('AGUARDANDO GPS');
+
+      const fixar = Array.from(container.querySelectorAll('button')).find((b) =>
+        (b.textContent || '').toUpperCase().includes('FIXAR ÂNCORA GPS')
+      );
+      expect(fixar?.disabled).toBe(false);
+    } finally {
+      root.unmount();
+      container.remove();
+    }
+  }, 20000);
 });

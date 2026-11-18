@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — campanha criada deixa de ser marcada como inexistente
+
+- **Campanha `CREATED` já conta como campanha da filial:** criar uma campanha
+  nasce no status `CREATED` e só depois é ativada. O cartão da unidade só
+  olhava `ACTIVE`, então uma campanha recém-criada aparecia como "pendente" e o
+  botão 📣 abria o cadastro em branco — caminho para duplicar a campanha. O
+  estado de liberação passa a distinguir **campanha gravada** (`CREATED` ou
+  `ACTIVE`), que deixa o botão verde e abre a ficha, de **campanha ativa**, que
+  continua sendo a única que libera o inventário de campo.
+- **Aviso da filial alinhado ao botão:** com campanha criada e ainda não ativa,
+  o cartão fica com o botão verde, mas a linha continuava a dizer "falta
+  campanha". O rótulo passa a apontar **ativar a campanha** (`describeUnitReleaseMissing`),
+  e as mensagens de bloqueio deixam de mandar "configurar" o que já existe.
+- **Comparação de filial tolerante na campanha:** a gestão de campanhas e a
+  leitura local comparavam a filial por igualdade exata; `010101_CICOPAL_GO` e
+  `010101 CICOPAL GO` não se encontravam e a tela abria o cadastro por cima de
+  uma campanha existente. Agora a comparação usa a mesma chave normalizada da
+  liberação da unidade (caixa, `_`, hífen e acento não separam) e considera os
+  três campos da unidade (`filial`, `unit_id`, `_unitid`).
+
+### Corrigido — o mapa GPS abre na âncora da filial
+
+- **A unidade era selecionada antes de as âncoras carregarem:** o efeito de
+  `initialUnit` corria no mount, com a lista de configs ainda vazia — a âncora
+  gravada não era encontrada, o formulário abria em branco e o mapa ficava no
+  centro do país. A seleção agora espera o carregamento e acontece uma única vez.
+- **Foco aplicado quando o mapa fica pronto:** se o `flyTo` chegasse antes do
+  evento `load` do MapLibre (mapa sem instância), o destino era perdido e o mapa
+  abria no Brasil. O destino fica guardado e é aplicado assim que o mapa carrega.
+- **Âncora gravada só com `filial` deixou de ser ignorada:** a procura no
+  `UnitConfigurator` só olhava `unit_id`; registros antigos/vindos da nuvem só
+  com `filial` não eram encontrados. `findUnitConfigForUnit` compara os três
+  campos com chave normalizada (caixa, `_`, hífen e acento não separam).
+
+### Alterado — botão CAMPANHA abre a campanha ativa ou o cadastro
+
+- **Botão 📣 verde abre a campanha da filial:** com campanha criada e ativa, o
+  toque no botão `Campanha` do cartão leva direto à ficha dessa campanha
+  (`initialAction: 'OPEN'`), sem passar pela lista.
+- **Botão 📣 vermelho abre o cadastro:** sem campanha ativa na filial, a gestão
+  de campanhas já nasce no formulário de cadastro daquela unidade
+  (`initialAction: 'CREATE'`); se a leitura não trouxer nenhuma campanha, o
+  cadastro abre na mesma, em vez de uma lista vazia.
+
+### Alterado — liberação da filial direto no cartão (sem a UNIDADE OPERACIONAL)
+
+- **Dois botões de estado no próprio cartão da filial:** no CONTRATO DE
+  TRABALHO, cada unidade passa a trazer os botões **Âncora GPS** e **Campanha**,
+  com o estado real da unidade — **vermelho = pendente**, **verde = OK**. Cada
+  botão abre a configuração daquela filial diretamente (`UNIT_CONFIGURATOR` e
+  `CAMPAIGN_MANAGEMENT`, com `unitName` em parâmetro).
+- **O toque do ADMIN/MASTER resolve a pendência:** numa unidade "AGUARDANDO
+  LIBERAÇÃO", tocar no cartão abre direto o que falta — a âncora quando ela
+  ainda não existe e a campanha quando a âncora já está fixada (e vice-versa).
+  O formulário intermediário da UNIDADE OPERACIONAL deixa de ser etapa.
+- **Unidade liberada continua sendo escolha, não navegação:** com âncora e
+  campanha OK, o toque no cartão — de qualquer perfil — só marca a filial,
+  preservando a trilha filial → módulo → "Acessar o Módulo".
+
 ### Acesso padronizado — biometria obrigatória com fallback declarado (Fase 2)
 
 - **A etapa deixou de desaparecer em silêncio:** o passo biométrico só abria

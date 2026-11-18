@@ -3,7 +3,9 @@ import {
   hasRealAnchor,
   isConfiguredAnchorRecord,
   collectGpsAnchorsFromStorage,
-  mergeUnitConfigIntoList
+  mergeUnitConfigIntoList,
+  unitConfigUnitOf,
+  findUnitConfigForUnit
 } from '../utils/gpsAnchors';
 import { buildUnitReleaseMap, readUnitRelease } from '../utils/unitRelease';
 
@@ -268,5 +270,34 @@ describe('mergeUnitConfigIntoList (contrato onUpdateConfigs)', () => {
   it('trata config sem unit_id como nova entrada', () => {
     const result = mergeUnitConfigIntoList([{ unit_id: 'A' }], { filial: 'SEM_ID' });
     expect(result).toHaveLength(2);
+  });
+});
+
+describe('findUnitConfigForUnit (âncora da filial no mapa)', () => {
+  it('lê o nome da unidade pela filial canônica e pelos legados', () => {
+    expect(unitConfigUnitOf({ filial: '010101 CICOPAL GO', unit_id: 'X' })).toBe('010101 CICOPAL GO');
+    expect(unitConfigUnitOf({ unit_id: 'SNACKS' })).toBe('SNACKS');
+    expect(unitConfigUnitOf({ _unitid: 'LEGADO' })).toBe('LEGADO');
+    expect(unitConfigUnitOf(null)).toBe('');
+  });
+
+  it('encontra âncora gravada só com `filial` (sem unit_id)', () => {
+    const configs = [
+      { filial: '010105 CICOPAL PA', lat: -16.7, lng: -49.1 },
+      { filial: '010101 CICOPAL GO', lat: -16.68, lng: -49.25 }
+    ];
+    const found = findUnitConfigForUnit(configs, '010101 CICOPAL GO');
+    expect(found?.lat).toBe(-16.68);
+  });
+
+  it('tolera caixa, underscore e hífen na comparação', () => {
+    const configs = [{ unit_id: '010101_CICOPAL-GO', lat: -16.68, lng: -49.25 }];
+    expect(findUnitConfigForUnit(configs, '010101 cicopal go')?.lat).toBe(-16.68);
+  });
+
+  it('devolve null quando a unidade não tem registro ou o nome está vazio', () => {
+    expect(findUnitConfigForUnit([{ filial: 'OUTRA', lat: 1, lng: 2 }], '010101 CICOPAL GO')).toBeNull();
+    expect(findUnitConfigForUnit([], 'MATRIZ')).toBeNull();
+    expect(findUnitConfigForUnit([{ filial: 'MATRIZ', lat: 1, lng: 2 }], '')).toBeNull();
   });
 });

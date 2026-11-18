@@ -116,10 +116,15 @@ isOwnerEmail(email)                        // email == VITE_ADMIN_EMAIL (case-in
   Acessos, Auditoria, Integridade, **Filiais** (UNIT_CONFIGURATOR),
   **Banco de Dados** (DATABASE_MANAGER — gate adicional `canAccessDatabaseManager`).
 - **Campanhas de Inventário** (`CAMPAIGN_MANAGEMENT`) e a **UNIDADE OPERACIONAL**
-  (âncora GPS) não têm entrada solta no painel. O caminho é contextual: no
-  CONTRATO DE TRABALHO (`WorkContextSelector`), o card da unidade (ou o badge
-  "Âncora e Campanha") abre a tela da unidade já filtrada naquela filial, onde
-  ficam as duas configurações — âncora GPS e campanha por unidade.
+  (âncora GPS) não têm entrada solta no painel. O caminho é contextual, no
+  CONTRATO DE TRABALHO (`WorkContextSelector`): cada cartão de filial traz os
+  botões **Âncora GPS** e **Campanha** com o estado real da unidade (vermelho =
+  pendente, verde = OK), e cada um abre a configuração já filtrada naquela
+  filial. Para ADMIN/MASTER, tocar numa unidade "AGUARDANDO LIBERAÇÃO" abre
+  direto o que falta — a âncora, ou a campanha quando a âncora já está fixada —
+  sem passar pelo formulário da UNIDADE OPERACIONAL. Com a unidade liberada o
+  **cartão volta a ser escolha, não navegação**, em todos os perfis, para não
+  quebrar a trilha filial → módulo → "Acessar o Módulo".
 - Grid de módulos: **CONCILIAÇÃO POR CONTAS** e **ASSINATURA DIGITAL** gated por
   `isAuditor` (Trilha B); INVENTÁRIO / FICHA / ETIQUETAR / CONSULTA livres (Trilha C).
 
