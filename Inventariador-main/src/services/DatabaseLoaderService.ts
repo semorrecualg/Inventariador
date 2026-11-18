@@ -6,6 +6,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
 import { normalizeDateISO, normalizeNumeric } from '../utils/normalize';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { createAssetIdentityAllocator, newImportBatchId, sourcePrimarykeyOf, type AssetIdentityCandidate } from '../utils/assetIdentity';
 import { reconcileImport, ImportReconciliationError, type LoadedAssetRef } from '../utils/importReconciliation';
 import { reportRecnoCollisions } from './recnoGuardService';
@@ -384,7 +385,7 @@ export class DatabaseLoaderService {
           source_primarykey: sourcePrimarykey,
           source_row: i + rowIndex + 1,
           import_batch: importBatch,
-          _is_synced: 0,
+          ...marcarAlteracaoLocal(),
           _is_deleted: 0,
           _conferido: 0,
           _plaquetado: 0,
@@ -624,7 +625,7 @@ export class DatabaseLoaderService {
             source_primarykey: sourcePrimarykey,
             source_row: i + chunkIndex + 1,
             import_batch: importBatch,
-            _is_synced: 0,
+            ...marcarAlteracaoLocal(),
             _is_deleted: 0,
             _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
             _plaquetado: 0,
@@ -920,7 +921,7 @@ export class DatabaseLoaderService {
             source_primarykey: sourcePrimarykey,
             source_row: i + chunkIndex + 1,
             import_batch: importBatch,
-            _is_synced: 0,
+            ...marcarAlteracaoLocal(),
             _is_deleted: 0,
             _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
             _plaquetado: 0,

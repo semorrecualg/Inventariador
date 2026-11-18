@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
@@ -1431,7 +1432,7 @@ export class SqliteService {
           tenantid: String(asset.tenantid || existing?.tenantid || '').trim().toUpperCase(),
           primarykey: primaryKeyVal,
           id: primaryKeyVal,
-          _is_synced: 0
+          ...marcarAlteracaoLocal()
         } as DexieAsset;
         
         await db.ativos.put(updatedItem);

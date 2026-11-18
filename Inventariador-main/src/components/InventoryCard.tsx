@@ -3,6 +3,7 @@ import { db, DexieAsset } from '../services/sqliteService';
 import { getCurrentTenantid } from '../services/localDbService';
 import { Asset } from '../types';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { showRecoveryToast } from '../services/NavigationGuardService';
 import { isConferido } from '../utils/conferencia';
 import { 
@@ -429,7 +430,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
           await saveCollectedAssetAtomic({
             ...asset,
             _conferido: 1,
-            _is_synced: 0,
+            ...marcarAlteracaoLocal(),
             status: 'CONFERIDO'
           });
 
@@ -486,7 +487,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         ...pendingAssetToTransfer,
         filial: unidadeSelecionada,
         _conferido: 1,
-        _is_synced: 0,
+        ...marcarAlteracaoLocal(),
         status: 'CONFERIDO_TRANSFERIDO',
         _history: JSON.stringify([
           ...(JSON.parse(pendingAssetToTransfer._history || '[]')),
@@ -541,7 +542,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         serial: surplusSerial.trim() || 'SEM SERIAL',
         status: 'SOBRA_FISICA',
         _conferido: 1,
-        _is_synced: 0,
+        ...marcarAlteracaoLocal(),
         observacao: surplusObservation.trim(),
         _auditor: userEmail,
         _dataLeitura: new Date().toISOString(),
