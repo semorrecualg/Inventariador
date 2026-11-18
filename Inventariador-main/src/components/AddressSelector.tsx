@@ -5,6 +5,7 @@ import {
   ChevronRight, 
   Compass, 
   RefreshCw, 
+  AlertTriangle,
   Lock
 } from 'lucide-react';
 import BackButton from './BackButton';
@@ -27,6 +28,10 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [addresses, setAddresses] = useState<Array<{ displayName: string; total: number; checked: number; locKey: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
+  // Falha de LEITURA da base local, que não é o mesmo que uma base vazia: a
+  // lista vazia dizia «Nenhum Endereço Cadastrado» e escondia o erro de SQLite.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -40,6 +45,7 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
     const fetchAddresses = async () => {
       if (!selectedUnit) return;
       setIsLoading(true);
+      setLoadError(null);
       try {
         const results = await localDb.assets.getLocationsWithStats(selectedUnit, debouncedQuery);
         if (active) {
@@ -47,6 +53,12 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
         }
       } catch (err) {
         console.error(">>> [SRE AddressSelector] Erro ao carregar localidades física do SQLite:", err);
+        if (active) {
+          // Sem lista não há endereços para tocar: o ecrã tem de dizer que a
+          // consulta falhou, e não que a filial não tem endereços.
+          setAddresses([]);
+          setLoadError(err instanceof Error ? err.message : String(err ?? '').trim() || 'Erro desconhecido ao consultar a base local.');
+        }
       } finally {
         if (active) setIsLoading(false);
       }
@@ -57,10 +69,11 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
     return () => {
       active = false;
     };
-  }, [selectedUnit, debouncedQuery]);
+  }, [selectedUnit, debouncedQuery, reloadToken]);
 
   const handleBack = () => {
     setAddresses([]);
+    setLoadError(null);
     setSearchQuery('');
     setDebouncedQuery('');
     onBack();
@@ -123,6 +136,25 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
             <RefreshCw size={36} className="text-accent animate-spin mb-4" />
             <h3 className="font-extrabold uppercase tracking-[0.15em] text-[10px] text-slate-700">Carregando Endereços</h3>
             <p className="text-[8px] text-slate-400 font-extrabold uppercase tracking-widest mt-1">SRE Sincronismo de I/O de Ativos</p>
+          </div>
+        ) : loadError ? (
+          <div id="address-load-error" role="alert" className="flex flex-col items-center justify-center h-full py-16 px-6 text-center bg-white rounded-2xl border-2 border-amber-300 p-8 shadow-sm">
+            <AlertTriangle size={40} className="text-amber-500 stroke-[1.5] mb-4" />
+            <h3 className="font-extrabold uppercase tracking-[0.15em] text-[10px] text-slate-700">Falha ao Ler a Base Local</h3>
+            <p className="text-[8px] text-slate-400 font-extrabold uppercase tracking-widest mt-1 leading-relaxed">
+              Não foi possível consultar os endereços desta filial. Os endereços podem existir — a leitura é que falhou.
+            </p>
+            <p className="text-[8px] text-amber-600 font-mono font-bold break-words mt-3 max-w-full">
+              {loadError}
+            </p>
+            <button
+              id="address-retry-btn"
+              onClick={() => setReloadToken((token) => token + 1)}
+              className="mt-4 px-5 py-3 rounded-xl bg-slate-900 text-white font-black uppercase text-[9px] tracking-widest active:scale-95 transition-all flex items-center gap-2"
+            >
+              <RefreshCw size={12} />
+              Tentar novamente
+            </button>
           </div>
         ) : addresses?.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full py-16 px-6 text-center bg-white rounded-2xl border border-gray-100 p-8 shadow-sm">
