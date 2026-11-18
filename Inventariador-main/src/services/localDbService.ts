@@ -54,15 +54,48 @@ export const matchesAddressSearch = (address: unknown, term: unknown): boolean =
   return normalizeAddressSearch(address).includes(needle);
 };
 
+/**
+ * Chave de UNIDADE para comparar filiais: caixa, acentos, espaços e os
+ * separadores `_`/`-` não distinguem a mesma filial (`010101_CICOPAL_GO` ≡
+ * `010101 CICOPAL GO`). Mesma tolerância da lista do inventário (`normalizeKey`).
+ */
+export const normalizeUnitMatchKey = (value: unknown): string =>
+  normalizeAddressSearch(value)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * Contrato efetivo para as consultas locais: perfil → sessão → armazenamento.
+ *
+ * O dono global (`ADMIN`) NÃO declara `tenantid` no perfil: se a leitura parasse
+ * no utilizador, todas as consultas `[tenantid+filial]` (endereços, localidades,
+ * estatísticas) rodavam com contrato vazio e devolviam «Nenhum Endereço
+ * Cadastrado» mesmo com a base carregada. A cadeia é a mesma de
+ * `resolveTenantId` (utils/tenantUtils) usada no resto do app.
+ */
 export const getCurrentTenantid = (): string => {
+  const candidatos: string[] = [];
   try {
     const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
     if (userStr) {
       const user = JSON.parse(userStr);
-      return user.tenantid || '';
+      candidatos.push(
+        String(user?.tenantid || user?.tenantId || user?.tenant_id || user?.tenantid_ || '')
+      );
     }
   } catch { /* ignore */ }
-  return '';
+  try {
+    candidatos.push(sessionStorage.getItem('tenantid') || '', sessionStorage.getItem('tenantId') || '');
+  } catch { /* ignore */ }
+  try {
+    candidatos.push(localStorage.getItem('tenantid') || '', localStorage.getItem('tenantId') || '');
+  } catch { /* ignore */ }
+
+  const valido = candidatos
+    .map(c => c.trim())
+    .find(c => c !== '' && !['NULL', 'UNDEFINED', 'N/A'].includes(c.toUpperCase()));
+  return valido || '';
 };
 
 const handleDemoAuditIncrement = () => {
@@ -398,16 +431,45 @@ export const localDb = {
       const tenant = getCurrentTenantid().trim().toUpperCase();
       const uIdUpper = unitId.toUpperCase().trim();
 
-      const indexedAddrs = await db.addresses.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+      // Leitura por filial: caminho rápido pelo índice EXATO e, se ele vier
+      // vazio, varredura do MESMO contrato com chave tolerante (caixa, acentos,
+      // `_`/`-`). Antes, o rótulo do cartão (`010101 CICOPAL GO`) não achava a
+      // filial gravada como `010101_CICOPAL_GO` e o ecrã anunciava «Nenhum
+      // Endereço Cadastrado» com a base cheia.
+      const unitMatch = normalizeUnitMatchKey(unitId);
+      const doContrato = async <T extends { tenantid?: unknown; filial?: unknown }>(
+        table: typeof db.addresses | typeof db.assets | typeof db.local_assets
+      ): Promise<T[]> => {
+        const rows = (await table.where('[tenantid+filial]').between([tenant, ''], [tenant, '\uffff']).toArray()) as unknown as T[];
+        if (!unitMatch) return [];
+        return rows.filter(r => normalizeUnitMatchKey(r.filial) === unitMatch);
+      };
+      const addressRows = async () => {
+        const exatos = await db.addresses.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+        if (exatos.length > 0 || !unitMatch) return exatos;
+        return doContrato<typeof exatos[number]>(db.addresses);
+      };
+      const assetRows = async () => {
+        const exatos = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+        if (exatos.length > 0 || !unitMatch) return exatos;
+        return doContrato<typeof exatos[number]>(db.assets);
+      };
+      const baselineRows = async () => {
+        const exatos = await db.local_assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+        if (exatos.length > 0 || !unitMatch) return exatos;
+        return doContrato<typeof exatos[number]>(db.local_assets);
+      };
+
+      const indexedAddrs = await addressRows();
       let addrList = indexedAddrs;
 
       // 2. Só se o ÍNDICE estiver vazio (nunca por causa do filtro): extrai as
       //    localidades da tabela de trabalho (assets canônica — decisão DBA
       //    2026-08-06; fallback local_assets baseline para restore .dat)
       if (addrList.length === 0) {
-        let workAssets = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+        let workAssets = await assetRows();
         if (workAssets.length === 0) {
-          workAssets = await db.local_assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+          workAssets = await baselineRows();
         }
         const extractedAddrs = new Map<string, typeof addrList[0]>();
         workAssets.forEach(a => {
@@ -434,9 +496,9 @@ export const localDb = {
       addrList = addrList.filter(a => matchesAddressSearch(a.codigo_endereco, searchTerm));
 
       // 4. Busca reativa das estatísticas de conferência na tabela de trabalho (assets canônica)
-      let listAssets = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+      let listAssets = await assetRows();
       if (listAssets.length === 0) {
-        listAssets = await db.local_assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+        listAssets = await baselineRows();
       }
       const nonDeleted = listAssets.filter(a => a._is_deleted !== 1);
 

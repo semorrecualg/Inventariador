@@ -1698,12 +1698,13 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
 
   const built = buildConfigCloudPayload(config, tenantid);
   if (!built) {
-    logger.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantid ausente.");
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
-        detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. O envio das configurações foi bloqueado." }
-      }));
-    }
+    // Autosave em segundo plano sem contrato resolvido (logout, dono global
+    // antes de escolher o contrato, base ainda vazia): NÃO é perda de sessão.
+    // Antes este caminho disparava `gbr_session_expired`, que encerrava a
+    // sessão e mostrava "SESSÃO EXPIRADA · o envio das configurações foi
+    // bloqueado" a quem só estava a navegar. A expiração real continua a ser
+    // tratada pelo listener de auth do Supabase; aqui só se ignora o envio.
+    logger.warn('>>> [Session] syncConfigToCloud ignorado: sem contrato (tenantid) para isolar a configuração — sessão preservada.');
     return; // Interrompe a operação de sync
   }
 
@@ -3153,16 +3154,17 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
   if (!supabase || !cleanTenantid) return localCampaigns;
 
   try {
-    let query = supabase
+    // SEM filtro de unidade no PostgREST: a coluna pode gravar
+    // `010101_CICOPAL_GO` enquanto o cartão mostra `010101 CICOPAL GO`, e
+    // `.or('filial.eq.<rótulo com espaços>')` é sintaxe inválida — o erro
+    // devolvia ZERO campanhas e a unidade liberada aparecia «falta campanha».
+    // A unidade é filtrada depois do merge, com a mesma chave tolerante do
+    // caminho local (`matchUnitKeys`).
+    const { data: cloudData, error } = await supabase
       .from('campaigns')
       .select('*')
-      .eq('tenantid', cleanTenantid);
-    
-    if (unitid) {
-      query = query.or(`filial.eq.${unitid},filial.is.null`);
-    }
-
-    const { data: cloudData, error } = await query.order('start_date', { ascending: false });
+      .eq('tenantid', cleanTenantid)
+      .order('start_date', { ascending: false });
 
     if (error) {
       logger.warn('>>> [Supabase] Falha ao buscar nuvem (mantendo local):', error);
@@ -3184,7 +3186,14 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
 
     const merged = Array.from(campaignMap.values());
     logger.info(`>>> [Governance] Merge concluído: ${localCampaigns.length} locais, ${cloudCampaigns.length} nuvem. Total: ${merged.length}`);
-    return merged;
+    if (!unitid) return merged;
+
+    const cleanUnitId = unitid.trim();
+    return merged.filter(c => {
+      const cUnit = String(c.filial || c.unit_id || c._unitid || '').trim();
+      const cUpper = cUnit.toUpperCase();
+      return cUpper === '' || cUpper === 'GLOBAL' || matchUnitKeys(cUnit, cleanUnitId);
+    });
 
   } catch (err) {
     logger.warn('>>> [Supabase] Erro de rede ao buscar campanhas. Retornando apenas locais.', err);

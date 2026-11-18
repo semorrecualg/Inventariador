@@ -64,7 +64,8 @@ import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturn
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
-import { buildUnitReleaseMap, campaignUnitKeys, collectActiveCampaignUnits, collectRecordedCampaignUnits, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
+import { buildUnitReleaseMap, campaignUnitKeys, collectConfiguredUnitNames, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
+import { loadCampaignUnitsForRelease } from './utils/campaignRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
 import {
   readCheckpointForDelta,
@@ -2297,13 +2298,24 @@ useEffect(() => {
    */
   const loadActiveCampaignUnits = useCallback(async () => {
     try {
-      const rows = await sqliteService.getCampaigns();
-      setActiveCampaignUnits(collectActiveCampaignUnits(rows));
-      setRecordedCampaignUnits(collectRecordedCampaignUnits(rows));
+      // Local SEM filtro (registros antigos sem contrato seguem valendo) + as
+      // campanhas do CONTRATO (local + nuvem, sem filtro de unidade). Ler só o
+      // banco local escondia a campanha que existe apenas na nuvem: o cartão da
+      // unidade ficava vermelho («falta campanha») com a campanha já ativa.
+      // Em modo INTERNAL a segunda fonte devolve só o local (soberania): a
+      // campanha que só exista na nuvem não liberta a unidade nesse aparelho.
+      const scope = String(currentTenantid || user?.tenantid || '').trim();
+      const units = await loadCampaignUnitsForRelease({
+        scope,
+        readLocal: () => sqliteService.getCampaigns(),
+        fetchScoped: tenant => fetchCampaigns(tenant, null)
+      });
+      setActiveCampaignUnits(units.active);
+      setRecordedCampaignUnits(units.recorded);
     } catch (err) {
       logger.warn('>>> [Governance] Falha ao ler campanhas persistidas para a liberação:', err);
     }
-  }, []);
+  }, [currentTenantid, user?.tenantid]);
 
   useEffect(() => {
     if (!dbInitialized) return;
@@ -6509,7 +6521,9 @@ useEffect(() => {
       return [];
     }
 
-    const userTenant = user?.tenantid || '';
+    // Contrato resolvido (perfil → sessão → base): o dono global não declara
+    // tenantid no perfil e a lista precisa da mesma chave usada na liberação.
+    const userTenant = (user?.tenantid || currentTenantid || '').trim().toUpperCase();
     const userUnits = user?.units || (userTenant ? [userTenant] : []);
     const isAuditor = isFieldAuditorRole(user?.role);
     const assets = inventory.assets;
@@ -6641,6 +6655,21 @@ useEffect(() => {
           baseCompaniesSet.add(cleanU);
         }
       }
+    }
+
+    // Unidades que existem na CONFIGURAÇÃO OPERACIONAL (âncora GPS e campanha)
+    // entram na lista mesmo quando a tabela de ativos do contrato ainda não foi
+    // carregada — são filiais reais, com cartão para conferir/liberar. Sem isto
+    // o seletor dizia «Nenhuma filial na base deste contrato» num contrato com
+    // âncoras e campanhas gravadas. O escopo do auditor é aplicado no 4b.
+    collectConfiguredUnitNames([unitConfigs, campaigns], userTenant).forEach(name => {
+      baseCompaniesSet.add(name);
+    });
+    // Âncoras persistidas no aparelho (leitura durável, independente do estado
+    // React) também provam a existência da filial. Só entram para ADMIN/MASTER:
+    // o auditor continua limitado às unidades do perfil (filtro do 4b).
+    if (isAdmin) {
+      unitsWithGps.forEach(norm => baseCompaniesSet.add(norm));
     }
     
     const baseCompanies = Array.from(baseCompaniesSet);
@@ -6835,13 +6864,33 @@ useEffect(() => {
 
     logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, recordedCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, currentTenantid, campaigns, activeCampaignUnits, recordedCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref
   // porque o handler do contrato de trabalho (declarado antes deste memo) é
   // quem aplica a trava de entrada.
   const unitReleaseRef = useRef<UnitReleaseMap>({});
+
+  // CATÁLOGO DE FILIAIS POR CONTRATO que o APP já conhece — a MESMA lista que
+  // alimenta o mapa de liberação. O seletor de contrato recebia apenas uma
+  // varredura do catálogo local, que pode vir vazia (configuração operacional
+  // gravada sem contrato, base interna ainda não espelhada), e então dizia
+  // «Nenhuma filial na base deste contrato» enquanto o próprio aviso apontava
+  // uma filial existente. Com esta lista, cartão e liberação nunca divergem.
+  const unitsByContract = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const unit of fullCompaniesWithStatus) {
+      const tenantid = String(unit.tenantid || user?.tenantid || '').trim().toUpperCase();
+      const name = String(unit.name || '').trim().toUpperCase();
+      if (!tenantid || !name) continue;
+      if (!map[tenantid]) map[tenantid] = [];
+      if (!map[tenantid].includes(name)) map[tenantid].push(name);
+    }
+    return map;
+  }, [fullCompaniesWithStatus, user?.tenantid]);
+
+
   const unitReleaseMap = useMemo(
     () =>
       buildUnitReleaseMap(
@@ -7761,6 +7810,7 @@ useEffect(() => {
               user={user}
               contexts={workContexts}
               unitRelease={unitReleaseMap}
+              availableFiliais={unitsByContract}
               initialSelection={workContextPreselection}
               onSelect={handleWorkContextModuleSelect}
               onOpenAdmin={(target, params) => pushScreen(target, params)}

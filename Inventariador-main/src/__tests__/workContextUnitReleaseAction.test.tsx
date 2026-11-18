@@ -350,3 +350,69 @@ describe('CONTRATO DE TRABALHO · liberação da unidade no cartão', () => {
     expect(screen.queryByText('010105 CICOPAL PA')).toBeNull();
   });
 });
+
+// ============================================================================
+// Figuras reais: contrato ativo, filial configurada (âncora gravada sem
+// contrato na configuração operacional), catálogo local vazio e a tela dizia
+// «Nenhuma filial na base deste contrato» enquanto o rodapé avisava «Unidade
+// aguardando liberação (falta campanha)» — sem filial nenhuma para tocar.
+// ============================================================================
+describe('CONTRATO DE TRABALHO · filiais que só o catálogo vivo conhece', () => {
+  afterEach(() => cleanup());
+
+  const renderLive = (params: {
+    map: typeof releaseMap;
+    availableFiliais?: Record<string, string[]>;
+    initialSelection?: { tenantid: string; filial: string; module: AppModule };
+  }) =>
+    render(
+      React.createElement(WorkContextSelector, {
+        user: { ...buildUser(UserRole.ADMIN), filial: '', units: [] } as User,
+        contexts: [{ tenantid: TENANT, filial: '' }],
+        unitRelease: params.map,
+        availableFiliais: params.availableFiliais,
+        initialSelection: params.initialSelection ?? null,
+        onSelect: vi.fn(),
+        onLogout: vi.fn(),
+        onOpenAdmin: vi.fn()
+      })
+    );
+
+  it('lista a filial que o app já conhece mesmo com o catálogo local vazio', () => {
+    renderLive({ map: releaseMap, availableFiliais: { [TENANT]: [FILIAL] } });
+
+    // A filial existe no app (é a mesma do mapa de liberação): o cartão aparece.
+    expect(screen.getByText(FILIAL)).toBeTruthy();
+    expect(screen.queryByText(/Nenhuma filial na base deste contrato/)).toBeNull();
+    // O estado aparece no cartão E no aviso do rodapé — os dois coerentes.
+    expect(screen.getAllByText(/AGUARDANDO LIBERAÇÃO · FALTA ÂNCORA GPS E CAMPANHA/i)).toHaveLength(2);
+    expect(screen.getByTestId('filial-options').textContent).toContain(FILIAL);
+  });
+
+  it('pré-seleção de filial configurada e sem campanha mostra a filial e o aviso', () => {
+    renderLive({
+      map: anchorOnlyMap,
+      availableFiliais: { [TENANT]: [FILIAL] },
+      initialSelection: { tenantid: TENANT, filial: FILIAL, module: AppModule.INVENTORY }
+    });
+
+    // A lista e o estado de liberação falam da MESMA unidade — o aviso do
+    // rodapé tem, enfim, um cartão para tocar.
+    expect(screen.getByText(FILIAL)).toBeTruthy();
+    expect(screen.getByTestId('unit-release-warning')).toBeTruthy();
+    expect(screen.queryByText(/Nenhuma filial na base deste contrato/)).toBeNull();
+  });
+
+  it('pré-seleção de filial que já não existe não deixa aviso órfão', () => {
+    renderLive({
+      map: releaseMap,
+      availableFiliais: {},
+      initialSelection: { tenantid: TENANT, filial: 'FILIAL ANTIGA', module: AppModule.INVENTORY }
+    });
+
+    // Escolha antiga de outra base: nenhuma unidade real, nenhum aviso de
+    // liberação apontando para uma filial invisível.
+    expect(screen.queryByTestId('unit-release-warning')).toBeNull();
+    expect(screen.getByText(/Nenhuma filial na base deste contrato/)).toBeTruthy();
+  });
+});

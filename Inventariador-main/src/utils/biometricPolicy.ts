@@ -4,11 +4,17 @@ import { canonicalRole } from './roles';
 /**
  * POLÍTICA DA BIOMETRIA — Fase 2 do acesso padronizado
  *
- * Regra do produto: a biometria é OBRIGATÓRIA sempre que o aparelho a pode
- * verificar; quando não pode (WebView do app nativo, hardware sem autenticador),
- * o passo continua a existir e o acesso segue por uma dispensa EXPLÍCITA,
- * motivada e registada na auditoria. Nunca em silêncio e nunca num beco sem
- * saída — o inventário de campo não pode parar por causa do hardware.
+ * Regra do produto: a biometria é uma etapa do APLICATIVO MÓVEL (casco nativo).
+ * No app ela é OBRIGATÓRIA sempre que o aparelho a pode verificar; quando não
+ * pode (hardware sem autenticador, plugin sem resposta), o passo continua a
+ * existir e o acesso segue por uma dispensa EXPLÍCITA, motivada e registada na
+ * auditoria. Nunca em silêncio e nunca num beco sem saída — o inventário de
+ * campo não pode parar por causa do hardware.
+ *
+ * No navegador/desktop o passo NÃO existe: nem cadastro, nem dispensa. Ter
+ * autenticador de plataforma (Touch ID / Windows Hello) não transforma o web
+ * num aparelho de campo — exigir cadastro ali travava o acesso de quem só
+ * queria entrar no sistema.
  *
  * Este módulo é puro (sem browser, sem WebAuthn) para a decisão ser testável
  * sem jsdom: o App recolhe os factos e o `resolveBiometricStep` decide.
@@ -29,7 +35,8 @@ export type BiometricReason =
   | 'credential-required'
   | 'webview-without-webauthn'
   | 'device-without-authenticator'
-  | 'registration-failed';
+  | 'registration-failed'
+  | 'web-session';
 
 /**
  * O que o plugin nativo respondeu neste aparelho (Fase 2b).
@@ -70,6 +77,8 @@ const REASON_TEXT: Record<BiometricReason, string> = {
     'O app nativo (WebView) não expõe biometria ao sistema: este acesso segue sem cadastro neste aparelho.',
   'device-without-authenticator':
     'Este dispositivo não tem autenticador biométrico disponível: este acesso segue sem cadastro neste aparelho.',
+  'web-session':
+    'Acesso pela web/desktop: a biometria é uma etapa exclusiva do aplicativo móvel.',
   // Não é devolvido por `resolveBiometricStep`: é o motivo da saída explícita
   // quando o cadastro OBRIGATÓRIO falha na tela (recusa do sensor, tempo
   // esgotado). Sem esta saída o utilizador ficaria preso no modo obrigatório.
@@ -87,11 +96,10 @@ export const biometricReasonText = (reason: BiometricReason): string => REASON_T
  *   1. DEMO é o único perfil isento (decisão de produto da Fase 2).
  *   2. Credencial existente dispensa o passo, mesmo no casco nativo.
  *   3. Dispensa já aceite vale para a sessão inteira (não reabre em loop).
- *   4. Casco nativo com plugin disponível → cadastro (nativo, Fase 2b).
- *   5. Casco nativo sem biometria utilizável → fallback com o motivo do plugin
+ *   4. Navegador/desktop → segue direto: a biometria é do app móvel.
+ *   5. Casco nativo com plugin disponível → cadastro (nativo, Fase 2b).
+ *   6. Casco nativo sem biometria utilizável → fallback com o motivo do plugin
  *      (hardware) ou, se o plugin não respondeu, o motivo do WebView.
- *   6. Sem autenticador de plataforma → fallback com motivo de hardware.
- *   7. Caso contrário, o cadastro é obrigatório.
  */
 export const resolveBiometricStep = (ctx: BiometricContext): BiometricDecision => {
   if (canonicalRole(ctx.role) === UserRole.DEMO) {
@@ -103,20 +111,21 @@ export const resolveBiometricStep = (ctx: BiometricContext): BiometricDecision =
   if (ctx.fallbackAccepted) {
     return { step: 'proceed', reason: 'fallback-accepted-session' };
   }
-  if (ctx.isNativeApp) {
-    if (ctx.nativeBiometry === 'available') {
-      return { step: 'register', reason: 'credential-required' };
-    }
-    return {
-      step: 'fallback',
-      reason:
-        ctx.nativeBiometry === 'unavailable'
-          ? 'device-without-authenticator'
-          : 'webview-without-webauthn'
-    };
+  // BIOMETRIA É DO APP MÓVEL: no navegador/desktop o passo não existe — nem
+  // cadastro obrigatório, nem tela de dispensa. `supported` (WebAuthn de
+  // plataforma) NÃO decide nada aqui: Touch ID/Windows Hello não transformam o
+  // web num aparelho de campo, e exigir cadastro ali travava o acesso.
+  if (!ctx.isNativeApp) {
+    return { step: 'proceed', reason: 'web-session' };
   }
-  if (!ctx.supported) {
-    return { step: 'fallback', reason: 'device-without-authenticator' };
+  if (ctx.nativeBiometry === 'available') {
+    return { step: 'register', reason: 'credential-required' };
   }
-  return { step: 'register', reason: 'credential-required' };
+  return {
+    step: 'fallback',
+    reason:
+      ctx.nativeBiometry === 'unavailable'
+        ? 'device-without-authenticator'
+        : 'webview-without-webauthn'
+  };
 };

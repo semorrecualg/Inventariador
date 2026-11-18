@@ -75,17 +75,21 @@ const Login: React.FC<LoginProps> = ({
   React.useEffect(() => {
     let cancelled = false;
     const checkBio = async () => {
-      if (normalizedUsername.length > 3) {
-        const supported = await isBiometricSupported();
-        if (supported && !cancelled) {
-          const registered = await hasBiometricRegistered(normalizedUsername);
-          if (!cancelled) setHasBio(registered);
-        } else if (!cancelled) {
-          setHasBio(false);
-        }
-      } else if (!cancelled) {
-        setHasBio(false);
+      // Biometria é do APP MÓVEL: no navegador/desktop o botão nem aparece —
+      // nem há cadastro a oferecer, mesmo que o sistema tenha Touch ID/Windows
+      // Hello disponível.
+      if (!isNativeAppShell() || normalizedUsername.length <= 3) {
+        if (!cancelled) setHasBio(false);
+        return;
       }
+      const supported = await isBiometricSupported();
+      if (cancelled) return;
+      if (!supported) {
+        setHasBio(false);
+        return;
+      }
+      const registered = await hasBiometricRegistered(normalizedUsername);
+      if (!cancelled) setHasBio(registered);
     };
     checkBio();
     return () => { cancelled = true; };

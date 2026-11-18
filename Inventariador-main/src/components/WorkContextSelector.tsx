@@ -33,6 +33,7 @@ import { canAccessDatabaseManager } from '../utils/authUtils';
 import {
   describeUnitReleaseMissing,
   readUnitRelease,
+  unitReleaseKey,
   type UnitReleaseMap
 } from '../utils/unitRelease';
 import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
@@ -67,6 +68,18 @@ interface WorkContextSelectorProps {
    * ser saltado no pós-login. O utilizador confirma em "Acessar o Módulo".
    */
   initialSelection?: WorkContextPreselection | null;
+  /**
+   * Unidades que o APP já conhece por contrato (`TENANTID` → filiais) — o
+   * catálogo vivo de ativos, base interna, âncoras, campanhas e lista da nuvem.
+   *
+   * O catálogo da base local (`listContracts`) não enxerga a configuração
+   * operacional gravada SEM contrato e pode vir vazio num aparelho com as
+   * filiais configuradas; era aí que a tela dizia «Nenhuma filial na base deste
+   * contrato» e, ao mesmo tempo, o aviso de liberação apontava uma filial
+   * existente. Esta é a MESMA fonte do mapa de liberação, para que a lista e o
+   * estado de cada unidade nunca divirjam.
+   */
+  availableFiliais?: Record<string, string[]>;
 }
 
 /**
@@ -89,7 +102,8 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   onOpenDatabase,
   unitRelease,
   onOpenAdmin,
-  initialSelection
+  initialSelection,
+  availableFiliais
 }) => {
   const groups = groupContextsByTenant(contexts);
 
@@ -156,6 +170,22 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     return baseContracts.find((c) => normalizeWorkTenant(c.tenantid) === tenant)?.filiais ?? [];
   }, [baseContracts, selectedTenant]);
 
+  // Filiais que o APP já conhece neste contrato (catálogo vivo). Somam-se às da
+  // base local: uma filial configurada sem contrato na configuração operacional
+  // não aparece no catálogo, mas é uma unidade real — e é ela que o aviso de
+  // liberação aponta.
+  const knownFiliais = useMemo(() => {
+    const tenant = normalizeWorkTenant(selectedTenant);
+    const list = (availableFiliais && availableFiliais[tenant]) || [];
+    const out: string[] = [];
+    for (const raw of list) {
+      const f = normalizeWorkFilial(raw);
+      if (!f || f === tenant || out.includes(f)) continue;
+      out.push(f);
+    }
+    return out;
+  }, [availableFiliais, selectedTenant]);
+
   // A lista do perfil manda para quem é de campo; o DONO do contrato (admin/
   // master) administra a unidade inteira, então ele também enxerga as filiais
   // REAIS da base local — são elas que recebem âncora e campanha na Unidade
@@ -170,21 +200,14 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     const tenant = normalizeWorkTenant(selectedTenant);
     const seen = new Set(authorized.map((o) => normalizeWorkFilial(o.filial)));
     const fromBase: FilialOption[] = [];
-    for (const raw of baseFiliais) {
+    for (const raw of [...baseFiliais, ...knownFiliais]) {
       const f = normalizeWorkFilial(raw);
       if (!f || f === tenant || seen.has(f)) continue;
       seen.add(f);
       fromBase.push({ filial: f, label: f });
     }
     return fromBase.length ? [...authorized, ...fromBase] : authorized;
-  }, [selectedTenant, contexts, baseFiliais, isAdmin]);
-
-  // Pré-seleção: a filial resolvida no login (quando autorizada) ou a primeira
-  // opção. O usuário pode trocar livremente entre as autorizadas.
-  const defaultFilial = filialOptions.some((o) => o.filial === activeFilial)
-    ? activeFilial
-    : (filialOptions[0]?.filial ?? '');
-  const chosenFilial = selectedFilial !== null ? selectedFilial : defaultFilial;
+  }, [selectedTenant, contexts, baseFiliais, knownFiliais, isAdmin]);
 
   // Estado de liberação da filial escolhida: âncora GPS + campanha configuradas
   // pelo administrador. Unidade sem as duas NÃO entra no inventário de campo.
@@ -193,6 +216,32 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   const showRelease = isAuditorOnly || isAdmin;
   const releaseOf = (filial: string) =>
     showRelease && filial ? readUnitRelease(unitRelease, selectedTenant, filial) : null;
+  // Chave EXATA do contrato: a leitura acima é tolerante e atravessa contratos
+  // para o dono global — não serve para decidir se a unidade é desta lista.
+  const exactReleaseOf = (filial: string) =>
+    filial && unitRelease ? unitRelease[unitReleaseKey(selectedTenant, filial)] : undefined;
+
+  // Pré-seleção: a filial resolvida no login (quando autorizada) ou a primeira
+  // opção. O usuário pode trocar livremente entre as autorizadas.
+  const defaultFilial = filialOptions.some((o) => o.filial === activeFilial)
+    ? activeFilial
+    : (filialOptions[0]?.filial ?? '');
+  // A escolha anterior só vale para uma unidade REAL deste contrato: uma opção
+  // da lista ou uma unidade com configuração gravada. Uma escolha antiga de
+  // outra base deixava o rodapé a falar de uma filial que a lista não mostrava
+  // («falta campanha» sem filial para tocar) e o acesso travado, sem saída.
+  const preselectionKnown =
+    selectedFilial !== null &&
+    (filialOptions.some((o) => o.filial === selectedFilial) || !!exactReleaseOf(selectedFilial));
+  const chosenFilial = preselectionKnown ? (selectedFilial as string) : defaultFilial;
+
+  // Unidade pré-selecionada e configurada, mas fora do catálogo local: entra na
+  // lista — é ela que o aviso de liberação está a apontar.
+  const filialOptionsView: FilialOption[] =
+    chosenFilial && !filialOptions.some((o) => o.filial === chosenFilial)
+      ? [...filialOptions, { filial: chosenFilial, label: chosenFilial }]
+      : filialOptions;
+
   const chosenRelease = releaseOf(chosenFilial);
   const chosenPending = chosenRelease && !chosenRelease.released
     ? describeUnitReleaseMissing(chosenRelease)
@@ -421,13 +470,13 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                 <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted">
                   Filial · Unidade Operacional
                 </p>
-                {filialOptions.length > 1 && (
+                {filialOptionsView.length > 1 && (
                   <span className="text-[8px] font-black uppercase tracking-widest text-ink-muted/50">
-                    {filialOptions.length} opções
+                    {filialOptionsView.length} opções
                   </span>
                 )}
               </div>
-              {filialOptions.length === 0 ? (
+              {filialOptionsView.length === 0 ? (
                 <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3.5">
                   <p className="text-[9px] font-extrabold text-amber-700 uppercase tracking-widest leading-relaxed text-center">
                     Nenhuma filial na base deste contrato — a unidade será escolhida na próxima tela.
@@ -435,7 +484,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                 </div>
               ) : (
                 <div className="space-y-2" data-testid="filial-options">
-                  {filialOptions.map((opt) => {
+                  {filialOptionsView.map((opt) => {
                     const isChosen = chosenFilial === opt.filial;
                     const release = releaseOf(opt.filial);
                     const pending = release && !release.released
@@ -717,7 +766,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
         </button>
         {missingFilialForInventory && (
           <p className="text-[9px] font-extrabold uppercase tracking-wider text-amber-600 text-center leading-relaxed">
-            {filialOptions.length === 0
+            {filialOptionsView.length === 0
               ? 'Este contrato ainda não tem filial na base. Cadastre a filial na Unidade Operacional ou use CONTROLE DE ATIVO, que não exige endereço de campo.'
               : 'Escolha a filial para entrar no INVENTARIADOR.'}
           </p>

@@ -7,6 +7,154 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — campanha ativa aparecia como «falta campanha»
+
+- **O filtro de unidade ia literal para o PostgREST:** `fetchCampaigns` pedia à
+  nuvem `.or('filial.eq.010101 CICOPAL GO,filial.is.null')`. A coluna grava
+  `010101_CICOPAL_GO` e um valor com espaços nem é sintaxe válida no PostgREST —
+  o erro devolvia **zero campanhas**. O contrato CICOPAL listava as filiais com
+  âncora verde e, ao mesmo tempo, «AGUARDANDO LIBERAÇÃO · FALTA CAMPANHA» com o
+  botão da campanha vermelho, e o ACESSAR ficava travado. A unidade passa a ser
+  filtrada **depois do merge**, com a mesma chave tolerante do caminho local
+  (`matchUnitKeys`), que aceita `_`/espaços/caixa.
+- **O mapa de liberação passou a incluir a campanha da nuvem:**
+  `loadActiveCampaignUnits` lia apenas o `campaigns` local e a campanha que
+  existe só na nuvem nunca libertava o cartão. Agora lê o local **sem filtro**
+  (registros antigos sem contrato continuam a valer) e acrescenta
+  `fetchCampaigns(contrato)` — local do contrato + nuvem, sem filtro de unidade.
+- **`mergeCampaignRows` deduplica pelo `id`:** a chave era prefixada pela
+  fonte (`local-<id>` / `scoped-<id>`), portanto a MESMA campanha vinda do
+  banco local e da nuvem entrava duas vezes — o comentário prometia dedupe por
+  `id` e não havia nenhum. Agora é uma linha por campanha e, no mesmo `id`,
+  vale a versão da nuvem; linhas sem `id` continuam a entrar todas.
+- *Testes:* `campaignRelease` (novo, 10) — dedupe por `id` (incluindo `42` vs
+  `'42'`), ids distintos preservados, linhas sem `id` sem colisão, campanha só
+  da nuvem a libertar, contrato ausente sem chamada remota e falha de cada
+  fonte sem perder a outra.
+- **A reunião das fontes saiu do App para `utils/campaignRelease`:**
+  `loadCampaignUnitsForRelease` lê o local sem filtro e acrescenta o contrato
+  (local + nuvem); devolve as unidades `ACTIVE`/gravadas. É a peça que o App
+  usa e que os testes exercitam — o caso real deixa de ser simulado à parte.
+- **Modo INTERNAL continua sem nuvem:** por soberania, `fetchCampaigns` devolve
+  só o local quando o modo é INTERNAL. Uma campanha que exista **apenas** na
+  nuvem NÃO liberta a unidade nesse aparelho — tem de ser criada/ativada
+  localmente. Este limite está fixado em teste, não é suposição.
+- *Testes:* `campaignUnitFilter` (novo, 5) — campanha da nuvem gravada com
+  `_` encontrada para o cartão com espaços, filial alheia não vaza, contrato
+  inteiro sem unidade pedida, campanhas `GLOBAL` mantidas e falha de nuvem sem
+  exceção; e a consulta deixa de usar `.or` com o rótulo literal.
+- *Testes:* `cloudCampaignRelease` (novo, 4) — caso real ponta a ponta com
+  campanha **só na nuvem** (`010101_CICOPAL_GO`): a cadeia
+  `fetchCampaigns → loadCampaignUnitsForRelease → buildUnitReleaseMap`
+  devolve `released: true`, o cartão `010101 CICOPAL GO` mostra **LIBERADA PARA
+  INVENTÁRIO** e o ACESSAR liberta; campanha de outra filial não liberta; e, em
+  modo INTERNAL, o cartão continua em «FALTA CAMPANHA» (limite do produto).
+
+### Corrigido — «Nenhuma filial na base» com a filial configurada
+
+- **A lista de filiais e o estado de liberação vinham de fontes diferentes:** o
+  cartão do contrato (`WorkContextSelector`) montava as filiais a partir de uma
+  varredura do catálogo local (`listContracts`, feita uma única vez no mount),
+  enquanto o aviso de liberação usava o catálogo vivo do App
+  (`fullCompaniesWithStatus`). Num aparelho cuja configuração operacional foi
+  gravada **sem contrato** (`unit_configs` sem `tenantid`, que o catálogo
+  descarta) o ecrã dizia «Nenhuma filial na base deste contrato» e, ao mesmo
+  tempo, avisava «Unidade aguardando liberação (falta campanha)» — um aviso a
+  apontar uma filial que não existia na lista, com o acesso travado e sem
+  saída.
+- **O catálogo vivo passou a alimentar o seletor:** o App entrega
+  `availableFiliais` (`tenantid` → filiais) ao `WorkContextSelector`, a MESMA
+  lista que gera o mapa de liberação (ativos, base interna, âncoras, campanhas,
+  lista da nuvem). A filial que o aviso menciona passa a ter cartão para tocar.
+- **Pré-seleção validada:** a última escolha só é pré-selecionada quando é uma
+  unidade real deste contrato (opção da lista ou configuração gravada com a
+  chave exata `TENANTID::FILIAL`); uma escolha antiga de outra base deixa de
+  produzir o aviso órfão.
+- *Testes:* `workContextUnitReleaseAction` — catálogo local vazio + catálogo
+  vivo com a filial (cartão listado), pré-seleção de unidade configurada sem
+  campanha (cartão + aviso) e pré-seleção inexistente (sem aviso órfão).
+
+### Corrigido — «Nenhum Endereço Cadastrado» com a base cheia
+
+- **O ecrã de endereços lia a base com o contrato do PERFIL:** `getCurrentTenantid`
+  (`src/services/localDbService.ts`) devolvia `user.tenantid` e mais nada. O dono
+  global não declara contrato no perfil, então as consultas `[tenantid+filial]`
+  rodavam com contrato vazio e todo o inventário interno aparecia vazio — com a
+  base carregada e a filial liberada. Passa a usar a cadeia do resto do app:
+  **perfil → sessão (`tenantid`) → armazenamento local**, ignorando sentinelas
+  (`NULL`, `UNDEFINED`, `N/A`).
+- **A filial era comparada LITERALMENTE no índice:** o cartão mostra
+  `010101 CICOPAL GO` e a base gravava `010101_CICOPAL_GO`; `getLocationsWithStats`
+  fazia `equals([tenant, '010101 CICOPAL GO'])` e devolvia lista vazia, mesmo com
+  os ativos e endereços presentes. Agora há um caminho tolerante — mesma chave
+  canónica da lista do inventário (caixa, acentos, espaços, `_`/`-`) — restrito ao
+  MESMO contrato: rápido pelo índice exato; se ele vier vazio, varre o contrato e
+  compara por `normalizeUnitMatchKey`.
+- *Testes:* `addressSearch` — `normalizeUnitMatchKey` (espaço/`_`/`-`/caixa/acentos)
+  e `getCurrentTenantid` (perfil vence; sem perfil cai na sessão; sentinelas não
+  são contrato).
+- *Verificado no preview:* filial `010101_CICOPAL_GO` na base, cartão
+  `010101 CICOPAL GO` → `ENDEREÇO FÍSICO` lista as localidades com contagem
+  (antes: «Nenhum Endereço Cadastrado»).
+
+### Corrigido — biometria deixa de ser exigida no web/desktop
+
+- **O cadastro biométrico obrigatório abria no navegador:** `resolveBiometricStep`
+  tratava «autenticador de plataforma disponível» (`Touch ID`, `Windows Hello`)
+  como aparelho de campo e exigia o cadastro a quem entrava pelo desktop/web —
+  sem credencial, a tela «SEGURANÇA BIOMÉTRICA · CADASTRO OBRIGATÓRIO» travava o
+  acesso. A biometria passa a ser **etapa exclusiva do aplicativo móvel** (casco
+  nativo): no navegador/desktop o passo não existe — nem cadastro, nem tela de
+  dispensa — e o motivo fica registado como `web-session`.
+- **O botão «Entrar com Biometria» também é do app:** `Login` só consulta suporte
+  e credencial no casco nativo, então no web o formulário fica exatamente
+  utilizador + senha.
+- **O app não muda:** no casco nativo continua obrigatório onde há biometria e
+  com dispensa explícita onde o hardware não verifica (Fase 2/2b).
+- *Testes:* `biometricPolicy` — web com e sem autenticador segue direto
+  (`web-session`), cadastro obrigatório só com `isNativeApp + nativeBiometry:
+  'available'`.
+
+### Corrigido — contrato sem filiais no seletor
+
+- **O seletor mostrava o contrato sem nenhuma filial:** o catálogo de contratos
+  (`listContracts`, `src/utils/tenantCatalog.ts`) montava as filiais apenas a
+  partir das tabelas de **ativos**, dos perfis e das licenças. Num aparelho onde
+  a base de ativos daquele contrato ainda não tinha sido baixada — mas com
+  **âncora GPS e campanha gravadas** nas filiais — o contrato aparecia como
+  «SEM FILIAL NA BASE» (ou «Nenhuma filial na base deste contrato») e não havia
+  como escolher a unidade nem conferir a liberação.
+- **A configuração operacional passou a ser fonte do catálogo:** `unit_configs`
+  (âncora GPS) e `campaigns` (campanha) entram na lista, por contrato, com
+  dedupe tolerante entre as grafias da unidade (`010101_CICOPAL_GO` e
+  `010101 CICOPAL GO` são a mesma filial).
+- **A lista de unidades do contrato também as inclui:** `fullCompaniesWithStatus`
+  passa a somar as filiais da configuração operacional e as âncoras persistidas
+  no aparelho à lista base (o escopo do auditor continua a filtrar), e o
+  contrato resolvido (`currentTenantid`) é usado na chave da unidade.
+- **Verificado no preview:** depois do login do admin global, o contrato CICOPAL
+  passou a listar as filiais — `010101 CICOPAL GO` como **LIBERADA PARA
+  INVENTÁRIO** (âncora + campanha ativa) e `010201 SNACKS PA` como «aguardando
+  liberação · falta campanha» (só âncora).
+- *Testes:* `tenantCatalog` (filiais de âncoras/campanhas sem ativos, fontes
+  antigas e sentinelas) e `unitRelease`/`collectConfiguredUnitNames` (três
+  grafias, dedupe, contrato alheio não vaza, sentinelas).
+
+### Corrigido — «SESSÃO EXPIRADA» em autosave sem contrato
+
+- **Um save em segundo plano deixava de encerrar a sessão:** `syncConfigToCloud`
+  desistia da gravação quando não tinha `tenantid` e disparava
+  `gbr_session_expired` — o App respondia com o modal «SESSÃO EXPIRADA · o envio
+  das configurações foi bloqueado», derrubava a sessão e voltava ao login. Isso
+  acontecia em navegação normal: logout, dono global antes de escolher o
+  contrato, base ainda sem unidades. Agora o envio é ignorado com aviso no log e
+  a sessão fica intacta; a expiração real continua a ser tratada pelo listener
+  de auth do Supabase.
+- **O autosave passa a levar o contrato da sessão:**
+  `persistenceService.saveInventory` resolve `readSessionTenantId()` /
+  `readLocalTenantId()` e envia a configuração para `config_<TENANT>` em vez de
+  depender de um `tenantid` que o chamador não passava.
+
 ### Adicionado — desbloqueio biométrico como primeira etapa no mobile
 
 - **A biometria passou a ser o primeiro passo, não o segundo:** no casco nativo
