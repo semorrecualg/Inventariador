@@ -22,10 +22,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existe só na nuvem nunca libertava o cartão. Agora lê o local **sem filtro**
   (registros antigos sem contrato continuam a valer) e acrescenta
   `fetchCampaigns(contrato)` — local do contrato + nuvem, sem filtro de unidade.
+- **A reunião das fontes saiu do App para `utils/campaignRelease`:**
+  `loadCampaignUnitsForRelease` lê o local sem filtro e acrescenta o contrato
+  (local + nuvem); devolve as unidades `ACTIVE`/gravadas. É a peça que o App
+  usa e que os testes exercitam — o caso real deixa de ser simulado à parte.
+- **Modo INTERNAL continua sem nuvem:** por soberania, `fetchCampaigns` devolve
+  só o local quando o modo é INTERNAL. Uma campanha que exista **apenas** na
+  nuvem NÃO liberta a unidade nesse aparelho — tem de ser criada/ativada
+  localmente. Este limite está fixado em teste, não é suposição.
 - *Testes:* `campaignUnitFilter` (novo, 5) — campanha da nuvem gravada com
   `_` encontrada para o cartão com espaços, filial alheia não vaza, contrato
   inteiro sem unidade pedida, campanhas `GLOBAL` mantidas e falha de nuvem sem
   exceção; e a consulta deixa de usar `.or` com o rótulo literal.
+- *Testes:* `cloudCampaignRelease` (novo, 4) — caso real ponta a ponta com
+  campanha **só na nuvem** (`010101_CICOPAL_GO`): a cadeia
+  `fetchCampaigns → loadCampaignUnitsForRelease → buildUnitReleaseMap`
+  devolve `released: true`, o cartão `010101 CICOPAL GO` mostra **LIBERADA PARA
+  INVENTÁRIO** e o ACESSAR liberta; campanha de outra filial não liberta; e, em
+  modo INTERNAL, o cartão continua em «FALTA CAMPANHA» (limite do produto).
 
 ### Corrigido — «Nenhuma filial na base» com a filial configurada
 

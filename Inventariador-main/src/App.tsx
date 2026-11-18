@@ -64,7 +64,8 @@ import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturn
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
-import { buildUnitReleaseMap, campaignUnitKeys, collectActiveCampaignUnits, collectConfiguredUnitNames, collectRecordedCampaignUnits, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
+import { buildUnitReleaseMap, campaignUnitKeys, collectConfiguredUnitNames, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
+import { loadCampaignUnitsForRelease } from './utils/campaignRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
 import {
   readCheckpointForDelta,
@@ -2297,23 +2298,20 @@ useEffect(() => {
    */
   const loadActiveCampaignUnits = useCallback(async () => {
     try {
-      // Local-first + nuvem do CONTRATO resolvido (`fetchCampaigns` sem filtro
-      // de unidade). Ler só o banco local escondia a campanha que existe apenas
-      // na nuvem: o cartão da unidade ficava vermelho («falta campanha») com a
-      // campanha já ativa. A leitura local continua SEM filtro (registros
-      // antigos sem contrato seguem valendo) e a nuvem só acrescenta.
-      const localRows = await sqliteService.getCampaigns();
+      // Local SEM filtro (registros antigos sem contrato seguem valendo) + as
+      // campanhas do CONTRATO (local + nuvem, sem filtro de unidade). Ler só o
+      // banco local escondia a campanha que existe apenas na nuvem: o cartão da
+      // unidade ficava vermelho («falta campanha») com a campanha já ativa.
+      // Em modo INTERNAL a segunda fonte devolve só o local (soberania): a
+      // campanha que só exista na nuvem não liberta a unidade nesse aparelho.
       const scope = String(currentTenantid || user?.tenantid || '').trim();
-      let rows = localRows;
-      if (scope) {
-        const scopedRows = await fetchCampaigns(scope, null);
-        const byId = new Map<string, Record<string, unknown>>();
-        for (const row of localRows) byId.set(String(row.id || ''), row);
-        for (const row of scopedRows) byId.set(String(row.id || ''), row as unknown as Record<string, unknown>);
-        rows = Array.from(byId.values());
-      }
-      setActiveCampaignUnits(collectActiveCampaignUnits(rows));
-      setRecordedCampaignUnits(collectRecordedCampaignUnits(rows));
+      const units = await loadCampaignUnitsForRelease({
+        scope,
+        readLocal: () => sqliteService.getCampaigns(),
+        fetchScoped: tenant => fetchCampaigns(tenant, null)
+      });
+      setActiveCampaignUnits(units.active);
+      setRecordedCampaignUnits(units.recorded);
     } catch (err) {
       logger.warn('>>> [Governance] Falha ao ler campanhas persistidas para a liberação:', err);
     }
