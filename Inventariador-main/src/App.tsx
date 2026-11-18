@@ -64,7 +64,7 @@ import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturn
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
-import { buildUnitReleaseMap, campaignUnitKeys, collectActiveCampaignUnits, collectRecordedCampaignUnits, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
+import { buildUnitReleaseMap, campaignUnitKeys, collectActiveCampaignUnits, collectConfiguredUnitNames, collectRecordedCampaignUnits, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
 import {
   readCheckpointForDelta,
@@ -6509,7 +6509,9 @@ useEffect(() => {
       return [];
     }
 
-    const userTenant = user?.tenantid || '';
+    // Contrato resolvido (perfil → sessão → base): o dono global não declara
+    // tenantid no perfil e a lista precisa da mesma chave usada na liberação.
+    const userTenant = (user?.tenantid || currentTenantid || '').trim().toUpperCase();
     const userUnits = user?.units || (userTenant ? [userTenant] : []);
     const isAuditor = isFieldAuditorRole(user?.role);
     const assets = inventory.assets;
@@ -6641,6 +6643,21 @@ useEffect(() => {
           baseCompaniesSet.add(cleanU);
         }
       }
+    }
+
+    // Unidades que existem na CONFIGURAÇÃO OPERACIONAL (âncora GPS e campanha)
+    // entram na lista mesmo quando a tabela de ativos do contrato ainda não foi
+    // carregada — são filiais reais, com cartão para conferir/liberar. Sem isto
+    // o seletor dizia «Nenhuma filial na base deste contrato» num contrato com
+    // âncoras e campanhas gravadas. O escopo do auditor é aplicado no 4b.
+    collectConfiguredUnitNames([unitConfigs, campaigns], userTenant).forEach(name => {
+      baseCompaniesSet.add(name);
+    });
+    // Âncoras persistidas no aparelho (leitura durável, independente do estado
+    // React) também provam a existência da filial. Só entram para ADMIN/MASTER:
+    // o auditor continua limitado às unidades do perfil (filtro do 4b).
+    if (isAdmin) {
+      unitsWithGps.forEach(norm => baseCompaniesSet.add(norm));
     }
     
     const baseCompanies = Array.from(baseCompaniesSet);
@@ -6835,7 +6852,7 @@ useEffect(() => {
 
     logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, recordedCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, currentTenantid, campaigns, activeCampaignUnits, recordedCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref

@@ -135,6 +135,47 @@ export const readUnitRelease = (
 };
 
 /**
+ * Unidades que existem na CONFIGURAÇÃO OPERACIONAL do contrato — âncora GPS
+ * (`unit_configs`) e campanha (`campaigns`).
+ *
+ * A lista de filiais do cartão saía apenas dos ativos carregados: um contrato
+ * cuja base de ativos ainda não foi baixada aparecia como «Nenhuma filial na
+ * base deste contrato», mesmo com âncoras e campanhas gravadas nas filiais.
+ * Estes registros são prova de que a filial existe e entra na lista.
+ *
+ * Regras: só o contrato resolvido (registro de outro contrato não vaza);
+ * aceita as três grafias da unidade; devolve nomes legíveis (maiúsculas, sem
+ * `_`), únicos e ordenados — a mesma normalização dos ativos.
+ */
+export const collectConfiguredUnitNames = (
+  sources: ReadonlyArray<
+    ReadonlyArray<{ tenantid?: unknown; filial?: unknown; unit_id?: unknown; _unitid?: unknown }> | null | undefined
+  >,
+  tenantid?: string | null
+): string[] => {
+  const tenant = String(tenantid || '').trim().toUpperCase();
+  const names = new Set<string>();
+  const sentinels = new Set(['', 'TODAS', 'NULL', 'UNDEFINED', 'DEFAULT', '0', 'SEM FILIAL']);
+
+  for (const list of sources) {
+    for (const row of list || []) {
+      const rowTenant = String(row?.tenantid || '').trim().toUpperCase();
+      // Muro multi-tenant: o registro de outro contrato não entra na lista.
+      if (tenant && rowTenant && rowTenant !== tenant) continue;
+      const name = String(row?.filial || row?.unit_id || row?._unitid || '')
+        .replace(/_/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toUpperCase();
+      if (!name || sentinels.has(name)) continue;
+      names.add(name);
+    }
+  }
+
+  return Array.from(names).sort((a, b) => a.localeCompare(b));
+};
+
+/**
  * CAMPANHA: leitura única (GBR KARDEK)
  *
  * A campanha é uma propriedade da UNIDADE, não do ecrã que a mostrou. Antes o

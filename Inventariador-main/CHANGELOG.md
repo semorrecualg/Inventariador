@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — contrato sem filiais no seletor
+
+- **O seletor mostrava o contrato sem nenhuma filial:** o catálogo de contratos
+  (`listContracts`, `src/utils/tenantCatalog.ts`) montava as filiais apenas a
+  partir das tabelas de **ativos**, dos perfis e das licenças. Num aparelho onde
+  a base de ativos daquele contrato ainda não tinha sido baixada — mas com
+  **âncora GPS e campanha gravadas** nas filiais — o contrato aparecia como
+  «SEM FILIAL NA BASE» (ou «Nenhuma filial na base deste contrato») e não havia
+  como escolher a unidade nem conferir a liberação.
+- **A configuração operacional passou a ser fonte do catálogo:** `unit_configs`
+  (âncora GPS) e `campaigns` (campanha) entram na lista, por contrato, com
+  dedupe tolerante entre as grafias da unidade (`010101_CICOPAL_GO` e
+  `010101 CICOPAL GO` são a mesma filial).
+- **A lista de unidades do contrato também as inclui:** `fullCompaniesWithStatus`
+  passa a somar as filiais da configuração operacional e as âncoras persistidas
+  no aparelho à lista base (o escopo do auditor continua a filtrar), e o
+  contrato resolvido (`currentTenantid`) é usado na chave da unidade.
+- **Verificado no preview:** depois do login do admin global, o contrato CICOPAL
+  passou a listar as filiais — `010101 CICOPAL GO` como **LIBERADA PARA
+  INVENTÁRIO** (âncora + campanha ativa) e `010201 SNACKS PA` como «aguardando
+  liberação · falta campanha» (só âncora).
+- *Testes:* `tenantCatalog` (filiais de âncoras/campanhas sem ativos, fontes
+  antigas e sentinelas) e `unitRelease`/`collectConfiguredUnitNames` (três
+  grafias, dedupe, contrato alheio não vaza, sentinelas).
+
 ### Corrigido — «SESSÃO EXPIRADA» em autosave sem contrato
 
 - **Um save em segundo plano deixava de encerrar a sessão:** `syncConfigToCloud`

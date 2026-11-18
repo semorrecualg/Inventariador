@@ -10,6 +10,7 @@ import {
   campaignUnitKeys,
   campaignUnitOf,
   collectActiveCampaignUnits,
+  collectConfiguredUnitNames,
   collectRecordedCampaignUnits,
   describeUnitReleaseMissing,
   isActiveCampaign,
@@ -94,6 +95,35 @@ describe('unitRelease · mapa por contrato + filial', () => {
     expect(describeUnitReleaseMissing(resolveUnitReleaseStatus({}))).toBe('âncora GPS e campanha');
     expect(describeUnitReleaseMissing(resolveUnitReleaseStatus({ hasAnchor: true }))).toBe('campanha');
     expect(describeUnitReleaseMissing(resolveUnitReleaseStatus({ hasAnchor: true, hasCampaign: true }))).toBe('');
+  });
+
+  it('filiais com âncora/campanha entram na lista mesmo sem ativos carregados', () => {
+    // Regressão: o seletor dizia «Nenhuma filial na base deste contrato» num
+    // contrato cuja tabela de ativos ainda não tinha sido baixada, apesar de
+    // âncoras GPS e campanhas gravadas nas filiais.
+    const configs = [
+      { tenantid: 'CICOPAL', filial: '010101_CICOPAL_GO', lat: -16, lng: -49 },
+      { tenantid: 'CICOPAL', unit_id: '010201 SNACKS PA' }
+    ];
+    const campaigns = [
+      { tenantid: 'CICOPAL', _unitid: '010401 CARPER BA', status: 'ACTIVE' },
+      // Mesma filial, outra grafia: não duplica o cartão.
+      { filial: '010101 CICOPAL GO', status: 'ACTIVE' },
+      // Outro contrato não vaza para este.
+      { tenantid: 'OUTRO', filial: '020101 OUTRA CONTRATO' },
+      // Sentinelas nunca são filiais.
+      { tenantid: 'CICOPAL', filial: 'TODAS' },
+      { tenantid: 'CICOPAL', filial: '' }
+    ];
+
+    const nomes = collectConfiguredUnitNames([configs, campaigns], 'CICOPAL');
+
+    expect(nomes).toEqual(['010101 CICOPAL GO', '010201 SNACKS PA', '010401 CARPER BA']);
+  });
+
+  it('sem contrato resolvido aceita os registros que não declaram tenantid', () => {
+    const nomes = collectConfiguredUnitNames([[{ filial: '010101_CICOPAL_GO' }]], '');
+    expect(nomes).toEqual(['010101 CICOPAL GO']);
   });
 
   it('campanha criada troca "falta campanha" por "falta ativar a campanha"', () => {
