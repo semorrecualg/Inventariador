@@ -11,6 +11,7 @@ import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { isRevokedAnchor } from '../utils/revokedAnchors';
+import { isConferido } from '../utils/conferencia';
 import { resolveCanonicalUnitAnchor } from '../utils/unitAnchorPriority';
 import { buildUnitConfigRowPayload } from '../utils/unitConfigPayload';
 import { buildUnitFlags, mergeUnitFlags } from '../utils/unitConfigFlags';
@@ -2147,7 +2148,7 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
           logger.error('Erro ao buscar ativo por etiqueta (retry):', retryError);
           return null;
         }
-        return retryData as Asset;
+        return retryData ? mapCloudAssetRow(retryData as Record<string, unknown>) : null;
       }
 
       if (error.code !== 'PGRST116') {
@@ -2156,7 +2157,10 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
       return null;
     }
 
-    return data as Asset;
+    // A linha do Postgres chega com `conferido`/`auditor`/`data_leitura`, nomes
+    // que o app não lê: sem a conversão, um ativo conferido na nuvem abria por
+    // QR Code como «pendente» e sem autor/data.
+    return mapCloudAssetRow(data as Record<string, unknown>);
   } catch (err) {
     logger.error('Erro inesperado ao buscar ativo:', err);
     return null;
@@ -2253,6 +2257,55 @@ export const fetchFullInventory = async (
  * fetchFullInventory (que resolve o tenantid e deduplica requisições).
  */
 /**
+ * A conferência de UMA linha da nuvem, numa só regra.
+ *
+ * A coluna `conferido` (scripts/assets-conferencia.sql) manda; `status` com
+ * CONFERIDO é o marcador legado e continua a valer quando o script ainda não
+ * correu. Nenhuma leitura da nuvem repete esta derivação.
+ */
+const conferidoDaNuvem = (row: Record<string, unknown>): boolean => {
+  const rawConferido = row.conferido;
+  return (
+    rawConferido === true ||
+    String(rawConferido).toLowerCase() === 'true' ||
+    String(row.status || '').toUpperCase().includes('CONFERIDO') ||
+    String(row.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM'
+  );
+};
+
+/**
+ * Os campos de conferência de uma linha da nuvem, no vocabulário do app.
+ *
+ * É o único sítio que traduz `conferido`/`auditor`/`data_leitura` para
+ * `_conferido`/`_auditor`/`_dataLeitura` — tanto o runtime (`mapCloudAssetRow`)
+ * como o laudo da campanha (`comConferenciaLocal`) passam por aqui.
+ */
+const camposDeConferencia = (row: Record<string, unknown>): Record<string, unknown> => {
+  const auditor = row.auditor !== undefined && row.auditor !== null ? String(row.auditor).trim() : '';
+  const dataLeitura = row.data_leitura !== undefined && row.data_leitura !== null ? String(row.data_leitura) : '';
+
+  return {
+    _conferido: conferidoDaNuvem(row),
+    ...(auditor ? { _auditor: auditor } : {}),
+    ...(dataLeitura ? { _dataLeitura: dataLeitura } : {}),
+  };
+};
+
+/**
+ * Acrescenta à linha CRUA a conferência no vocabulário do app, sem mexer em
+ * mais nada.
+ *
+ * É o que o laudo da campanha arquiva e conta. Ali a linha é artefacto fiscal:
+ * `tenantid`/`filial` ficam exatamente como estavam no Postgres e não entra o
+ * `unitid` legado — por isso NÃO se usa `mapCloudAssetRow`, que normaliza a
+ * identidade para o runtime.
+ */
+export const comConferenciaLocal = (row: Record<string, unknown>): Record<string, unknown> => ({
+  ...row,
+  ...camposDeConferencia(row),
+});
+
+/**
  * Converte uma linha do Postgres em `Asset`, preservando a CONFERÊNCIA.
  *
  * O upsert só envia colunas do schema remoto, e a conferência (quem conferiu e
@@ -2266,26 +2319,13 @@ export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
   const tId = String(row.tenantid || '').trim().toUpperCase();
   const uId = String(row.filial || row.unit_id || row.unitid || '').trim().toUpperCase();
 
-  const rawConferido = row.conferido;
-  const statusUpper = String(row.status || '').toUpperCase();
-  const conferido =
-    rawConferido === true ||
-    String(rawConferido).toLowerCase() === 'true' ||
-    statusUpper.includes('CONFERIDO') ||
-    String(row.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-
-  const auditor = row.auditor !== undefined && row.auditor !== null ? String(row.auditor).trim() : '';
-  const dataLeitura = row.data_leitura !== undefined && row.data_leitura !== null ? String(row.data_leitura) : '';
-
   return {
     ...(row as unknown as Asset),
     id: row.id as string | number,
     tenantid: tId,
     filial: uId,
     unitid: uId, // Legado
-    _conferido: conferido,
-    ...(auditor ? { _auditor: auditor } : {}),
-    ...(dataLeitura ? { _dataLeitura: dataLeitura } : {}),
+    ...camposDeConferencia(row),
   };
 };
 
@@ -3539,10 +3579,12 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
           logger.warn('>>> [SQLite] Nenhum ativo encontrado para o snapshot.');
         }
 
-        // 3. Stats
+        // 3. Stats — a conferência pela coluna da base (`AUDITOR_STATUS_CONFERENCIA
+        // = 'SIM'`) não deixa `_conferido` local; a contagem tem de usar a regra
+        // única, senão o laudo subconta o que a planilha já conferiu.
         const stats = {
           total: assets.length,
-          inventoried: assets.filter(a => a._conferido || a.status === 'CONFERIDO').length,
+          inventoried: assets.filter(a => isConferido(a as unknown as Asset)).length,
           divergences: assets.filter(a => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
           generated_at: new Date().toISOString(),
           cpc_compliance: 'CPC 27 / NBC TG 27 (MODO LOCAL)'
@@ -3597,10 +3639,24 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             return false;
         }
 
-        // 3. Calcula metadados/stats para o laudo consolidado
+        // 3. Calcula metadados/stats para o laudo consolidado.
+        // A linha do Postgres chama à conferência `conferido`; o app chama
+        // `_conferido`. Contar `a._conferido` na linha crua dava SEMPRE 0 — o
+        // laudo dizia que nada foi inventariado e o snapshot arquivado não
+        // guardava quem conferiu nem quando.
+        //
+        // O que se grava: a linha ORIGINAL do Postgres, acrescentada só da
+        // conferência no vocabulário do app (`comConferenciaLocal`). Não é
+        // `mapCloudAssetRow` de propósito: dentro de um laudo fechado a
+        // identidade tem de ficar como estava (sem `tenantid`/`filial`
+        // normalizados, sem `unitid` legado) — o artefacto fiscal não se reescreve.
+        const ativosDoLaudo = (assets as Record<string, unknown>[]).map(comConferenciaLocal);
         const stats = {
-            total: assets.length,
-            inventoried: assets.filter((a: Record<string, unknown>) => a._conferido).length,
+            total: ativosDoLaudo.length,
+            inventoried: ativosDoLaudo.filter((a) => isConferido(a)).length,
+            // TAG_INVENTARIO é runtime local (não existe no public); a
+            // divergência canónica deriva-se de status/databaixa — fica para
+            // tarefa própria, porque muda números já publicados.
             divergences: assets.filter((a: Record<string, unknown>) => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
             generated_at: new Date().toISOString(),
             cpc_compliance: 'CPC 27 / NBC TG 27'
@@ -3612,7 +3668,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             await persistSnapshotLocally({
                 id: `snap_${campaignId}_${Date.now()}`,
                 campaign_id: campaignId,
-                assets_data: assets as unknown as Asset[],
+                assets_data: ativosDoLaudo as unknown as Asset[],
                 metadata: stats,
                 snapshot_date: new Date().toISOString(),
                 closed_by: closedBy,
@@ -3629,7 +3685,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             .from('campaign_snapshots')
             .insert([{
                 campaign_id: campaignId,
-                assets_data: assets as Asset[],
+                assets_data: ativosDoLaudo as unknown as Asset[],
                 metadata: stats as Record<string, unknown>,
                 closed_at: new Date().toISOString(),
                 closed_by: closedBy,
@@ -3713,15 +3769,30 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
       .select('*', { count: 'exact', head: true })
       .eq('tenantid', tenantid);
       
-    // Ativos inventariados — contrato public.assets: `currentCampaignId` é
-    // runtime LOCAL (coluna inexistente no public → PGRST204; não sincronizada).
-    // O marcador sincronizado de conferência é `status = 'CONFERIDO'` (espelha o
-    // snapshot local: a._conferido || a.status === 'CONFERIDO').
-    const { count: inventoriedCount } = await supabase
+    // Ativos inventariados — a conferência canónica na nuvem é a coluna
+    // `conferido` (scripts/assets-conferencia.sql). Contar por `status`
+    // subconta tudo o que foi conferido no aparelho depois da coluna existir,
+    // porque conferir não mexe no `status`. Se a coluna ainda não existir
+    // (script pendente, 42703) a consulta falha e o contador cai no `status`
+    // legado, em vez de devolver zero.
+    let inventoriedCount = 0;
+    const { count: byConferido, error: byConferidoError } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
       .eq('tenantid', tenantid)
-      .eq('status', 'CONFERIDO');
+      .eq('conferido', true);
+
+    if (!byConferidoError) {
+      inventoriedCount = byConferido || 0;
+    } else {
+      logger.warn('>>> [Stats] Contagem por `conferido` indisponível — a usar `status` (script pendente).', byConferidoError);
+      const { count: byStatus } = await supabase
+        .from('assets')
+        .select('*', { count: 'exact', head: true })
+        .eq('tenantid', tenantid)
+        .eq('status', 'CONFERIDO');
+      inventoriedCount = byStatus || 0;
+    }
 
     // Divergências — contrato public.assets: `TAG_INVENTARIO` é runtime LOCAL
     // (coluna inexistente no public → PGRST204; não sincronizada). A divergência

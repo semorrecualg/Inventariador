@@ -136,6 +136,26 @@ describe('snapshots e fila de fotos — modo resolvido por getDatabaseMode()', (
     expect(cloud.insertSnapshot).not.toHaveBeenCalled();
   });
 
+  // A conferência pela coluna da base (planilha SIM) não deixa `_conferido`
+  // local. Contar só `_conferido || status === 'CONFERIDO'` subcontava o laudo.
+  it('o laudo local conta o ativo conferido apenas pela coluna da base', async () => {
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    localStorage.setItem('app_last_tenant', 'CICOPAL');
+    stubCloud();
+    getCampaignsMock.mockResolvedValue([{ id: 'camp-a', filial: '010101 CICOPAL GO' }]);
+    getAllAssetsMock.mockResolvedValue([
+      { id: 'a1', filial: '010101 CICOPAL GO', _conferido: 0, AUDITOR_STATUS_CONFERENCIA: 'SIM' },
+      { id: 'a2', filial: '010101 CICOPAL GO', _conferido: 1, status: 'PENDENTE' },
+      { id: 'a3', filial: '010101 CICOPAL GO', _conferido: 0, AUDITOR_STATUS_CONFERENCIA: 'NAO' },
+      { id: 'a4', filial: '010105 CICOPAL PA', _conferido: 1 }
+    ]);
+
+    await supabaseModule.createCampaignSnapshot('camp-a', 'ana@gbr.com');
+
+    const row = snapshotPutMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(JSON.parse(String(row.metadata))).toMatchObject({ total: 3, inventoried: 2 });
+  });
+
   it('getCampaignSnapshot lê o laudo na nuvem quando o modo não está gravado', async () => {
     localStorage.removeItem('app_database_mode');
     const cloud = stubCloud();
