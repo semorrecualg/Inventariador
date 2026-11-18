@@ -2297,13 +2297,27 @@ useEffect(() => {
    */
   const loadActiveCampaignUnits = useCallback(async () => {
     try {
-      const rows = await sqliteService.getCampaigns();
+      // Local-first + nuvem do CONTRATO resolvido (`fetchCampaigns` sem filtro
+      // de unidade). Ler só o banco local escondia a campanha que existe apenas
+      // na nuvem: o cartão da unidade ficava vermelho («falta campanha») com a
+      // campanha já ativa. A leitura local continua SEM filtro (registros
+      // antigos sem contrato seguem valendo) e a nuvem só acrescenta.
+      const localRows = await sqliteService.getCampaigns();
+      const scope = String(currentTenantid || user?.tenantid || '').trim();
+      let rows = localRows;
+      if (scope) {
+        const scopedRows = await fetchCampaigns(scope, null);
+        const byId = new Map<string, Record<string, unknown>>();
+        for (const row of localRows) byId.set(String(row.id || ''), row);
+        for (const row of scopedRows) byId.set(String(row.id || ''), row as unknown as Record<string, unknown>);
+        rows = Array.from(byId.values());
+      }
       setActiveCampaignUnits(collectActiveCampaignUnits(rows));
       setRecordedCampaignUnits(collectRecordedCampaignUnits(rows));
     } catch (err) {
       logger.warn('>>> [Governance] Falha ao ler campanhas persistidas para a liberação:', err);
     }
-  }, []);
+  }, [currentTenantid, user?.tenantid]);
 
   useEffect(() => {
     if (!dbInitialized) return;

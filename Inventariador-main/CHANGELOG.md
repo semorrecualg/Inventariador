@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — campanha ativa aparecia como «falta campanha»
+
+- **O filtro de unidade ia literal para o PostgREST:** `fetchCampaigns` pedia à
+  nuvem `.or('filial.eq.010101 CICOPAL GO,filial.is.null')`. A coluna grava
+  `010101_CICOPAL_GO` e um valor com espaços nem é sintaxe válida no PostgREST —
+  o erro devolvia **zero campanhas**. O contrato CICOPAL listava as filiais com
+  âncora verde e, ao mesmo tempo, «AGUARDANDO LIBERAÇÃO · FALTA CAMPANHA» com o
+  botão da campanha vermelho, e o ACESSAR ficava travado. A unidade passa a ser
+  filtrada **depois do merge**, com a mesma chave tolerante do caminho local
+  (`matchUnitKeys`), que aceita `_`/espaços/caixa.
+- **O mapa de liberação passou a incluir a campanha da nuvem:**
+  `loadActiveCampaignUnits` lia apenas o `campaigns` local e a campanha que
+  existe só na nuvem nunca libertava o cartão. Agora lê o local **sem filtro**
+  (registros antigos sem contrato continuam a valer) e acrescenta
+  `fetchCampaigns(contrato)` — local do contrato + nuvem, sem filtro de unidade.
+- *Testes:* `campaignUnitFilter` (novo, 5) — campanha da nuvem gravada com
+  `_` encontrada para o cartão com espaços, filial alheia não vaza, contrato
+  inteiro sem unidade pedida, campanhas `GLOBAL` mantidas e falha de nuvem sem
+  exceção; e a consulta deixa de usar `.or` com o rótulo literal.
+
 ### Corrigido — «Nenhuma filial na base» com a filial configurada
 
 - **A lista de filiais e o estado de liberação vinham de fontes diferentes:** o
