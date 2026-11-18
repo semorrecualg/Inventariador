@@ -29,8 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   que não existe na API do html5-qrcode; a excepção era engolida e o track
   nunca era guardado. O track passa a vir do `srcObject` do `<video>`, a
   lanterna reaplica-se após cada reinício/troca de câmara e o zoom usa o
-  intervalo real do sensor (min/max/step), mostrando o factor relativo. Sem
-  suporte de hardware o controlo fica desactivado em vez de parecer avariado.
+  intervalo real do sensor (min/max/step), mostrando o factor relativo.
+- **Zoom morto no telemóvel:** a WebView do Android (Capacitor) não expõe
+  `zoom` no `MediaStreamTrack.getCapabilities()` nem aceita a constraint — o
+  botão aparecia desactivado a 40% de opacidade e o toque não fazia nada. Sem
+  zoom de hardware, o controlo passa a fazer zoom digital de 1x a 3x: o vídeo
+  é ampliado e centrado e a região de leitura acompanha o mesmo factor, de modo
+  que a caixa azul mostra o que é descodificado e as barras deixam de chegar ao
+  leitor reduzidas à largura do ecrã.
 - **Foco contínuo:** aplicado quando a câmara o suporta — a imagem desfocada
   era a causa mais comum de um código visível não ser lido.
 - **Botão do zoom cortado:** a barra de controlos era uma fila única de três
