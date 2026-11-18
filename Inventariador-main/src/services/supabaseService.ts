@@ -2257,16 +2257,6 @@ export const fetchFullInventory = async (
  * fetchFullInventory (que resolve o tenantid e deduplica requisições).
  */
 /**
- * Converte uma linha do Postgres em `Asset`, preservando a CONFERÊNCIA.
- *
- * O upsert só envia colunas do schema remoto, e a conferência (quem conferiu e
- * quando) não tinha coluna: reinstalar o app devolvia a base sem autor nem data.
- * Com `scripts/assets-conferencia.sql` aplicado, as colunas `conferido`,
- * `auditor` e `data_leitura` vêm na linha. Sem elas, `status = 'CONFERIDO'`
- * continua a bastar para o item voltar marcado como conferido (só perde
- * autor/data, que a nuvem nunca guardou).
- */
-/**
  * A conferência de UMA linha da nuvem, numa só regra.
  *
  * A coluna `conferido` (scripts/assets-conferencia.sql) manda; `status` com
@@ -2284,34 +2274,50 @@ const conferidoDaNuvem = (row: Record<string, unknown>): boolean => {
 };
 
 /**
- * Acrescenta à linha CRUA a conferência no vocabulário do app (`_conferido`,
- * `_auditor`, `_dataLeitura`), sem mexer em mais nada.
+ * Os campos de conferência de uma linha da nuvem, no vocabulário do app.
  *
- * É o que o laudo da campanha arquiva e conta. Ali a linha é artefacto fiscal:
- * `tenantid`/`filial` ficam exatamente como estavam no Postgres e não entra o
- * `unitid` legado — por isso NÃO se usa `mapCloudAssetRow`, que normaliza a
- * identidade para o runtime (`tenantid`/`filial` em maiúsculas, `unitid`).
+ * É o único sítio que traduz `conferido`/`auditor`/`data_leitura` para
+ * `_conferido`/`_auditor`/`_dataLeitura` — tanto o runtime (`mapCloudAssetRow`)
+ * como o laudo da campanha (`comConferenciaLocal`) passam por aqui.
  */
-export const comConferenciaLocal = (row: Record<string, unknown>): Record<string, unknown> => {
+const camposDeConferencia = (row: Record<string, unknown>): Record<string, unknown> => {
   const auditor = row.auditor !== undefined && row.auditor !== null ? String(row.auditor).trim() : '';
   const dataLeitura = row.data_leitura !== undefined && row.data_leitura !== null ? String(row.data_leitura) : '';
 
   return {
-    ...row,
     _conferido: conferidoDaNuvem(row),
     ...(auditor ? { _auditor: auditor } : {}),
     ...(dataLeitura ? { _dataLeitura: dataLeitura } : {}),
   };
 };
 
+/**
+ * Acrescenta à linha CRUA a conferência no vocabulário do app, sem mexer em
+ * mais nada.
+ *
+ * É o que o laudo da campanha arquiva e conta. Ali a linha é artefacto fiscal:
+ * `tenantid`/`filial` ficam exatamente como estavam no Postgres e não entra o
+ * `unitid` legado — por isso NÃO se usa `mapCloudAssetRow`, que normaliza a
+ * identidade para o runtime.
+ */
+export const comConferenciaLocal = (row: Record<string, unknown>): Record<string, unknown> => ({
+  ...row,
+  ...camposDeConferencia(row),
+});
+
+/**
+ * Converte uma linha do Postgres em `Asset`, preservando a CONFERÊNCIA.
+ *
+ * O upsert só envia colunas do schema remoto, e a conferência (quem conferiu e
+ * quando) não tinha coluna: reinstalar o app devolvia a base sem autor nem data.
+ * Com `scripts/assets-conferencia.sql` aplicado, as colunas `conferido`,
+ * `auditor` e `data_leitura` vêm na linha. Sem elas, `status = 'CONFERIDO'`
+ * continua a bastar para o item voltar marcado como conferido (só perde
+ * autor/data, que a nuvem nunca guardou).
+ */
 export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
   const tId = String(row.tenantid || '').trim().toUpperCase();
   const uId = String(row.filial || row.unit_id || row.unitid || '').trim().toUpperCase();
-
-  const conferido = conferidoDaNuvem(row);
-
-  const auditor = row.auditor !== undefined && row.auditor !== null ? String(row.auditor).trim() : '';
-  const dataLeitura = row.data_leitura !== undefined && row.data_leitura !== null ? String(row.data_leitura) : '';
 
   return {
     ...(row as unknown as Asset),
@@ -2319,9 +2325,7 @@ export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
     tenantid: tId,
     filial: uId,
     unitid: uId, // Legado
-    _conferido: conferido,
-    ...(auditor ? { _auditor: auditor } : {}),
-    ...(dataLeitura ? { _dataLeitura: dataLeitura } : {}),
+    ...camposDeConferencia(row),
   };
 };
 
