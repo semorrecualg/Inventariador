@@ -49,7 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contexto novo e nunca o fechava, mantendo o áudio acordado e a acumular
   objectos durante toda a sessão.
 - **Fim do ciclo de câmara por item:** o cooldown de 500 ms pós-leitura pausava
-  o scanner e obrigava a parar/reabrir a câmara a cada código confirmado.
+  o scanner e obrigava a parar/reabrir a câmara a cada código confirmado. Além
+  disso, o arranque do leitor dependia de `onScan`, cuja identidade muda a cada
+  leitura — qualquer mudança de estado do inventário reiniciava a câmara. O
+  callback passa a ser lido de uma ref e a câmara só reinicia quando muda a
+  câmara, o modo ou o perfil de consumo.
 - **Sem desfoque de fundo sobre o vídeo em direto:** os controlos e o indicador
   de estado usavam `backdrop-blur`, recalculado pelo GPU a cada frame. O fundo
   passou a ser opaco e a animação da linha de leitura corre em `transform`

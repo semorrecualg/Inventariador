@@ -73,6 +73,12 @@ const Scanner: React.FC<ScannerProps> = ({
   // A lanterna é uma prop controlada; o valor é lido pelo `startScanner` sem
   // o obrigar a recriar-se (recriar reiniciava a câmara a cada toque).
   const torchRef = useRef<'on' | 'off'>(torch);
+  // O `onScan` do inventário muda de identidade a cada leitura (depende de
+  // `isCoolingDown`/`isPersistingScan`). Se `startScanner` o tivesse nas
+  // dependências, cada leitura recriava o arranque e o efeito de mount parava
+  // e reabria a câmara. A ref mantém a câmara viva: só reinicia quando muda a
+  // câmara, o modo ou o perfil de consumo.
+  const onScanRef = useRef(onScan);
   const isStoppingRef = useRef(false);
   const isStartingRef = useRef(false);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -104,6 +110,7 @@ const Scanner: React.FC<ScannerProps> = ({
     stopScannerRef.current = stopScanner;
     isInactiveRef.current = isInactive;
     torchRef.current = torch;
+    onScanRef.current = onScan;
   });
 
   useEffect(() => {
@@ -367,7 +374,7 @@ const Scanner: React.FC<ScannerProps> = ({
 
         // PESIMISMO SAUDÁVEL: Só apita e brilha se o banco aceitar
         try {
-          await onScan(decodedText);
+          await onScanRef.current(decodedText);
 
           // FEEDBACK CONFIRMADO PELO BANCO
           playBeep();
@@ -487,7 +494,9 @@ const Scanner: React.FC<ScannerProps> = ({
         setIsLoading(false);
       }
     }
-  }, [mode, onScan, batterySaver, currentCameraIndex, availableCameras, playBeep, resetInactivityTimeout, stopScanner, getVideoTrack, initZoom, applyTorch]);
+    // `onScan` de fora: lido por `onScanRef` dentro de `onScanSuccess`, para a
+    // câmara não reiniciar quando o callback do inventário muda de identidade.
+  }, [mode, batterySaver, currentCameraIndex, availableCameras, playBeep, resetInactivityTimeout, stopScanner, getVideoTrack, initZoom, applyTorch]);
 
   useEffect(() => {
     if (!isPaused && !isTabHidden && !isInactive) {
