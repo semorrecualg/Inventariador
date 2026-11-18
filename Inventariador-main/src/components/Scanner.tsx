@@ -6,6 +6,13 @@ import { X, Maximize, Minimize, Camera, RefreshCw, ShieldCheck, Flashlight } fro
 import { ScannerMode, ScanFeedbackMode } from '../types';
 import { logger } from '../utils/logger';
 import { playScanFeedback } from '../utils/scanFeedback';
+import {
+  SOFTWARE_ZOOM_MAX,
+  SOFTWARE_ZOOM_MIN,
+  SOFTWARE_ZOOM_STEP,
+  centerRegionForSoftwareZoom,
+  clampSoftwareZoom
+} from '../utils/cameraZoom';
 
 interface ScannerProps {
   mode: ScannerMode;
@@ -40,9 +47,15 @@ const getTrackCapabilities = (track: MediaStreamTrack): ExtendedCameraCapabiliti
  * 30 imagens por segundo para descodificar 10 deitava fora dois terços do
  * trabalho. A captura passa a acompanhar a cadência de descodificação, com
  * folga de meia imagem para o viewfinder não parecer um slideshow.
+ *
+ * A captura fica em 1280x720. O html5-qrcode desenha a região de leitura num
+ * canvas do tamanho do viewfinder em píxeis CSS (~350 px de largura), por isso
+ * um sensor de 1080p só aumenta a redução (~5x): as barras finas de um Code 128
+ * colapsam em cinzento e o leitor deixa de ler. Em 720p a redução é ~3x — a
+ * configuração que lia — sem custo extra de sensor.
  */
 const SCAN_PROFILES = {
-  performance: { decodeFps: 10, captureFps: 15, width: 1920, height: 1080 },
+  performance: { decodeFps: 10, captureFps: 15, width: 1280, height: 720 },
   saver: { decodeFps: 6, captureFps: 10, width: 1280, height: 720 }
 } as const;
 
@@ -83,7 +96,10 @@ const Scanner: React.FC<ScannerProps> = ({
   const isStartingRef = useRef(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
-  const [zoomSupported, setZoomSupported] = useState<boolean | null>(null);
+  // 'hardware' = zoom do track (Chrome/desktop). A WebView do Android não expõe
+  // `zoom` em `getCapabilities()`, por isso aí o zoom é digital. `null` = ainda
+  // sem câmara pronta.
+  const [zoomMode, setZoomMode] = useState<'hardware' | 'software' | null>(null);
   const [torchSupported, setTorchSupported] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [availableCameras, setAvailableCameras] = useState<{ id: string, label: string }[]>([]);
@@ -190,23 +206,70 @@ const Scanner: React.FC<ScannerProps> = ({
     return track;
   }, []);
 
+  /**
+   * Zoom digital, para quando o track não expõe `zoom` — o que acontece na
+   * WebView do Android (Capacitor): nem `getCapabilities()` nem a constraint
+   * `advanced` o suportam, e o controlo ficava desactivado a 40% de opacidade.
+   * O vídeo é desenhado `factor` vezes maior e centrado e a região de leitura
+   * (que o html5-qrcode recorta no sistema de coordenadas do vídeo) é centrada
+   * no mesmo ponto: a caixa azul mostra o que é descodificado e as barras
+   * chegam ao leitor com mais píxeis, em vez de reduzidas à largura do ecrã.
+   * A largura/altura da região não mudam (o canvas de descodificação é fixo).
+   *
+   * Só é aplicado quando a região existe: ampliar a imagem sem deslocar o
+   * recorte faria o leitor descodificar uma zona diferente da que o utilizador
+   * vê — pior do que não ter zoom. Devolve `false` sem tocar em nada nesse caso.
+   */
+  const applySoftwareZoom = useCallback((factor: number): boolean => {
+    // `qrRegion` é o recorte usado em cada leitura (não é API pública, mas é um
+    // campo estável desta versão) e é o único ponto que alinha a
+    // descodificação com a imagem ampliada.
+    const region = (scannerRef.current as unknown as {
+      qrRegion?: { x: number; y: number; width: number; height: number };
+    } | null)?.qrRegion;
+    const reader = document.getElementById('reader');
+    const viewportWidth = reader?.clientWidth ?? 0;
+    const viewportHeight = reader?.clientHeight ?? 0;
+    if (!reader || !region || !viewportWidth || !viewportHeight) {
+      logger.warn('>>> [Scanner] Zoom digital indisponível: região de leitura ausente ou viewfinder sem tamanho');
+      return false;
+    }
+
+    const zoom = clampSoftwareZoom(factor);
+    const { x, y } = centerRegionForSoftwareZoom({
+      viewportWidth,
+      viewportHeight,
+      regionWidth: region.width,
+      regionHeight: region.height,
+      factor: zoom
+    });
+    reader.style.setProperty('--scanner-zoom', String(zoom));
+    region.x = x;
+    region.y = y;
+    return true;
+  }, []);
+
   // O zoom do hardware é reportado em valores do sensor (por vezes 100–400,
   // não 1–8), com um `step` próprio. Guardar o intervalo real evita pedir
-  // valores que o dispositivo ignora — era por isso que o botão parecia morto.
+  // valores que o dispositivo ignora.
   const initZoom = useCallback((track: MediaStreamTrack, capabilities: ExtendedCameraCapabilities) => {
-    if (!capabilities.zoom || capabilities.zoom.max <= capabilities.zoom.min) {
-      setZoomSupported(false);
+    const caps = capabilities.zoom;
+    if (caps && caps.max > caps.min) {
+      const { min, max } = caps;
+      const step = caps.step && caps.step > 0 ? caps.step : (max - min) / 100;
+      setZoomRange({ min, max, step });
+      const settings = track.getSettings() as MediaTrackSettings & { zoom?: number };
+      setZoomLevel(typeof settings.zoom === 'number' ? settings.zoom : min);
+      setZoomMode('hardware');
       return;
     }
-    const { min, max } = capabilities.zoom;
-    const step = capabilities.zoom.step && capabilities.zoom.step > 0
-      ? capabilities.zoom.step
-      : (max - min) / 100;
-    setZoomRange({ min, max, step });
-    setZoomSupported(true);
-    const settings = track.getSettings() as MediaTrackSettings & { zoom?: number };
-    setZoomLevel(typeof settings.zoom === 'number' ? settings.zoom : min);
-  }, []);
+
+    setZoomRange({ min: SOFTWARE_ZOOM_MIN, max: SOFTWARE_ZOOM_MAX, step: SOFTWARE_ZOOM_STEP });
+    setZoomLevel(SOFTWARE_ZOOM_MIN);
+    // Sem região de leitura não há zoom digital honesto: o controlo fica
+    // desactivado em vez de ampliar a imagem sem ampliar a leitura.
+    setZoomMode(applySoftwareZoom(SOFTWARE_ZOOM_MIN) ? 'software' : null);
+  }, [applySoftwareZoom]);
 
   const applyTorch = useCallback(async (enabled: boolean): Promise<boolean> => {
     const track = getVideoTrack();
@@ -303,28 +366,24 @@ const Scanner: React.FC<ScannerProps> = ({
     const config = {
       // 2 leituras/s (o valor anterior) davam ~2 hipóteses de descodificar por
       // segundo: um Code 128 pequeno só era lido com a mão parada. 10 leituras/s
-      // com o detector nativo é o que torna a leitura utilizável em movimento.
+      // é o que torna a leitura utilizável em movimento.
       fps: profile.decodeFps,
-      // Área de leitura relativa ao viewfinder (era 350x150 fixos): uma faixa
-      // larga e centrada perdoa o alinhamento e mantém a caixa azul coerente em
-      // ecrãs pequenos.
+      // Região fixa (350x150 para barras, 280x280 para QR). Uma função que
+      // calculasse a região a partir do viewfinder deixava o canvas dependente
+      // de uma medição que pode chegar a zero no arranque — e um canvas de 0 px
+      // nunca descodifica nada, sem erro visível. A caixa azul do ecrã continua
+      // a marcar a zona onde o código deve ficar.
       qrbox: isBarcode
-        ? (viewfinderWidth: number, viewfinderHeight: number) => ({
-            width: Math.floor(viewfinderWidth * 0.9),
-            height: Math.min(Math.floor(viewfinderHeight * 0.35), 320)
-          })
-        : (viewfinderWidth: number, viewfinderHeight: number) => {
-            const side = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.8);
-            return { width: side, height: side };
-          },
+        ? { width: 350, height: 150 }
+        : { width: 280, height: 280 },
       aspectRatio: window.innerHeight > window.innerWidth ? 0.5625 : 1.7777778,
       // Não gasta metade dos quadros a testar a imagem espelhada: a câmara é
       // sempre a traseira (facingMode environment).
       disableFlip: true,
       videoConstraints: {
         facingMode: "environment",
-        // 1920x1080 em vez de 1280x720: um código de barras fino precisa de
-        // pixels no eixo horizontal para as barras não colapsarem.
+        // 1280x720: a resolução de captura que lia bem e que não aquece o
+        // sensor como 1080p (ver SCAN_PROFILES).
         width: { ideal: profile.width },
         height: { ideal: profile.height },
         // A cadência da câmara deixa de ser 30 fps: o sensor produz o que a
@@ -347,14 +406,22 @@ const Scanner: React.FC<ScannerProps> = ({
       await new Promise(resolve => setTimeout(resolve, 500));
       if (!isMounted.current) return;
       
-      // `formatsToSupport` e `experimentalFeatures` pertencem ao construtor do
-      // Html5Qrcode: passados ao `start()` eram simplesmente ignorados. Com
-      // `useBarCodeDetectorIfSupported` o Chrome/WebView Android usa o
-      // BarcodeDetector nativo, bem mais preciso em códigos 1D.
+      // Um reinício recria o vídeo e recalcula a região de leitura: o zoom
+      // digital (CSS `--scanner-zoom`) não pode sobreviver ao arranque. O
+      // controlo fica inactivo até `initZoom` voltar a decidir o modo.
+      document.getElementById('reader')?.style.removeProperty('--scanner-zoom');
+      setZoomMode(null);
+      setZoomLevel(1);
+
+      // `formatsToSupport` pertence ao construtor do Html5Qrcode: passado ao
+      // `start()` era simplesmente ignorado. Ficamos no descodificador ZXing, o
+      // caminho que lia: com o BarcodeDetector nativo ligado
+      // (`useBarCodeDetectorIfSupported`) esta WebView deixou de devolver
+      // detecções de códigos 1D e a leitura ficou cega.
+
       const html5QrCode = new Html5Qrcode("reader", {
         verbose: false,
-        formatsToSupport: formats,
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+        formatsToSupport: formats
       });
       scannerRef.current = html5QrCode;
 
@@ -467,7 +534,7 @@ const Scanner: React.FC<ScannerProps> = ({
             await applyTorch(true).catch(() => false);
           }
         } else {
-          setZoomSupported(false);
+          setZoomMode(null);
           setTorchSupported(false);
         }
       } catch (e) {
@@ -578,14 +645,27 @@ const Scanner: React.FC<ScannerProps> = ({
   // Um passo fixo de 0.5 não serve para todos os sensores (1–8 ou 100–400):
   // avança ~10% do intervalo, no mínimo o step reportado.
   const handleZoom = (direction: -1 | 1) => {
+    if (zoomMode === 'software') {
+      const next = clampSoftwareZoom(zoomLevel + direction * SOFTWARE_ZOOM_STEP);
+      if (next === zoomLevel) return;
+      if (!applySoftwareZoom(next)) {
+        setZoomMode(null);
+        return;
+      }
+      setZoomLevel(next);
+      return;
+    }
     const { min, max, step } = zoomRange;
     const increment = Math.max(step > 0 ? step : 0.1, (max - min) / 10);
     void applyZoom(zoomLevel + direction * increment);
   };
 
   // O hardware pode reportar o zoom em valores absolutos do sensor; o ecrã
-  // mostra o factor relativo (1.0x = zoom mínimo da câmara).
-  const zoomDisplay = zoomRange.min > 0 ? zoomLevel / zoomRange.min : zoomLevel;
+  // mostra o factor relativo (1.0x = zoom mínimo da câmara). No zoom digital o
+  // nível já é o próprio factor.
+  const zoomDisplay = zoomMode === 'software'
+    ? zoomLevel
+    : (zoomRange.min > 0 ? zoomLevel / zoomRange.min : zoomLevel);
 
   // Alternância de modo: o botão no centro continua existindo, mas o duplo
   // clique/toque em qualquer área livre da leitura também alterna
@@ -780,10 +860,10 @@ const Scanner: React.FC<ScannerProps> = ({
         </div>
 
         {!isInline && (
-          <div className={`p-1 bg-slate-900/70 rounded-2xl flex items-center border border-white/10 shadow-xl pointer-events-auto ${zoomSupported === false ? 'opacity-40' : ''}`}>
+          <div className={`p-1 bg-slate-900/70 rounded-2xl flex items-center border border-white/10 shadow-xl pointer-events-auto ${zoomMode === null ? 'opacity-40' : ''}`}>
             <button
               onClick={() => handleZoom(-1)}
-              disabled={zoomSupported === false}
+              disabled={zoomMode === null}
               className="p-2 text-white active:scale-90"
               title="Reduzir zoom"
               aria-label="Reduzir zoom"
@@ -793,7 +873,7 @@ const Scanner: React.FC<ScannerProps> = ({
             <span className="text-white text-[10px] font-bold w-10 text-center tabular-nums">{zoomDisplay.toFixed(1)}x</span>
             <button
               onClick={() => handleZoom(1)}
-              disabled={zoomSupported === false}
+              disabled={zoomMode === null}
               className="p-2 text-white active:scale-90"
               title="Aumentar zoom"
               aria-label="Aumentar zoom"
@@ -864,10 +944,16 @@ const Scanner: React.FC<ScannerProps> = ({
           background-color: black !important;
           border: none !important;
         }
+        /* O zoom digital amplia o elemento de vídeo pela largura/altura (e não
+           por transform), para o html5-qrcode medir o novo tamanho, e centra-o. */
         #reader video {
           object-fit: cover !important;
-          width: 100% !important;
-          height: 100% !important;
+          position: absolute !important;
+          left: 50% !important;
+          top: 50% !important;
+          transform: translate(-50%, -50%) !important;
+          width: calc(100% * var(--scanner-zoom, 1)) !important;
+          height: calc(100% * var(--scanner-zoom, 1)) !important;
           display: block !important;
         }
         /* Hide all library UI elements except the video */

@@ -9,29 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Corrigido — Leitura de código de barras, lanterna e zoom do scanner
 
-- **Leitura 1D em 1920x1080 a 10 leituras/s:** a configuração anterior pedia
-  1280x720, limitava a câmara a 5 fps e descodificava a `fps: 2` — duas
-  hipóteses por segundo, insuficientes para um Code 128 ou Code 39 de etiqueta
-  pequena, mesmo visível no ecrã. Passa a pedir 1920x1080 (1280x720 em economia
-  de bateria), 10 leituras/s e `disableFlip` (a câmara é a traseira).
-- **Área de leitura relativa:** a caixa de 350x150 px fixos passa a uma faixa
-  de 90% × 35% do viewfinder, o que perdoa o alinhamento em ecrãs pequenos.
-- **BarcodeDetector nativo:** `formatsToSupport` e `experimentalFeatures` eram
-  passados ao `start()` do html5-qrcode, onde são ignorados; passam ao
-  construtor, com `useBarCodeDetectorIfSupported` — no Chrome/WebView Android a
-  descodificação usa o detector nativo, mais preciso em 1D.
+- **Leitura 1D a 10 leituras/s:** a configuração anterior limitava a câmara a
+  5 fps e descodificava a `fps: 2` — duas hipóteses por segundo, insuficientes
+  para um Code 128 ou Code 39 de etiqueta pequena, mesmo visível no ecrã. Passa
+  a descodificar 10 leituras/s (6 em economia de bateria), a capturar a 15 fps
+  (10 em economia) e a usar `disableFlip` (a câmara é a traseira).
+- **Leitura cega: captura de volta a 1280x720 e região de leitura fixa:** o
+  html5-qrcode desenha a região de leitura num canvas do tamanho do viewfinder
+  em píxeis CSS (~350 px de largura), por isso pedir 1920x1080 só aumentava a
+  redução (~5x) — as barras finas de um Code 128 colapsavam em cinzento e o
+  leitor deixou de ler. A captura volta a 1280x720 e a região a 350x150
+  (280x280 em QR): uma função calculada a partir do viewfinder podia devolver
+  0 px no arranque e deixar o canvas vazio, sem erro visível.
+- **ZXing em vez do BarcodeDetector nativo:** `experimentalFeatures` com
+  `useBarCodeDetectorIfSupported` não devolvia detecções de códigos 1D nesta
+  WebView. `formatsToSupport` continua a ir no construtor do `Html5Qrcode`
+  (passado ao `start()` era ignorado), mas sem o detector nativo.
 - **Lanterna e zoom não funcionavam:** o código chamava `getRunningTrack()`,
   que não existe na API do html5-qrcode; a excepção era engolida e o track
   nunca era guardado. O track passa a vir do `srcObject` do `<video>`, a
   lanterna reaplica-se após cada reinício/troca de câmara e o zoom usa o
-  intervalo real do sensor (min/max/step), mostrando o factor relativo. Sem
-  suporte de hardware o controlo fica desactivado em vez de parecer avariado.
+  intervalo real do sensor (min/max/step), mostrando o factor relativo.
+- **Zoom morto no telemóvel:** a WebView do Android (Capacitor) não expõe
+  `zoom` no `MediaStreamTrack.getCapabilities()` nem aceita a constraint — o
+  botão aparecia desactivado a 40% de opacidade e o toque não fazia nada. Sem
+  zoom de hardware, o controlo passa a fazer zoom digital de 1x a 3x: o vídeo
+  é ampliado e centrado e a região de leitura acompanha o mesmo factor, de modo
+  que a caixa azul mostra o que é descodificado e as barras deixam de chegar ao
+  leitor reduzidas à largura do ecrã.
 - **Foco contínuo:** aplicado quando a câmara o suporta — a imagem desfocada
   era a causa mais comum de um código visível não ser lido.
 - **Botão do zoom cortado:** a barra de controlos era uma fila única de três
   colunas `flex-1` com larguras mínimas fixas; num ecrã de 360 px o grupo do
   zoom saía pela direita. Passa a duas filas (acções da câmara e zoom) abaixo da
   área segura do Android.
+
+### Corrigido — «PENDENTE NUVEM» eterno depois de reiniciar o app
+
+- **A filial de envio vinha só do `sessionStorage`:** o Android esvazia o
+  `sessionStorage` quando mata a WebView em segundo plano, e todas as guardas
+  de sincronização (`processDataSyncQueue`, fila de fotos, campanhas, contador
+  de pendentes e o ciclo de 60 s) liam a filial apenas dali. Depois de um
+  reinício o ciclo voltava em silêncio sem enviar nada, e ativos conferidos em
+  dias anteriores continuavam com a etiqueta «PENDENTE NUVEM» mesmo com a
+  unidade visível no ecrã (a UI já caía para o `localStorage`/sessão). A
+  leitura passa a seguir a mesma cascata da UI: sessão → unidade seleccionada →
+  `localStorage` persistente.
 
 ### Alterado — consumo de bateria e aquecimento durante a leitura
 
