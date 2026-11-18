@@ -3,7 +3,7 @@ import React, { useMemo } from 'react';
 import { Asset, TagInventario } from '../types';
 import { resolvePersistedTag, getTagMetadata } from '../services/tagService';
 import { formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
-import { syncBadgeState } from '../utils/syncBadge';
+import { syncBadgeState, syncPendingInfo } from '../utils/syncBadge';
 import { 
   Camera, 
   Check, 
@@ -89,6 +89,8 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
 
   // Selo do cartão (ver utils/syncBadge): base vinda da nuvem não é "conferência".
   const seloSync = syncBadgeState(asset);
+  // «Pendente Nuvem» sozinho não diz o motivo nem se é de agora ou da semana passada.
+  const pendencia = syncPendingInfo(asset);
 
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
   const isAdotadoExterno = visualStatus === TagInventario.ADOTADO_EXTERNO;
@@ -215,10 +217,15 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
                 Sincronizado
               </span>
             )}
-            {seloSync === 'pendente' && (
-              <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tight bg-amber-50/60 border border-amber-100 px-1.5 py-0.5 rounded-md flex items-center gap-1 animate-pulse">
-                <span className="w-1 h-1 bg-amber-400 rounded-full animate-ping"></span>
+            {/* `pendencia` só existe quando o selo está pendente: uma condição, não duas. */}
+            {pendencia && (
+              <span className="max-w-full text-[9px] font-bold text-amber-500 uppercase tracking-tight bg-amber-50/60 border border-amber-100 px-1.5 py-0.5 rounded-md flex flex-wrap items-center gap-1 animate-pulse">
+                <span className="w-1 h-1 shrink-0 bg-amber-400 rounded-full animate-ping"></span>
                 Pendente Nuvem
+                <span className="min-w-0 break-words text-amber-600/80 normal-case tracking-normal font-semibold">
+                  · {pendencia.motivo}
+                  {pendencia.idade ? ` · ${pendencia.idade}` : ''}
+                </span>
               </span>
             )}
             {asset.registro && (
