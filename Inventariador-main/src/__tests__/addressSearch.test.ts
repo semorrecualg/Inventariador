@@ -94,10 +94,11 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
 
     const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
 
+    // «SEM LOCAL» tem 1 pendente (K4): fica no topo, onde o auditor o encontra.
     expect(rows.map(r => r.displayName)).toEqual([
+      'SEM LOCAL',
       '151100 PRODUCAO - PV1 MILHO',
-      '151200 CONTABILIDADE - CDC 70104',
-      'SEM LOCAL'
+      '151200 CONTABILIDADE - CDC 70104'
     ]);
     expect(rows.find(r => r.displayName.startsWith('151100'))).toMatchObject({ total: 2, checked: 1 });
     // K4 não tem coluna de endereço: ganha entrada própria. antes ficava invisível.
@@ -132,10 +133,11 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
 
     const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
 
+    // «SEM LOCAL» tem 2 pendentes: vai para o topo da lista.
     expect(rows.map(r => r.displayName)).toEqual([
+      'SEM LOCAL',
       '151100 PRODUCAO - PV1 MILHO',
-      '151200 CONTABILIDADE - CDC 70104',
-      'SEM LOCAL'
+      '151200 CONTABILIDADE - CDC 70104'
     ]);
     expect(rows.find(r => r.displayName === 'SEM LOCAL')).toMatchObject({ total: 2 });
     // A chave interna de contagem nunca vira nome de localidade.
@@ -263,8 +265,8 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
 
     expect(rows.map(r => r.displayName)).toEqual([
-      '151100 PRODUCAO - PV1 MILHO',
-      'SEM LOCAL'
+      'SEM LOCAL',
+      '151100 PRODUCAO - PV1 MILHO'
     ]);
     expect(rows.find(r => r.displayName === '151100 PRODUCAO - PV1 MILHO')).toMatchObject({ total: 1 });
     expect(rows.find(r => r.displayName === 'SEM LOCAL')).toMatchObject({ total: 2, checked: 1 });
@@ -286,9 +288,9 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
 
     expect(rows.map(r => r.displayName)).toEqual([
+      'SEM LOCAL',
       '151100 PRODUCAO - PV1 MILHO',
-      '151200 CONTABILIDADE - CDC 70104',
-      'SEM LOCAL'
+      '151200 CONTABILIDADE - CDC 70104'
     ]);
     expect(rows.find(r => r.displayName === 'SEM LOCAL')).toMatchObject({ total: 2, checked: 1, locKey: 'SEMLOCAL' });
     // A busca continua a achar os dois ativos sem endereço.
@@ -302,7 +304,7 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
 
     const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
 
-    expect(rows.map(r => r.displayName)).toEqual(['151100 PRODUCAO - PV1 MILHO', 'SEM LOCAL']);
+    expect(rows.map(r => r.displayName)).toEqual(['SEM LOCAL', '151100 PRODUCAO - PV1 MILHO']);
     expect(rows.find(r => r.displayName === '151100 PRODUCAO - PV1 MILHO')).toMatchObject({ total: 0 });
     expect(rows.find(r => r.displayName === 'SEM LOCAL')).toMatchObject({ total: 2, checked: 1 });
   });
@@ -333,6 +335,38 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     expect(semLocal).toHaveLength(1);
     // A localidade real e os ativos sem endereço são a MESMA chave no inventário.
     expect(semLocal[0]).toMatchObject({ total: 2 });
+  });
+
+  it('fixa «SEM LOCAL» no topo enquanto tem itens por conferir', async () => {
+    // Numa filial com 150 localidades a ordenação alfabética deixava a entrada
+    // no fim: a correcção do #97 (a entrada existir) não resolvia o alcance.
+    await putAtivos([
+      row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'),
+      row('151200 CONTABILIDADE - CDC 70104', 0, 'K2'),
+      row('151300 MANUTENCAO', 0, 'K3'),
+      row('', 0, 'K4')
+    ]);
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    expect(rows[0]).toMatchObject({ displayName: 'SEM LOCAL', total: 1, checked: 0 });
+    // As restantes continuam alfabéticas.
+    expect(rows.slice(1).map(r => r.displayName)).toEqual([
+      '151100 PRODUCAO - PV1 MILHO',
+      '151200 CONTABILIDADE - CDC 70104',
+      '151300 MANUTENCAO'
+    ]);
+  });
+
+  it('sem pendentes em «SEM LOCAL», a ordem volta a ser alfabética', async () => {
+    await putAtivos([
+      row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'),
+      row('', 1, 'K2')
+    ]);
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    expect(rows.map(r => r.displayName)).toEqual(['151100 PRODUCAO - PV1 MILHO', 'SEM LOCAL']);
   });
 
   it('não mistura o mesmo código de filial de outro contrato', async () => {

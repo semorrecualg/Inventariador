@@ -660,7 +660,19 @@ export const localDb = {
         }
       });
 
-      return Array.from(uniqueResults.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
+      // «SEM LOCAL» no topo enquanto tiver itens por conferir. A entrada do
+      // #97 existia, mas a ordenação alfabética deixava-a no fim de uma filial
+      // com muitas localidades — o auditor continuava sem a encontrar. Assim
+      // que fica sem pendentes, volta à ordem alfabética como as outras.
+      const semLocalPendente = (r: { displayName: string; total: number; checked: number }): boolean =>
+        r.displayName.trim().toUpperCase() === SEM_LOCAL_LABEL && r.total > r.checked;
+
+      return Array.from(uniqueResults.values()).sort((a, b) => {
+        const aFixo = semLocalPendente(a) ? 0 : 1;
+        const bFixo = semLocalPendente(b) ? 0 : 1;
+        if (aFixo !== bFixo) return aFixo - bFixo;
+        return a.displayName.localeCompare(b.displayName);
+      });
     },
 
     /**

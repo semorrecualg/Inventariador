@@ -136,6 +136,9 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
           <div className="grid grid-cols-1 gap-2.5">
             {addresses.map((item, index) => {
               const checkedPercent = item.total > 0 ? Math.round((item.checked / item.total) * 100) : 0;
+              // A pergunta do auditor é «quantos faltam», não «quantos já
+              // foram conferidos»: o cartão responde pelo que falta.
+              const pendentes = Math.max(0, item.total - item.checked);
               return (
                 <button
                   key={item.locKey || index}
@@ -152,7 +155,7 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
                         {item.displayName || 'GERAL - NÃO ESPECIFICADO'}
                       </h4>
                       <div className="flex items-center space-x-2 text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">
-                        <span>{item.checked} de {item.total} conferidos</span>
+                        <span>{pendentes === 0 ? `Tudo conferido (${item.total})` : `Faltam ${pendentes} de ${item.total}`}</span>
                         <span>•</span>
                         <span className={checkedPercent === 100 ? "text-emerald-500 font-extrabold" : "text-slate-400"}>
                           {checkedPercent}%
