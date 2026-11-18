@@ -9,6 +9,7 @@ import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 import { isValidCoordinate } from '../utils/gpsCore';
 import { APP_VERSION_LABEL } from '../utils/appVersion';
+import { isConferido } from '../utils/conferencia';
 
 interface AssetMapProps {
   assets: Asset[];
@@ -130,8 +131,8 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
 
 
   const filteredAssets = useMemo(() => {
-    // REGRA: O mapa de calor/área deve ler somente os itens INVENTARIADOS (_conferido)
-    let filtered = sourceAssets.filter(a => !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
+    // REGRA: O mapa de calor/área deve ler somente os itens INVENTARIADOS (ver `isConferido`)
+    let filtered = sourceAssets.filter(isConferido);
     
     // Filtragem de andar movida para o motor do mapa via ['get', 'id_andar']
     // Porém para cálculos de BI e grid aqui, ainda filtramos
@@ -428,7 +429,7 @@ const AssetMap: React.FC<AssetMapProps> = ({ assets, onBack, databaseMode, tenan
   const locations = useMemo(() => {
     const locs = new Set<string>();      sourceAssets.forEach(a => {
       // REGRA: Apenas localidades que possuem itens INVENTARIADOS
-      if (a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM') {
+      if (isConferido(a)) {
         const loc = a._localMaster || a.endereco;
         if (loc) locs.add(loc);
       }

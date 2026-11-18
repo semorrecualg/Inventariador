@@ -3,6 +3,7 @@ import React from 'react';
 import { Asset, InventoryCampaign, CampaignStatus } from '../types';
 import { ArrowLeft, Printer, ShieldCheck, AlertCircle } from 'lucide-react';
 import { APP_VERSION_LABEL } from '../utils/appVersion';
+import { isConferido } from '../utils/conferencia';
 
 interface AssetPrintViewProps {
   assets: Asset[];
@@ -151,7 +152,7 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
                     <div className="space-y-1">
                       <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Status Auditoria</p>
                       <p className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full inline-block ${
-                          asset._conferido ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                          isConferido(asset) ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
                       }`}>
                           {asset.TAG_INVENTARIO || 'PENDENTE'}
                       </p>
