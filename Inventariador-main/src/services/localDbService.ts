@@ -579,12 +579,17 @@ export const localDb = {
         addrList = Array.from(extractedAddrs.values());
       }
 
+      // Sem NENHUMA localidade na filial (antes do filtro de busca): é o caso
+      // de uma base sem coluna de endereço. A tela ficaria vazia e sem caminho
+      // para a lista/cadastro.
+      const semLocalidades = addrList.length === 0;
+
       // 3. Busca por TRECHO, sem acentos e sem caixa, no índice já montado.
       //    Antes: `startsWith` case-sensitive e, no fallback, comparação de
       //    maiúsculas contra termo minúsculo — “CONTAB” nunca encontrava nada.
       addrList = addrList.filter(a => matchesAddressSearch(a.codigo_endereco, searchTerm));
 
-      // 4. Busca reativa das estatísticas de conferência (assets → ativos → baseline)
+      // 4. Busca reativa das estatísticas de conferência (ativos → assets → baseline)
       const listAssets = await assetRows();
       const nonDeleted = listAssets.filter(a => a._is_deleted !== 1);
 
@@ -600,9 +605,32 @@ export const localDb = {
         statsMap.set(key, stats);
       });
 
+      // 4b. «SEM LOCAL»: com ativos na filial e nenhuma coluna de endereço
+      //     preenchida, a localidade sintética é a MESMA chave do inventário
+      //     (`assetAddressKey` → 'SEM LOCAL'), para o toque abrir exactamente
+      //     esses ativos e o cadastro deixar de ser inalcançável.
+      const SEM_LOCAL_LABEL = 'SEM LOCAL';
+      const semLocalAssets = nonDeleted.filter(a => !addressOf(a));
+      const semLocalStats = {
+        total: semLocalAssets.length,
+        checked: semLocalAssets.filter(a => a._conferido === 1).length
+      };
+      if (semLocalidades && semLocalAssets.length > 0 && matchesAddressSearch(SEM_LOCAL_LABEL, searchTerm)) {
+        addrList = [{
+          tenantid: tenant,
+          filial: uIdUpper,
+          codigo_endereco: SEM_LOCAL_LABEL,
+          setor: '',
+          bloco: '',
+          _is_synced: 1
+        }];
+      }
+
       const finalResults = addrList.map(addr => {
         const displayName = String(addr.codigo_endereco || '').trim() || 'GERAL - NÃO ESPECIFICADO';
-        const stats = statsMap.get(displayName.toUpperCase()) || { total: 0, checked: 0 };
+        const stats = displayName.toUpperCase() === SEM_LOCAL_LABEL
+          ? semLocalStats
+          : (statsMap.get(displayName.toUpperCase()) || { total: 0, checked: 0 });
         return {
           displayName,
           total: Math.max(0, stats.total),

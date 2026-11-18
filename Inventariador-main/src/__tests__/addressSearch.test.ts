@@ -217,6 +217,38 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     ]);
   });
 
+  it('sem nenhuma coluna de endereço, oferece «SEM LOCAL» para abrir a lista/cadastro', async () => {
+    await putAtivos([
+      row('', 0, 'K1'),
+      row('', 1, 'K2')
+    ]);
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ displayName: 'SEM LOCAL', total: 2, checked: 1 });
+    // Mesma chave do inventário (`assetAddressKey` → 'SEM LOCAL').
+    expect(rows[0].locKey).toBe('SEMLOCAL');
+  });
+
+  it('«SEM LOCAL» respeita o termo de busca digitado', async () => {
+    await putAtivos([row('', 0, 'K1')]);
+
+    expect(await localDb.assets.getLocationsWithStats('010101 CICOPAL GO', 'CONTAB')).toHaveLength(0);
+    expect(await localDb.assets.getLocationsWithStats('010101 CICOPAL GO', 'sem local')).toHaveLength(1);
+  });
+
+  it('não cria «SEM LOCAL» quando a filial já tem localidades', async () => {
+    await putAtivos([
+      row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'),
+      row('', 0, 'K2')
+    ]);
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    expect(rows.map(r => r.displayName)).toEqual(['151100 PRODUCAO - PV1 MILHO']);
+  });
+
   it('não mistura o mesmo código de filial de outro contrato', async () => {
     await putAtivos([
       row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'),
