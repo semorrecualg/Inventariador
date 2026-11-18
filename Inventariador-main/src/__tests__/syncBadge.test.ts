@@ -34,6 +34,15 @@ describe('syncBadgeState', () => {
     expect(syncBadgeState(ativo({ _conferido: false, _is_synced: 0 }))).toBe('pendente');
   });
 
+  it('conferido pela coluna de auditoria da base conta como conferência', () => {
+    // A planilha traz AUDITOR_STATUS_CONFERENCIA='SIM' sem `_conferido`: o selo
+    // tem de a reconhecer, como o cartão já fazia (ver utils/conferencia).
+    expect(syncBadgeState(ativo({ _conferido: false, AUDITOR_STATUS_CONFERENCIA: 'SIM', _is_synced: 1 })))
+      .toBe('sincronizado');
+    expect(syncBadgeState(ativo({ _conferido: false, AUDITOR_STATUS_CONFERENCIA: 'SIM', _is_synced: 0 })))
+      .toBe('pendente');
+  });
+
   it('tolera _conferido/_is_synced gravados como 1/0 no Dexie', () => {
     expect(syncBadgeState(ativo({ _conferido: 1 as unknown as boolean, _is_synced: 1 }))).toBe('sincronizado');
     expect(syncBadgeState(ativo({ _conferido: 0 as unknown as boolean, _is_synced: 0 }))).toBe('pendente');
@@ -67,6 +76,14 @@ describe('syncPendingInfo', () => {
   it('sem data no registo mostra o motivo mas não inventa idade', () => {
     const info = syncPendingInfo(ativo({ _conferido: false, _is_synced: 0 }), AGORA);
     expect(info).toEqual({ motivo: 'base por espelhar', idade: null });
+  });
+
+  it('conferência vinda da coluna de auditoria tem o mesmo motivo e idade', () => {
+    const info = syncPendingInfo(
+      ativo({ _conferido: false, AUDITOR_STATUS_CONFERENCIA: 'SIM', _is_synced: 0, _dataLeitura: haHoras(2) }),
+      AGORA
+    );
+    expect(info).toEqual({ motivo: 'conferência por enviar', idade: 'há 2 h' });
   });
 
   it('não há detalhe quando o selo está sincronizado ou ausente', () => {

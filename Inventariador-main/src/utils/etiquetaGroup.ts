@@ -1,4 +1,5 @@
 import type { Asset } from '../types';
+import { isConferido } from './conferencia';
 import { normalizeKey } from './schema';
 
 /**
@@ -37,10 +38,6 @@ export const hasUsableTag = (value: unknown): boolean => chaveUtil(value) !== ''
 
 /** Chave do registro, ou vazio quando é placeholder/curto demais para ser lote. */
 export const registroKey = (asset: Partial<Asset>): string => chaveUtil(asset.registro, 3);
-
-/** Já conferido (flag local ou a coluna de auditoria da base). */
-export const isConferido = (asset: Partial<Asset>): boolean =>
-  !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
 
 /** Baixado no patrimônio: não entra na conferência. */
 export const isBaixado = (asset: Partial<Asset>): boolean =>

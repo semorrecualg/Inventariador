@@ -61,6 +61,14 @@ describe('AssetListItem — selo de pendência', () => {
     expect(texto).toContain('há 3 d');
   });
 
+  it('conferido só pela coluna de auditoria já conta como conferido', () => {
+    const texto = cartao({ _conferido: false, AUDITOR_STATUS_CONFERENCIA: 'SIM', _is_synced: 1 });
+
+    expect(texto).toContain('Sincronizado');
+    expect(texto).not.toContain('Pendente Nuvem');
+    expect(texto).not.toContain('Confirmar');
+  });
+
   it('sem data no registo não inventa idade', () => {
     const texto = cartao({ _conferido: false });
 
