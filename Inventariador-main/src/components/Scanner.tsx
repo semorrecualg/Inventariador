@@ -11,7 +11,8 @@ import {
   SOFTWARE_ZOOM_MIN,
   SOFTWARE_ZOOM_STEP,
   centerRegionForSoftwareZoom,
-  clampSoftwareZoom
+  clampSoftwareZoom,
+  isUsableQrRegion
 } from '../utils/cameraZoom';
 
 interface ScannerProps {
@@ -221,17 +222,16 @@ const Scanner: React.FC<ScannerProps> = ({
    * vê — pior do que não ter zoom. Devolve `false` sem tocar em nada nesse caso.
    */
   const applySoftwareZoom = useCallback((factor: number): boolean => {
-    // `qrRegion` é o recorte usado em cada leitura (não é API pública, mas é um
-    // campo estável desta versão) e é o único ponto que alinha a
-    // descodificação com a imagem ampliada.
-    const region = (scannerRef.current as unknown as {
-      qrRegion?: { x: number; y: number; width: number; height: number };
-    } | null)?.qrRegion;
+    // `qrRegion` é o recorte usado em cada leitura e o único ponto que alinha a
+    // descodificação com a imagem ampliada. Não é API pública: a guarda valida
+    // a forma para que uma subida do html5-qrcode desactive o zoom em vez de
+    // deixar a imagem ampliada a descodificar outra zona.
+    const region = (scannerRef.current as unknown as { qrRegion?: unknown } | null)?.qrRegion;
     const reader = document.getElementById('reader');
     const viewportWidth = reader?.clientWidth ?? 0;
     const viewportHeight = reader?.clientHeight ?? 0;
-    if (!reader || !region || !viewportWidth || !viewportHeight) {
-      logger.warn('>>> [Scanner] Zoom digital indisponível: região de leitura ausente ou viewfinder sem tamanho');
+    if (!reader || !isUsableQrRegion(region) || !viewportWidth || !viewportHeight) {
+      logger.warn('>>> [Scanner] Zoom digital indisponível: região de leitura ausente ou inválida, ou viewfinder sem tamanho');
       return false;
     }
 
