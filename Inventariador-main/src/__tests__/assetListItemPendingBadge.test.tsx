@@ -36,39 +36,36 @@ const ativo = (over: Partial<Asset> = {}): Asset => ({
   ...over
 } as Asset);
 
+/** Texto do cartão inteiro (o selo é o único sítio com «Pendente Nuvem»). */
+const cartao = (over: Partial<Asset> = {}): string =>
+  render(<AssetListItem asset={ativo(over)} />).container.textContent ?? '';
+
 describe('AssetListItem — selo de pendência', () => {
   it('mostra o motivo e a idade da conferência por enviar', () => {
     const ha2h = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    const texto = cartao({ _dataLeitura: ha2h });
 
-    const { container } = render(<AssetListItem asset={ativo({ _dataLeitura: ha2h })} />);
-    const selo = container.querySelector('#sync-badge-1');
-
-    expect(selo?.textContent).toContain('Pendente Nuvem');
-    expect(selo?.textContent).toContain('conferência por enviar');
-    expect(selo?.textContent).toContain('há 2 h');
+    expect(texto).toContain('Pendente Nuvem');
+    expect(texto).toContain('conferência por enviar');
+    expect(texto).toContain('há 2 h');
   });
 
   it('base nunca espelhada identifica-se como tal', () => {
-    const { container } = render(
-      <AssetListItem
-        asset={ativo({
-          _conferido: false,
-          _lastUpdated: new Date(Date.now() - 3 * 86400 * 1000).toISOString()
-        })}
-      />
-    );
-    const selo = container.querySelector('#sync-badge-1');
+    const texto = cartao({
+      _conferido: false,
+      _lastUpdated: new Date(Date.now() - 3 * 86400 * 1000).toISOString()
+    });
 
-    expect(selo?.textContent).toContain('Pendente Nuvem');
-    expect(selo?.textContent).toContain('base por espelhar');
-    expect(selo?.textContent).toContain('há 3 d');
+    expect(texto).toContain('Pendente Nuvem');
+    expect(texto).toContain('base por espelhar');
+    expect(texto).toContain('há 3 d');
   });
 
   it('sem data no registo não inventa idade', () => {
-    const { container } = render(<AssetListItem asset={ativo({ _conferido: false })} />);
-    const selo = container.querySelector('#sync-badge-1');
+    const texto = cartao({ _conferido: false });
 
-    expect(selo?.textContent).toContain('base por espelhar');
-    expect(selo?.textContent).not.toContain('há ');
+    expect(texto).toContain('Pendente Nuvem');
+    expect(texto).toContain('base por espelhar');
+    expect(texto).not.toContain('há ');
   });
 });

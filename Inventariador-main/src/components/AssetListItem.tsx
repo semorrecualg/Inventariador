@@ -217,19 +217,15 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
                 Sincronizado
               </span>
             )}
-            {seloSync === 'pendente' && (
-              <span
-                id={`sync-badge-${asset.id ?? asset.primarykey}`}
-                className="text-[9px] font-bold text-amber-500 uppercase tracking-tight bg-amber-50/60 border border-amber-100 px-1.5 py-0.5 rounded-md flex flex-wrap items-center gap-1 animate-pulse"
-              >
-                <span className="w-1 h-1 bg-amber-400 rounded-full animate-ping"></span>
+            {/* `pendencia` só existe quando o selo está pendente: uma condição, não duas. */}
+            {pendencia && (
+              <span className="max-w-full text-[9px] font-bold text-amber-500 uppercase tracking-tight bg-amber-50/60 border border-amber-100 px-1.5 py-0.5 rounded-md flex flex-wrap items-center gap-1 animate-pulse">
+                <span className="w-1 h-1 shrink-0 bg-amber-400 rounded-full animate-ping"></span>
                 Pendente Nuvem
-                {pendencia && (
-                  <span className="text-amber-600/80 normal-case tracking-normal font-semibold">
-                    · {pendencia.motivo}
-                    {pendencia.idade ? ` · ${pendencia.idade}` : ''}
-                  </span>
-                )}
+                <span className="min-w-0 break-words text-amber-600/80 normal-case tracking-normal font-semibold">
+                  · {pendencia.motivo}
+                  {pendencia.idade ? ` · ${pendencia.idade}` : ''}
+                </span>
               </span>
             )}
             {asset.registro && (

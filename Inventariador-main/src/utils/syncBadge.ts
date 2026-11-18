@@ -19,11 +19,17 @@ import type { Asset } from '../types';
  */
 export type SyncBadgeState = 'sincronizado' | 'pendente' | null;
 
-export const syncBadgeState = (asset: Asset): SyncBadgeState => {
-  const conferido = asset._conferido === true || Number(asset._conferido) === 1;
-  const naNuvem = Number(asset._is_synced) === 1;
+/** `_conferido` chega como booleano ou como 1/0, consoante a origem da linha. */
+const isConferido = (asset: Asset): boolean =>
+  asset._conferido === true || Number(asset._conferido) === 1;
 
-  if (!conferido && naNuvem) return null;
+/** Linha igual à nuvem neste momento (não implica ter sido conferida). */
+const isNaNuvem = (asset: Asset): boolean => Number(asset._is_synced) === 1;
+
+export const syncBadgeState = (asset: Asset): SyncBadgeState => {
+  const naNuvem = isNaNuvem(asset);
+
+  if (!isConferido(asset) && naNuvem) return null;
   return naNuvem ? 'sincronizado' : 'pendente';
 };
 
@@ -40,32 +46,22 @@ export const syncBadgeState = (asset: Asset): SyncBadgeState => {
  * `_lastUpdated` para base). Quando o registo não tem data nenhuma, a idade é
  * omitida em vez de inventada.
  */
-export type SyncPendingReason = 'conferência por enviar' | 'base por espelhar';
-
 export interface SyncPendingInfo {
-  motivo: SyncPendingReason;
-  /** Texto curto (ex.: «há 2 h») ou null quando não há data no registo. */
+  motivo: 'conferência por enviar' | 'base por espelhar';
+  /** Texto curto (ex.: «há 2 h») ou null quando o registo não tem data. */
   idade: string | null;
 }
-
-/** Converte para timestamp só datas legíveis; devolve null para o resto. */
-const parseTimestamp = (value?: string | null): number | null => {
-  if (!value) return null;
-  const ts = new Date(value).getTime();
-  return Number.isFinite(ts) ? ts : null;
-};
 
 /** Idade em texto curto: «agora», «há 5 min», «há 3 h», «há 2 d». */
 export const formatPendingAge = (
   value: string | null | undefined,
   now: number = Date.now()
 ): string | null => {
-  const ts = parseTimestamp(value);
-  if (ts === null) return null;
+  const ts = value ? new Date(value).getTime() : NaN;
+  if (!Number.isFinite(ts)) return null;
 
   // Relógio do aparelho atrasado não pode produzir «há -3 min».
-  const diffMs = Math.max(0, now - ts);
-  const minutes = Math.floor(diffMs / 60000);
+  const minutes = Math.floor(Math.max(0, now - ts) / 60000);
   if (minutes < 1) return 'agora';
   if (minutes < 60) return `há ${minutes} min`;
   const hours = Math.floor(minutes / 60);
@@ -73,14 +69,13 @@ export const formatPendingAge = (
   return `há ${Math.floor(hours / 24)} d`;
 };
 
+/** Sem selo (já na nuvem) não há motivo nem idade; a conferência decide a data. */
 export const syncPendingInfo = (asset: Asset, now: number = Date.now()): SyncPendingInfo | null => {
-  if (syncBadgeState(asset) !== 'pendente') return null;
+  if (isNaNuvem(asset)) return null;
 
-  const conferido = asset._conferido === true || Number(asset._conferido) === 1;
-  const data = conferido ? asset._dataLeitura : asset._lastUpdated;
-
+  const conferido = isConferido(asset);
   return {
     motivo: conferido ? 'conferência por enviar' : 'base por espelhar',
-    idade: formatPendingAge(data, now)
+    idade: formatPendingAge(conferido ? asset._dataLeitura : asset._lastUpdated, now)
   };
 };
