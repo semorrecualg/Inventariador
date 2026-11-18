@@ -22,6 +22,19 @@ interface ScannerProps {
   onTorchToggle?: () => void;
 }
 
+/**
+ * Capacidades do track que a API do DOM ainda não tipa (torch) ou tipa de
+ * forma genérica (zoom). São lidas do hardware, não assumidas.
+ */
+type ExtendedCameraCapabilities = MediaTrackCapabilities & {
+  torch?: boolean;
+  zoom?: { min: number; max: number; step?: number };
+  focusMode?: string[];
+};
+
+const getTrackCapabilities = (track: MediaStreamTrack): ExtendedCameraCapabilities =>
+  (track.getCapabilities?.() ?? {}) as ExtendedCameraCapabilities;
+
 const Scanner: React.FC<ScannerProps> = ({ 
   mode, 
   onScan, 
@@ -39,9 +52,15 @@ const Scanner: React.FC<ScannerProps> = ({
   const isMounted = useRef(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const currentModeRef = useRef<ScannerMode>(mode);
+  // A lanterna é uma prop controlada; o valor é lido pelo `startScanner` sem
+  // o obrigar a recriar-se (recriar reiniciava a câmara a cada toque).
+  const torchRef = useRef<'on' | 'off'>(torch);
   const isStoppingRef = useRef(false);
   const isStartingRef = useRef(false);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
+  const [zoomSupported, setZoomSupported] = useState<boolean | null>(null);
+  const [torchSupported, setTorchSupported] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [availableCameras, setAvailableCameras] = useState<{ id: string, label: string }[]>([]);
   const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
@@ -62,6 +81,7 @@ const Scanner: React.FC<ScannerProps> = ({
     resetInactivityTimeoutRef.current = resetInactivityTimeout;
     stopScannerRef.current = stopScanner;
     isInactiveRef.current = isInactive;
+    torchRef.current = torch;
   });
 
   useEffect(() => {
@@ -124,6 +144,50 @@ const Scanner: React.FC<ScannerProps> = ({
   const playBeep = useCallback(() => {
     playScanFeedback(scanFeedbackMode, batterySaver);
   }, [scanFeedbackMode, batterySaver]);
+
+  // O html5-qrcode 2.3.x não expõe o MediaStreamTrack — `getRunningTrack()`
+  // não existe na classe (existem `getRunningTrackCapabilities`, settings e
+  // `applyVideoConstraints`). O track real está no `srcObject` do <video> que
+  // a biblioteca cria dentro de #reader; é sobre ele que a lanterna, o zoom e
+  // o foco têm de ser aplicados.
+  const getVideoTrack = useCallback((): MediaStreamTrack | null => {
+    if (trackRef.current && trackRef.current.readyState === 'live') {
+      return trackRef.current;
+    }
+    const video = document.querySelector<HTMLVideoElement>('#reader video');
+    const stream = video?.srcObject as MediaStream | null;
+    const track = stream?.getVideoTracks?.()[0] ?? null;
+    if (track) trackRef.current = track;
+    return track;
+  }, []);
+
+  // O zoom do hardware é reportado em valores do sensor (por vezes 100–400,
+  // não 1–8), com um `step` próprio. Guardar o intervalo real evita pedir
+  // valores que o dispositivo ignora — era por isso que o botão parecia morto.
+  const initZoom = useCallback((track: MediaStreamTrack, capabilities: ExtendedCameraCapabilities) => {
+    if (!capabilities.zoom || capabilities.zoom.max <= capabilities.zoom.min) {
+      setZoomSupported(false);
+      return;
+    }
+    const { min, max } = capabilities.zoom;
+    const step = capabilities.zoom.step && capabilities.zoom.step > 0
+      ? capabilities.zoom.step
+      : (max - min) / 100;
+    setZoomRange({ min, max, step });
+    setZoomSupported(true);
+    const settings = track.getSettings() as MediaTrackSettings & { zoom?: number };
+    setZoomLevel(typeof settings.zoom === 'number' ? settings.zoom : min);
+  }, []);
+
+  const applyTorch = useCallback(async (enabled: boolean): Promise<boolean> => {
+    const track = getVideoTrack();
+    if (!track) return false;
+    if (!getTrackCapabilities(track).torch) return false;
+    await track.applyConstraints({
+      advanced: [{ torch: enabled }]
+    } as unknown as MediaTrackConstraints);
+    return true;
+  }, [getVideoTrack]);
 
   const stopScanner = useCallback(async () => {
     if (isStoppingRef.current) return;
@@ -192,7 +256,9 @@ const Scanner: React.FC<ScannerProps> = ({
 
     currentModeRef.current = mode;
 
-    const formats = mode === ScannerMode.BARCODE 
+    const isBarcode = mode === ScannerMode.BARCODE;
+
+    const formats = isBarcode
       ? [
           Html5QrcodeSupportedFormats.CODE_128,
           Html5QrcodeSupportedFormats.EAN_13,
@@ -204,17 +270,33 @@ const Scanner: React.FC<ScannerProps> = ({
       : [Html5QrcodeSupportedFormats.QR_CODE];
 
     const config = {
-      fps: 2, // Redução drástica: 2 verificações por segundo (suficiente para QR/Barras)
-      qrbox: mode === ScannerMode.BARCODE 
-        ? { width: 350, height: 150 } 
-        : { width: 280, height: 280 },
-      formatsToSupport: formats,
+      // 2 leituras/s (o valor anterior) davam ~2 hipóteses de descodificar por
+      // segundo: um Code 128 pequeno só era lido com a mão parada. 10 leituras/s
+      // com o detector nativo é o que torna a leitura utilizável em movimento.
+      fps: batterySaver ? 4 : 10,
+      // Área de leitura relativa ao viewfinder (era 350x150 fixos): uma faixa
+      // larga e centrada perdoa o alinhamento e mantém a caixa azul coerente em
+      // ecrãs pequenos.
+      qrbox: isBarcode
+        ? (viewfinderWidth: number, viewfinderHeight: number) => ({
+            width: Math.floor(viewfinderWidth * 0.9),
+            height: Math.min(Math.floor(viewfinderHeight * 0.35), 320)
+          })
+        : (viewfinderWidth: number, viewfinderHeight: number) => {
+            const side = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.8);
+            return { width: side, height: side };
+          },
       aspectRatio: window.innerHeight > window.innerWidth ? 0.5625 : 1.7777778,
+      // Não gasta metade dos quadros a testar a imagem espelhada: a câmara é
+      // sempre a traseira (facingMode environment).
+      disableFlip: true,
       videoConstraints: {
         facingMode: "environment",
-        width: { ideal: batterySaver ? 640 : 1280 },
-        height: { ideal: batterySaver ? 480 : 720 },
-        frameRate: { ideal: 5 } // FPS Baixo para evitar processamento contínuo da GPU
+        // 1920x1080 em vez de 1280x720: um código de barras fino precisa de
+        // pixels no eixo horizontal para as barras não colapsarem.
+        width: { ideal: batterySaver ? 1280 : 1920 },
+        height: { ideal: batterySaver ? 720 : 1080 },
+        frameRate: { ideal: batterySaver ? 10 : 30 }
       }
     };
 
@@ -231,7 +313,15 @@ const Scanner: React.FC<ScannerProps> = ({
       await new Promise(resolve => setTimeout(resolve, 500));
       if (!isMounted.current) return;
       
-      const html5QrCode = new Html5Qrcode("reader");
+      // `formatsToSupport` e `experimentalFeatures` pertencem ao construtor do
+      // Html5Qrcode: passados ao `start()` eram simplesmente ignorados. Com
+      // `useBarCodeDetectorIfSupported` o Chrome/WebView Android usa o
+      // BarcodeDetector nativo, bem mais preciso em códigos 1D.
+      const html5QrCode = new Html5Qrcode("reader", {
+        verbose: false,
+        formatsToSupport: formats,
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+      });
       scannerRef.current = html5QrCode;
 
       const onScanSuccess = async (decodedText: string) => {
@@ -305,16 +395,35 @@ const Scanner: React.FC<ScannerProps> = ({
         return;
       }
 
-      // Detecção de capacidades (Zoom apenas, Lanterna removida)
+      // Capacidades reais do track: foco contínuo, zoom e lanterna. A versão
+      // anterior chamava `getRunningTrack()` (que não existe no html5-qrcode),
+      // a excepção era apanhada e o track nunca era guardado — nem a lanterna
+      // nem o zoom chegavam a ser aplicados.
       try {
-        await new Promise(resolve => setTimeout(resolve, 800)); 
-        
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const html5QrCodeAny = html5QrCode as any;
-        const track = html5QrCodeAny.getRunningTrack();
-        
+        await new Promise(resolve => setTimeout(resolve, 400));
+        if (!isMounted.current) return;
+
+        const track = getVideoTrack();
         if (track) {
-          trackRef.current = track;
+          const capabilities = getTrackCapabilities(track);
+
+          // Foco contínuo: a imagem desfocada era a causa mais comum de um
+          // código visível não ser lido.
+          if (capabilities.focusMode?.includes('continuous')) {
+            await track
+              .applyConstraints({ advanced: [{ focusMode: 'continuous' }] } as unknown as MediaTrackConstraints)
+              .catch(() => {});
+          }
+
+          initZoom(track, capabilities);
+
+          // Um reinício/troca de câmara desliga a lanterna no hardware.
+          if (torchRef.current === 'on') {
+            await applyTorch(true).catch(() => false);
+          }
+        } else {
+          setZoomSupported(false);
+          setTorchSupported(false);
         }
       } catch (e) {
         logger.warn("Capability check failed", e);
@@ -340,7 +449,7 @@ const Scanner: React.FC<ScannerProps> = ({
         setIsLoading(false);
       }
     }
-  }, [mode, onScan, batterySaver, currentCameraIndex, availableCameras, playBeep, resetInactivityTimeout, stopScanner]);
+  }, [mode, onScan, batterySaver, currentCameraIndex, availableCameras, playBeep, resetInactivityTimeout, stopScanner, getVideoTrack, initZoom, applyTorch]);
 
   useEffect(() => {
     if (!isPaused && !isTabHidden && !isInactive) {
@@ -353,34 +462,43 @@ const Scanner: React.FC<ScannerProps> = ({
     };
   }, [startScanner, stopScanner, isPaused, isTabHidden, isInactive]);
 
+  // A lanterna é uma capacidade do track: o track só existe depois de a câmara
+  // arrancar e é substituído a cada reinício/troca. Por isso a aplicação é
+  // repetida quando o estado de carregamento ou a câmara mudam.
   useEffect(() => {
-    let active = true;
-    const applyTorch = async () => {
-      if (!trackRef.current) return;
-      // Aguarda o hardware estar pronto
-      await new Promise(resolve => setTimeout(resolve, 500));
-      if (!active || !trackRef.current) return;
+    let cancelled = false;
 
+    const syncTorch = async () => {
+      if (isLoading) return; // espera pelo novo track
+
+      const track = getVideoTrack();
+      if (!track) {
+        if (!cancelled) setTorchSupported(false);
+        return;
+      }
+
+      const capabilities = getTrackCapabilities(track);
+      if (!capabilities.torch) {
+        if (!cancelled) setTorchSupported(false);
+        if (torch === 'on') logger.warn(">>> [Scanner] Lanterna não suportada por esta câmera");
+        return;
+      }
+
+      if (!cancelled) setTorchSupported(true);
       try {
-        const capabilities = trackRef.current.getCapabilities() as MediaTrackCapabilities & { torch?: boolean };
-        logger.info(">>> [Scanner] Capabilities:", capabilities);
-        
-        if (capabilities.torch) {
-          // Hardware native command for torch mode
-          await trackRef.current.applyConstraints({
-            advanced: [{ torch: torch === 'on' }]
-          } as unknown as MediaTrackConstraints);
-          logger.info(`>>> [Scanner] Torch set to: ${torch}`);
-        } else {
-          logger.warn(">>> [Scanner] Torch not supported by this camera track");
-        }
+        await track.applyConstraints({
+          advanced: [{ torch: torch === 'on' }]
+        } as unknown as MediaTrackConstraints);
+        logger.info(`>>> [Scanner] Lanterna: ${torch}`);
       } catch (e) {
-        logger.warn(">>> [Scanner] Torch applyConstraints failed", e);
+        logger.warn(">>> [Scanner] Falha ao aplicar a lanterna", e);
+        if (!cancelled) setTorchSupported(false);
       }
     };
-    applyTorch();
-    return () => { active = false; };
-  }, [torch]);
+
+    syncTorch();
+    return () => { cancelled = true; };
+  }, [torch, isLoading, currentCameraIndex, getVideoTrack]);
 
   const switchCamera = async () => {
     if (availableCameras.length < 2) return;
@@ -392,28 +510,35 @@ const Scanner: React.FC<ScannerProps> = ({
     // O useEffect cuidará de parar e reiniciar o scanner pois currentCameraIndex mudou
   };
 
-  const handleZoom = async (delta: number) => {
-    if (!scannerRef.current) return;
+  const applyZoom = useCallback(async (nextZoom: number) => {
+    const track = getVideoTrack();
+    if (!track) return;
+
+    const { min, max } = zoomRange;
+    const clamped = Math.max(min, Math.min(max, nextZoom));
     try {
-      const scannerInstance = scannerRef.current as unknown as { getRunningTrack?: () => MediaStreamTrack };
-      if (typeof scannerInstance.getRunningTrack === 'function') {
-        const track = scannerInstance.getRunningTrack();
-        if (track) {
-          const capabilities = track.getCapabilities() as MediaTrackCapabilities & { zoom?: { min: number, max: number } };
-          if (capabilities.zoom) {
-            const newZoom = Math.max(capabilities.zoom.min, Math.min(capabilities.zoom.max, zoomLevel + delta));
-            await track.applyConstraints({
-              advanced: [{ zoom: newZoom }]
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            } as any);
-            setZoomLevel(newZoom);
-          }
-        }
-      }
+      await track.applyConstraints({
+        advanced: [{ zoom: clamped }]
+      } as unknown as MediaTrackConstraints);
+      // Lê o valor realmente aceite pelo hardware (arredondado ao step do sensor).
+      const applied = (track.getSettings() as MediaTrackSettings & { zoom?: number }).zoom;
+      setZoomLevel(typeof applied === 'number' ? applied : clamped);
     } catch (e) {
-      logger.error("Zoom failed", e);
+      logger.warn(">>> [Scanner] Zoom falhou", e);
     }
+  }, [getVideoTrack, zoomRange]);
+
+  // Um passo fixo de 0.5 não serve para todos os sensores (1–8 ou 100–400):
+  // avança ~10% do intervalo, no mínimo o step reportado.
+  const handleZoom = (direction: -1 | 1) => {
+    const { min, max, step } = zoomRange;
+    const increment = Math.max(step > 0 ? step : 0.1, (max - min) / 10);
+    void applyZoom(zoomLevel + direction * increment);
   };
+
+  // O hardware pode reportar o zoom em valores absolutos do sensor; o ecrã
+  // mostra o factor relativo (1.0x = zoom mínimo da câmara).
+  const zoomDisplay = zoomRange.min > 0 ? zoomLevel / zoomRange.min : zoomLevel;
 
   // Alternância de modo: o botão no centro continua existindo, mas o duplo
   // clique/toque em qualquer área livre da leitura também alterna
@@ -497,9 +622,9 @@ const Scanner: React.FC<ScannerProps> = ({
       <div className={`absolute inset-0 pointer-events-none flex flex-col items-center justify-center transition-opacity duration-300 ${isPaused ? 'opacity-0' : 'opacity-100'}`}>
         {/* Bounding Box Simulation */}
         <div className={`border-2 border-blue-500/50 rounded-2xl relative overflow-hidden shadow-[0_0_0_1000px_rgba(0,0,0,0.7)] ${
-          mode === ScannerMode.BARCODE 
-            ? (isInline ? 'w-[240px] h-[100px]' : 'w-[350px] h-[150px]') 
-            : (isInline ? 'w-[200px] h-[200px]' : 'w-[280px] h-[280px]')
+          mode === ScannerMode.BARCODE
+            ? (isInline ? 'w-[240px] h-[100px]' : 'w-[88vw] max-w-[520px] h-[150px]')
+            : (isInline ? 'w-[200px] h-[200px]' : 'w-[70vw] max-w-[280px] h-[70vw] max-h-[280px]')
         }`}>
           {/* Scanner Line */}
           {!isPaused && <div className="absolute left-0 right-0 h-0.5 bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-scanLine"></div>}
@@ -524,83 +649,108 @@ const Scanner: React.FC<ScannerProps> = ({
       </div>
 
       {/* Controls */}
-      <div className={`absolute ${isInline ? 'top-4' : 'top-8'} left-0 right-0 px-6 flex items-center justify-between pointer-events-none z-50 transition-opacity duration-300 ${isPaused ? 'opacity-20' : 'opacity-100'}`}>
-        {/* Lado Esquerdo: Fechar */}
-        <div className="flex-1 flex justify-start">
+      <div
+        className={`absolute left-0 right-0 px-3 z-50 flex flex-col items-center gap-2 pointer-events-none transition-opacity duration-300 ${isPaused ? 'opacity-20' : 'opacity-100'}`}
+        // Abaixo da área segura: com `top-8` a barra de estado do Android
+        // cobria os botões e o grupo do zoom era empurrado para fora do ecrã.
+        style={{ top: isInline ? '0.75rem' : 'calc(var(--ion-safe-area-top, 0px) + 0.75rem)' }}
+      >
+        <div className="w-full flex items-center justify-between gap-2">
           {onClose && (
-            <button 
+            <button
               onClick={onClose}
               className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 pointer-events-auto"
+              title="Fechar scanner"
             >
-              <X size={24} />
+              <X size={isInline ? 20 : 24} />
             </button>
           )}
-        </div>
 
-        {/* Centro: Modo de Leitura */}
-        <div className="flex-1 flex justify-center space-x-2">
-          {batterySaver && (
-            <div className="absolute top-20 left-1/2 -translate-x-1/2 px-3 py-1 bg-amber-500/20 backdrop-blur-md rounded-full border border-amber-500/30 flex items-center space-x-2 animate-pulse">
-              <ShieldCheck size={12} className="text-amber-500" />
-              <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Modo Econômico Ativo</span>
-            </div>
-          )}
+          {/* Uma fila que encolhe e passa para a linha seguinte: as três
+              colunas `flex-1` anteriores empurravam o zoom para fora do ecrã
+              num telemóvel de 360px — o botão aparecia cortado. */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {onModeChange && (
+              <button
+                onClick={toggleMode}
+                className={`p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center ${isInline ? 'min-w-[48px]' : 'min-w-[64px]'} pointer-events-auto shadow-xl`}
+              >
+                <RefreshCw size={isInline ? 16 : 20} className="mb-1" />
+                <span className={`font-black uppercase tracking-tighter ${isInline ? 'text-[6px]' : 'text-[8px]'}`}>
+                  {mode === ScannerMode.BARCODE ? 'p/ QR' : 'p/ Barras'}
+                </span>
+              </button>
+            )}
 
-          {onModeChange && (
-            <button 
-              onClick={toggleMode}
+            <button
+              onClick={() => {
+                stopScanner().then(() => startScanner());
+              }}
               className={`p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center ${isInline ? 'min-w-[48px]' : 'min-w-[64px]'} pointer-events-auto shadow-xl`}
+              title="Reiniciar Câmera"
             >
-              <RefreshCw size={isInline ? 16 : 20} className="mb-1" />
+              <Camera size={isInline ? 16 : 20} className={`mb-1 ${isLoading ? 'animate-spin' : ''}`} />
               <span className={`font-black uppercase tracking-tighter ${isInline ? 'text-[6px]' : 'text-[8px]'}`}>
-                {mode === ScannerMode.BARCODE ? 'p/ QR' : 'p/ Barras'}
+                Reiniciar
               </span>
             </button>
-          )}
-          
-          <button 
-            onClick={() => {
-              stopScanner().then(() => startScanner());
-            }}
-            className={`p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center ${isInline ? 'min-w-[48px]' : 'min-w-[64px]'} pointer-events-auto shadow-xl`}
-            title="Reiniciar Câmera"
-          >
-            <Camera size={isInline ? 16 : 20} className={`mb-1 ${isLoading ? 'animate-spin' : ''}`} />
-            <span className={`font-black uppercase tracking-tighter ${isInline ? 'text-[6px]' : 'text-[8px]'}`}>
-              Reiniciar
-            </span>
-          </button>
+
+            {onTorchToggle && (
+              <button
+                onClick={onTorchToggle}
+                disabled={torchSupported === false}
+                aria-pressed={torch === 'on'}
+                className={`p-3 backdrop-blur-md rounded-2xl active:scale-90 transition-all border shadow-xl pointer-events-auto ${
+                  torch === 'on' ? 'bg-amber-500 border-amber-600 text-white' : 'bg-white/10 border-white/10 text-white'
+                } ${torchSupported === false ? 'opacity-40' : ''}`}
+                title={torchSupported === false ? 'Lanterna não suportada por esta câmera' : 'Alternar Lanterna'}
+              >
+                <Flashlight size={isInline ? 16 : 20} className={torch === 'on' ? 'animate-pulse' : ''} />
+              </button>
+            )}
+
+            {availableCameras.length > 1 && !isInline && (
+              <button
+                onClick={switchCamera}
+                className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 shadow-xl pointer-events-auto"
+                title="Trocar Câmera"
+              >
+                <Camera size={20} />
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Lado Direito: Zoom & Troca de Câmera */}
-        <div className="flex-1 flex justify-end items-center space-x-2 pointer-events-auto">
-          {onTorchToggle && (
-            <button 
-              onClick={onTorchToggle}
-              className={`p-3 backdrop-blur-md rounded-2xl active:scale-90 transition-all border shadow-xl ${
-                torch === 'on' ? 'bg-amber-500 border-amber-600 text-white' : 'bg-white/10 border-white/10 text-white'
-              }`}
-              title="Alternar Lanterna"
+        {!isInline && (
+          <div className={`p-1 bg-white/10 backdrop-blur-md rounded-2xl flex items-center border border-white/10 shadow-xl pointer-events-auto ${zoomSupported === false ? 'opacity-40' : ''}`}>
+            <button
+              onClick={() => handleZoom(-1)}
+              disabled={zoomSupported === false}
+              className="p-2 text-white active:scale-90"
+              title="Reduzir zoom"
+              aria-label="Reduzir zoom"
             >
-              <Flashlight size={20} className={torch === 'on' ? 'animate-pulse' : ''} />
+              <Minimize size={20} />
             </button>
-          )}
-          {availableCameras.length > 1 && !isInline && (
-            <button 
-              onClick={switchCamera}
-              className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 shadow-xl"
+            <span className="text-white text-[10px] font-bold w-10 text-center tabular-nums">{zoomDisplay.toFixed(1)}x</span>
+            <button
+              onClick={() => handleZoom(1)}
+              disabled={zoomSupported === false}
+              className="p-2 text-white active:scale-90"
+              title="Aumentar zoom"
+              aria-label="Aumentar zoom"
             >
-              <Camera size={20} />
+              <Maximize size={20} />
             </button>
-          )}
-          {!isInline && (
-            <div className="p-1 bg-white/10 backdrop-blur-md rounded-2xl flex items-center border border-white/10 shadow-xl">
-              <button onClick={() => handleZoom(-0.5)} className="p-2 text-white active:scale-90"><Minimize size={20} /></button>
-              <span className="text-white text-[10px] font-bold w-8 text-center">{zoomLevel.toFixed(1)}x</span>
-              <button onClick={() => handleZoom(0.5)} className="p-2 text-white active:scale-90"><Maximize size={20} /></button>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {batterySaver && (
+          <div className="px-3 py-1 bg-amber-500/20 backdrop-blur-md rounded-full border border-amber-500/30 flex items-center space-x-2 pointer-events-auto">
+            <ShieldCheck size={12} className="text-amber-500" />
+            <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Modo Econômico Ativo</span>
+          </div>
+        )}
       </div>
 
       {/* Overlay Children (Confirmation UI) */}
@@ -614,7 +764,10 @@ const Scanner: React.FC<ScannerProps> = ({
         // Em ecrã cheio o aviso fica SOB a barra de controlos: no rodapé ele
         // ficava por baixo do botão "Digitar Código Manualmente" (ambos em
         // bottom-24) e a mensagem + "Tentar Novamente" era ilegível.
-        <div className={`absolute ${isInline ? 'bottom-4' : 'top-24'} left-6 right-6 z-[120] p-4 bg-red-500/20 backdrop-blur-md border border-red-500/50 rounded-2xl text-center pointer-events-auto`}>
+        <div
+          className={`absolute ${isInline ? 'bottom-4' : ''} left-6 right-6 z-[120] p-4 bg-red-500/20 backdrop-blur-md border border-red-500/50 rounded-2xl text-center pointer-events-auto`}
+          style={isInline ? undefined : { top: 'calc(var(--ion-safe-area-top, 0px) + 9rem)' }}
+        >
           <p className="text-white text-xs font-bold uppercase tracking-tight">{error}</p>
           <button onClick={() => { setError(null); startScanner(); }} className="mt-2 text-white text-[10px] font-bold underline uppercase tracking-widest">Tentar Novamente</button>
         </div>

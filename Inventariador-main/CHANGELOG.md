@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — Leitura de código de barras, lanterna e zoom do scanner
+
+- **Leitura 1D em 1920x1080 a 10 leituras/s:** a configuração anterior pedia
+  1280x720, limitava a câmara a 5 fps e descodificava a `fps: 2` — duas
+  hipóteses por segundo, insuficientes para um Code 128 ou Code 39 de etiqueta
+  pequena, mesmo visível no ecrã. Passa a pedir 1920x1080 (1280x720 em economia
+  de bateria), 10 leituras/s e `disableFlip` (a câmara é a traseira).
+- **Área de leitura relativa:** a caixa de 350x150 px fixos passa a uma faixa
+  de 90% × 35% do viewfinder, o que perdoa o alinhamento em ecrãs pequenos.
+- **BarcodeDetector nativo:** `formatsToSupport` e `experimentalFeatures` eram
+  passados ao `start()` do html5-qrcode, onde são ignorados; passam ao
+  construtor, com `useBarCodeDetectorIfSupported` — no Chrome/WebView Android a
+  descodificação usa o detector nativo, mais preciso em 1D.
+- **Lanterna e zoom não funcionavam:** o código chamava `getRunningTrack()`,
+  que não existe na API do html5-qrcode; a excepção era engolida e o track
+  nunca era guardado. O track passa a vir do `srcObject` do `<video>`, a
+  lanterna reaplica-se após cada reinício/troca de câmara e o zoom usa o
+  intervalo real do sensor (min/max/step), mostrando o factor relativo. Sem
+  suporte de hardware o controlo fica desactivado em vez de parecer avariado.
+- **Foco contínuo:** aplicado quando a câmara o suporta — a imagem desfocada
+  era a causa mais comum de um código visível não ser lido.
+- **Botão do zoom cortado:** a barra de controlos era uma fila única de três
+  colunas `flex-1` com larguras mínimas fixas; num ecrã de 360 px o grupo do
+  zoom saía pela direita. Passa a duas filas (acções da câmara e zoom) abaixo da
+  área segura do Android.
+
 ### Corrigido — «Nenhum Endereço Cadastrado» com os ativos na tabela de trabalho
 
 - **O ecrã lia as tabelas erradas:** `getLocationsWithStats` consultava
