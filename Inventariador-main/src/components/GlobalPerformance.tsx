@@ -1,6 +1,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Asset } from '../types';
+import { isConferido } from '../utils/conferencia';
 import BackButton from './BackButton';
 import { 
   ChevronLeft, 
@@ -30,8 +31,8 @@ const GlobalPerformance: React.FC<GlobalPerformanceProps> = ({ assets, onBack })
 
     for (let i = 0; i < assets.length; i++) {
       const a = assets[i];
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-      if (isConferido) {
+      const conferido = isConferido(a);
+      if (conferido) {
         s.checked++;
         if (a._dataLeitura) {
           const date = new Date(a._dataLeitura).toLocaleDateString('en-CA');

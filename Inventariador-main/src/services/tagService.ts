@@ -1,5 +1,6 @@
 import { TagInventario, Asset } from '../types';
 import { normalizeFlag } from '../utils/normalize';
+import { isConferido } from '../utils/conferencia';
 import { 
   AlertCircle, 
   CheckCircle2, 
@@ -226,7 +227,7 @@ export const isAssetBaixado = (asset: Asset): boolean => {
 export const determineAssetTag = (asset: Asset, targetLocation: string, selectedUnit: string | null): TagInventario => {
   const statusUpper = String(asset.status || '').toUpperCase();
   const isBaixado = isAssetBaixado(asset);
-  const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+  const conferido = isConferido(asset);
   
   // REGRA DE OURO: Divergência Crítica (Ativo mas com Baixa)
   const isGoldenRuleDivergent = !statusUpper.includes('BAIXA') && !!asset.databaixa;
@@ -273,7 +274,7 @@ export const determineAssetTag = (asset: Asset, targetLocation: string, selected
   }
 
   // Se não foi conferido ainda, é PENDENTE
-  if (!isConferido) return TagInventario.PENDENTE;
+  if (!conferido) return TagInventario.PENDENTE;
 
   // 5. CONFERIDO vs ADOTADO vs RE-ADOTADO
   const targetLocKey = normalizeString(targetLocation);

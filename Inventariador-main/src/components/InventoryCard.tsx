@@ -5,6 +5,7 @@ import { Asset } from '../types';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { showRecoveryToast } from '../services/NavigationGuardService';
+import { isConferido } from '../utils/conferencia';
 import { 
   ArrowLeft, 
   MapPin, 
@@ -249,10 +250,10 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         (ativo.primarykey?.toLowerCase() || '').includes(term);
 
       // Filtro de status de conferência
-      const isConferido = ativo._conferido === 1;
+      const conferido = isConferido(ativo);
       const matchConferido = filterConferido === 'todos' ||
-        (filterConferido === 'conferido' && isConferido) ||
-        (filterConferido === 'pendente' && !isConferido);
+        (filterConferido === 'conferido' && conferido) ||
+        (filterConferido === 'pendente' && !conferido);
 
       // Filtro de conta de eliminação fiscal (131105001)
       const isContaEspecial = ativo.contacontabil === '131105001';
@@ -266,7 +267,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
   const stats = useMemo(() => {
     const list = filteredAtivos || [];
     const total = list.length;
-    const conferidos = list.filter(a => a._conferido === 1).length;
+    const conferidos = list.filter(a => isConferido(a)).length;
     const pendentes = total - conferidos;
     const somaFinanceira = list.reduce((acc, curr) => acc + (curr.vlraquisic || 0), 0);
     const contaEspecialContagem = list.filter(a => a.contacontabil === '131105001').length;
@@ -898,7 +899,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
           ) : (
             <div className="divide-y divide-slate-900">
               {paginatedAtivos.map((ativo) => {
-                const isConferido = ativo._conferido === 1;
+                const conferido = isConferido(ativo);
                 const isSpecial = ativo.contacontabil === '131105001';
 
                 return (
@@ -921,9 +922,9 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                         )}
 
                         <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
-                          isConferido ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-900/50' : 'bg-slate-900 text-slate-400 border border-slate-800'
+                          conferido ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-900/50' : 'bg-slate-900 text-slate-400 border border-slate-800'
                         }`}>
-                          {isConferido ? 'CONFERIDO' : 'PENDENTE'}
+                          {conferido ? 'CONFERIDO' : 'PENDENTE'}
                         </span>
                       </div>
 
@@ -948,9 +949,9 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                       </div>
 
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center border transition-colors ${
-                        isConferido ? 'bg-emerald-950 border-emerald-800 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-600 hover:text-white'
+                        conferido ? 'bg-emerald-950 border-emerald-800 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-600 hover:text-white'
                       }`}>
-                        <Check size={14} className={isConferido ? 'stroke-[3]' : 'stroke-[2]'} />
+                        <Check size={14} className={conferido ? 'stroke-[3]' : 'stroke-[2]'} />
                       </div>
                     </div>
                   </div>
@@ -1007,9 +1008,9 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                 <h3 className="text-sm font-black text-white font-mono uppercase">ETIQUETA: {ativoDetalhado.etiqueta || 'N/A'}</h3>
               </div>
               <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
-                ativoDetalhado._conferido === 1 ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-amber-950 text-amber-400 border border-amber-800'
+                isConferido(ativoDetalhado) ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-amber-950 text-amber-400 border border-amber-800'
               }`}>
-                {ativoDetalhado._conferido === 1 ? 'REGISTRO CONFERIDO' : 'AGUARDANDO LEITURA'}
+                {isConferido(ativoDetalhado) ? 'REGISTRO CONFERIDO' : 'AGUARDANDO LEITURA'}
               </span>
             </div>
 

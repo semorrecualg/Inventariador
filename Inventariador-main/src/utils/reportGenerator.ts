@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { Asset } from '../types';
 import { getLocalPhoto } from '../services/photoService';
+import { isConferido } from './conferencia';
 
 /**
  * Converte um Blob em uma string DataURL (Base64)
@@ -45,7 +46,7 @@ export const generateInventoryBook = async (assets: Asset[], unitName: string): 
     a.etiqueta || 'S/E',
     a.descricaodoativo || 'S/D',
     a.endereco || 'S/L',
-    a._conferido ? 'CONFERIDO' : 'PENDENTE',
+    isConferido(a) ? 'CONFERIDO' : 'PENDENTE',
     a.TAG_INVENTARIO || '---'
   ]);
 
@@ -128,7 +129,7 @@ export const generateKardexFichas = async (assets: Asset[], unitName: string): P
     doc.line(15, 192, 195, 192);
 
     doc.setTextColor(20, 20, 20);
-    doc.text(`CONFERIDO: ${asset._conferido ? 'SIM' : 'NÃO'}`, 15, 200);
+    doc.text(`CONFERIDO: ${isConferido(asset) ? 'SIM' : 'NÃO'}`, 15, 200);
     doc.text(`DATA AUDITORIA: ${asset._conferidoEm ? new Date(asset._conferidoEm).toLocaleString('pt-BR') : 'PENDENTE'}`, 15, 210);
     doc.text(`AUDITOR: ${asset._conferidoPor || 'NÃO IDENTIFICADO'}`, 15, 220);
     

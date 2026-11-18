@@ -16,6 +16,7 @@ import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './uti
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { marcarAlteracaoLocal, preservarPendenciaLocal } from './utils/pendencia';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
+import { isConferido } from './utils/conferencia';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
@@ -3240,8 +3241,8 @@ useEffect(() => {
           let hasChanges = false;
 
           const updatedAssets = saved.assets.map(a => {
-            const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-            if (isConferido) {
+            const conferido = isConferido(a);
+            if (conferido) {
               let needsUpdate = false;
               if (!a._dataLeitura) {
                 needsUpdate = true;
@@ -3310,8 +3311,8 @@ useEffect(() => {
               const yesterdayStr = '2026-03-15T12:00:00Z';
               
               parsed.assets = parsed.assets.map((a: Asset) => {
-                const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-                if (isConferido) {
+                const conferido = isConferido(a);
+                if (conferido) {
                   let needsUpdate = false;
                   if (!a._dataLeitura) {
                     needsUpdate = true;
@@ -3992,7 +3993,7 @@ useEffect(() => {
         continue;
       }
 
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      const conferido = isConferido(a);
       const effectiveLoc = effectiveAssetAddress(a);
       const locDisplay = String(effectiveLoc).trim().toUpperCase();
       const locKey = normalizeKey(effectiveLoc);
@@ -4002,13 +4003,13 @@ useEffect(() => {
       const statusUpper = String(a.status || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXA') || !!a.databaixa;
       
-      if (isBaixado && !isConferido) continue;
+      if (isBaixado && !conferido) continue;
 
       if (!stats[locKey]) stats[locKey] = { total: 0, checked: 0, displayName: locDisplay };
       
       if (!isBaixado) stats[locKey].total++;
       
-      if (isConferido) {
+      if (conferido) {
         stats[locKey].checked++;
         if (isBaixado) stats[locKey].total++;
       }
@@ -6354,7 +6355,7 @@ useEffect(() => {
   const handleSignatureConfirm = useCallback(async (signature: string) => {
     if (!selectedUnit) return;
 
-    const confirmedAssets = filteredAssetsByUnit.filter(a => a._conferido);
+    const confirmedAssets = filteredAssetsByUnit.filter(a => isConferido(a));
     if (confirmedAssets.length === 0) {
       setModalConfig({
         isOpen: true,
@@ -7577,7 +7578,7 @@ useEffect(() => {
             />
           ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}{screen === AppScreen.SIGNATURE && (userHasPermission(user, 'sign_documents') ? (
             <Signature 
-              assets={filteredAssetsByUnit.filter(a => a._conferido)}
+              assets={filteredAssetsByUnit.filter(a => isConferido(a))}
               onBack={popScreen}
               onConfirm={handleSignatureConfirm}
               unitName={selectedUnit || ''}

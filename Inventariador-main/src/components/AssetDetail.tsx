@@ -8,6 +8,7 @@ import { QR_FIELD_ORDER } from '../utils/qrUtils';
 import { updateAssetInProtheus } from '../services/protheusService';
 import { localDb } from '../services/localDbService';
 import { canonicalKey } from '../utils/normalize';
+import { isConferido } from '../utils/conferencia';
 
 import { 
   Edit2, 
@@ -522,7 +523,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     return current === 'ETIQUETAR' || original === 'ETIQUETAR';
   }, [workingAsset.etiqueta, workingAsset._valoresOriginais]);
 
-  const isConferido = !!workingAsset._conferido || String(workingAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+  const conferido = isConferido(workingAsset);
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
 
   const meta = getTagMetadata(visualStatus);
@@ -738,7 +739,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       {/* KARDEX BODY */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-[60vh] bg-bg-main">
           {/* SITUAÇÃO DO ATIVO (REGRA DE OURO) */}
-          {(isAdopted || workingAsset._is_divergent_baixa || isConferido) && (
+          {(isAdopted || workingAsset._is_divergent_baixa || conferido) && (
             <div className="bg-white border border-border rounded-2xl p-5 shadow-sm space-y-4 animate-slideIn">
               <div className="flex items-center justify-between mb-1">
                 <h4 className="text-[10px] font-black text-ink-muted uppercase tracking-[0.2em] flex items-center">
@@ -774,7 +775,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                       </div>
                     )}
 
-                    {(isAdopted || isConferido) && (
+                    {(isAdopted || conferido) && (
                       <div className="flex items-start">
                         <div className="w-8 h-8 rounded-xl bg-blue-500 text-white flex items-center justify-center mr-3 shrink-0 shadow-lg shadow-blue-500/20">
                           <MapPin size={14} />

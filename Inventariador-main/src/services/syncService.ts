@@ -8,6 +8,7 @@ import { sanitizeAssetKey } from '../utils/assetKey';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { matchUnitKeys } from '../utils/schema';
 import { UPSERT_TIMEOUT_MS, withUpsertTimeout } from './syncQueueGuards';
+import { isConferido } from '../utils/conferencia';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -665,10 +666,17 @@ const _syncService = {
             currentCampaignId: record.currentCampaignId !== undefined && record.currentCampaignId !== null ? String(record.currentCampaignId).trim() : null,
             // CONFERÊNCIA (quem e quando): sem estas três colunas o ativo subia,
             // mas a nuvem nunca sabia que ele tinha sido conferido no aparelho.
-            conferido: Boolean(
-              Number(record._conferido) === 1 ||
-              String(record.status || '').toUpperCase().includes('CONFERIDO')
-            ),
+            // A flag local sobe pela MESMA regra das leituras (`isConferido`),
+            // que aceita booleano, 1/0, `'1'`/`'true'` e a coluna da base
+            // (`AUDITOR_STATUS_CONFERENCIA = 'SIM'`). Antes só valia
+            // `Number(_conferido) === 1`: conferido no aparelho como `true` (ou
+            // conferido pela planilha) subia PENDENTE e a nuvem ficava sem a
+            // conferência. O `status` textual continua a valer pelo mesmo
+            // motivo de sempre: é o marcador legado que a planilha/ERP traz e
+            // que a nuvem lê (`status = 'CONFERIDO'`).
+            conferido:
+              isConferido(record) ||
+              String(record.status || '').toUpperCase().includes('CONFERIDO'),
             auditor: record._auditor !== undefined && record._auditor !== null ? String(record._auditor).trim() || null : null,
             data_leitura: record._dataLeitura !== undefined && record._dataLeitura !== null ? String(record._dataLeitura) : null
           };
