@@ -117,3 +117,31 @@ export const mergeUnitConfigIntoList = <T extends { unit_id?: string }>(
   else list.push(config);
   return list;
 };
+
+/** Campos que identificam a unidade num registro de configuração. */
+export interface UnitConfigUnitFields {
+  filial?: string;
+  unit_id?: string;
+  _unitid?: string;
+}
+
+/** Nome da unidade de um registro — `filial` é o canônico, os legados vêm depois. */
+export const unitConfigUnitOf = (config: UnitConfigUnitFields | null | undefined): string =>
+  String(config?.filial || config?.unit_id || config?._unitid || '').trim();
+
+/**
+ * Registro de âncora da unidade, comparado pela chave normalizada (`_`, hífen,
+ * acento e caixa não separam a mesma filial).
+ *
+ * O `UnitConfigurator` procurava só `unit_id`: registros gravados/legados só
+ * com `filial` não eram encontrados, o formulário abria vazio e o mapa ficava
+ * no centro do país mesmo com a âncora da filial já configurada.
+ */
+export const findUnitConfigForUnit = <T extends UnitConfigUnitFields>(
+  configs: T[],
+  unit: string | null | undefined
+): T | null => {
+  const key = normalizeKey(unit || '');
+  if (!key) return null;
+  return configs.find(entry => normalizeKey(unitConfigUnitOf(entry)) === key) ?? null;
+};

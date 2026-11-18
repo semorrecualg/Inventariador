@@ -16,7 +16,7 @@ import { buildUnitConfigRowPayload } from '../utils/unitConfigPayload';
 import { buildUnitFlags, mergeUnitFlags } from '../utils/unitConfigFlags';
 import { isAdminEmail } from '../utils/authUtils';
 import { pullDedupKey } from '../utils/syncDedup';
-import { normalizeKey } from '../utils/schema';
+import { matchUnitKeys, normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
@@ -3136,10 +3136,14 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
   // Se for apenas interno, filtramos e retornamos
   if (isInternal) {
     if (unitid) {
-      const cleanUnitId = unitid.trim().toUpperCase();
+      const cleanUnitId = unitid.trim();
+      // Comparação tolerante (`010101_CICOPAL_GO` = `010101 CICOPAL GO`): a
+      // igualdade exata escondia a campanha já gravada e a tela abria o cadastro
+      // em branco, criando uma segunda campanha para a mesma filial.
       return localCampaigns.filter(c => {
-        const cUnit = (String(c.filial || c.unit_id || c._unitid || '')).trim().toUpperCase();
-        return cUnit === cleanUnitId || cUnit === '' || cUnit === 'GLOBAL';
+        const cUnit = String(c.filial || c.unit_id || c._unitid || '').trim();
+        const cUpper = cUnit.toUpperCase();
+        return cUpper === '' || cUpper === 'GLOBAL' || matchUnitKeys(cUnit, cleanUnitId);
       });
     }
     return localCampaigns;
