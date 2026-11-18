@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   estado de liberação passa a distinguir **campanha gravada** (`CREATED` ou
   `ACTIVE`), que deixa o botão verde e abre a ficha, de **campanha ativa**, que
   continua sendo a única que libera o inventário de campo.
+- **Aviso da filial alinhado ao botão:** com campanha criada e ainda não ativa,
+  o cartão fica com o botão verde, mas a linha continuava a dizer "falta
+  campanha". O rótulo passa a apontar **ativar a campanha** (`describeUnitReleaseMissing`),
+  e as mensagens de bloqueio deixam de mandar "configurar" o que já existe.
 - **Comparação de filial tolerante na campanha:** a gestão de campanhas e a
   leitura local comparavam a filial por igualdade exata; `010101_CICOPAL_GO` e
   `010101 CICOPAL GO` não se encontravam e a tela abria o cadastro por cima de

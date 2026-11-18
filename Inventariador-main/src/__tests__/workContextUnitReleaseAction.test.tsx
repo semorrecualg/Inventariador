@@ -187,8 +187,11 @@ describe('CONTRATO DE TRABALHO · liberação da unidade no cartão', () => {
       unitName: FILIAL,
       campaignAction: 'OPEN'
     });
-    // A liberação continua pendente: só a campanha ATIVA libera o inventário.
-    expect(screen.getByTestId('unit-release-warning').textContent).toMatch(/falta campanha/i);
+    // A liberação continua pendente: só a campanha ATIVA libera o inventário —
+    // o aviso aponta a ativação, não a criação (a campanha existe).
+    expect(screen.getByTestId('unit-release-warning').textContent).toMatch(/falta ativar a campanha/i);
+    // A própria linha do cartão aponta a ativação, coerente com o botão verde.
+    expect(unitCard().textContent).toMatch(/FALTA ativar a campanha/i);
   });
 
   it('admin: com campanha criada, o toque no cartão abre a campanha (não o cadastro)', () => {

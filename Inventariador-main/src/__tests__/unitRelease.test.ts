@@ -95,6 +95,24 @@ describe('unitRelease · mapa por contrato + filial', () => {
     expect(describeUnitReleaseMissing(resolveUnitReleaseStatus({ hasAnchor: true }))).toBe('campanha');
     expect(describeUnitReleaseMissing(resolveUnitReleaseStatus({ hasAnchor: true, hasCampaign: true }))).toBe('');
   });
+
+  it('campanha criada troca "falta campanha" por "falta ativar a campanha"', () => {
+    // A campanha existe (botão do cartão verde): o pendente é a ativação.
+    expect(
+      describeUnitReleaseMissing(
+        resolveUnitReleaseStatus({ hasAnchor: true, hasCampaignRecord: true })
+      )
+    ).toBe('ativar a campanha');
+    expect(
+      describeUnitReleaseMissing(resolveUnitReleaseStatus({ hasCampaignRecord: true }))
+    ).toBe('âncora GPS e ativar a campanha');
+    // Com campanha ativa não sobra nada a apontar.
+    expect(
+      describeUnitReleaseMissing(
+        resolveUnitReleaseStatus({ hasAnchor: true, hasCampaign: true, hasCampaignRecord: true })
+      )
+    ).toBe('');
+  });
 });
 
 describe('unitRelease · campanha lida do banco persistido', () => {

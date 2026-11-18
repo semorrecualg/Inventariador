@@ -249,11 +249,19 @@ export const readActiveCampaignCache = (
   return units;
 };
 
-/** Rótulo curto do que falta para liberar a unidade. */
+/**
+ * Rótulo curto do que falta para liberar a unidade.
+ *
+ * Campanha gravada e ainda não ativa: o que falta NÃO é criar campanha (ela
+ * existe, o botão do cartão está verde) — é ativá-la. Dizer "falta campanha"
+ * contradizia o próprio cartão e levava a criar duplicado.
+ */
 export const describeUnitReleaseMissing = (status: UnitReleaseStatus | null): string => {
   if (!status || status.released) return '';
   const parts: string[] = [];
   if (status.missing.includes('ANCHOR')) parts.push('âncora GPS');
-  if (status.missing.includes('CAMPAIGN')) parts.push('campanha');
+  if (status.missing.includes('CAMPAIGN')) {
+    parts.push(status.hasCampaignRecord ? 'ativar a campanha' : 'campanha');
+  }
   return parts.join(' e ');
 };

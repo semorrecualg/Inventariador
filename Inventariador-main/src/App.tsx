@@ -4302,8 +4302,8 @@ useEffect(() => {
           isOpen: true,
           title: 'Unidade aguardando liberação',
           message: isAdminUser(user)
-            ? `A unidade ${newFilial} ainda não foi liberada para inventário. Configure ${pending} na Unidade Operacional para liberar.`
-            : `A unidade ${newFilial} ainda não foi liberada para inventário. O administrador precisa configurar ${pending} na Unidade Operacional.`,
+            ? `A unidade ${newFilial} ainda não foi liberada para inventário. Falta ${pending} — resolva na Unidade Operacional ou pelo cartão da filial.`
+            : `A unidade ${newFilial} ainda não foi liberada para inventário. O administrador precisa resolver: ${pending}.`,
           type: 'error',
           onConfirm: () => {}
         });
@@ -4383,8 +4383,8 @@ useEffect(() => {
           isOpen: true,
           title: 'Unidade aguardando liberação',
           message: isAdminUser(user)
-            ? `A unidade ${selectedUnit} ainda não foi liberada para inventário. Configure ${pending} na Unidade Operacional para liberar.`
-            : `A unidade ${selectedUnit} ainda não foi liberada para inventário. O administrador precisa configurar ${pending} na Unidade Operacional.`,
+            ? `A unidade ${selectedUnit} ainda não foi liberada para inventário. Falta ${pending} — resolva na Unidade Operacional ou pelo cartão da filial.`
+            : `A unidade ${selectedUnit} ainda não foi liberada para inventário. O administrador precisa resolver: ${pending}.`,
           type: 'error',
           onConfirm: () => {}
         });

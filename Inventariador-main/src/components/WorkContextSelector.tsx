@@ -600,7 +600,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                   </p>
                   <p className="text-[8px] font-bold text-amber-600 uppercase tracking-wider leading-relaxed text-center mt-1">
                     {isAdmin
-                      ? 'Toque na filial ou nos botões vermelhos para configurar o que falta.'
+                      ? 'Toque na filial ou nos botões para resolver o que falta.'
                       : 'O administrador define âncora e campanha na Unidade Operacional.'}
                   </p>
                 </div>
