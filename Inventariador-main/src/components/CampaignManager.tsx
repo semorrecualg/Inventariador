@@ -21,6 +21,8 @@ import { User, InventoryCampaign, CampaignStatus, AppScreen, type CampaignOpenIn
 import { isAdminUser, userHasPermission } from '../services/rbacService';
 import { createCampaign, updateCampaignStatus, fetchCampaignStats, deleteCampaign, getCampaignSnapshot, createCampaignSnapshot, fetchCampaigns, fetchAllCampaigns, campaignAuditWorkCount } from '../services/supabaseService';
 import { CampaignGovernanceError, requireCampaignFilial } from '../utils/campaignGuard';
+import { campaignUnitKeys, isActiveCampaign, isRecordedCampaign } from '../utils/unitRelease';
+import { matchUnitKeys } from '../utils/schema';
 import { localDb } from '../services/localDbService';
 import { db } from '../services/sqliteService';
 import { Device } from '@capacitor/device';
@@ -467,8 +469,9 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
   }, [user]);
 
   // Botão CAMPANHA do cartão da filial (`initialAction`):
-  //  · `OPEN`   → a campanha ATIVA daquela filial abre já na ficha, sem passar
-  //               pela lista;
+  //  · `OPEN`   → a campanha daquela filial abre já na ficha, sem passar pela
+  //               lista — ATIVA primeiro e, quando ainda não foi ativada, a
+  //               CRIADA (existe registro: abrir, nunca cadastrar de novo);
   //  · `CREATE` → o cadastro nasce aberto (estado inicial de `isCreating`);
   //  · `OPEN` sem campanha gravada nesta filial → cadastro, senão o utilizador
   //               cairia numa lista vazia depois de tocar no botão vermelho.
@@ -477,19 +480,22 @@ const CampaignManager: React.FC<CampaignManagerProps> = ({
     if (initialAction !== 'OPEN' || initialActionAppliedRef.current) return;
     if (!hasLoadedCampaigns) return;
 
-    const filial = (initialUnit || '').trim().toUpperCase();
+    const filial = (initialUnit || '').trim();
+    // Comparação tolerante (`010101_CICOPAL_GO` = `010101 CICOPAL GO`) e por
+    // qualquer um dos campos da unidade: a comparação exata deixava a campanha
+    // de fora e o cadastro em branco abria por cima de uma campanha existente.
     const candidates = localCampaigns.filter(c => {
       if (!filial) return true;
-      const own = String(c.filial || c.unit_id || c._unitid || '').trim().toUpperCase();
-      return own === filial;
+      return campaignUnitKeys(c).some(key => matchUnitKeys(key, filial));
     });
-    const activeCampaign =
+    const target =
       candidates.find(c => String(c.id) === String(currentCampaignId)) ||
-      candidates.find(c => String(c.status).toUpperCase() === CampaignStatus.ACTIVE);
+      candidates.find(c => isActiveCampaign(c)) ||
+      candidates.find(c => isRecordedCampaign(c));
 
     initialActionAppliedRef.current = true;
-    if (activeCampaign) {
-      handleSelectCampaign(activeCampaign);
+    if (target) {
+      handleSelectCampaign(target);
     } else if (candidates.length === 0) {
       setIsCreating(true);
     }

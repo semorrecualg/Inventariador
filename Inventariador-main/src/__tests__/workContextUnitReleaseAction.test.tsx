@@ -54,6 +54,12 @@ const campaignOnlyMap = buildUnitReleaseMap([
   { name: FILIAL, tenantid: TENANT, hasAnchor: false, hasCampaign: true }
 ]);
 
+// Campanha CRIADA mas ainda não ativada: já existe registro na filial (o botão
+// não pode dizer "criar"), mas a unidade continua aguardando a ativação.
+const createdCampaignMap = buildUnitReleaseMap([
+  { name: FILIAL, tenantid: TENANT, hasAnchor: true, hasCampaign: false, hasCampaignRecord: true }
+]);
+
 // Unidade LIBERADA: âncora GPS e campanha configuradas.
 const releasedMap = buildUnitReleaseMap([
   { name: FILIAL, tenantid: TENANT, hasAnchor: true, hasCampaign: true }
@@ -163,6 +169,33 @@ describe('CONTRATO DE TRABALHO · liberação da unidade no cartão', () => {
     fireEvent.click(campaignAction());
 
     expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.CAMPAIGN_MANAGEMENT, {
+      unitName: FILIAL,
+      campaignAction: 'OPEN'
+    });
+  });
+
+  it('admin: campanha criada (ainda não ativa) fica verde e abre a campanha da filial', () => {
+    const { onOpenAdmin } = renderSelector(UserRole.ADMIN, createdCampaignMap);
+
+    expect(campaignAction().getAttribute('data-state')).toBe('ok');
+    expect(campaignAction().getAttribute('title')).toContain('criada');
+    fireEvent.click(campaignAction());
+
+    expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+    expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.CAMPAIGN_MANAGEMENT, {
+      unitName: FILIAL,
+      campaignAction: 'OPEN'
+    });
+    // A liberação continua pendente: só a campanha ATIVA libera o inventário.
+    expect(screen.getByTestId('unit-release-warning').textContent).toMatch(/falta campanha/i);
+  });
+
+  it('admin: com campanha criada, o toque no cartão abre a campanha (não o cadastro)', () => {
+    const { onOpenAdmin } = renderSelector(UserRole.ADMIN, createdCampaignMap);
+
+    fireEvent.click(unitCard());
+
     expect(onOpenAdmin).toHaveBeenCalledWith(AppScreen.CAMPAIGN_MANAGEMENT, {
       unitName: FILIAL,
       campaignAction: 'OPEN'

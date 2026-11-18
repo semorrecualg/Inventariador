@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — campanha criada deixa de ser marcada como inexistente
+
+- **Campanha `CREATED` já conta como campanha da filial:** criar uma campanha
+  nasce no status `CREATED` e só depois é ativada. O cartão da unidade só
+  olhava `ACTIVE`, então uma campanha recém-criada aparecia como "pendente" e o
+  botão 📣 abria o cadastro em branco — caminho para duplicar a campanha. O
+  estado de liberação passa a distinguir **campanha gravada** (`CREATED` ou
+  `ACTIVE`), que deixa o botão verde e abre a ficha, de **campanha ativa**, que
+  continua sendo a única que libera o inventário de campo.
+- **Comparação de filial tolerante na campanha:** a gestão de campanhas e a
+  leitura local comparavam a filial por igualdade exata; `010101_CICOPAL_GO` e
+  `010101 CICOPAL GO` não se encontravam e a tela abria o cadastro por cima de
+  uma campanha existente. Agora a comparação usa a mesma chave normalizada da
+  liberação da unidade (caixa, `_`, hífen e acento não separam) e considera os
+  três campos da unidade (`filial`, `unit_id`, `_unitid`).
+
 ### Corrigido — o mapa GPS abre na âncora da filial
 
 - **A unidade era selecionada antes de as âncoras carregarem:** o efeito de

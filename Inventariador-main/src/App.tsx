@@ -64,7 +64,7 @@ import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturn
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
-import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
+import { buildUnitReleaseMap, campaignUnitKeys, collectActiveCampaignUnits, collectRecordedCampaignUnits, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
 import {
   readCheckpointForDelta,
@@ -773,6 +773,9 @@ useEffect(() => {
   // filtro de ecrã/unidade aplicado à lista `campaigns`). É a fonte do chip
   // CAMPANHA no cartão do contrato de trabalho e da trava de liberação.
   const [activeCampaignUnits, setActiveCampaignUnits] = useState<Set<string>>(() => new Set());
+  // Campanhas GRAVADAS (CREATED/ACTIVE) por unidade: o cartão da filial usa
+  // este conjunto para não marcar como "não criada" uma campanha apenas criada.
+  const [recordedCampaignUnits, setRecordedCampaignUnits] = useState<Set<string>>(() => new Set());
 
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -2296,6 +2299,7 @@ useEffect(() => {
     try {
       const rows = await sqliteService.getCampaigns();
       setActiveCampaignUnits(collectActiveCampaignUnits(rows));
+      setRecordedCampaignUnits(collectRecordedCampaignUnits(rows));
     } catch (err) {
       logger.warn('>>> [Governance] Falha ao ler campanhas persistidas para a liberação:', err);
     }
@@ -6573,18 +6577,18 @@ useEffect(() => {
       }
     }
 
-    // Pre-calculate units with direct ACTIVE campaigns for O(1) lookup
+    // Pre-calculate units with direct campaigns for O(1) lookup.
+    //  · `unitsWithDirectCampaign`: só ACTIVE libera o inventário;
+    //  · `unitsWithRecordedCampaign`: CREATED ou ACTIVE — a campanha já existe
+    //    (abre a ficha em vez do cadastro em branco).
     const unitsWithDirectCampaign = new Set<string>();
+    const unitsWithRecordedCampaign = new Set<string>();
     campaigns.forEach(c => {
-      // REGRA DE GOVERNANÇA: Apenas campanhas com status exatamente igual a 'ACTIVE' habilitam o botão visual
-      if (String(c.status) === 'ACTIVE') {
-        // `filial` é o campo canónico da unidade; `_unitid`/`unit_id` são legado e
-        // podem trazer outro valor, o que deixava o chip CAMPANHA desabilitado.
-        const uId = c.filial || c._unitid || c.unit_id;
-        if (uId) {
-          const norm = normalizeKey(uId);
-          unitsWithDirectCampaign.add(norm);
-        }
+      // Todas as grafias da unidade (`filial`/`unit_id`/`_unitid`): comparar só
+      // o primeiro campo escondia campanha gravada e o cartão pedia "criar".
+      for (const key of campaignUnitKeys(c)) {
+        unitsWithRecordedCampaign.add(key);
+        if (isActiveCampaign(c)) unitsWithDirectCampaign.add(key);
       }
     });
 
@@ -6750,6 +6754,11 @@ useEffect(() => {
         isUnitInReleaseSet(unitsWithDirectCampaign, unit.name) ||
         isUnitInReleaseSet(activeCampaignUnits, unit.name) ||
         isUnitInReleaseSet(cachedActiveCampaignUnits, unit.name);
+      // Campanha já GRAVADA na filial: inclui a criada e ainda não ativada.
+      const hasCampaignRecord =
+        hasDirectCampaign ||
+        isUnitInReleaseSet(unitsWithRecordedCampaign, unit.name) ||
+        isUnitInReleaseSet(recordedCampaignUnits, unit.name);
       const hasGps = unitsWithGps.has(norm);
 
       let assetCount = 0;
@@ -6774,7 +6783,8 @@ useEffect(() => {
         tenantid: unit.tenantid,
         hasData: unit.hasData,
         hasActiveAssets: unit.hasActiveAssets,
-        hasCampaign: hasDirectCampaign, // Stricter governance: only ACTIVE campaign in table or cached enables button
+        hasCampaign: hasDirectCampaign, // Só ACTIVE libera o inventário.
+        hasCampaignRecord, // CREATED ou ACTIVE: a campanha já existe (ficha, não cadastro).
         hasGps,
         assetCount
       };
@@ -6806,6 +6816,7 @@ useEffect(() => {
             hasData: true,
             hasActiveAssets: true,
             hasCampaign: false,
+            hasCampaignRecord: false,
             hasGps: false,
             assetCount
           };
@@ -6824,7 +6835,7 @@ useEffect(() => {
 
     logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, recordedCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref
@@ -6838,7 +6849,8 @@ useEffect(() => {
           name: c.name,
           tenantid: c.tenantid,
           hasAnchor: c.hasGps,
-          hasCampaign: c.hasCampaign
+          hasCampaign: c.hasCampaign,
+          hasCampaignRecord: c.hasCampaignRecord
         }))
       ),
     [fullCompaniesWithStatus]

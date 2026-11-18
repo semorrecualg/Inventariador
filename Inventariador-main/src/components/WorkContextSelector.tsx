@@ -446,11 +446,15 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                     // unidade — é o que colore os botões do cartão (vermelho =
                     // pendente, verde = OK).
                     const anchorReady = release?.hasAnchor === true;
-                    const campaignReady = release?.hasCampaign === true;
+                    // ATIVA libera o inventário; CRIADA (ainda não ativada) já
+                    // existe na filial — o botão fica verde e abre essa campanha,
+                    // em vez de pedir "criar" e gerar duplicado.
+                    const campaignActive = release?.hasCampaign === true;
+                    const campaignReady = release?.hasCampaignRecord === true;
                     // Sem leitura da unidade, o botão continua acionável e nasce
                     // vermelho: configurar é sempre seguro.
                     // O botão da CAMPANHA leva a intenção junto: com campanha
-                    // ativa a tela abre na campanha da filial; sem campanha, já
+                    // gravada a tela abre na campanha da filial; sem campanha, já
                     // no cadastro (botão vermelho).
                     const campaignParams: NavigationParams = {
                       unitName: opt.filial,
@@ -546,12 +550,16 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                             <div
                               role="button"
                               tabIndex={0}
-                              title={campaignReady
-                                ? `Campanha OK · gerenciar ${opt.label}`
-                                : `Campanha pendente · criar ${opt.label}`}
-                              aria-label={campaignReady
+                              title={campaignActive
+                                ? `Campanha OK · ativa · gerenciar ${opt.label}`
+                                : campaignReady
+                                  ? `Campanha criada · ativar/gerenciar ${opt.label}`
+                                  : `Campanha pendente · criar ${opt.label}`}
+                              aria-label={campaignActive
                                 ? `Campanha de ${opt.label} ativa`
-                                : `Criar campanha de ${opt.label}`}
+                                : campaignReady
+                                  ? `Campanha de ${opt.label} criada`
+                                  : `Criar campanha de ${opt.label}`}
                               data-testid={`unit-campaign-action-${opt.filial}`}
                               data-state={campaignReady ? 'ok' : 'pending'}
                               onClick={openRelease(AppScreen.CAMPAIGN_MANAGEMENT, campaignParams)}

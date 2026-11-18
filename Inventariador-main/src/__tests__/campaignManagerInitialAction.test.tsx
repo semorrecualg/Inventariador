@@ -100,6 +100,17 @@ const activeCampaign = (): InventoryCampaign => ({
   end_date: null
 }) as unknown as InventoryCampaign;
 
+// Criada na tela de campanha (status CREATED) e gravada com a filial no formato
+// do banco (`_` em vez de espaço): continua sendo a MESMA unidade.
+const createdCampaign = (): InventoryCampaign => ({
+  ...activeCampaign(),
+  id: 'camp-b',
+  name: 'Inventário criado',
+  status: 'CREATED',
+  filial: '010101_CICOPAL_GO',
+  unit_id: '010101_CICOPAL_GO'
+}) as unknown as InventoryCampaign;
+
 const renderManager = (initialAction: 'CREATE' | 'OPEN') => (
   <CampaignManager
     user={user}
@@ -145,5 +156,15 @@ describe('CampaignManager — intenção do botão CAMPANHA', () => {
     render(renderManager('OPEN'));
 
     expect(await screen.findByText('Nova Campanha')).toBeTruthy();
+  });
+
+  it('OPEN com campanha CRIADA (ainda não ativa) abre a campanha, não o cadastro', async () => {
+    fetchCampaignsMock.mockResolvedValue([createdCampaign()]);
+    render(renderManager('OPEN'));
+
+    // Existe campanha gravada: abre a ficha — cadastro em branco criaria duplicado.
+    expect(await screen.findByText('Inventário criado')).toBeTruthy();
+    expect(await screen.findByText('Excluir Campanha')).toBeTruthy();
+    expect(screen.queryByText('Nova Campanha')).toBeNull();
   });
 });
