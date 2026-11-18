@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Fingerprint, Loader2, Lock, ShieldCheck } from 'lucide-react';
+import { Fingerprint, Loader2, Lock, ShieldCheck, UserRound } from 'lucide-react';
 
 interface BiometricUnlockProps {
   /** Último utilizador autenticado neste aparelho (chave da credencial). */
@@ -10,6 +10,12 @@ interface BiometricUnlockProps {
   onUnlocked: () => void | Promise<void>;
   /** Saída explícita para a senha — o plano B nunca desaparece. */
   onUsePassword: () => void;
+  /**
+   * Segundo utilizador no aparelho: esquece o último utilizador (o `Login`
+   * apaga `gbr_last_login_user`) e abre o formulário vazio, para que ninguém
+   * herde a credencial biométrica do anterior.
+   */
+  onUseAnotherAccount: () => void;
 }
 
 /**
@@ -25,7 +31,8 @@ export const BiometricUnlock: React.FC<BiometricUnlockProps> = ({
   username,
   authenticate,
   onUnlocked,
-  onUsePassword
+  onUsePassword,
+  onUseAnotherAccount
 }) => {
   const [status, setStatus] = useState<'prompting' | 'failed' | 'unlocked'>('prompting');
   // O prompt é automático, mas só uma vez: rerenders e o botão de repetir não
@@ -130,7 +137,17 @@ export const BiometricUnlock: React.FC<BiometricUnlockProps> = ({
           <span>Usar senha</span>
         </button>
 
-        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center pt-2">
+        <button
+          type="button"
+          onClick={onUseAnotherAccount}
+          data-testid="biometric-unlock-other-account"
+          className="w-full bg-transparent text-slate-500 hover:text-accent font-bold py-2.5 rounded-2xl active:scale-[0.98] transition-all uppercase tracking-[0.12em] text-[10px] flex items-center justify-center gap-2 cursor-pointer"
+        >
+          <UserRound size={14} />
+          <span>Entrar com outra conta</span>
+        </button>
+
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center pt-1">
           A senha continua a ser a alternativa neste aparelho
         </p>
       </div>

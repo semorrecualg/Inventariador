@@ -17,6 +17,7 @@ const renderUnlock = async (
   const authenticate = vi.fn().mockResolvedValue(true);
   const onUnlocked = vi.fn();
   const onUsePassword = vi.fn();
+  const onUseAnotherAccount = vi.fn();
 
   await act(async () => {
     render(
@@ -25,12 +26,13 @@ const renderUnlock = async (
         authenticate={authenticate}
         onUnlocked={onUnlocked}
         onUsePassword={onUsePassword}
+        onUseAnotherAccount={onUseAnotherAccount}
         {...props}
       />
     );
   });
 
-  return { authenticate, onUnlocked, onUsePassword };
+  return { authenticate, onUnlocked, onUsePassword, onUseAnotherAccount };
 };
 
 describe('BiometricUnlock — primeira etapa no mobile', () => {
@@ -74,6 +76,17 @@ describe('BiometricUnlock — primeira etapa no mobile', () => {
 
     fireEvent.click(screen.getByTestId('biometric-unlock-password'));
     expect(onUsePassword).toHaveBeenCalledTimes(1);
+  });
+
+  it('oferece «Entrar com outra conta» sem passar pela senha do anterior', async () => {
+    const { onUseAnotherAccount, onUsePassword, authenticate } = await renderUnlock();
+
+    fireEvent.click(screen.getByTestId('biometric-unlock-other-account'));
+    expect(onUseAnotherAccount).toHaveBeenCalledTimes(1);
+    // Caminho distinto do «Usar senha»: não pré-preenche o utilizador anterior.
+    expect(onUsePassword).not.toHaveBeenCalled();
+    // Sem novo prompt biométrico: quem entra é outra pessoa.
+    expect(authenticate).toHaveBeenCalledTimes(1);
   });
 
   it('falha do plugin cai na recusa em vez de rebentar a tela', async () => {

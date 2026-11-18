@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Primeiro acesso intacto:** aparelho capaz sem credencial → senha e depois o
   **cadastro obrigatório** (`BiometricRegistration`), como na Fase 2; só depois
   é que o desbloqueio biométrico passa a ser a primeira etapa.
+- **Segundo utilizador no mesmo aparelho:** a tela passa a oferecer **«Entrar
+  com outra conta»**, que esquece o último utilizador (`gbr_last_login_user`) e
+  abre o formulário **vazio** — ninguém herda o desbloqueio biométrico de quem
+  entrou antes. A credencial registada do anterior continua no aparelho (não se
+  apaga registo nenhum); só o «último utilizador» é esquecido.
 - **Sessão igual à do login por senha:** a entrada biométrica marca a sessão
   como gerida pelo app, grava `LOGIN` com origem «Desbloqueio do aparelho» no
   `audit_logs` e segue para contrato → módulo.
