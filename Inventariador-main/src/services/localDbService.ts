@@ -439,14 +439,20 @@ export const localDb = {
       //
       // A tabela de trabalho do modo INTERNAL é `ativos` (é ela que o
       // Dashboard, a Consulta e o Mapa leem). Ler só `assets`/`local_assets`
-      // deixava o ecrã vazio num aparelho com os ativos carregados em `ativos`
-      // — por isso as três tabelas entram, por esta ordem: canónica, trabalho,
-      // baseline.
+      // deixava o ecrã vazio num aparelho com os ativos carregados em `ativos`.
+      //
+      // As três tabelas são UNIDAS — nunca «a primeira que tem linhas»: uma
+      // filial pode ter em `assets` só as linhas sem endereço e as localidades
+      // em `ativos`, e parar na primeira deixava o ecrã vazio. A união é feita
+      // pela chave do ativo (`[tenantid+primarykey]`), para o mesmo ativo
+      // espelhado nas três tabelas contar UMA vez nas estatísticas.
       const unitMatch = normalizeUnitMatchKey(unitId);
       /** Tabela lida como estrutura: só `tenantid`/`filial` e os campos usados. */
       type UnitRow = {
         tenantid?: unknown;
         filial?: unknown;
+        primarykey?: unknown;
+        id?: unknown;
         endereco?: unknown;
         codigo_endereco?: unknown;
         _is_deleted?: unknown;
@@ -491,19 +497,48 @@ export const localDb = {
         if (exatos.length > 0 || !unitMatch) return exatos as unknown as DexieAddress[];
         return (await doContrato(table)) as unknown as DexieAddress[];
       };
-      /** Ativos da filial: índice exato em cada tabela e, só se todas vierem
-       *  vazias, a varredura tolerante do mesmo contrato. */
+      /**
+       * Duas cópias do MESMO ativo (mesma `primarykey`) em tabelas diferentes:
+       * fica o endereço de qualquer uma e o estado de conferência mais avançado.
+       * Assim a união não perde o local nem desfaz uma conferência já feita em
+       * `ativos`/`local_assets`.
+       */
+      const mergeAssetCopies = (prev: UnitRow, next: UnitRow): UnitRow => ({
+        ...prev,
+        _localMaster: prev._localMaster || next._localMaster,
+        endereco: prev.endereco || next.endereco,
+        LOCALIZACAO: prev.LOCALIZACAO || next.LOCALIZACAO,
+        CENTRO_CUSTO: prev.CENTRO_CUSTO || next.CENTRO_CUSTO,
+        _conferido:
+          prev._conferido === 1 || next._conferido === 1
+            ? 1
+            : (prev._conferido ?? next._conferido),
+        _is_deleted: prev._is_deleted ?? next._is_deleted
+      });
+      /**
+       * Ativos da filial nas TRÊS tabelas (canónica → trabalho → baseline),
+       * com índice exato em cada uma e a varredura tolerante do mesmo contrato
+       * quando a tabela não tem o índice exato. A união é deduplicada pela
+       * chave do ativo; linhas sem chave são mantidas individualmente.
+       */
       const assetRows = async (): Promise<UnitRow[]> => {
+        const byKey = new Map<string, UnitRow>();
+        const anonymous: UnitRow[] = [];
         for (const table of workTables) {
-          const exatos = await exactRowsOf(table);
-          if (exatos.length > 0) return exatos;
+          let rows = await exactRowsOf(table);
+          if (rows.length === 0 && unitMatch) rows = await doContrato(table);
+          rows.forEach(row => {
+            const id = String(row.primarykey ?? row.id ?? '').trim();
+            if (!id) {
+              anonymous.push(row);
+              return;
+            }
+            const key = `${String(row.tenantid || tenant).trim().toUpperCase()}::${id.toUpperCase()}`;
+            const prev = byKey.get(key);
+            byKey.set(key, prev ? mergeAssetCopies(prev, row) : row);
+          });
         }
-        if (!unitMatch) return [];
-        for (const table of workTables) {
-          const tolerantes = await doContrato(table);
-          if (tolerantes.length > 0) return tolerantes;
-        }
-        return [];
+        return [...byKey.values(), ...anonymous];
       };
 
       const indexedAddrs = await addressRows();

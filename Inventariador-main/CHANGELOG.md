@@ -14,16 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   em **`ativos`** — é a tabela que o Dashboard, a Consulta e o Mapa leem. Num
   aparelho com a base carregada só em `ativos` o ENDEREÇO FÍSICO anunciava
   «Nenhum Endereço Cadastrado» (e não havia caminho para o cadastro de ativos).
-  Passa a ler as três, por esta ordem: canónica (`assets`), trabalho (`ativos`),
-  baseline (`local_assets`) — índice exacto em cada uma e, só se todas vierem
-  vazias, a varredura tolerante do mesmo contrato.
+  Passa a **unir** as três tabelas (canónica `assets`, trabalho `ativos`,
+  baseline `local_assets`) — e não a parar na primeira que tem linhas: se
+  `assets` tiver a filial só com linhas sem endereço, as localidades de
+  `ativos` continuam a aparecer. Cada tabela tenta o índice exacto e, quando
+  não o tem, a varredura tolerante do mesmo contrato.
+- **Sem contagens duplicadas:** o mesmo ativo espelhado nas três tabelas é
+  unido pela chave `tenantid + primarykey` e conta **uma** vez; o endereço vem
+  da cópia que o tiver e o estado de conferência é o mais avançado (o trabalho
+  de campo grava em `ativos`/`local_assets`, não necessariamente em `assets`).
 - **Endereço efetivo, igual ao do inventário:** a extração e as estatísticas
   usavam só `endereco`. Passam a usar a mesma regra de `assetAddressKey`
   (`Inventory.tsx`): `_localMaster` (local auditado) vence, e as colunas legadas
   `LOCALIZACAO`/`CENTRO_CUSTO` também identificam a localidade.
-- *Testes:* `addressSearch` (+5) — localidades só em `ativos`, ordem
-  canónica `assets` → `ativos`, filial com `_` a partir do cartão com espaços,
-  `_localMaster`/`LOCALIZACAO` como endereço e isolamento por contrato.
+- *Testes:* `addressSearch` (+8) — localidades só em `ativos`, união de
+  `assets`+`ativos`, **cenário misto** (`assets` com linhas sem endereço e as
+  localidades em `ativos`), ativo espelhado nas três tabelas a contar uma vez,
+  conferência feita numa só cópia a valer, filial com `_` a partir do cartão
+  com espaços, `_localMaster`/`LOCALIZACAO` como endereço e isolamento por
+  contrato. A coluna de endereço da base é `endereco` (confirmado pelo
+  utilizador), e é a primeira da regra de endereço efectivo.
 
 ### Corrigido — campanha ativa aparecia como «falta campanha»
 

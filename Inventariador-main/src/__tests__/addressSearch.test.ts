@@ -91,7 +91,7 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     expect(rows.find(r => r.displayName.startsWith('151100'))).toMatchObject({ total: 2, checked: 1 });
   });
 
-  it('mantém a ordem canónica: `assets` responde antes de `ativos`', async () => {
+  it('junta as três tabelas: `assets` e `ativos` contribuem para a lista', async () => {
     await putAssets([
       { tenantid: 'CICOPAL', primarykey: 'A1', id: 'A1', filial: '010101_CICOPAL_GO', endereco: 'ADMINISTRACAO CENTRAL', _is_deleted: 0, _conferido: 0 }
     ]);
@@ -99,7 +99,57 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
 
     const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
 
-    expect(rows.map(r => r.displayName)).toEqual(['ADMINISTRACAO CENTRAL']);
+    expect(rows.map(r => r.displayName)).toEqual([
+      '151100 PRODUCAO - PV1 MILHO',
+      'ADMINISTRACAO CENTRAL'
+    ]);
+  });
+
+  it('cenário misto: `assets` com linhas SEM endereço e as localidades em `ativos`', async () => {
+    // Regressão real: parar na primeira tabela não vazia deixava este caso
+    // vazio — `assets` tem a filial, mas nenhuma das linhas tem localidade.
+    await putAssets([
+      { tenantid: 'CICOPAL', primarykey: 'A1', id: 'A1', filial: '010101_CICOPAL_GO', endereco: '', _is_deleted: 0, _conferido: 0 },
+      { tenantid: 'CICOPAL', primarykey: 'A2', id: 'A2', filial: '010101_CICOPAL_GO', _is_deleted: 0, _conferido: 0 }
+    ]);
+    await putAtivos([
+      row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'),
+      row('151200 CONTABILIDADE - CDC 70104', 1, 'K2')
+    ]);
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    expect(rows.map(r => r.displayName)).toEqual([
+      '151100 PRODUCAO - PV1 MILHO',
+      '151200 CONTABILIDADE - CDC 70104'
+    ]);
+    // As duas linhas sem endereço de `assets` não viram localidade.
+    expect(rows.some(r => r.displayName === 'GERAL - NÃO ESPECIFICADO')).toBe(false);
+  });
+
+  it('o mesmo ativo espelhado nas três tabelas conta UMA vez', async () => {
+    const shared = row('151100 PRODUCAO - PV1 MILHO', 0, 'K1');
+    await putAssets([{ ...shared }]);
+    await putAtivos([{ ...shared }]);
+    await db.local_assets.bulkPut([{ ...shared }] as unknown as Parameters<typeof db.local_assets.bulkPut>[0]);
+    await putAtivos([row('151200 CONTABILIDADE - CDC 70104', 0, 'K2')]);
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    expect(rows.find(r => r.displayName.startsWith('151100'))).toMatchObject({ total: 1, checked: 0 });
+    expect(rows.find(r => r.displayName.startsWith('151200'))).toMatchObject({ total: 1 });
+  });
+
+  it('conferência feita só numa das cópias conta como conferida', async () => {
+    // O trabalho de campo grava em `ativos`/`local_assets`; `assets` pode ficar
+    // atrás. A união não pode desfazer a conferência já feita.
+    await putAssets([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]);
+    await putAtivos([row('151100 PRODUCAO - PV1 MILHO', 1, 'K1')]);
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ total: 1, checked: 1 });
   });
 
   it('acha a filial gravada com `_` a partir do cartão com espaços (ativos)', async () => {
