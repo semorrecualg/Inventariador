@@ -1,5 +1,6 @@
 import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
+import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
@@ -579,11 +580,6 @@ export const localDb = {
         addrList = Array.from(extractedAddrs.values());
       }
 
-      // Sem NENHUMA localidade na filial (antes do filtro de busca): é o caso
-      // de uma base sem coluna de endereço. A tela ficaria vazia e sem caminho
-      // para a lista/cadastro.
-      const semLocalidades = addrList.length === 0;
-
       // 3. Busca por TRECHO, sem acentos e sem caixa, no índice já montado.
       //    Antes: `startsWith` case-sensitive e, no fallback, comparação de
       //    maiúsculas contra termo minúsculo — “CONTAB” nunca encontrava nada.
@@ -605,18 +601,24 @@ export const localDb = {
         statsMap.set(key, stats);
       });
 
-      // 4b. «SEM LOCAL»: com ativos na filial e nenhuma coluna de endereço
-      //     preenchida, a localidade sintética é a MESMA chave do inventário
-      //     (`assetAddressKey` → 'SEM LOCAL'), para o toque abrir exactamente
-      //     esses ativos e o cadastro deixar de ser inalcançável.
-      const SEM_LOCAL_LABEL = 'SEM LOCAL';
+      // 4b. «SEM LOCAL»: ativos sem endereço efectivo viram uma localidade
+      //     sintética com a MESMA chave do inventário (`assetAddressKey` →
+      //     `SEM_LOCAL_LABEL`), para o toque abrir exactamente esses ativos.
+      //     Entra também quando a filial JÁ tem localidades — senão esses
+      //     ativos ficavam sem caminho para a lista/cadastro. Respeita a busca
+      //     digitada e nunca duplica uma localidade real com o mesmo nome.
       const semLocalAssets = nonDeleted.filter(a => !addressOf(a));
+      const semLocalBucket = statsMap.get(SEM_LOCAL_LABEL) || { total: 0, checked: 0 };
+      const semEnderecoBucket = statsMap.get('GERAL - NÃO ESPECIFICADO') || { total: 0, checked: 0 };
       const semLocalStats = {
-        total: semLocalAssets.length,
-        checked: semLocalAssets.filter(a => a._conferido === 1).length
+        total: semLocalBucket.total + semEnderecoBucket.total,
+        checked: semLocalBucket.checked + semEnderecoBucket.checked
       };
-      if (semLocalidades && semLocalAssets.length > 0 && matchesAddressSearch(SEM_LOCAL_LABEL, searchTerm)) {
-        addrList = [{
+      const semLocalJaListada = addrList.some(
+        a => String(a.codigo_endereco || '').trim().toUpperCase() === SEM_LOCAL_LABEL
+      );
+      if (semLocalAssets.length > 0 && !semLocalJaListada && matchesAddressSearch(SEM_LOCAL_LABEL, searchTerm)) {
+        addrList = [...addrList, {
           tenantid: tenant,
           filial: uIdUpper,
           codigo_endereco: SEM_LOCAL_LABEL,

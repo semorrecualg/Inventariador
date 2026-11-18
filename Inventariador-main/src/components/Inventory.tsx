@@ -15,6 +15,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, AppScreen } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
+import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
 import { generateUUID } from '../services/supabaseService';
 import { telemetryService } from '../services/telemetryService';
 import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
@@ -97,7 +98,7 @@ const normalizeKeyFast = (s: string | null | undefined) => {
  * do `AddressSelector`: o local auditado (`_localMaster`) vence o endereço da base.
  */
 const assetAddressKey = (a: Asset): string =>
-  normalizeKeyFast(a._localMaster || a.endereco || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL');
+  normalizeKeyFast(a._localMaster || a.endereco || a.LOCALIZACAO || a.CENTRO_CUSTO || SEM_LOCAL_LABEL);
 
 /**
  * Pertence à unidade em auditoria? Tolera divergência de grafia entre `filial`
