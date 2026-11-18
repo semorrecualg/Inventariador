@@ -26,6 +26,12 @@ describe('isConferido', () => {
     expect(isConferido(ativo())).toBe(false);
   });
 
+  it('aceita as escritas legadas que normalizeFlag já unifica (1/0, "1", "true")', () => {
+    expect(isConferido(ativo({ _conferido: '1' }))).toBe(true);
+    expect(isConferido(ativo({ _conferido: 'true' }))).toBe(true);
+    expect(isConferido(ativo({ _conferido: '0' }))).toBe(false);
+  });
+
   it('reconhece a coluna de auditoria da base, sem a flag local', () => {
     expect(isConferido(ativo({ AUDITOR_STATUS_CONFERENCIA: 'SIM' }))).toBe(true);
     // A planilha nem sempre vem em maiúsculas.

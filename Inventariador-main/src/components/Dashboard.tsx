@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 import { normalizeFlag } from '../utils/normalize';
+import { isConferido } from '../utils/conferencia';
 import { readSessionTenantId } from '../utils/tenantUtils';
 import BackButton from './BackButton';
 import { 
@@ -247,7 +248,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
       const statusUpper = String(a.status || a.SITUACAO || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXADO');
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      const conferido = isConferido(a);
       const tag = a.TAG_INVENTARIO || TagInventario.PENDENTE;
       const etq = String(a.etiqueta || '').toUpperCase().trim();
       const plaquetaMaster = String(a._plaquetaMaster || '').toUpperCase().trim();
@@ -264,13 +265,13 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
       if (!isBaixado) {
         s.totalAtivos++;
-        if (isConferido) s.conferidoAtivos++;
+        if (conferido) s.conferidoAtivos++;
         
         // Unit Progress
         if (!unitMap[unit]) unitMap[unit] = { total: 0, conferido: 0 };
         unitMap[unit].total++;
-        if (isConferido) unitMap[unit].conferido++;
-      } else if (isConferido) {
+        if (conferido) unitMap[unit].conferido++;
+      } else if (conferido) {
         s.baixadosLocalizados++;
       }
 

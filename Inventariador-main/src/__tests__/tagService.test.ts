@@ -23,6 +23,15 @@ describe('determineAssetTag — Regras de Ouro', () => {
     expect(determineAssetTag(asset({ _conferido: true }), 'CORREDOR A', 'MATRIZ')).toBe(TagInventario.CONFERIDO);
   });
 
+  it('conferido só pela coluna de auditoria da base conta como conferido', () => {
+    // Mesma noção de utils/conferencia: planilha já conferida traz a coluna,
+    // não a flag local.
+    expect(determineAssetTag(asset({ AUDITOR_STATUS_CONFERENCIA: 'SIM' }), 'CORREDOR A', 'MATRIZ'))
+      .toBe(TagInventario.CONFERIDO);
+    expect(determineAssetTag(asset({ AUDITOR_STATUS_CONFERENCIA: 'NAO' }), 'CORREDOR A', 'MATRIZ'))
+      .toBe(TagInventario.PENDENTE);
+  });
+
   it('ativo conferido em outro endereço é ADOTADO', () => {
     expect(determineAssetTag(asset({ _conferido: true }), 'CORREDOR B', 'MATRIZ')).toBe(TagInventario.ADOTADO);
   });
