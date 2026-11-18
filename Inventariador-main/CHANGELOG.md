@@ -107,6 +107,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quando a filial já tem localidades (são os ativos que estavam invisíveis),
   respeita o termo de busca e nunca duplica uma localidade real com o mesmo
   nome.
+- **Uma única porta para os ativos sem endereço:** uma linha do índice
+  `addresses` com `codigo_endereco` vazio era listada como «GERAL - NÃO
+  ESPECIFICADO» — a chave interna de contagem — ao lado da entrada sintética
+  «SEM LOCAL», as duas a apontar para os mesmos ativos. Linhas sem endereço
+  deixam de ser listadas: esses ativos aparecem só em «SEM LOCAL», com as
+  contagens certas.
 - **Busca ativa alinhada com o inventário:** o agrupamento/filtro por
   localidade usava só `endereco` e o rótulo «SEM LOCALIZAÇÃO», pelo que não
   encontrava os ativos que o ENDEREÇO FÍSICO lista como «SEM LOCAL». Passa a
@@ -125,6 +131,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *Testes:* `activeSearch` (novo) — busca ativa agrupa e filtra pelo endereço
   efetivo: `_localMaster` vence, sem-endereço vira «SEM LOCAL» (e filtra só
   esses ativos), «SEM LOCALIZAÇÃO» já não existe.
+- *Testes:* `addressSearch` (+3) — cenário misto com as localidades no índice
+  `addresses` e os ativos sem endereço em `assets` (contagens e `locKey`), o
+  mesmo entre tabelas (`ativos`) e a linha de índice com endereço vazio sem
+  virar «GERAL - NÃO ESPECIFICADO» nem duplicar «SEM LOCAL».
 - *Testes:* `addressSearch` (+16) — «SEM LOCAL» sem coluna de endereço (com
   `total`/`checked`), cenário misto (filial com localidades **e** ativos sem
   endereço), sem duplicar uma localidade real com o mesmo nome, «SEM LOCAL» a

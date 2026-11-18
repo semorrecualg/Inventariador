@@ -628,18 +628,24 @@ export const localDb = {
         }];
       }
 
-      const finalResults = addrList.map(addr => {
-        const displayName = String(addr.codigo_endereco || '').trim() || 'GERAL - NÃO ESPECIFICADO';
-        const stats = displayName.toUpperCase() === SEM_LOCAL_LABEL
-          ? semLocalStats
-          : (statsMap.get(displayName.toUpperCase()) || { total: 0, checked: 0 });
-        return {
-          displayName,
-          total: Math.max(0, stats.total),
-          checked: Math.max(0, stats.checked),
-          locKey: displayName.toUpperCase().replace(/[^A-Z0-9]/g, '')
-        };
-      });
+      // «GERAL - NÃO ESPECIFICADO» é uma chave interna de contagem, nunca uma
+      // localidade: uma linha do índice `addresses` com `codigo_endereco`
+      // vazio aparecia com esse nome AO LADO de «SEM LOCAL», as duas a apontar
+      // para os mesmos ativos. Os ativos sem endereço têm uma única entrada.
+      const finalResults = addrList
+        .filter(addr => String(addr.codigo_endereco || '').trim() !== '')
+        .map(addr => {
+          const displayName = String(addr.codigo_endereco || '').trim();
+          const stats = displayName.toUpperCase() === SEM_LOCAL_LABEL
+            ? semLocalStats
+            : (statsMap.get(displayName.toUpperCase()) || { total: 0, checked: 0 });
+          return {
+            displayName,
+            total: Math.max(0, stats.total),
+            checked: Math.max(0, stats.checked),
+            locKey: displayName.toUpperCase().replace(/[^A-Z0-9]/g, '')
+          };
+        });
 
       // Deduplicação dos endereços resultantes para evitar duplicidade de renderização
       const uniqueResults = new Map<string, typeof finalResults[0]>();
