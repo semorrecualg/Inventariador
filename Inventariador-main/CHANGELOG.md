@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — Leitura de código de barras, lanterna e zoom do scanner
+
+- **Leitura 1D em 1920x1080 a 10 leituras/s:** a configuração anterior pedia
+  1280x720, limitava a câmara a 5 fps e descodificava a `fps: 2` — duas
+  hipóteses por segundo, insuficientes para um Code 128 ou Code 39 de etiqueta
+  pequena, mesmo visível no ecrã. Passa a pedir 1920x1080 (1280x720 em economia
+  de bateria), 10 leituras/s e `disableFlip` (a câmara é a traseira).
+- **Área de leitura relativa:** a caixa de 350x150 px fixos passa a uma faixa
+  de 90% × 35% do viewfinder, o que perdoa o alinhamento em ecrãs pequenos.
+- **BarcodeDetector nativo:** `formatsToSupport` e `experimentalFeatures` eram
+  passados ao `start()` do html5-qrcode, onde são ignorados; passam ao
+  construtor, com `useBarCodeDetectorIfSupported` — no Chrome/WebView Android a
+  descodificação usa o detector nativo, mais preciso em 1D.
+- **Lanterna e zoom não funcionavam:** o código chamava `getRunningTrack()`,
+  que não existe na API do html5-qrcode; a excepção era engolida e o track
+  nunca era guardado. O track passa a vir do `srcObject` do `<video>`, a
+  lanterna reaplica-se após cada reinício/troca de câmara e o zoom usa o
+  intervalo real do sensor (min/max/step), mostrando o factor relativo. Sem
+  suporte de hardware o controlo fica desactivado em vez de parecer avariado.
+- **Foco contínuo:** aplicado quando a câmara o suporta — a imagem desfocada
+  era a causa mais comum de um código visível não ser lido.
+- **Botão do zoom cortado:** a barra de controlos era uma fila única de três
+  colunas `flex-1` com larguras mínimas fixas; num ecrã de 360 px o grupo do
+  zoom saía pela direita. Passa a duas filas (acções da câmara e zoom) abaixo da
+  área segura do Android.
+
+### Alterado — consumo de bateria e aquecimento durante a leitura
+
+- **A câmara deixa de correr a 30 fps para descodificar 10:** o sensor/ISP
+  produzia 30 imagens por segundo e a leitura usava uma em cada três. A captura
+  passa a 15 fps (10 fps em economia de bateria), com a mesma resolução e a
+  mesma cadência de descodificação — a eficácia não muda e o sensor trabalha
+  metade das vezes.
+- **Bip, vibração e gravação deixam de se repetir em rajada:** um código parado
+  à frente da câmara é descodificado ~10x por segundo e cada leitura gerava
+  novo `AudioContext`, bipes, vibrações, flash de ecrã e consulta ao banco.
+  Passa a haver uma janela de guarda de 2 s por código e uma trava para leituras
+  concorrentes.
+- **Um único `AudioContext`, suspenso entre bipes:** antes cada bip criava um
+  contexto novo e nunca o fechava, mantendo o áudio acordado e a acumular
+  objectos durante toda a sessão.
+- **Fim do ciclo de câmara por item:** o cooldown de 500 ms pós-leitura pausava
+  o scanner e obrigava a parar/reabrir a câmara a cada código confirmado. Além
+  disso, o arranque do leitor dependia de `onScan`, cuja identidade muda a cada
+  leitura — qualquer mudança de estado do inventário reiniciava a câmara. O
+  callback passa a ser lido de uma ref e a câmara só reinicia quando muda a
+  câmara, o modo ou o perfil de consumo.
+- **Sem desfoque de fundo sobre o vídeo em direto:** os controlos e o indicador
+  de estado usavam `backdrop-blur`, recalculado pelo GPU a cada frame. O fundo
+  passou a ser opaco e a animação da linha de leitura corre em `transform`
+  (composição) em vez de `top` (layout + pintura a cada frame).
+
 ### Corrigido — «Nenhum Endereço Cadastrado» com os ativos na tabela de trabalho
 
 - **O ecrã lia as tabelas erradas:** `getLocationsWithStats` consultava
