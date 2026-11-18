@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — desbloqueio biométrico como primeira etapa no mobile
+
+- **A biometria passou a ser o primeiro passo, não o segundo:** no casco nativo
+  o acesso abre com o **último utilizador autenticado no aparelho** e dispara o
+  prompt do sistema automaticamente — sem teclado, sem senha. A senha continua
+  sempre disponível em **«Usar senha»** (e «Tentar novamente» quando o prompt é
+  recusado ou falha); o prompt é automático uma única vez, nunca em loop.
+- **O que decide a tela:** `canOfferBiometricUnlock` (`src/utils/biometricUnlock.ts`)
+  exige casco nativo + plugin `available` + credencial **nativa** registada para
+  esse último utilizador. O identificador é memorizado em
+  `gbr_last_login_user` no login por senha e na entrada biométrica (o perfil
+  `DEMO` nunca o substitui).
+- **Web sem autenticador continua só utilizador e senha:** a tela de
+  desbloqueio só é montada no casco nativo; no navegador o caminho actual não
+  muda (o botão de biometria do formulário continua a aparecer apenas com
+  plataforma disponível e credencial registada).
+- **Primeiro acesso intacto:** aparelho capaz sem credencial → senha e depois o
+  **cadastro obrigatório** (`BiometricRegistration`), como na Fase 2; só depois
+  é que o desbloqueio biométrico passa a ser a primeira etapa.
+- **Sessão igual à do login por senha:** a entrada biométrica marca a sessão
+  como gerida pelo app, grava `LOGIN` com origem «Desbloqueio do aparelho» no
+  `audit_logs` e segue para contrato → módulo.
+
 ### Corrigido — campanha criada deixa de ser marcada como inexistente
 
 - **Campanha `CREATED` já conta como campanha da filial:** criar uma campanha
