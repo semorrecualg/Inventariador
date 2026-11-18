@@ -111,6 +111,7 @@ const auditDiscardedPending = async (
 };
 
 const SYNC_RECORD_FAIL_AUDIT = 'SYNC_RECORD_FAIL';
+const SYNC_RECORD_EXCEPTION_AUDIT = 'SYNC_RECORD_EXCEPTION';
 /** Janela em que a mesma falha (primarykey + erro) não volta a ser registada. */
 const SYNC_FAILURE_AUDIT_WINDOW_MS = 10 * 60 * 1000;
 
@@ -119,17 +120,20 @@ const SYNC_FAILURE_AUDIT_WINDOW_MS = 10 * 60 * 1000;
  *
  * O ciclo de sincronização corre a cada 60 s (`App.tsx`). Sem janela, um ativo
  * recusado por RLS escrevia `SYNC_RECORD_FAIL` ~1.440 vezes por dia, e um lote
- * de 200 escrevia muito mais. `audit_logs` é a ferramenta com que se
-diagnosticou o «PENDENTE NUVEM» do #95: inundada, o diagnóstico seguinte fica
-mais lento exactamente quando é preciso. A assinatura `primarykey|erro` fica no
-`delta` e é comparada com o que já foi registado na janela.
+ * de 200 escrevia muito mais. A mesma janela cobre os dois desfechos do
+ * upsert: a recusa devolvida pela nuvem (`SYNC_RECORD_FAIL`) e a excepção
+ * lançada no envio (`SYNC_RECORD_EXCEPTION`), que também escrevia uma linha por
+ * registo em cada ciclo. `audit_logs` é a ferramenta com que se diagnosticou o
+ * «PENDENTE NUVEM» do #95: inundada, o diagnóstico seguinte fica mais lento
+ * exactamente quando é preciso. A assinatura `primarykey|erro` fica no `delta`
+ * e é comparada com o que já foi registado na janela.
  */
-const loadRecentSyncFailureSignatures = async (): Promise<Set<string>> => {
+const loadRecentSyncAuditSignatures = async (acao: string): Promise<Set<string>> => {
   const cutoffIso = new Date(Date.now() - SYNC_FAILURE_AUDIT_WINDOW_MS).toISOString();
   const recentes = await db.audit_logs.where('updated_at').above(cutoffIso).toArray();
   const signatures = new Set<string>();
   for (const log of recentes) {
-    if (log.acao !== SYNC_RECORD_FAIL_AUDIT) continue;
+    if (log.acao !== acao) continue;
     try {
       const signature = JSON.parse(String(log.delta || '{}')).signature;
       if (typeof signature === 'string' && signature) signatures.add(signature);
@@ -142,6 +146,7 @@ const loadRecentSyncFailureSignatures = async (): Promise<Set<string>> => {
 
 const auditSyncRecordFailure = async (
   userId: string,
+  acao: string,
   primaryKey: string,
   details: string,
   jaAuditadas: Set<string>,
@@ -150,7 +155,7 @@ const auditSyncRecordFailure = async (
   if (jaAuditadas.has(signature)) return;
   await sqliteService.logAuditEvent(
     userId,
-    SYNC_RECORD_FAIL_AUDIT,
+    acao,
     'local_assets',
     primaryKey,
     details,
@@ -597,6 +602,7 @@ const _syncService = {
       // Assinaturas das recusas já auditadas na janela. Carregadas no primeiro
       // erro do ciclo (não em todos os ciclos) e actualizadas a cada registo.
       let failureSignatures: Set<string> | null = null;
+      let exceptionSignatures: Set<string> | null = null;
 
       for (const record of records) {
         // GUARDA DE CONECTIVIDADE EM TEMPO REAL: Evita enchentes de erros caso o sinal caia no meio do laço
@@ -703,8 +709,8 @@ const _syncService = {
             logger.warn(`>>> [Sync Isolator] Erro Supabase detectado silenciosamente para chave ${pKey}:`, detailsStr);
 
             try {
-              failureSignatures ??= await loadRecentSyncFailureSignatures();
-              await auditSyncRecordFailure(user.id, String(pKey), detailsStr, failureSignatures);
+              failureSignatures ??= await loadRecentSyncAuditSignatures(SYNC_RECORD_FAIL_AUDIT);
+              await auditSyncRecordFailure(user.id, SYNC_RECORD_FAIL_AUDIT, String(pKey), detailsStr, failureSignatures);
             } catch (auditErr) {
               logger.warn('>>> [Sync Audit] Falha ao registrar a recusa do registo:', auditErr);
             }
@@ -714,13 +720,19 @@ const _syncService = {
           const errMsg = err instanceof Error ? err.message : String(err);
           logger.warn(`>>> [Sync Isolator] Exceção capturada silenciosamente para chave ${pKey}:`, errMsg);
 
-          await sqliteService.logAuditEvent(
-            user.id,
-            'SYNC_RECORD_EXCEPTION',
-            'local_assets',
-            String(pKey),
-            `Exceção ao sincronizar registro: ${errMsg}`
-          ).catch(console.error);
+          const exceptionDetails = `Exceção ao sincronizar registro: ${errMsg}`;
+          try {
+            exceptionSignatures ??= await loadRecentSyncAuditSignatures(SYNC_RECORD_EXCEPTION_AUDIT);
+            await auditSyncRecordFailure(
+              user.id,
+              SYNC_RECORD_EXCEPTION_AUDIT,
+              String(pKey),
+              exceptionDetails,
+              exceptionSignatures
+            );
+          } catch (auditErr) {
+            logger.warn('>>> [Sync Audit] Falha ao registrar a excepção do registo:', auditErr);
+          }
           
           if (!navigator.onLine) break; // Força a saída do laço se o erro foi decorrente de queda de rede físico
         }
