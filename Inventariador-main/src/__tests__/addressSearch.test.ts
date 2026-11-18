@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // src/__tests__/addressSearch.test.ts
 // Busca do ENDEREÇO FÍSICO (AddressSelector) e do filtro de localidade do
 // inventário. Bug real: `getLocationsWithStats` filtrava com `startsWith`
@@ -6,7 +7,12 @@
 // pressionar Enter devolvia "Nenhum Endereço Cadastrado".
 import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
-import { matchesAddressSearch, normalizeAddressSearch } from '../services/localDbService';
+import {
+  getCurrentTenantid,
+  matchesAddressSearch,
+  normalizeAddressSearch,
+  normalizeUnitMatchKey
+} from '../services/localDbService';
 
 describe('busca de endereço/localidade', () => {
   it('encontra o termo em qualquer posição do endereço (não só no início)', () => {
@@ -33,5 +39,43 @@ describe('busca de endereço/localidade', () => {
     expect(matchesAddressSearch('QUALQUER ENDEREÇO', '   ')).toBe(true);
     expect(matchesAddressSearch('151200 CONTABILIDADE', '  contab  ')).toBe(true);
     expect(normalizeAddressSearch('  151200   CONTABILIDADE  ')).toBe('151200 CONTABILIDADE');
+  });
+});
+
+describe('filial e contrato da tela de endereço', () => {
+  it('trata a mesma filial com espaço, `_`, `-`, caixa e acentos', () => {
+    const chave = normalizeUnitMatchKey('010101 CICOPAL GO');
+    expect(normalizeUnitMatchKey('010101_CICOPAL_GO')).toBe(chave);
+    expect(normalizeUnitMatchKey('010101-Cicopal-Go')).toBe(chave);
+    expect(normalizeUnitMatchKey('  010101   CICOPAL   GO  ')).toBe(chave);
+    expect(normalizeUnitMatchKey('010101 CICÓPAL GO')).toBe(chave);
+    expect(normalizeUnitMatchKey('010201 SNACKS PA')).not.toBe(chave);
+  });
+
+  it('resolve o contrato pelo perfil, pela sessão ou pelo armazenamento', () => {
+    // Regressão: o dono global não declara tenantid no perfil. A leitura
+    // parava no utilizador, o contrato ia vazio para as consultas
+    // [tenantid+filial] e o ecrã dizia «Nenhum Endereço Cadastrado».
+    sessionStorage.clear();
+    localStorage.removeItem('tenantid');
+    localStorage.removeItem('tenantId');
+    sessionStorage.setItem('app_current_user', JSON.stringify({ email: 'admin@x.com', role: 'ADMIN' }));
+    expect(getCurrentTenantid()).toBe('');
+
+    sessionStorage.setItem('tenantid', 'CICOPAL');
+    expect(getCurrentTenantid()).toBe('CICOPAL');
+
+    // Contrato no perfil vence a sessão.
+    sessionStorage.setItem('app_current_user', JSON.stringify({ email: 'a@b.com', tenantid: 'DEMO_DEFAULT' }));
+    expect(getCurrentTenantid()).toBe('DEMO_DEFAULT');
+
+    // Valores sentinela não são contrato.
+    sessionStorage.setItem('app_current_user', JSON.stringify({ email: 'a@b.com', tenantid: 'NULL' }));
+    sessionStorage.setItem('tenantid', 'UNDEFINED');
+    localStorage.setItem('tenantid', 'CICOPAL');
+    expect(getCurrentTenantid()).toBe('CICOPAL');
+
+    sessionStorage.clear();
+    localStorage.removeItem('tenantid');
   });
 });

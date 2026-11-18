@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — «Nenhum Endereço Cadastrado» com a base cheia
+
+- **O ecrã de endereços lia a base com o contrato do PERFIL:** `getCurrentTenantid`
+  (`src/services/localDbService.ts`) devolvia `user.tenantid` e mais nada. O dono
+  global não declara contrato no perfil, então as consultas `[tenantid+filial]`
+  rodavam com contrato vazio e todo o inventário interno aparecia vazio — com a
+  base carregada e a filial liberada. Passa a usar a cadeia do resto do app:
+  **perfil → sessão (`tenantid`) → armazenamento local**, ignorando sentinelas
+  (`NULL`, `UNDEFINED`, `N/A`).
+- **A filial era comparada LITERALMENTE no índice:** o cartão mostra
+  `010101 CICOPAL GO` e a base gravava `010101_CICOPAL_GO`; `getLocationsWithStats`
+  fazia `equals([tenant, '010101 CICOPAL GO'])` e devolvia lista vazia, mesmo com
+  os ativos e endereços presentes. Agora há um caminho tolerante — mesma chave
+  canónica da lista do inventário (caixa, acentos, espaços, `_`/`-`) — restrito ao
+  MESMO contrato: rápido pelo índice exato; se ele vier vazio, varre o contrato e
+  compara por `normalizeUnitMatchKey`.
+- *Testes:* `addressSearch` — `normalizeUnitMatchKey` (espaço/`_`/`-`/caixa/acentos)
+  e `getCurrentTenantid` (perfil vence; sem perfil cai na sessão; sentinelas não
+  são contrato).
+- *Verificado no preview:* filial `010101_CICOPAL_GO` na base, cartão
+  `010101 CICOPAL GO` → `ENDEREÇO FÍSICO` lista as localidades com contagem
+  (antes: «Nenhum Endereço Cadastrado»).
+
 ### Corrigido — biometria deixa de ser exigida no web/desktop
 
 - **O cadastro biométrico obrigatório abria no navegador:** `resolveBiometricStep`
