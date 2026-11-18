@@ -9,8 +9,6 @@
 // espelhar» durante horas (004229/004231 em 2026-11-18).
 // ============================================================================
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { shouldRunBackgroundSync } from '../utils/backgroundSync';
 
 describe('shouldRunBackgroundSync', () => {
@@ -31,15 +29,6 @@ describe('shouldRunBackgroundSync', () => {
   });
 });
 
-describe('App.tsx — a barreira do ciclo de fundo', () => {
-  const fonte = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
-  const inicio = fonte.indexOf('const triggerBackgroundSync');
-  const fim = fonte.indexOf('setInterval(triggerBackgroundSync, 60000)', inicio);
-  const bloco = fonte.slice(inicio, fim === -1 ? undefined : fim);
-
-  it('usa o predicado sem filial e não exige o sessionStorage', () => {
-    expect(inicio).toBeGreaterThan(-1);
-    expect(bloco).toContain('shouldRunBackgroundSync(user)');
-    expect(bloco).not.toContain("sessionStorage.getItem('filial')");
-  });
-});
+// O comportamento do ciclo (a barreira + as chamadas à fila) é testado em
+// `backgroundSyncTimer.test.tsx`, com temporizadores falsos, e não por leitura
+// do texto do App.tsx — um rename não pode pintar um teste de vermelho.

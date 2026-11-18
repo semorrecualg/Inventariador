@@ -18,3 +18,18 @@ export const marcarAlteracaoLocal = (
   _is_synced: 0,
   _lastUpdated: quando instanceof Date ? quando.toISOString() : quando,
 });
+
+/**
+ * MANTÉM A PENDÊNCIA QUE JÁ EXISTIA (não é um toque novo)
+ * ============================================================================
+ * O pull da base não pode apagar a pendência local de um registo — mas também
+ * não pode inventar-lhe uma data. Os pendentes anteriores a `_lastUpdated` não
+ * têm data nenhuma; carimbar «agora» a cada pull reiniciava a idade mostrada no
+ * selo, e um registo de há três horas aparecia sempre como «agora».
+ */
+export const preservarPendenciaLocal = (
+  quando?: string | null
+): { _is_synced: 0; _lastUpdated?: string } => ({
+  _is_synced: 0,
+  ...(quando ? { _lastUpdated: quando } : {}),
+});

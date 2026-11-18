@@ -20,8 +20,11 @@ export const SyncBadge: React.FC = () => {
 
   const checkCounters = async () => {
     try {
-      // 1. Contador de dados pendentes no Dexie de forma fluente e nativa
-      const dataCount = await db.ativos.where('_is_synced').equals(0).filter(a => a._is_deleted !== 1).count();
+      // 1. Contador de dados pendentes no Dexie — a MESMA tabela que a fila lê.
+      // Contar `ativos` subcontava: a confirmação pelo cartão grava `_is_synced`
+      // em `local_assets` e em `ativos` só mexe no `_conferido`, pelo que o botão
+      // ficava desactivado («Sincronizado») com trabalho por enviar na fila.
+      const dataCount = await db.local_assets.where('_is_synced').equals(0).filter(a => a._is_deleted !== 1).count();
       
       // 2. Contador de fotos pendentes no IndexedDB
       const photoKeys = await photoQueueStore.keys();

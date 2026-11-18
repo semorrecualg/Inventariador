@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { marcarAlteracaoLocal } from '../utils/pendencia';
+import { marcarAlteracaoLocal, preservarPendenciaLocal } from '../utils/pendencia';
 import { syncPendingInfo } from '../utils/syncBadge';
 
 const varrer = (dir: string, acc: string[] = []): string[] => {
@@ -35,6 +35,23 @@ describe('marcarAlteracaoLocal', () => {
     expect(marcarAlteracaoLocal('2026-11-10T08:00:00.000Z')._lastUpdated)
       .toBe('2026-11-10T08:00:00.000Z');
     expect(marcarAlteracaoLocal(undefined)._lastUpdated).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  // O pull mantém a pendência, mas não inventa data: pendentes antigos (sem
+  // `_lastUpdated`) não podem ver a idade reiniciada a cada descarga da base.
+  it('preservar a pendência não reinicia a idade quando não há data', () => {
+    expect(preservarPendenciaLocal(undefined)).toEqual({ _is_synced: 0 });
+    expect(preservarPendenciaLocal(null)).toEqual({ _is_synced: 0 });
+    expect(preservarPendenciaLocal('2026-11-18T10:00:00.000Z')).toEqual({
+      _is_synced: 0,
+      _lastUpdated: '2026-11-18T10:00:00.000Z',
+    });
+
+    const semData = syncPendingInfo(
+      { _conferido: false, ...preservarPendenciaLocal(undefined) } as never,
+      Date.parse('2026-11-18T12:00:00.000Z')
+    );
+    expect(semData).toEqual({ motivo: 'base por espelhar', idade: null });
   });
 
   it('o selo passa a mostrar o motivo com a idade da pendência', () => {
