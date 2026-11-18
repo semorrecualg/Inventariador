@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unido pela chave `tenantid + primarykey` e conta **uma** vez; o endereço vem
   da cópia que o tiver e o estado de conferência é o mais avançado (o trabalho
   de campo grava em `ativos`/`local_assets`, não necessariamente em `assets`).
+- **«SEM LOCAL» como localidade de acesso:** ativos **sem** endereço efectivo
+  passam a ter a localidade sintética **«SEM LOCAL»**, com as contagens deles.
+  O rótulo vive agora numa constante partilhada
+  (`constants/addressLabels.ts`), usada também pelo `assetAddressKey` do
+  inventário e pelo filtro de localidade — por isso o toque abre exactamente
+  esses ativos e o cadastro deixa de ser inalcançável. Aparece **também**
+  quando a filial já tem localidades (são os ativos que estavam invisíveis),
+  respeita o termo de busca e nunca duplica uma localidade real com o mesmo
+  nome.
 - **`_is_deleted` com precedência definida:** quem decide é a cópia de maior
   precedência — **`ativos` (viva)** → `assets` (canónica) → `local_assets`
   (baseline). Uma baixa feita no aparelho esconde o ativo mesmo que a canónica
@@ -32,7 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   usavam só `endereco`. Passam a usar a mesma regra de `assetAddressKey`
   (`Inventory.tsx`): `_localMaster` (local auditado) vence, e as colunas legadas
   `LOCALIZACAO`/`CENTRO_CUSTO` também identificam a localidade.
-- *Testes:* `addressSearch` (+11) — precedência do `_is_deleted` nos três
+- *Testes:* `addressSearch` (+16) — «SEM LOCAL» sem coluna de endereço (com
+  `total`/`checked`), cenário misto (filial com localidades **e** ativos sem
+  endereço), sem duplicar uma localidade real com o mesmo nome, «SEM LOCAL» a
+  respeitar a busca, precedência do `_is_deleted` nos três
   casos (vivo na viva vence baixado na canónica; baixa na viva esconde;
   fallback para a canónica quando a viva não declara o campo), localidades só
   em `ativos`, união de

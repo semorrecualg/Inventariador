@@ -9,6 +9,7 @@ import { startSecurityMonitor, checkRuntimeIntegrity } from './services/security
 import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
+import { SEM_LOCAL_LABEL } from './constants/addressLabels';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
@@ -4076,7 +4077,7 @@ useEffect(() => {
       }
 
       const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-      const effectiveLoc = a._localMaster || a.endereco || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL';
+      const effectiveLoc = a._localMaster || a.endereco || a.LOCALIZACAO || a.CENTRO_CUSTO || SEM_LOCAL_LABEL;
       const locDisplay = String(effectiveLoc).trim().toUpperCase();
       const locKey = normalizeKey(effectiveLoc);
       
