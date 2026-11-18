@@ -32,7 +32,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Node.js (.nvmrc)
+      # Versão exacta do .nvmrc (22.22.2), não a major "22": major flutuante
+      # faz o CI apanhar patches diferentes dos da máquina (e a suíte depende do
+      # localStorage do jsdom — um Node com webstorage ligado expõe um global
+      # que o sombreia e derruba testes). O .nvmrc é a fonte única: não repetir
+      # aqui o número, ou CI e máquina voltam a poder divergir.
+      - name: Node.js (.nvmrc → 22.22.2)
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
