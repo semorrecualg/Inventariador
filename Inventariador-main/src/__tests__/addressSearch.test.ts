@@ -63,6 +63,16 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     db.ativos.bulkPut(rows as unknown as Parameters<typeof db.ativos.bulkPut>[0]);
   const putAssets = (rows: Array<Record<string, unknown>>) =>
     db.assets.bulkPut(rows as unknown as Parameters<typeof db.assets.bulkPut>[0]);
+  const putAddresses = (rows: Array<Record<string, unknown>>) =>
+    db.addresses.bulkPut(rows as unknown as Parameters<typeof db.addresses.bulkPut>[0]);
+  const address = (codigo_endereco: string) => ({
+    tenantid: 'CICOPAL',
+    filial: '010101_CICOPAL_GO',
+    codigo_endereco,
+    setor: '',
+    bloco: '',
+    _is_synced: 1
+  });
 
   beforeEach(async () => {
     sessionStorage.clear();
@@ -258,6 +268,57 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     ]);
     expect(rows.find(r => r.displayName === '151100 PRODUCAO - PV1 MILHO')).toMatchObject({ total: 1 });
     expect(rows.find(r => r.displayName === 'SEM LOCAL')).toMatchObject({ total: 2, checked: 1 });
+  });
+
+  it('cenário misto real: localidades no índice `addresses` e ativos sem endereço em `assets`', async () => {
+    // Formato de produção: o índice tem as localidades da filial e os ativos
+    // sem coluna de endereço vivem na tabela canónica. Sem a entrada
+    // sintética, estes ativos não tinham caminho nenhum a partir do ecrã.
+    await putAddresses([
+      address('151100 PRODUCAO - PV1 MILHO'),
+      address('151200 CONTABILIDADE - CDC 70104')
+    ]);
+    await putAssets([
+      { tenantid: 'CICOPAL', primarykey: 'A1', id: 'A1', filial: '010101_CICOPAL_GO', _is_deleted: 0, _conferido: 0 },
+      { tenantid: 'CICOPAL', primarykey: 'A2', id: 'A2', filial: '010101_CICOPAL_GO', endereco: '', _is_deleted: 0, _conferido: 1 }
+    ]);
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    expect(rows.map(r => r.displayName)).toEqual([
+      '151100 PRODUCAO - PV1 MILHO',
+      '151200 CONTABILIDADE - CDC 70104',
+      'SEM LOCAL'
+    ]);
+    expect(rows.find(r => r.displayName === 'SEM LOCAL')).toMatchObject({ total: 2, checked: 1, locKey: 'SEMLOCAL' });
+    // A busca continua a achar os dois ativos sem endereço.
+    const filtradas = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO', 'sem local');
+    expect(filtradas.map(r => r.displayName)).toEqual(['SEM LOCAL']);
+  });
+
+  it('cenário misto entre tabelas: localidades no índice e sem endereço só em `ativos`', async () => {
+    await putAddresses([address('151100 PRODUCAO - PV1 MILHO')]);
+    await putAtivos([row('', 0, 'K1'), row('', 1, 'K2')]);
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    expect(rows.map(r => r.displayName)).toEqual(['151100 PRODUCAO - PV1 MILHO', 'SEM LOCAL']);
+    expect(rows.find(r => r.displayName === '151100 PRODUCAO - PV1 MILHO')).toMatchObject({ total: 0 });
+    expect(rows.find(r => r.displayName === 'SEM LOCAL')).toMatchObject({ total: 2, checked: 1 });
+  });
+
+  it('linha do índice com endereço vazio não vira «GERAL - NÃO ESPECIFICADO» nem duplica «SEM LOCAL»', async () => {
+    await putAddresses([address('')]);
+    await putAssets([
+      { tenantid: 'CICOPAL', primarykey: 'A1', id: 'A1', filial: '010101_CICOPAL_GO', _is_deleted: 0, _conferido: 0 }
+    ]);
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    // Uma única porta para os ativos sem endereço, com a contagem certa.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ displayName: 'SEM LOCAL', total: 1, checked: 0 });
+    expect(rows.some(r => r.displayName === 'GERAL - NÃO ESPECIFICADO')).toBe(false);
   });
 
   it('não duplica «SEM LOCAL» quando já existe uma localidade com esse nome', async () => {
