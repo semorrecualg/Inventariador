@@ -61,6 +61,9 @@ const asset = (over: Record<string, unknown> = {}) =>
 const failureLogs = () =>
   db.audit_logs.filter((log) => log.acao === 'SYNC_RECORD_FAIL').toArray();
 
+const exceptionLogs = () =>
+  db.audit_logs.filter((log) => log.acao === 'SYNC_RECORD_EXCEPTION').toArray();
+
 beforeEach(async () => {
   upsert.mockReset();
   upsert.mockResolvedValue({ error: RLS_ERROR });
@@ -122,5 +125,44 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
     await processDataSyncQueue();
 
     expect(await failureLogs()).toHaveLength(2);
+  });
+
+  it('a excepção lançada no upsert segue a mesma janela de 10 min', async () => {
+    await db.local_assets.put(asset() as never);
+    upsert.mockRejectedValue(new Error('rede caiu no envio'));
+
+    await processDataSyncQueue();
+    await processDataSyncQueue();
+    await processDataSyncQueue();
+
+    expect(await exceptionLogs()).toHaveLength(1);
+    // A recusa da nuvem não é a mesma coisa: fica na acção dela.
+    expect(await failureLogs()).toHaveLength(0);
+  });
+
+  it('uma excepção diferente do mesmo ativo é registada', async () => {
+    await db.local_assets.put(asset() as never);
+    upsert.mockRejectedValue(new Error('rede caiu no envio'));
+    await processDataSyncQueue();
+
+    upsert.mockRejectedValue(new Error('timeout do pedido'));
+    await processDataSyncQueue();
+
+    expect(await exceptionLogs()).toHaveLength(2);
+  });
+
+  it('volta a registar a excepção depois da janela de 10 min', async () => {
+    await db.local_assets.put(asset() as never);
+    upsert.mockRejectedValue(new Error('rede caiu no envio'));
+    await processDataSyncQueue();
+
+    const [log] = await exceptionLogs();
+    expect(log).toBeTruthy();
+    await db.audit_logs.update(String(log.id), {
+      updated_at: new Date(Date.now() - 11 * 60 * 1000).toISOString()
+    });
+
+    await processDataSyncQueue();
+    expect(await exceptionLogs()).toHaveLength(2);
   });
 });
