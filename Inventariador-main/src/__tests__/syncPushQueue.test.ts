@@ -223,6 +223,68 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
   });
 });
 
+// ----------------------------------------------------------------------------
+// A conferência local chega em formatos diferentes conforme quem gravou: o App
+// grava booleano, o carregador da planilha grava 0/1 e um JSON reimportado pode
+// trazer o texto `'true'`. O payload só aceitava `Number(_conferido) === 1`,
+// pelo que esses ativos subiam como PENDENTES e a nuvem ficava sem a
+// conferência — o oposto do que se vê no aparelho.
+// ----------------------------------------------------------------------------
+describe('processDataSyncQueue — formatos da conferência local', () => {
+  beforeEach(async () => {
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    await db.local_assets.clear();
+    await db.audit_logs.clear();
+    localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));
+    localStorage.removeItem('filial');
+    localStorage.removeItem('app_selected_unit');
+    sessionStorage.setItem('filial', '010101 CICOPAL GO');
+    sessionStorage.setItem('tenantid', 'CICOPAL');
+  });
+
+  // `status: 'PENDENTE'` isola a flag: sem ele o marcador textual legado
+  // (`status = 'CONFERIDO'`) tornaria todos os casos verdadeiros.
+  it.each([
+    ['booleano true', { _conferido: true }],
+    ['número 1', { _conferido: 1 }],
+    ['texto "1"', { _conferido: '1' }],
+    ['texto "true"', { _conferido: 'true' }]
+  ])('sobe como conferido o ativo gravado com %s', async (_rotulo, flag) => {
+    await db.local_assets.put(asset({ status: 'PENDENTE', ...flag }) as never);
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBe(1);
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect((upsert.mock.calls[0][0] as Record<string, unknown>).conferido).toBe(true);
+  });
+
+  it('sobe como conferido o ativo conferido apenas pela coluna da base', async () => {
+    await db.local_assets.put(
+      asset({ status: 'PENDENTE', _conferido: 0, AUDITOR_STATUS_CONFERENCIA: 'SIM' }) as never
+    );
+
+    await processDataSyncQueue();
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect((upsert.mock.calls[0][0] as Record<string, unknown>).conferido).toBe(true);
+  });
+
+  it.each([
+    ['flag 0 sem coluna', { _conferido: 0 }],
+    ['texto "0"', { _conferido: '0' }],
+    ['coluna NAO', { _conferido: 0, AUDITOR_STATUS_CONFERENCIA: 'NAO' }]
+  ])('mantém pendente o ativo com %s', async (_rotulo, over) => {
+    await db.local_assets.put(asset({ status: 'PENDENTE', ...over }) as never);
+
+    await processDataSyncQueue();
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect((upsert.mock.calls[0][0] as Record<string, unknown>).conferido).toBe(false);
+  });
+});
+
 describe('filtro de filial da fila — tolerância ao rótulo da unidade', () => {
   const variacoes: Array<[string, string]> = [
     ['010101 CICOPAL GO', '010101'],

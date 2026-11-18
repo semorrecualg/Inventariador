@@ -26,7 +26,9 @@ describe('isConferido', () => {
     expect(isConferido(ativo())).toBe(false);
   });
 
-  it('aceita as escritas legadas que normalizeFlag já unifica (1/0, "1", "true")', () => {
+  // Um JSON reimportado ou um registo passado por `String` grava a flag como
+  // texto. `'1'` e `'true'` continuam a ser conferido; `'0'` não.
+  it('reconhece a flag gravada como texto', () => {
     expect(isConferido(ativo({ _conferido: '1' }))).toBe(true);
     expect(isConferido(ativo({ _conferido: 'true' }))).toBe(true);
     expect(isConferido(ativo({ _conferido: '0' }))).toBe(false);
