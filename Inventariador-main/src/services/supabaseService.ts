@@ -11,6 +11,7 @@ import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { isRevokedAnchor } from '../utils/revokedAnchors';
+import { isConferido } from '../utils/conferencia';
 import { resolveCanonicalUnitAnchor } from '../utils/unitAnchorPriority';
 import { buildUnitConfigRowPayload } from '../utils/unitConfigPayload';
 import { buildUnitFlags, mergeUnitFlags } from '../utils/unitConfigFlags';
@@ -2147,7 +2148,7 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
           logger.error('Erro ao buscar ativo por etiqueta (retry):', retryError);
           return null;
         }
-        return retryData as Asset;
+        return retryData ? mapCloudAssetRow(retryData as Record<string, unknown>) : null;
       }
 
       if (error.code !== 'PGRST116') {
@@ -2156,7 +2157,10 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
       return null;
     }
 
-    return data as Asset;
+    // A linha do Postgres chega com `conferido`/`auditor`/`data_leitura`, nomes
+    // que o app não lê: sem a conversão, um ativo conferido na nuvem abria por
+    // QR Code como «pendente» e sem autor/data.
+    return mapCloudAssetRow(data as Record<string, unknown>);
   } catch (err) {
     logger.error('Erro inesperado ao buscar ativo:', err);
     return null;
@@ -3539,10 +3543,12 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
           logger.warn('>>> [SQLite] Nenhum ativo encontrado para o snapshot.');
         }
 
-        // 3. Stats
+        // 3. Stats — a conferência pela coluna da base (`AUDITOR_STATUS_CONFERENCIA
+        // = 'SIM'`) não deixa `_conferido` local; a contagem tem de usar a regra
+        // única, senão o laudo subconta o que a planilha já conferiu.
         const stats = {
           total: assets.length,
-          inventoried: assets.filter(a => a._conferido || a.status === 'CONFERIDO').length,
+          inventoried: assets.filter(a => isConferido(a as unknown as Asset)).length,
           divergences: assets.filter(a => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
           generated_at: new Date().toISOString(),
           cpc_compliance: 'CPC 27 / NBC TG 27 (MODO LOCAL)'
@@ -3713,15 +3719,30 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
       .select('*', { count: 'exact', head: true })
       .eq('tenantid', tenantid);
       
-    // Ativos inventariados — contrato public.assets: `currentCampaignId` é
-    // runtime LOCAL (coluna inexistente no public → PGRST204; não sincronizada).
-    // O marcador sincronizado de conferência é `status = 'CONFERIDO'` (espelha o
-    // snapshot local: a._conferido || a.status === 'CONFERIDO').
-    const { count: inventoriedCount } = await supabase
+    // Ativos inventariados — a conferência canónica na nuvem é a coluna
+    // `conferido` (scripts/assets-conferencia.sql). Contar por `status`
+    // subconta tudo o que foi conferido no aparelho depois da coluna existir,
+    // porque conferir não mexe no `status`. Se a coluna ainda não existir
+    // (script pendente, 42703) a consulta falha e o contador cai no `status`
+    // legado, em vez de devolver zero.
+    let inventoriedCount = 0;
+    const { count: byConferido, error: byConferidoError } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
       .eq('tenantid', tenantid)
-      .eq('status', 'CONFERIDO');
+      .eq('conferido', true);
+
+    if (!byConferidoError) {
+      inventoriedCount = byConferido || 0;
+    } else {
+      logger.warn('>>> [Stats] Contagem por `conferido` indisponível — a usar `status` (script pendente).', byConferidoError);
+      const { count: byStatus } = await supabase
+        .from('assets')
+        .select('*', { count: 'exact', head: true })
+        .eq('tenantid', tenantid)
+        .eq('status', 'CONFERIDO');
+      inventoriedCount = byStatus || 0;
+    }
 
     // Divergências — contrato public.assets: `TAG_INVENTARIO` é runtime LOCAL
     // (coluna inexistente no public → PGRST204; não sincronizada). A divergência
