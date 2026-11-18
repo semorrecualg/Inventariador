@@ -33,6 +33,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zoom saía pela direita. Passa a duas filas (acções da câmara e zoom) abaixo da
   área segura do Android.
 
+### Alterado — consumo de bateria e aquecimento durante a leitura
+
+- **A câmara deixa de correr a 30 fps para descodificar 10:** o sensor/ISP
+  produzia 30 imagens por segundo e a leitura usava uma em cada três. A captura
+  passa a 15 fps (10 fps em economia de bateria), com a mesma resolução e a
+  mesma cadência de descodificação — a eficácia não muda e o sensor trabalha
+  metade das vezes.
+- **Bip, vibração e gravação deixam de se repetir em rajada:** um código parado
+  à frente da câmara é descodificado ~10x por segundo e cada leitura gerava
+  novo `AudioContext`, bipes, vibrações, flash de ecrã e consulta ao banco.
+  Passa a haver uma janela de guarda de 2 s por código e uma trava para leituras
+  concorrentes.
+- **Um único `AudioContext`, suspenso entre bipes:** antes cada bip criava um
+  contexto novo e nunca o fechava, mantendo o áudio acordado e a acumular
+  objectos durante toda a sessão.
+- **Fim do ciclo de câmara por item:** o cooldown de 500 ms pós-leitura pausava
+  o scanner e obrigava a parar/reabrir a câmara a cada código confirmado.
+- **Sem desfoque de fundo sobre o vídeo em direto:** os controlos e o indicador
+  de estado usavam `backdrop-blur`, recalculado pelo GPU a cada frame. O fundo
+  passou a ser opaco e a animação da linha de leitura corre em `transform`
+  (composição) em vez de `top` (layout + pintura a cada frame).
+
 ### Corrigido — «Nenhum Endereço Cadastrado» com os ativos na tabela de trabalho
 
 - **O ecrã lia as tabelas erradas:** `getLocationsWithStats` consultava

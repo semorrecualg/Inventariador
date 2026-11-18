@@ -2440,7 +2440,12 @@ const Inventory: React.FC<InventoryProps> = ({
           onModeChange={onUpdateScannerMode}
           onScan={handleScan}
           onClose={closeScannerForTyping}
-          isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset || showGlobalSearchResolution)}
+          // O cooldown de 500 ms NÃO entra aqui: pausar o scanner desligava a
+          // câmara a cada leitura e obrigava a um ciclo completo de
+          // stop/start (libertação + reabertura do sensor) por item — caro em
+          // bateria e em calor. A repetição do mesmo código já é travada pelo
+          // leitor (janela de guarda) e por `isPersistingScan` no `handleScan`.
+          isPaused={isScannerPaused || isThermalBlocked || !!(scannedAsset || scannedResult || duplicateAsset || showGlobalSearchResolution)}
           scanFeedbackMode={scanFeedbackMode}
           batterySaver={batterySaver}
           torch={torch}
@@ -2482,7 +2487,9 @@ const Inventory: React.FC<InventoryProps> = ({
               </button>
             </div>
           )}
-          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center space-x-2 z-50">              <div className={`px-4 py-2 backdrop-blur-md rounded-full flex items-center space-x-3 shadow-2xl border border-white/20 ${isScannerPaused ? 'bg-amber-500/80' : 'bg-success/80'}`}>
+          {/* Sem `backdrop-blur`: o desfoque sobre o vídeo em direto é recalculado
+              a cada frame pelo GPU. O fundo já é 80% opaco, o efeito não se nota. */}
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center space-x-2 z-50">              <div className={`px-4 py-2 rounded-full flex items-center space-x-3 shadow-2xl border border-white/20 ${isScannerPaused ? 'bg-amber-500/80' : 'bg-success/80'}`}>
                 <div className="w-2.5 h-2.5 bg-white rounded-full animate-pulse"></div>
                 <span className="text-xs font-black text-white uppercase tracking-[0.2em]">
                   {isScannerPaused ? 'Scanner Pausado' : 'Scanner Ativo'}

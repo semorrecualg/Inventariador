@@ -35,6 +35,24 @@ type ExtendedCameraCapabilities = MediaTrackCapabilities & {
 const getTrackCapabilities = (track: MediaStreamTrack): ExtendedCameraCapabilities =>
   (track.getCapabilities?.() ?? {}) as ExtendedCameraCapabilities;
 
+/**
+ * Perfis de leitura. O sensor/ISP é a maior fonte de calor do aparelho: pedir
+ * 30 imagens por segundo para descodificar 10 deitava fora dois terços do
+ * trabalho. A captura passa a acompanhar a cadência de descodificação, com
+ * folga de meia imagem para o viewfinder não parecer um slideshow.
+ */
+const SCAN_PROFILES = {
+  performance: { decodeFps: 10, captureFps: 15, width: 1920, height: 1080 },
+  saver: { decodeFps: 6, captureFps: 10, width: 1280, height: 720 }
+} as const;
+
+/**
+ * Um código parado no enquadramento é descodificado ~10x por segundo: sem esta
+ * janela o leitor apitava, vibrava, piscava o ecrã e reabria a consulta a cada
+ * 100 ms — o maior consumo e aquecimento de uma sessão de inventário.
+ */
+const REPEAT_SCAN_GUARD_MS = 2000;
+
 const Scanner: React.FC<ScannerProps> = ({ 
   mode, 
   onScan, 
@@ -68,6 +86,10 @@ const Scanner: React.FC<ScannerProps> = ({
   const [showSuccess, setShowSuccess] = useState(false);
   const [isFlashing, setIsFlashing] = useState(false);
   const trackRef = useRef<MediaStreamTrack | null>(null);
+  // Guarda contra a repetição do MESMO código enquanto ele fica à frente da
+  // câmara, e contra duas leituras concorrentes em cima da mesma frame.
+  const lastReadRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
+  const isHandlingScanRef = useRef(false);
 
   const [isTabHidden, setIsTabHidden] = useState(false);
   const [isInactive, setIsInactive] = useState(false);
@@ -269,11 +291,13 @@ const Scanner: React.FC<ScannerProps> = ({
         ]
       : [Html5QrcodeSupportedFormats.QR_CODE];
 
+    const profile = batterySaver ? SCAN_PROFILES.saver : SCAN_PROFILES.performance;
+
     const config = {
       // 2 leituras/s (o valor anterior) davam ~2 hipóteses de descodificar por
       // segundo: um Code 128 pequeno só era lido com a mão parada. 10 leituras/s
       // com o detector nativo é o que torna a leitura utilizável em movimento.
-      fps: batterySaver ? 4 : 10,
+      fps: profile.decodeFps,
       // Área de leitura relativa ao viewfinder (era 350x150 fixos): uma faixa
       // larga e centrada perdoa o alinhamento e mantém a caixa azul coerente em
       // ecrãs pequenos.
@@ -294,9 +318,12 @@ const Scanner: React.FC<ScannerProps> = ({
         facingMode: "environment",
         // 1920x1080 em vez de 1280x720: um código de barras fino precisa de
         // pixels no eixo horizontal para as barras não colapsarem.
-        width: { ideal: batterySaver ? 1280 : 1920 },
-        height: { ideal: batterySaver ? 720 : 1080 },
-        frameRate: { ideal: batterySaver ? 10 : 30 }
+        width: { ideal: profile.width },
+        height: { ideal: profile.height },
+        // A cadência da câmara deixa de ser 30 fps: o sensor produz o que a
+        // descodificação consome (15 fps) e o aparelho deixa de aquecer por
+        // frames que ninguém lê.
+        frameRate: { ideal: profile.captureFps }
       }
     };
 
@@ -325,27 +352,38 @@ const Scanner: React.FC<ScannerProps> = ({
       scannerRef.current = html5QrCode;
 
       const onScanSuccess = async (decodedText: string) => {
-        if (isMounted.current) {
-          resetInactivityTimeout();
-          
-          // PESIMISMO SAUDÁVEL: Só apita e brilha se o banco aceitar
-          try {
-            await onScan(decodedText);
-            
-            // FEEDBACK CONFIRMADO PELO BANCO
-            playBeep();
-            setIsFlashing(true);
-            setShowSuccess(true);
-            setTimeout(() => {
-              if (isMounted.current) {
-                setIsFlashing(false);
-                setTimeout(() => setShowSuccess(false), 1000);
-              }
-            }, 150);
-          } catch (err) {
-            logger.error(">>> [SCAN] Falha na persistência pós-scan:", err);
-            // Aqui poderíamos ter um feedback de erro visual se necessário
-          }
+        if (!isMounted.current) return;
+        // Uma leitura em curso (consulta à base) e o mesmo código dentro da
+        // janela de guarda não voltam a apitar nem a reabrir a consulta.
+        if (isHandlingScanRef.current) return;
+        const now = Date.now();
+        const isRepeat = decodedText === lastReadRef.current.text
+          && now - lastReadRef.current.at < REPEAT_SCAN_GUARD_MS;
+        if (isRepeat) return;
+        lastReadRef.current = { text: decodedText, at: now };
+        isHandlingScanRef.current = true;
+
+        resetInactivityTimeout();
+
+        // PESIMISMO SAUDÁVEL: Só apita e brilha se o banco aceitar
+        try {
+          await onScan(decodedText);
+
+          // FEEDBACK CONFIRMADO PELO BANCO
+          playBeep();
+          setIsFlashing(true);
+          setShowSuccess(true);
+          setTimeout(() => {
+            if (isMounted.current) {
+              setIsFlashing(false);
+              setTimeout(() => setShowSuccess(false), 1000);
+            }
+          }, 150);
+        } catch (err) {
+          logger.error(">>> [SCAN] Falha na persistência pós-scan:", err);
+          // Aqui poderíamos ter um feedback de erro visual se necessário
+        } finally {
+          isHandlingScanRef.current = false;
         }
       };
 
@@ -626,8 +664,19 @@ const Scanner: React.FC<ScannerProps> = ({
             ? (isInline ? 'w-[240px] h-[100px]' : 'w-[88vw] max-w-[520px] h-[150px]')
             : (isInline ? 'w-[200px] h-[200px]' : 'w-[70vw] max-w-[280px] h-[70vw] max-h-[280px]')
         }`}>
-          {/* Scanner Line */}
-          {!isPaused && <div className="absolute left-0 right-0 h-0.5 bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-scanLine"></div>}
+          {/* Scanner Line — a animação corre em `transform` (só composição);
+              animar `top` obrigava a layout + pintura a cada frame por cima do
+              vídeo, com custo de CPU/GPU permanente. */}
+          {!isPaused && (
+            <div
+              className="absolute left-0 right-0 top-0 h-0.5 bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-scanLine"
+              style={{
+                '--scan-travel': isInline
+                  ? (mode === ScannerMode.BARCODE ? '98px' : '198px')
+                  : (mode === ScannerMode.BARCODE ? '148px' : '278px')
+              } as React.CSSProperties}
+            />
+          )}
           
           {/* Corners */}
           <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-blue-500 rounded-tl-lg"></div>
@@ -659,7 +708,7 @@ const Scanner: React.FC<ScannerProps> = ({
           {onClose && (
             <button
               onClick={onClose}
-              className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 pointer-events-auto"
+              className="p-3 bg-slate-900/70 rounded-2xl text-white active:scale-90 transition-all border border-white/10 pointer-events-auto"
               title="Fechar scanner"
             >
               <X size={isInline ? 20 : 24} />
@@ -673,7 +722,7 @@ const Scanner: React.FC<ScannerProps> = ({
             {onModeChange && (
               <button
                 onClick={toggleMode}
-                className={`p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center ${isInline ? 'min-w-[48px]' : 'min-w-[64px]'} pointer-events-auto shadow-xl`}
+                className={`p-3 bg-slate-900/70 rounded-2xl text-white active:scale-90 transition-all border border-white/10 flex flex-col items-center justify-center ${isInline ? 'min-w-[48px]' : 'min-w-[64px]'} pointer-events-auto shadow-xl`}
               >
                 <RefreshCw size={isInline ? 16 : 20} className="mb-1" />
                 <span className={`font-black uppercase tracking-tighter ${isInline ? 'text-[6px]' : 'text-[8px]'}`}>
@@ -700,8 +749,8 @@ const Scanner: React.FC<ScannerProps> = ({
                 onClick={onTorchToggle}
                 disabled={torchSupported === false}
                 aria-pressed={torch === 'on'}
-                className={`p-3 backdrop-blur-md rounded-2xl active:scale-90 transition-all border shadow-xl pointer-events-auto ${
-                  torch === 'on' ? 'bg-amber-500 border-amber-600 text-white' : 'bg-white/10 border-white/10 text-white'
+                className={`p-3 rounded-2xl active:scale-90 transition-all border shadow-xl pointer-events-auto ${
+                  torch === 'on' ? 'bg-amber-500 border-amber-600 text-white' : 'bg-slate-900/70 border-white/10 text-white'
                 } ${torchSupported === false ? 'opacity-40' : ''}`}
                 title={torchSupported === false ? 'Lanterna não suportada por esta câmera' : 'Alternar Lanterna'}
               >
@@ -712,7 +761,7 @@ const Scanner: React.FC<ScannerProps> = ({
             {availableCameras.length > 1 && !isInline && (
               <button
                 onClick={switchCamera}
-                className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90 transition-all border border-white/10 shadow-xl pointer-events-auto"
+                className="p-3 bg-slate-900/70 rounded-2xl text-white active:scale-90 transition-all border border-white/10 shadow-xl pointer-events-auto"
                 title="Trocar Câmera"
               >
                 <Camera size={20} />
@@ -722,7 +771,7 @@ const Scanner: React.FC<ScannerProps> = ({
         </div>
 
         {!isInline && (
-          <div className={`p-1 bg-white/10 backdrop-blur-md rounded-2xl flex items-center border border-white/10 shadow-xl pointer-events-auto ${zoomSupported === false ? 'opacity-40' : ''}`}>
+          <div className={`p-1 bg-slate-900/70 rounded-2xl flex items-center border border-white/10 shadow-xl pointer-events-auto ${zoomSupported === false ? 'opacity-40' : ''}`}>
             <button
               onClick={() => handleZoom(-1)}
               disabled={zoomSupported === false}
@@ -746,7 +795,7 @@ const Scanner: React.FC<ScannerProps> = ({
         )}
 
         {batterySaver && (
-          <div className="px-3 py-1 bg-amber-500/20 backdrop-blur-md rounded-full border border-amber-500/30 flex items-center space-x-2 pointer-events-auto">
+          <div className="px-3 py-1 bg-amber-500/25 rounded-full border border-amber-500/30 flex items-center space-x-2 pointer-events-auto">
             <ShieldCheck size={12} className="text-amber-500" />
             <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Modo Econômico Ativo</span>
           </div>
@@ -779,7 +828,7 @@ const Scanner: React.FC<ScannerProps> = ({
           {onManualInput && (
             <button 
               onClick={onManualInput}
-              className="px-8 py-4 bg-white/10 backdrop-blur-md rounded-2xl text-white border border-white/20 flex items-center space-x-3 active:scale-95 transition-all shadow-2xl"
+              className="px-8 py-4 bg-slate-900/70 rounded-2xl text-white border border-white/20 flex items-center space-x-3 active:scale-95 transition-all shadow-2xl"
             >
               <RefreshCw size={20} className="text-blue-400" />
               <span className="text-[10px] font-black uppercase tracking-widest">Digitar Código Manualmente</span>
@@ -795,12 +844,12 @@ const Scanner: React.FC<ScannerProps> = ({
 
       <style>{`
         @keyframes scanLine {
-          0% { top: 0%; }
-          50% { top: 100%; }
-          100% { top: 0%; }
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(var(--scan-travel, 148px)); }
         }
         .animate-scanLine {
           animation: scanLine 3s ease-in-out infinite;
+          will-change: transform;
         }
         #reader {
           background-color: black !important;
