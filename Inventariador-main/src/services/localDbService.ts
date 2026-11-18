@@ -1,4 +1,4 @@
-import { db, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
+import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
@@ -436,28 +436,120 @@ export const localDb = {
       // `_`/`-`). Antes, o rótulo do cartão (`010101 CICOPAL GO`) não achava a
       // filial gravada como `010101_CICOPAL_GO` e o ecrã anunciava «Nenhum
       // Endereço Cadastrado» com a base cheia.
+      //
+      // A tabela de trabalho do modo INTERNAL é `ativos` (é ela que o
+      // Dashboard, a Consulta e o Mapa leem). Ler só `assets`/`local_assets`
+      // deixava o ecrã vazio num aparelho com os ativos carregados em `ativos`.
+      //
+      // As três tabelas são UNIDAS — nunca «a primeira que tem linhas»: uma
+      // filial pode ter em `assets` só as linhas sem endereço e as localidades
+      // em `ativos`, e parar na primeira deixava o ecrã vazio. A união é feita
+      // pela chave do ativo (`[tenantid+primarykey]`), para o mesmo ativo
+      // espelhado nas três tabelas contar UMA vez nas estatísticas.
       const unitMatch = normalizeUnitMatchKey(unitId);
-      const doContrato = async <T extends { tenantid?: unknown; filial?: unknown }>(
-        table: typeof db.addresses | typeof db.assets | typeof db.local_assets
-      ): Promise<T[]> => {
-        const rows = (await table.where('[tenantid+filial]').between([tenant, ''], [tenant, '\uffff']).toArray()) as unknown as T[];
+      /** Tabela lida como estrutura: só `tenantid`/`filial` e os campos usados. */
+      type UnitRow = {
+        tenantid?: unknown;
+        filial?: unknown;
+        primarykey?: unknown;
+        id?: unknown;
+        endereco?: unknown;
+        codigo_endereco?: unknown;
+        _is_deleted?: unknown;
+        _conferido?: unknown;
+        _localMaster?: unknown;
+        LOCALIZACAO?: unknown;
+        CENTRO_CUSTO?: unknown;
+      };
+      /**
+       * Endereço EFETIVO do ativo — a MESMA regra do inventário
+       * (`assetAddressKey`, Inventory.tsx): o local auditado (`_localMaster`)
+       * vence o endereço da base, e as colunas legadas (`LOCALIZACAO`,
+       * `CENTRO_CUSTO`) também identificam a localidade. Ler só `endereco`
+       * deixava a tela vazia com os ativos presentes em outras colunas.
+       */
+      const addressOf = (row: UnitRow): string =>
+        String(row._localMaster || row.endereco || row.LOCALIZACAO || row.CENTRO_CUSTO || '').trim();
+      type UnitTable = {
+        where: (index: string) => {
+          equals: (key: unknown) => { toArray: () => Promise<unknown[]> };
+          between: (lower: unknown, upper: unknown) => { toArray: () => Promise<unknown[]> };
+        };
+      };
+      const exactRowsOf = async (table: UnitTable): Promise<UnitRow[]> =>
+        (await table.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray()) as UnitRow[];
+      const doContrato = async (table: UnitTable): Promise<UnitRow[]> => {
+        const rows = (await table
+          .where('[tenantid+filial]')
+          .between([tenant, ''], [tenant, '\uffff'])
+          .toArray()) as UnitRow[];
         if (!unitMatch) return [];
         return rows.filter(r => normalizeUnitMatchKey(r.filial) === unitMatch);
       };
-      const addressRows = async () => {
-        const exatos = await db.addresses.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
-        if (exatos.length > 0 || !unitMatch) return exatos;
-        return doContrato<typeof exatos[number]>(db.addresses);
+      // ORDEM = PRECEDÊNCIA da união. `ativos` é a tabela VIVA (é onde o
+      // trabalho de campo grava e apaga); `assets` é a canónica do último
+      // carregamento e `local_assets` o baseline do restore. A ordem só decide
+      // `_is_deleted` (ver `mergeAssetCopies`) — endereço e conferência são
+      // combinados, não sobrepostos.
+      const workTables: UnitTable[] = [
+        db.ativos as unknown as UnitTable,
+        db.assets as unknown as UnitTable,
+        db.local_assets as unknown as UnitTable
+      ];
+      /**
+       * Duas cópias do MESMO ativo (mesma `primarykey`) em tabelas diferentes.
+       *  · endereço: da cópia que o tiver;
+       *  · `_conferido`: o estado mais avançado (1 se qualquer cópia conferiu);
+       *  · `_is_deleted`: o da cópia de MAIOR precedência (`ativos` → `assets`
+       *    → `local_assets`) — uma baixa feita no aparelho esconde o ativo, e
+       *    uma reposição feita em `ativos` volta a mostrá-lo, mesmo que a
+       *    canónica ainda esteja atrasada. Só quando a cópia viva não declara o
+       *    campo é que se desce para a seguinte.
+       */
+      const mergeAssetCopies = (prev: UnitRow, next: UnitRow): UnitRow => ({
+        ...prev,
+        _localMaster: prev._localMaster || next._localMaster,
+        endereco: prev.endereco || next.endereco,
+        LOCALIZACAO: prev.LOCALIZACAO || next.LOCALIZACAO,
+        CENTRO_CUSTO: prev.CENTRO_CUSTO || next.CENTRO_CUSTO,
+        _conferido:
+          prev._conferido === 1 || next._conferido === 1
+            ? 1
+            : (prev._conferido ?? next._conferido),
+        // `prev` é sempre a cópia de maior precedência (ordem de `workTables`).
+        _is_deleted: prev._is_deleted ?? next._is_deleted
+      });
+      const addressRows = async (): Promise<DexieAddress[]> => {
+        const table = db.addresses as unknown as UnitTable;
+        const exatos = await exactRowsOf(table);
+        if (exatos.length > 0 || !unitMatch) return exatos as unknown as DexieAddress[];
+        return (await doContrato(table)) as unknown as DexieAddress[];
       };
-      const assetRows = async () => {
-        const exatos = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
-        if (exatos.length > 0 || !unitMatch) return exatos;
-        return doContrato<typeof exatos[number]>(db.assets);
-      };
-      const baselineRows = async () => {
-        const exatos = await db.local_assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
-        if (exatos.length > 0 || !unitMatch) return exatos;
-        return doContrato<typeof exatos[number]>(db.local_assets);
+      /**
+       * Ativos da filial nas TRÊS tabelas, pela ordem de precedência (`ativos`
+       * viva → `assets` canónica → `local_assets` baseline), com índice exato
+       * em cada uma e a varredura tolerante do mesmo contrato quando a tabela
+       * não tem o índice exato. A união é deduplicada pela chave do ativo;
+       * linhas sem chave são mantidas individualmente.
+       */
+      const assetRows = async (): Promise<UnitRow[]> => {
+        const byKey = new Map<string, UnitRow>();
+        const anonymous: UnitRow[] = [];
+        for (const table of workTables) {
+          let rows = await exactRowsOf(table);
+          if (rows.length === 0 && unitMatch) rows = await doContrato(table);
+          rows.forEach(row => {
+            const id = String(row.primarykey ?? row.id ?? '').trim();
+            if (!id) {
+              anonymous.push(row);
+              return;
+            }
+            const key = `${String(row.tenantid || tenant).trim().toUpperCase()}::${id.toUpperCase()}`;
+            const prev = byKey.get(key);
+            byKey.set(key, prev ? mergeAssetCopies(prev, row) : row);
+          });
+        }
+        return [...byKey.values(), ...anonymous];
       };
 
       const indexedAddrs = await addressRows();
@@ -467,13 +559,10 @@ export const localDb = {
       //    localidades da tabela de trabalho (assets canônica — decisão DBA
       //    2026-08-06; fallback local_assets baseline para restore .dat)
       if (addrList.length === 0) {
-        let workAssets = await assetRows();
-        if (workAssets.length === 0) {
-          workAssets = await baselineRows();
-        }
+        const workAssets = await assetRows();
         const extractedAddrs = new Map<string, typeof addrList[0]>();
         workAssets.forEach(a => {
-          const addrStr = String(a.endereco || '').trim();
+          const addrStr = addressOf(a);
           if (!addrStr) return;
           const key = addrStr.toUpperCase();
           if (!extractedAddrs.has(key)) {
@@ -495,16 +584,13 @@ export const localDb = {
       //    maiúsculas contra termo minúsculo — “CONTAB” nunca encontrava nada.
       addrList = addrList.filter(a => matchesAddressSearch(a.codigo_endereco, searchTerm));
 
-      // 4. Busca reativa das estatísticas de conferência na tabela de trabalho (assets canônica)
-      let listAssets = await assetRows();
-      if (listAssets.length === 0) {
-        listAssets = await baselineRows();
-      }
+      // 4. Busca reativa das estatísticas de conferência (assets → ativos → baseline)
+      const listAssets = await assetRows();
       const nonDeleted = listAssets.filter(a => a._is_deleted !== 1);
 
       const statsMap = new Map<string, { total: number; checked: number }>();
       nonDeleted.forEach(asset => {
-        const address = String(asset.endereco || '').trim().toUpperCase();
+        const address = addressOf(asset).toUpperCase();
         const key = address !== '' ? address : 'GERAL - NÃO ESPECIFICADO';
         const stats = statsMap.get(key) || { total: 0, checked: 0 };
         stats.total += 1;
