@@ -156,6 +156,29 @@ const isStringInvalid = (val: unknown): boolean => {
 };
 
 /**
+ * Filial de trabalho activa, com a mesma cascata que a UI usa (App.tsx).
+ *
+ * O Android esvazia o `sessionStorage` quando mata a WebView em segundo plano,
+ * e todas as guardas de envio liam a filial SÓ dali. Depois de um reinício do
+ * processo o ciclo de sincronização voltava em silêncio sem enviar nada: os
+ * ativos conferidos continuavam `_is_synced = 0` e a etiqueta «PENDENTE NUVEM»
+ * ficava para sempre, mesmo com a unidade visível no ecrã (a UI já caía para o
+ * `localStorage`/sessão). Por isso aqui a leitura segue a mesma ordem.
+ */
+const readActiveFilial = (): string | null => {
+  const candidates = [
+    sessionStorage.getItem('filial'),
+    sessionStorage.getItem('selectedUnit'),
+    localStorage.getItem('filial'),
+    localStorage.getItem('app_selected_unit'),
+  ];
+  for (const candidate of candidates) {
+    if (!isStringInvalid(candidate)) return candidate;
+  }
+  return null;
+};
+
+/**
  * Verifica condições de segurança física de hardware (trava preventiva de bateria baixa < 5%)
  */
 export const checkHardwareSafety = async (): Promise<boolean> => {
@@ -284,7 +307,7 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
   }
   const user = getUserFromLocalStorage();
   const rawTenant = user ? resolveTenantId(user) : null;
-  const rawFilial = sessionStorage.getItem('filial');
+  const rawFilial = readActiveFilial();
 
   if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
     if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
@@ -360,7 +383,7 @@ export const photoSyncManager = {
     }
     const user = getUserFromLocalStorage();
     const rawTenant = user ? resolveTenantId(user) : null;
-    const rawFilial = sessionStorage.getItem('filial');
+    const rawFilial = readActiveFilial();
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
       if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
@@ -480,7 +503,7 @@ const _syncService = {
     }
     const user = getUserFromLocalStorage();
     const rawTenant = user ? resolveTenantId(user) : null;
-    const rawFilial = sessionStorage.getItem('filial');
+    const rawFilial = readActiveFilial();
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
       return { success: false, processedCount: 0, error: "Sincronização abortada: Usuário ou filial indisponíveis." };
@@ -688,7 +711,7 @@ const _syncService = {
   backupContingencyLocal: async (): Promise<boolean> => {
     const user = getUserFromLocalStorage();
     const rawTenant = user ? resolveTenantId(user) : null;
-    const rawFilial = sessionStorage.getItem('filial');
+    const rawFilial = readActiveFilial();
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
       return false;
@@ -728,7 +751,7 @@ export const getUnsyncedAssetsCount = async (): Promise<number> => {
    try {
      const user = getUserFromLocalStorage();
      const rawTenant = user ? resolveTenantId(user) : null;
-     const rawFilial = sessionStorage.getItem('filial');
+     const rawFilial = readActiveFilial();
      
      const unsynced = await db.local_assets.where('_is_synced').equals(0).toArray();
      
@@ -880,7 +903,7 @@ const runSyncLoopCycle = async () => {
 
   // Barreira de guarda para evitar loops infinitos de sincronização antes do operador estar logado
   const user = getUserFromLocalStorage();
-  const rawFilial = sessionStorage.getItem('filial');
+  const rawFilial = readActiveFilial();
   if (!user || isStringInvalid(rawFilial)) {
     // Retorna silenciosamente e agenda o próximo ciclo sem incrementar falhas
     scheduleNextCycle();

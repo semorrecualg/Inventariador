@@ -64,6 +64,8 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     await db.assets.clear();
     await db.audit_logs.clear();
     localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));
+    localStorage.removeItem('filial');
+    localStorage.removeItem('app_selected_unit');
     sessionStorage.setItem('filial', '010101 CICOPAL GO');
     sessionStorage.setItem('tenantid', 'CICOPAL');
   });
@@ -87,6 +89,23 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     });
 
     // A etiqueta PENDENTE NUVEM só desaparece com a marcação local.
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    expect(Number(local?._is_synced)).toBe(1);
+  });
+
+  // O Android esvazia o `sessionStorage` quando mata a WebView em segundo
+  // plano. A filial continuava visível no ecrã (a UI cai para o `localStorage`),
+  // mas as guardas do envio liam só a sessão: o ciclo voltava em silêncio sem
+  // enviar nada e o ativo ficava «PENDENTE NUVEM» para sempre.
+  it('envia mesmo quando o reinício da WebView esvazia a filial da sessão', async () => {
+    await db.local_assets.put(asset() as never);
+    sessionStorage.removeItem('filial');
+    localStorage.setItem('filial', '010101 CICOPAL GO');
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBeGreaterThan(0);
+    expect(upsert).toHaveBeenCalledTimes(1);
     const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
     expect(Number(local?._is_synced)).toBe(1);
   });
