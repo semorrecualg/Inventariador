@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quando a filial já tem localidades (são os ativos que estavam invisíveis),
   respeita o termo de busca e nunca duplica uma localidade real com o mesmo
   nome.
+- **Busca ativa alinhada com o inventário:** o agrupamento/filtro por
+  localidade usava só `endereco` e o rótulo «SEM LOCALIZAÇÃO», pelo que não
+  encontrava os ativos que o ENDEREÇO FÍSICO lista como «SEM LOCAL». Passa a
+  usar o endereço efectivo partilhado (`utils/assetAddress`, mesma regra do
+  `assetAddressKey`), com a chave normalizada — e mostra a localidade no cartão
+  do item.
 - **`_is_deleted` com precedência definida:** quem decide é a cópia de maior
   precedência — **`ativos` (viva)** → `assets` (canónica) → `local_assets`
   (baseline). Uma baixa feita no aparelho esconde o ativo mesmo que a canónica
@@ -41,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   usavam só `endereco`. Passam a usar a mesma regra de `assetAddressKey`
   (`Inventory.tsx`): `_localMaster` (local auditado) vence, e as colunas legadas
   `LOCALIZACAO`/`CENTRO_CUSTO` também identificam a localidade.
+- *Testes:* `activeSearch` (novo) — busca ativa agrupa e filtra pelo endereço
+  efetivo: `_localMaster` vence, sem-endereço vira «SEM LOCAL» (e filtra só
+  esses ativos), «SEM LOCALIZAÇÃO» já não existe.
 - *Testes:* `addressSearch` (+16) — «SEM LOCAL» sem coluna de endereço (com
   `total`/`checked`), cenário misto (filial com localidades **e** ativos sem
   endereço), sem duplicar uma localidade real com o mesmo nome, «SEM LOCAL» a

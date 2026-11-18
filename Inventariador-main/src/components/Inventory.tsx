@@ -15,7 +15,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, AppScreen } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
-import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
+import { effectiveAssetAddress } from '../utils/assetAddress';
 import { generateUUID } from '../services/supabaseService';
 import { telemetryService } from '../services/telemetryService';
 import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
@@ -94,11 +94,11 @@ const normalizeKeyFast = (s: string | null | undefined) => {
 };
 
 /**
- * Endereço efetivo do ativo — MESMA regra de `getLocationsWithStats` (App.tsx) e
- * do `AddressSelector`: o local auditado (`_localMaster`) vence o endereço da base.
+ * Endereço efetivo do ativo — MESMA regra de `getLocationsWithStats`, do
+ * `AddressSelector`, do App e da busca ativa (`utils/assetAddress`): o local
+ * auditado (`_localMaster`) vence o endereço da base.
  */
-const assetAddressKey = (a: Asset): string =>
-  normalizeKeyFast(a._localMaster || a.endereco || a.LOCALIZACAO || a.CENTRO_CUSTO || SEM_LOCAL_LABEL);
+const assetAddressKey = (a: Asset): string => normalizeKeyFast(effectiveAssetAddress(a));
 
 /**
  * Pertence à unidade em auditoria? Tolera divergência de grafia entre `filial`

@@ -1,6 +1,7 @@
 import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
 import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
+import { pickAssetAddress } from '../utils/assetAddress';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
@@ -469,8 +470,7 @@ export const localDb = {
        * `CENTRO_CUSTO`) também identificam a localidade. Ler só `endereco`
        * deixava a tela vazia com os ativos presentes em outras colunas.
        */
-      const addressOf = (row: UnitRow): string =>
-        String(row._localMaster || row.endereco || row.LOCALIZACAO || row.CENTRO_CUSTO || '').trim();
+      const addressOf = (row: UnitRow): string => pickAssetAddress(row);
       type UnitTable = {
         where: (index: string) => {
           equals: (key: unknown) => { toArray: () => Promise<unknown[]> };
