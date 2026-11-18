@@ -14,6 +14,7 @@ import {
   clampSoftwareZoom,
   isUsableQrRegion
 } from '../utils/cameraZoom';
+import { loadScannerZoomFactor, saveScannerZoomFactor } from '../utils/scannerZoomPreference';
 
 interface ScannerProps {
   mode: ScannerMode;
@@ -260,23 +261,38 @@ const Scanner: React.FC<ScannerProps> = ({
   // não 1–8), com um `step` próprio. Guardar o intervalo real evita pedir
   // valores que o dispositivo ignora.
   const initZoom = useCallback((track: MediaStreamTrack, capabilities: ExtendedCameraCapabilities) => {
+    // Um reinício da câmara (standby térmico, troca de câmara) não pode apagar
+    // o factor que o auditor escolheu: repõe-se o do modo em uso.
+    const savedFactor = loadScannerZoomFactor(mode);
     const caps = capabilities.zoom;
     if (caps && caps.max > caps.min) {
       const { min, max } = caps;
       const step = caps.step && caps.step > 0 ? caps.step : (max - min) / 100;
       setZoomRange({ min, max, step });
       const settings = track.getSettings() as MediaTrackSettings & { zoom?: number };
-      setZoomLevel(typeof settings.zoom === 'number' ? settings.zoom : min);
+      const currentZoom = typeof settings.zoom === 'number' ? settings.zoom : min;
+      // O guardado é o factor relativo (1x = mínimo), não o valor cru do
+      // sensor — o mesmo telemóvel pode ter um intervalo 100–400.
+      const targetZoom = savedFactor === null
+        ? currentZoom
+        : Math.max(min, Math.min(max, min * savedFactor));
+      setZoomLevel(targetZoom);
       setZoomMode('hardware');
+      if (savedFactor !== null && targetZoom !== currentZoom) {
+        void track.applyConstraints({
+          advanced: [{ zoom: targetZoom }]
+        } as unknown as MediaTrackConstraints).catch(() => {});
+      }
       return;
     }
 
     setZoomRange({ min: SOFTWARE_ZOOM_MIN, max: SOFTWARE_ZOOM_MAX, step: SOFTWARE_ZOOM_STEP });
-    setZoomLevel(SOFTWARE_ZOOM_MIN);
+    const factor = savedFactor === null ? SOFTWARE_ZOOM_MIN : clampSoftwareZoom(savedFactor);
+    setZoomLevel(factor);
     // Sem região de leitura não há zoom digital honesto: o controlo fica
     // desactivado em vez de ampliar a imagem sem ampliar a leitura.
-    setZoomMode(applySoftwareZoom(SOFTWARE_ZOOM_MIN) ? 'software' : null);
-  }, [applySoftwareZoom]);
+    setZoomMode(applySoftwareZoom(factor) ? 'software' : null);
+  }, [applySoftwareZoom, mode]);
 
   const applyTorch = useCallback(async (enabled: boolean): Promise<boolean> => {
     const track = getVideoTrack();
@@ -658,11 +674,14 @@ const Scanner: React.FC<ScannerProps> = ({
       } as unknown as MediaTrackConstraints);
       // Lê o valor realmente aceite pelo hardware (arredondado ao step do sensor).
       const applied = (track.getSettings() as MediaTrackSettings & { zoom?: number }).zoom;
-      setZoomLevel(typeof applied === 'number' ? applied : clamped);
+      const appliedZoom = typeof applied === 'number' ? applied : clamped;
+      setZoomLevel(appliedZoom);
+      // Guarda o factor relativo: é isto que sobrevive ao reinício da câmara.
+      saveScannerZoomFactor(mode, zoomRange.min > 0 ? appliedZoom / zoomRange.min : appliedZoom);
     } catch (e) {
       logger.warn(">>> [Scanner] Zoom falhou", e);
     }
-  }, [getVideoTrack, zoomRange]);
+  }, [getVideoTrack, zoomRange, mode]);
 
   // Um passo fixo de 0.5 não serve para todos os sensores (1–8 ou 100–400):
   // avança ~10% do intervalo, no mínimo o step reportado.
@@ -675,6 +694,7 @@ const Scanner: React.FC<ScannerProps> = ({
         return;
       }
       setZoomLevel(next);
+      saveScannerZoomFactor(mode, next);
       return;
     }
     const { min, max, step } = zoomRange;
