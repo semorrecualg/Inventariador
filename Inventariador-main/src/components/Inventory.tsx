@@ -26,6 +26,7 @@ import { queueAssetBackupMirror } from '../services/persistenceService';
 import { sqliteService } from '../services/sqliteService';
 import { MemoryGuardService } from '../services/MemoryGuardService';
 import { normalizeKey } from '../utils/schema';
+import { isConferido } from '../utils/conferencia';
 import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
@@ -313,7 +314,7 @@ const Inventory: React.FC<InventoryProps> = ({
         let recoveredCount = 0;
         for (const backedAsset of backupArray) {
           const currentLocalObj = allAssetsRef.current.find(a => String(a.id) === String(backedAsset.id));
-          const isAlreadyConferido = currentLocalObj && (currentLocalObj._conferido || String(currentLocalObj.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
+          const isAlreadyConferido = !!currentLocalObj && isConferido(currentLocalObj);
           
           if (!isAlreadyConferido) {
             logger.info(`>>> [Recovery Boot] Recuperando ativo órfão/pendente de gravação local: ${backedAsset.id} (Etiqueta: ${backedAsset.etiqueta})`);
@@ -1137,7 +1138,7 @@ const Inventory: React.FC<InventoryProps> = ({
     for (const a of source) {
       if (!belongsToUnit(a, activeFilialKey)) continue;
 
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      const conferido = isConferido(a);
 
       if (term) {
         const etq = normalizeKeyFast(a.etiqueta || '');
@@ -1147,10 +1148,10 @@ const Inventory: React.FC<InventoryProps> = ({
       } else {
         // Baixado não conferido não entra no giro (o hub só o conta quando localizado).
         const isBaixado = String(a.status || '').toUpperCase().includes('BAIXA') || !!a.databaixa;
-        if (isBaixado && !isConferido) continue;
+        if (isBaixado && !conferido) continue;
       }
 
-      if (activeFilter === 'checked' ? isConferido : !isConferido) result.push(a);
+      if (activeFilter === 'checked' ? conferido : !conferido) result.push(a);
     }
 
     return result.sort((a, b) => {
@@ -1170,7 +1171,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const isSearchResultBatch = useMemo(() => {
     if (!committedSearch || filteredAssets.length <= 1) return false;
-    const pendingInSearch = filteredAssets.filter(a => !a._conferido);
+    const pendingInSearch = filteredAssets.filter(a => !isConferido(a));
     if (pendingInSearch.length <= 1) return false;
     
     const firstEtq = normalizeKey(pendingInSearch[0].etiqueta || "");
@@ -1186,11 +1187,11 @@ const Inventory: React.FC<InventoryProps> = ({
     let checked = 0;
     for (const a of addressAssets) {
       if (!belongsToUnit(a, activeFilialKey)) continue;
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      const conferido = isConferido(a);
       const isBaixado = String(a.status || '').toUpperCase().includes('BAIXA') || !!a.databaixa;
-      if (isBaixado && !isConferido) continue;
+      if (isBaixado && !conferido) continue;
       if (!isBaixado) total++;
-      if (isConferido) {
+      if (conferido) {
         checked++;
         if (isBaixado) total++;
       }
@@ -1201,7 +1202,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const locationProgress = locationStats.total > 0
     ? Math.round((locationStats.checked / locationStats.total) * 100)
     : 0;
-  const pendingSearchCount = filteredAssets.filter(a => !a._conferido).length;
+  const pendingSearchCount = filteredAssets.filter(a => !isConferido(a)).length;
 
   /**
    * Leitura digitada e clique no item usam o MESMO modal de conferência em
@@ -1209,7 +1210,7 @@ const Inventory: React.FC<InventoryProps> = ({
    * a lista para o auditor ver e confirmar, em vez de conferir às cegas.
    */
   const handleConfirmSearchBatch = () => {
-    const pendingInSearch = filteredAssets.filter(a => !a._conferido);
+    const pendingInSearch = filteredAssets.filter(a => !isConferido(a));
     if (pendingInSearch.length === 0) return;
     // Lote = mesma etiqueta consultada, por CONTER o código digitado (`0058`
     // acha `A 005830`) e em qualquer endereço. Sem 2+ pendentes dessa etiqueta
@@ -1254,7 +1255,7 @@ const Inventory: React.FC<InventoryProps> = ({
         const sameComp = normalizeKey(a.filial || a._unitid || "") === currentCompKey;
         const sUpper = String(a.status || '').toUpperCase();
         const isNotB = !sUpper.includes('BAIXA') && !a.databaixa;
-        return sameEtq && sameComp && isNotB && !a._conferido;
+        return sameEtq && sameComp && isNotB && !isConferido(a);
       });
 
       if (related.length > 1) {
@@ -1287,7 +1288,7 @@ const Inventory: React.FC<InventoryProps> = ({
     const assetCompKey = normalizeKey(asset.filial || asset._unitid || '');
 
     // BLOQUEIO DE SEGURANÇA: Se já foi conferido, mostra modal de duplicidade e impede abertura
-    if (asset._conferido) {
+    if (isConferido(asset)) {
       setDuplicateAsset(asset);
       return;
     }
@@ -1341,7 +1342,7 @@ const Inventory: React.FC<InventoryProps> = ({
     // Filtra apenas os que ainda não foram conferidos para preservar integridade De/Para
     const ids = Array.from(selectedIds).filter(id => {
       const asset = allAssets.find(a => String(a.id) === id);
-      return asset && !asset._conferido;
+      return !!asset && !isConferido(asset);
     });
 
     if (ids.length > 0) {
@@ -1501,7 +1502,7 @@ const Inventory: React.FC<InventoryProps> = ({
   }, [displayValue]);
 
   useEffect(() => {
-    if (filteredAssets.length === 1 && committedSearch && !filteredAssets[0]._conferido) {
+    if (filteredAssets.length === 1 && committedSearch && !isConferido(filteredAssets[0])) {
       searchInputRef.current?.blur();
     }
   }, [filteredAssets, committedSearch]);
