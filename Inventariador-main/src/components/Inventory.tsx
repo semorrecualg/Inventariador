@@ -781,6 +781,12 @@ const Inventory: React.FC<InventoryProps> = ({
         message: 'Falha no Motor Dexie',
         subText: `Ocorreu uma exceção física: ${err instanceof Error ? err.message : String(err)}`
       });
+
+      // Relança para o Scanner: só ele está por cima da câmara e pode dizer ao
+      // operador que o código foi lido MAS não gravado. Engolir o erro aqui
+      // deixava o scanner a apitar e a mostrar "Lido!" sobre um registo que
+      // nunca entrou na base.
+      throw err;
     } finally {
       setIsPersistingScan(false);
     }

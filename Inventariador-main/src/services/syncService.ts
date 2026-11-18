@@ -110,6 +110,55 @@ const auditDiscardedPending = async (
   }
 };
 
+const SYNC_RECORD_FAIL_AUDIT = 'SYNC_RECORD_FAIL';
+/** Janela em que a mesma falha (primarykey + erro) não volta a ser registada. */
+const SYNC_FAILURE_AUDIT_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * Uma linha de auditoria por registo falhado, por janela — e não a cada ciclo.
+ *
+ * O ciclo de sincronização corre a cada 60 s (`App.tsx`). Sem janela, um ativo
+ * recusado por RLS escrevia `SYNC_RECORD_FAIL` ~1.440 vezes por dia, e um lote
+ * de 200 escrevia muito mais. `audit_logs` é a ferramenta com que se
+diagnosticou o «PENDENTE NUVEM» do #95: inundada, o diagnóstico seguinte fica
+mais lento exactamente quando é preciso. A assinatura `primarykey|erro` fica no
+`delta` e é comparada com o que já foi registado na janela.
+ */
+const loadRecentSyncFailureSignatures = async (): Promise<Set<string>> => {
+  const cutoffIso = new Date(Date.now() - SYNC_FAILURE_AUDIT_WINDOW_MS).toISOString();
+  const recentes = await db.audit_logs.where('updated_at').above(cutoffIso).toArray();
+  const signatures = new Set<string>();
+  for (const log of recentes) {
+    if (log.acao !== SYNC_RECORD_FAIL_AUDIT) continue;
+    try {
+      const signature = JSON.parse(String(log.delta || '{}')).signature;
+      if (typeof signature === 'string' && signature) signatures.add(signature);
+    } catch {
+      // Linha antiga sem delta legível não conta como falha já registada.
+    }
+  }
+  return signatures;
+};
+
+const auditSyncRecordFailure = async (
+  userId: string,
+  primaryKey: string,
+  details: string,
+  jaAuditadas: Set<string>,
+): Promise<void> => {
+  const signature = `${primaryKey}|${details}`;
+  if (jaAuditadas.has(signature)) return;
+  await sqliteService.logAuditEvent(
+    userId,
+    SYNC_RECORD_FAIL_AUDIT,
+    'local_assets',
+    primaryKey,
+    details,
+    JSON.stringify({ signature })
+  );
+  jaAuditadas.add(signature);
+};
+
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 const CAMPAIGN_QUEUE_STORE = 'gbr_campaign_sync_queue';
 
@@ -545,6 +594,9 @@ const _syncService = {
 
       const syncedPrimaryKeys: string[] = [];
       const failedPrimaryKeys: string[] = [];
+      // Assinaturas das recusas já auditadas na janela. Carregadas no primeiro
+      // erro do ciclo (não em todos os ciclos) e actualizadas a cada registo.
+      let failureSignatures: Set<string> | null = null;
 
       for (const record of records) {
         // GUARDA DE CONECTIVIDADE EM TEMPO REAL: Evita enchentes de erros caso o sinal caia no meio do laço
@@ -650,13 +702,12 @@ const _syncService = {
             
             logger.warn(`>>> [Sync Isolator] Erro Supabase detectado silenciosamente para chave ${pKey}:`, detailsStr);
 
-            await sqliteService.logAuditEvent(
-              user.id,
-              'SYNC_RECORD_FAIL',
-              'local_assets',
-              String(pKey),
-              detailsStr
-            ).catch(console.error);
+            try {
+              failureSignatures ??= await loadRecentSyncFailureSignatures();
+              await auditSyncRecordFailure(user.id, String(pKey), detailsStr, failureSignatures);
+            } catch (auditErr) {
+              logger.warn('>>> [Sync Audit] Falha ao registrar a recusa do registo:', auditErr);
+            }
           }
         } catch (err: unknown) {
           failedPrimaryKeys.push(String(pKey));
