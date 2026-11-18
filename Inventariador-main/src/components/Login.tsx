@@ -5,7 +5,7 @@ import { isAdminEmail, markAppManagedSession, ADMIN_EMAIL } from '../utils/authU
 import { useLocalAuth } from '../hooks/useLocalAuth';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode } from '../services/supabaseService';
 import { authenticateBiometric, checkNativeBiometry, hasBiometricRegistered, isBiometricSupported, isNativeAppShell } from '../services/biometricService';
-import { canOfferBiometricUnlock, normalizeUnlockUser, readLastLoginUser, rememberLastLoginUser } from '../utils/biometricUnlock';
+import { canOfferBiometricUnlock, forgetLastLoginUser, normalizeUnlockUser, readLastLoginUser, rememberLastLoginUser } from '../utils/biometricUnlock';
 import BiometricUnlock from './BiometricUnlock';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { safeStringify } from '../services/utils';
@@ -824,6 +824,16 @@ const Login: React.FC<LoginProps> = ({
         onUsePassword={() => {
           setUnlockUser(null);
           setUsername(unlockName);
+          setError(null);
+        }}
+        onUseAnotherAccount={() => {
+          // Segundo utilizador no mesmo aparelho: esquece o último utilizador
+          // para o formulário não herdar o desbloqueio biométrico do anterior.
+          // A credencial registada do anterior fica intacta no aparelho.
+          forgetLastLoginUser();
+          setUnlockUser(null);
+          setUsername('');
+          setPassword('');
           setError(null);
         }}
       />

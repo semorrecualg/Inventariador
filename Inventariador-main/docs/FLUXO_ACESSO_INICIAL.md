@@ -219,7 +219,11 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   (`src/utils/biometricUnlock.ts`) é quem autoriza a tela: casco nativo + plugin
   `available` + credencial registada + último utilizador — sem qualquer destes,
   nada muda. A senha fica sempre em **«Usar senha»** (o formulário abre já com o
-  utilizador preenchido) e a recusa oferece «Tentar novamente». No **web sem
+  utilizador preenchido) e a recusa oferece «Tentar novamente». Para um segundo
+  utilizador no mesmo aparelho há **«Entrar com outra conta»**: esquece o último
+  utilizador (`gbr_last_login_user`) e abre o formulário vazio, sem herdar a
+  biometria de quem entrou antes (a credencial registada desse anterior fica
+  intacta). No **web sem
   autenticador** a tela não existe: o acesso continua a ser utilizador + senha,
   com o botão biométrico do formulário apenas quando há plataforma e credencial.
   O **primeiro acesso** mantém a ordem senha → cadastro obrigatório da Fase 2;
