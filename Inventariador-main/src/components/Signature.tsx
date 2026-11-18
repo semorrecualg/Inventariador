@@ -9,6 +9,7 @@ import 'jspdf-autotable';
 import { generateInventoryBook, generateKardexFichas } from '../utils/reportGenerator';
 import { Loader2, BookOpen, CreditCard } from 'lucide-react';
 import { APP_VERSION_LABEL } from '../utils/appVersion';
+import { isConferido } from '../utils/conferencia';
 
 interface SignatureProps {
   assets: Asset[];
@@ -59,7 +60,7 @@ const Signature: React.FC<SignatureProps> = ({ assets, onBack, onConfirm, unitNa
       a.etiqueta || 'S/E',
       a.descricaodoativo || 'S/D',
       a.endereco || 'S/L',
-      a._conferido ? 'SIM' : 'NÃO',
+      isConferido(a) ? 'SIM' : 'NÃO',
       a.TAG_INVENTARIO || '---'
     ]);
 
