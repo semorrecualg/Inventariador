@@ -11,6 +11,7 @@ import { FileSystemStorageService } from './FileSystemStorageService';
 import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { reportRecnoConflictForAsset } from './recnoGuardService';
 import type { RecnoCandidate } from '../utils/recnoGuard';
 
@@ -252,7 +253,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
       ...assetData,
       tenantid: String(assetData.tenantid || existingLocal?.tenantid || existingActive?.tenantid || '').trim().toUpperCase(),
       _conferido: 1,
-      _is_synced: 0,
+      ...marcarAlteracaoLocal(),
       updated_at: new Date().toISOString()
     } as unknown as DexieAsset;
 

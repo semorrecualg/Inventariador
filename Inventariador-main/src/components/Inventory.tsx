@@ -16,6 +16,7 @@ import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMod
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
 import { effectiveAssetAddress } from '../utils/assetAddress';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { generateUUID } from '../services/supabaseService';
 import { telemetryService } from '../services/telemetryService';
 import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
@@ -692,7 +693,7 @@ const Inventory: React.FC<InventoryProps> = ({
           ...(isBaixado ? {} : { status: 'CONFERIDO' }),
           TAG_INVENTARIO: auditTag,
           _localMaster: auditLocation,
-          _is_synced: 0
+          ...marcarAlteracaoLocal()
         }, user?.email || 'operador');
 
         // Adiciona um log de auditoria de conferência
@@ -714,7 +715,7 @@ const Inventory: React.FC<InventoryProps> = ({
           _conferido: true,
           ...(isBaixado ? {} : { status: 'CONFERIDO' }),
           TAG_INVENTARIO: auditTag,
-          _is_synced: 0,
+          ...marcarAlteracaoLocal(),
           _localMaster: auditLocation
         });
         await onUpdateAssetRef.current(cleanAsset);
@@ -1467,7 +1468,7 @@ const Inventory: React.FC<InventoryProps> = ({
         _conferido: true,
         _isNew: true,
         // Item criado no aparelho: tem de subir, então nasce pendente.
-        _is_synced: 0,
+        ...marcarAlteracaoLocal(),
         currentCampaignId: currentCampaignId,
         _localMaster: selectedLocation || ""
     } as Asset;
@@ -1780,7 +1781,7 @@ const Inventory: React.FC<InventoryProps> = ({
                             : { status: 'CONFERIDO' }),
                           TAG_INVENTARIO: auditTag,
                           _localMaster: auditLoc,
-                          _is_synced: 0
+                          ...marcarAlteracaoLocal()
                         };
 
                         const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
@@ -1827,7 +1828,7 @@ const Inventory: React.FC<InventoryProps> = ({
                             : { status: 'CONFERIDO' }),
                           TAG_INVENTARIO: auditTag,
                           _localMaster: auditLoc,
-                          _is_synced: 0
+                          ...marcarAlteracaoLocal()
                         };
                         
                         const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);

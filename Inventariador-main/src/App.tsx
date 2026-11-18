@@ -14,6 +14,8 @@ import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } 
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
+import { marcarAlteracaoLocal } from './utils/pendencia';
+import { shouldRunBackgroundSync } from './utils/backgroundSync';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
@@ -630,7 +632,7 @@ useEffect(() => {
                     // Chave composta [tenantid+primarykey] (v6).
                     await db.ativos.update(
                       [String(asset.tenantid || '').trim().toUpperCase(), String(asset.primarykey || '')],
-                      { _conferido: 1, _is_synced: 0 }
+                      { _conferido: 1, ...marcarAlteracaoLocal() }
                     );
                   }
                 }
@@ -1196,8 +1198,11 @@ useEffect(() => {
   // Agendador Automático Oculto (Background Sync Timer)
   useEffect(() => {
     const triggerBackgroundSync = async () => {
-      // Barreira de guarda declarativa rigorosa:
-      if (!user || (!user.tenantid && !user.tenantid) || !sessionStorage.getItem('filial')) {
+      // A filial NÃO entra nesta barreira: o Android esvazia o `sessionStorage`
+      // quando mata a WebView e o ciclo ficava mudo para sempre, embora o ecrã
+      // continuasse a mostrar a unidade (localStorage). A fila resolve a
+      // unidade sozinha e audita os pendentes que descarta.
+      if (!shouldRunBackgroundSync(user)) {
         return;
       }
       // Watchdog: se o ciclo anterior passou de 2 minutos, a trava ficou presa
@@ -2896,7 +2901,11 @@ useEffect(() => {
           const localById = new Map(prev.assets.map(a => [String(a.id), a]));
           const mergedAssets = cloudAssets.map(cloudAsset => {
             const local = localById.get(String(cloudAsset.id));
-            return local && Number(local._is_synced) === 0 ? { ...cloudAsset, _is_synced: 0 } : cloudAsset;
+            // O pull não apaga a pendência local — nem a data do toque que a
+            // originou, que é o que o selo mostra como idade.
+            return local && Number(local._is_synced) === 0
+              ? { ...cloudAsset, ...marcarAlteracaoLocal(local._lastUpdated) }
+              : cloudAsset;
           });
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           
@@ -5621,7 +5630,7 @@ useEffect(() => {
       // `_is_synced = 1` vindo do pull e o cartão dizia "Sincronizado" antes de
       // a fila enviar (ou para sempre, offline). A fila só volta a marcar 1
       // depois do upsert confirmado.
-      _is_synced: 0,
+      ...marcarAlteracaoLocal(),
       currentCampaignId: inventory.currentCampaignId || assetWithGps.currentCampaignId,
       _version: nextVersion,
       _history: [...(assetWithGps._history || []), auditEntry],
@@ -5691,7 +5700,7 @@ useEffect(() => {
       _conferido: true,
       // Unitarizar altera o pai neste aparelho: pendente de nuvem como qualquer
       // outra conferência (o pai sai do giro e sobe unitarizado).
-      _is_synced: 0,
+      ...marcarAlteracaoLocal(timestamp),
       _dataLeitura: timestamp,
       _auditor: auditor,
       TAG_INVENTARIO: TagInventario.CONFERIDO,
