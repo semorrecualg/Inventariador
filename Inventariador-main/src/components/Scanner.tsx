@@ -210,45 +210,43 @@ const Scanner: React.FC<ScannerProps> = ({
    * Zoom digital, para quando o track não expõe `zoom` — o que acontece na
    * WebView do Android (Capacitor): nem `getCapabilities()` nem a constraint
    * `advanced` o suportam, e o controlo ficava desactivado a 40% de opacidade.
-   * Aqui o vídeo é desenhado `factor` vezes maior e centrado, e a região de
-   * leitura (lida pelo html5-qrcode no sistema de coordenadas do vídeo) é
-   * centrada no mesmo ponto: a caixa azul mostra o que é descodificado e as
-   * barras passam a chegar ao leitor com mais píxeis, em vez de reduzidas à
-   * largura do ecrã. A largura/altura da região não mudam (canvas fixo).
+   * O vídeo é desenhado `factor` vezes maior e centrado e a região de leitura
+   * (que o html5-qrcode recorta no sistema de coordenadas do vídeo) é centrada
+   * no mesmo ponto: a caixa azul mostra o que é descodificado e as barras
+   * chegam ao leitor com mais píxeis, em vez de reduzidas à largura do ecrã.
+   * A largura/altura da região não mudam (o canvas de descodificação é fixo).
+   *
+   * Só é aplicado quando a região existe: ampliar a imagem sem deslocar o
+   * recorte faria o leitor descodificar uma zona diferente da que o utilizador
+   * vê — pior do que não ter zoom. Devolve `false` sem tocar em nada nesse caso.
    */
-  const applySoftwareZoom = useCallback((factor: number) => {
-    const reader = document.getElementById('reader');
-    const video = reader?.querySelector<HTMLVideoElement>('video');
-    if (!reader || !video) return;
-
-    const viewportWidth = reader.clientWidth;
-    const viewportHeight = reader.clientHeight;
-    if (!viewportWidth || !viewportHeight) return;
-
-    const zoom = clampSoftwareZoom(factor);
-    reader.style.setProperty('--scanner-zoom', String(zoom));
-
-    // `qrRegion` é o recorte que o html5-qrcode usa em cada leitura (não é API
-    // pública, mas é um campo estável desta versão e é o único ponto que
-    // alinha a descodificação com a imagem ampliada).
-    const scanner = scannerRef.current as unknown as {
+  const applySoftwareZoom = useCallback((factor: number): boolean => {
+    // `qrRegion` é o recorte usado em cada leitura (não é API pública, mas é um
+    // campo estável desta versão) e é o único ponto que alinha a
+    // descodificação com a imagem ampliada.
+    const region = (scannerRef.current as unknown as {
       qrRegion?: { x: number; y: number; width: number; height: number };
-    } | null;
-    const region = scanner?.qrRegion;
-    if (!region) {
-      logger.warn('>>> [Scanner] Região de leitura indisponível para o zoom digital');
-      return;
+    } | null)?.qrRegion;
+    const reader = document.getElementById('reader');
+    const viewportWidth = reader?.clientWidth ?? 0;
+    const viewportHeight = reader?.clientHeight ?? 0;
+    if (!reader || !region || !viewportWidth || !viewportHeight) {
+      logger.warn('>>> [Scanner] Zoom digital indisponível: região de leitura ausente ou viewfinder sem tamanho');
+      return false;
     }
 
-    const centered = centerRegionForSoftwareZoom({
+    const zoom = clampSoftwareZoom(factor);
+    const { x, y } = centerRegionForSoftwareZoom({
       viewportWidth,
       viewportHeight,
       regionWidth: region.width,
       regionHeight: region.height,
       factor: zoom
     });
-    region.x = centered.x;
-    region.y = centered.y;
+    reader.style.setProperty('--scanner-zoom', String(zoom));
+    region.x = x;
+    region.y = y;
+    return true;
   }, []);
 
   // O zoom do hardware é reportado em valores do sensor (por vezes 100–400,
@@ -268,8 +266,9 @@ const Scanner: React.FC<ScannerProps> = ({
 
     setZoomRange({ min: SOFTWARE_ZOOM_MIN, max: SOFTWARE_ZOOM_MAX, step: SOFTWARE_ZOOM_STEP });
     setZoomLevel(SOFTWARE_ZOOM_MIN);
-    setZoomMode('software');
-    applySoftwareZoom(SOFTWARE_ZOOM_MIN);
+    // Sem região de leitura não há zoom digital honesto: o controlo fica
+    // desactivado em vez de ampliar a imagem sem ampliar a leitura.
+    setZoomMode(applySoftwareZoom(SOFTWARE_ZOOM_MIN) ? 'software' : null);
   }, [applySoftwareZoom]);
 
   const applyTorch = useCallback(async (enabled: boolean): Promise<boolean> => {
@@ -408,8 +407,11 @@ const Scanner: React.FC<ScannerProps> = ({
       if (!isMounted.current) return;
       
       // Um reinício recria o vídeo e recalcula a região de leitura: o zoom
-      // digital (CSS `--scanner-zoom`) não pode sobreviver ao arranque.
+      // digital (CSS `--scanner-zoom`) não pode sobreviver ao arranque. O
+      // controlo fica inactivo até `initZoom` voltar a decidir o modo.
       document.getElementById('reader')?.style.removeProperty('--scanner-zoom');
+      setZoomMode(null);
+      setZoomLevel(1);
 
       // `formatsToSupport` pertence ao construtor do Html5Qrcode: passado ao
       // `start()` era simplesmente ignorado. Ficamos no descodificador ZXing, o
@@ -646,8 +648,11 @@ const Scanner: React.FC<ScannerProps> = ({
     if (zoomMode === 'software') {
       const next = clampSoftwareZoom(zoomLevel + direction * SOFTWARE_ZOOM_STEP);
       if (next === zoomLevel) return;
+      if (!applySoftwareZoom(next)) {
+        setZoomMode(null);
+        return;
+      }
       setZoomLevel(next);
-      applySoftwareZoom(next);
       return;
     }
     const { min, max, step } = zoomRange;
@@ -859,8 +864,8 @@ const Scanner: React.FC<ScannerProps> = ({
             <button
               onClick={() => handleZoom(-1)}
               disabled={zoomMode === null}
-              className="p-2 text-white active:scale-90 disabled:opacity-50"
-              title={zoomMode === 'software' ? 'Reduzir zoom digital' : 'Reduzir zoom'}
+              className="p-2 text-white active:scale-90"
+              title="Reduzir zoom"
               aria-label="Reduzir zoom"
             >
               <Minimize size={20} />
@@ -869,8 +874,8 @@ const Scanner: React.FC<ScannerProps> = ({
             <button
               onClick={() => handleZoom(1)}
               disabled={zoomMode === null}
-              className="p-2 text-white active:scale-90 disabled:opacity-50"
-              title={zoomMode === 'software' ? 'Aumentar zoom digital' : 'Aumentar zoom'}
+              className="p-2 text-white active:scale-90"
+              title="Aumentar zoom"
               aria-label="Aumentar zoom"
             >
               <Maximize size={20} />
