@@ -14,7 +14,6 @@ import {
   findBatchGroup,
   findBatchGroupBySearch,
   isBaixado,
-  isConferido,
   plaquetaKey,
   registroKey,
   sameBatch,
@@ -46,10 +45,7 @@ describe('chaves do lote', () => {
     expect(registroKey(asset({ registro: '12' }))).toBe('');
   });
 
-  it('reconhece conferido e baixado', () => {
-    expect(isConferido(asset({ _conferido: 1 }))).toBe(true);
-    expect(isConferido(asset({ AUDITOR_STATUS_CONFERENCIA: 'SIM' }))).toBe(true);
-    expect(isConferido(asset())).toBe(false);
+  it('reconhece baixado', () => {
     expect(isBaixado(asset({ status: 'BAIXA PATRIMONIAL' }))).toBe(true);
     expect(isBaixado(asset({ databaixa: '01/2020' }))).toBe(true);
     expect(isBaixado(asset())).toBe(false);

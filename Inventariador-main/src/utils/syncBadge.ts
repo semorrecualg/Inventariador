@@ -1,4 +1,5 @@
 import type { Asset } from '../types';
+import { isConferido } from './conferencia';
 
 /**
  * SELO DE SINCRONIZAÇÃO DO CARTÃO ("Sincronizado" × "Pendente Nuvem")
@@ -18,10 +19,6 @@ import type { Asset } from '../types';
  *   - não conferido e já na nuvem  → **sem selo**: é base, não conferência.
  */
 export type SyncBadgeState = 'sincronizado' | 'pendente' | null;
-
-/** `_conferido` chega como booleano ou como 1/0, consoante a origem da linha. */
-const isConferido = (asset: Asset): boolean =>
-  asset._conferido === true || Number(asset._conferido) === 1;
 
 /** Linha igual à nuvem neste momento (não implica ter sido conferida). */
 const isNaNuvem = (asset: Asset): boolean => Number(asset._is_synced) === 1;
