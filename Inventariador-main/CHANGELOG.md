@@ -23,11 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unido pela chave `tenantid + primarykey` e conta **uma** vez; o endereço vem
   da cópia que o tiver e o estado de conferência é o mais avançado (o trabalho
   de campo grava em `ativos`/`local_assets`, não necessariamente em `assets`).
+- **`_is_deleted` com precedência definida:** quem decide é a cópia de maior
+  precedência — **`ativos` (viva)** → `assets` (canónica) → `local_assets`
+  (baseline). Uma baixa feita no aparelho esconde o ativo mesmo que a canónica
+  ainda esteja viva; uma reposição feita em `ativos` volta a mostrá-lo; e só
+  quando a cópia viva não declara o campo se desce para a seguinte.
 - **Endereço efetivo, igual ao do inventário:** a extração e as estatísticas
   usavam só `endereco`. Passam a usar a mesma regra de `assetAddressKey`
   (`Inventory.tsx`): `_localMaster` (local auditado) vence, e as colunas legadas
   `LOCALIZACAO`/`CENTRO_CUSTO` também identificam a localidade.
-- *Testes:* `addressSearch` (+8) — localidades só em `ativos`, união de
+- *Testes:* `addressSearch` (+11) — precedência do `_is_deleted` nos três
+  casos (vivo na viva vence baixado na canónica; baixa na viva esconde;
+  fallback para a canónica quando a viva não declara o campo), localidades só
+  em `ativos`, união de
   `assets`+`ativos`, **cenário misto** (`assets` com linhas sem endereço e as
   localidades em `ativos`), ativo espelhado nas três tabelas a contar uma vez,
   conferência feita numa só cópia a valer, filial com `_` a partir do cartão

@@ -140,6 +140,44 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     expect(rows.find(r => r.displayName.startsWith('151200'))).toMatchObject({ total: 1 });
   });
 
+  it('`_is_deleted`: a tabela VIVA (`ativos`) manda — vivo nela vence baixado na canónica', async () => {
+    await putAtivos([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]); // vivo
+    await putAssets([{ ...row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'), _is_deleted: 1 }]); // baixado
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ total: 1, checked: 0 });
+  });
+
+  it('`_is_deleted`: baixa feita na tabela viva esconde o ativo mesmo com a canónica viva', async () => {
+    await putAtivos([{ ...row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'), _is_deleted: 1 }]); // baixado
+    await putAssets([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]); // vivo
+
+    const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+
+    // A localidade continua listável (é o endereço que dá acesso ao cadastro),
+    // mas o ativo baixado não entra nas contagens.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ total: 0, checked: 0 });
+  });
+
+  it('`_is_deleted`: sem o campo na tabela viva, desce para a canónica', async () => {
+    const semFlag = row('151100 PRODUCAO - PV1 MILHO', 0, 'K1');
+    delete semFlag._is_deleted;
+    await putAtivos([semFlag]);
+    await putAssets([{ ...row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'), _is_deleted: 1 }]);
+
+    const comBaixaNaCanonica = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+    expect(comBaixaNaCanonica[0]).toMatchObject({ total: 0 });
+
+    await db.assets.clear();
+    await putAssets([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]); // canónica viva
+
+    const comCanonicaViva = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+    expect(comCanonicaViva[0]).toMatchObject({ total: 1 });
+  });
+
   it('conferência feita só numa das cópias conta como conferida', async () => {
     // O trabalho de campo grava em `ativos`/`local_assets`; `assets` pode ficar
     // atrás. A união não pode desfazer a conferência já feita.

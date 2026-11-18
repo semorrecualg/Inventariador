@@ -486,22 +486,25 @@ export const localDb = {
         if (!unitMatch) return [];
         return rows.filter(r => normalizeUnitMatchKey(r.filial) === unitMatch);
       };
+      // ORDEM = PRECEDÊNCIA da união. `ativos` é a tabela VIVA (é onde o
+      // trabalho de campo grava e apaga); `assets` é a canónica do último
+      // carregamento e `local_assets` o baseline do restore. A ordem só decide
+      // `_is_deleted` (ver `mergeAssetCopies`) — endereço e conferência são
+      // combinados, não sobrepostos.
       const workTables: UnitTable[] = [
-        db.assets as unknown as UnitTable,
         db.ativos as unknown as UnitTable,
+        db.assets as unknown as UnitTable,
         db.local_assets as unknown as UnitTable
       ];
-      const addressRows = async (): Promise<DexieAddress[]> => {
-        const table = db.addresses as unknown as UnitTable;
-        const exatos = await exactRowsOf(table);
-        if (exatos.length > 0 || !unitMatch) return exatos as unknown as DexieAddress[];
-        return (await doContrato(table)) as unknown as DexieAddress[];
-      };
       /**
-       * Duas cópias do MESMO ativo (mesma `primarykey`) em tabelas diferentes:
-       * fica o endereço de qualquer uma e o estado de conferência mais avançado.
-       * Assim a união não perde o local nem desfaz uma conferência já feita em
-       * `ativos`/`local_assets`.
+       * Duas cópias do MESMO ativo (mesma `primarykey`) em tabelas diferentes.
+       *  · endereço: da cópia que o tiver;
+       *  · `_conferido`: o estado mais avançado (1 se qualquer cópia conferiu);
+       *  · `_is_deleted`: o da cópia de MAIOR precedência (`ativos` → `assets`
+       *    → `local_assets`) — uma baixa feita no aparelho esconde o ativo, e
+       *    uma reposição feita em `ativos` volta a mostrá-lo, mesmo que a
+       *    canónica ainda esteja atrasada. Só quando a cópia viva não declara o
+       *    campo é que se desce para a seguinte.
        */
       const mergeAssetCopies = (prev: UnitRow, next: UnitRow): UnitRow => ({
         ...prev,
@@ -513,13 +516,21 @@ export const localDb = {
           prev._conferido === 1 || next._conferido === 1
             ? 1
             : (prev._conferido ?? next._conferido),
+        // `prev` é sempre a cópia de maior precedência (ordem de `workTables`).
         _is_deleted: prev._is_deleted ?? next._is_deleted
       });
+      const addressRows = async (): Promise<DexieAddress[]> => {
+        const table = db.addresses as unknown as UnitTable;
+        const exatos = await exactRowsOf(table);
+        if (exatos.length > 0 || !unitMatch) return exatos as unknown as DexieAddress[];
+        return (await doContrato(table)) as unknown as DexieAddress[];
+      };
       /**
-       * Ativos da filial nas TRÊS tabelas (canónica → trabalho → baseline),
-       * com índice exato em cada uma e a varredura tolerante do mesmo contrato
-       * quando a tabela não tem o índice exato. A união é deduplicada pela
-       * chave do ativo; linhas sem chave são mantidas individualmente.
+       * Ativos da filial nas TRÊS tabelas, pela ordem de precedência (`ativos`
+       * viva → `assets` canónica → `local_assets` baseline), com índice exato
+       * em cada uma e a varredura tolerante do mesmo contrato quando a tabela
+       * não tem o índice exato. A união é deduplicada pela chave do ativo;
+       * linhas sem chave são mantidas individualmente.
        */
       const assetRows = async (): Promise<UnitRow[]> => {
         const byKey = new Map<string, UnitRow>();
