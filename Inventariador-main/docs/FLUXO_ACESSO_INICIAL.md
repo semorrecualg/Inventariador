@@ -210,6 +210,23 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   bloqueado por hardware, mas nenhuma dispensa é silenciosa. *Testes:
   `biometricPolicy` e `biometricRegistrationFallback`; a WebView real só se
   confirma com APK novo (o instalado é anterior a estas correções).*
+- **Desbloqueio biométrico como primeira etapa — Fase 3 (2026-11-18):** no casco
+  nativo o acesso deixa de começar no formulário. Se o aparelho tem biometria e
+  existe credencial **nativa** do último utilizador autenticado
+  (`gbr_last_login_user`, gravado no login por senha ou pela biometria),
+  `BiometricUnlock` abre com esse utilizador e **dispara o prompt
+  automaticamente**, uma única vez. `canOfferBiometricUnlock`
+  (`src/utils/biometricUnlock.ts`) é quem autoriza a tela: casco nativo + plugin
+  `available` + credencial registada + último utilizador — sem qualquer destes,
+  nada muda. A senha fica sempre em **«Usar senha»** (o formulário abre já com o
+  utilizador preenchido) e a recusa oferece «Tentar novamente». No **web sem
+  autenticador** a tela não existe: o acesso continua a ser utilizador + senha,
+  com o botão biométrico do formulário apenas quando há plataforma e credencial.
+  O **primeiro acesso** mantém a ordem senha → cadastro obrigatório da Fase 2;
+  o desbloqueio biométrico só passa a ser a primeira etapa nos acessos
+  seguintes. *Testes: `biometricUnlock` (elegibilidade e memória do aparelho) e
+  `biometricUnlockScreen` (prompt automático, recusa, repetição e «Usar senha»);
+  o prompt real confirma-se num APK novo.*
 - **Biometria nativa no APK — Fase 2b (2026-11-17):** no casco Capacitor a
   etapa usa `@aparajita/capacitor-biometric-auth@8.0.2` (linha do Capacitor 6):
   `checkNativeBiometry()` (`src/services/biometricService.ts`) traduz a resposta
