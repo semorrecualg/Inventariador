@@ -11,7 +11,8 @@ import {
   SOFTWARE_ZOOM_MIN,
   SOFTWARE_ZOOM_STEP,
   centerRegionForSoftwareZoom,
-  clampSoftwareZoom
+  clampSoftwareZoom,
+  isUsableQrRegion
 } from '../utils/cameraZoom';
 
 // Ecrã de um telemóvel comum, com a região de leitura de 350x150 do modo barras.
@@ -46,5 +47,33 @@ describe('zoom digital do scanner', () => {
     const { x, y } = centerRegionForSoftwareZoom({ ...viewport, factor: SOFTWARE_ZOOM_MAX });
     expect(x).toBeGreaterThanOrEqual(0);
     expect(y).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// `qrRegion` é um campo interno: se a biblioteca mudar, o zoom fica desactivado
+// em vez de ampliar a imagem sem deslocar a região de descodificação.
+describe('guarda do qrRegion', () => {
+  it('aceita a região que o html5-qrcode 2.3.8 expõe', () => {
+    expect(isUsableQrRegion({ x: 20, y: 347, width: 350, height: 150 })).toBe(true);
+  });
+
+  it('recusa o campo ausente, nulo ou de outro tipo', () => {
+    expect(isUsableQrRegion(undefined)).toBe(false);
+    expect(isUsableQrRegion(null)).toBe(false);
+    expect(isUsableQrRegion('region')).toBe(false);
+    expect(isUsableQrRegion({})).toBe(false);
+  });
+
+  it('recusa uma forma diferente — o caso de uma subida da biblioteca', () => {
+    expect(isUsableQrRegion({ x: 20, y: 347, w: 350, h: 150 })).toBe(false);
+    expect(isUsableQrRegion({ x: 20, y: 347, width: 350 })).toBe(false);
+    expect(isUsableQrRegion({ x: '20', y: 347, width: 350, height: 150 })).toBe(false);
+    expect(isUsableQrRegion({ x: Number.NaN, y: 347, width: 350, height: 150 })).toBe(false);
+    expect(isUsableQrRegion({ x: 20, y: Number.POSITIVE_INFINITY, width: 350, height: 150 })).toBe(false);
+  });
+
+  it('recusa uma região sem área', () => {
+    expect(isUsableQrRegion({ x: 20, y: 347, width: 0, height: 150 })).toBe(false);
+    expect(isUsableQrRegion({ x: 20, y: 347, width: 350, height: -1 })).toBe(false);
   });
 });

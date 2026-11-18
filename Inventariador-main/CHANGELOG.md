@@ -36,7 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zoom de hardware, o controlo passa a fazer zoom digital de 1x a 3x: o vídeo
   é ampliado e centrado e a região de leitura acompanha o mesmo factor, de modo
   que a caixa azul mostra o que é descodificado e as barras deixam de chegar ao
-  leitor reduzidas à largura do ecrã.
+  leitor reduzidas à largura do ecrã. O recorte interno (`qrRegion`) é validado
+  antes de se mexer em qualquer coisa: se uma subida do html5-qrcode o renomear
+  ou mudar a forma, o controlo fica desactivado em vez de ampliar só a imagem e
+  deixar a descodificação numa zona diferente da que o utilizador vê.
 - **Foco contínuo:** aplicado quando a câmara o suporta — a imagem desfocada
   era a causa mais comum de um código visível não ser lido.
 - **Botão do zoom cortado:** a barra de controlos era uma fila única de três
