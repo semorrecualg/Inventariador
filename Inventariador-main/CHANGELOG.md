@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — biometria deixa de ser exigida no web/desktop
+
+- **O cadastro biométrico obrigatório abria no navegador:** `resolveBiometricStep`
+  tratava «autenticador de plataforma disponível» (`Touch ID`, `Windows Hello`)
+  como aparelho de campo e exigia o cadastro a quem entrava pelo desktop/web —
+  sem credencial, a tela «SEGURANÇA BIOMÉTRICA · CADASTRO OBRIGATÓRIO» travava o
+  acesso. A biometria passa a ser **etapa exclusiva do aplicativo móvel** (casco
+  nativo): no navegador/desktop o passo não existe — nem cadastro, nem tela de
+  dispensa — e o motivo fica registado como `web-session`.
+- **O botão «Entrar com Biometria» também é do app:** `Login` só consulta suporte
+  e credencial no casco nativo, então no web o formulário fica exatamente
+  utilizador + senha.
+- **O app não muda:** no casco nativo continua obrigatório onde há biometria e
+  com dispensa explícita onde o hardware não verifica (Fase 2/2b).
+- *Testes:* `biometricPolicy` — web com e sem autenticador segue direto
+  (`web-session`), cadastro obrigatório só com `isNativeApp + nativeBiometry:
+  'available'`.
+
 ### Corrigido — contrato sem filiais no seletor
 
 - **O seletor mostrava o contrato sem nenhuma filial:** o catálogo de contratos

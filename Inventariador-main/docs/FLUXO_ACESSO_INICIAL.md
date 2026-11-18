@@ -210,6 +210,16 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   bloqueado por hardware, mas nenhuma dispensa é silenciosa. *Testes:
   `biometricPolicy` e `biometricRegistrationFallback`; a WebView real só se
   confirma com APK novo (o instalado é anterior a estas correções).*
+- **Biometria restrita ao app móvel — Fase 4 (2026-11-18):** a etapa biométrica
+  deixou de existir no navegador/desktop. `resolveBiometricStep` só devolve
+  `register`/`fallback` quando `isNativeApp` é verdadeiro (casco Capacitor); no
+  web devolve `proceed` com o motivo `web-session`, independentemente de
+  `isUserVerifyingPlatformAuthenticatorAvailable()` — Touch ID/Windows Hello não
+  transformam o desktop num aparelho de campo, e exigir cadastro ali travava o
+  acesso. O botão «Entrar com Biometria» do formulário também só aparece no app.
+  No **APK** nada muda: obrigatório com biometria disponível, dispensa explícita
+  no hardware sem autenticador. *Testes: `biometricPolicy` (web com/sem
+  autenticador → `proceed`; cadastro só em `isNativeApp + available`).*
 - **Desbloqueio biométrico como primeira etapa — Fase 3 (2026-11-18):** no casco
   nativo o acesso deixa de começar no formulário. Se o aparelho tem biometria e
   existe credencial **nativa** do último utilizador autenticado
