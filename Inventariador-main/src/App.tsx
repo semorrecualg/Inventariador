@@ -6859,6 +6859,26 @@ useEffect(() => {
   // porque o handler do contrato de trabalho (declarado antes deste memo) é
   // quem aplica a trava de entrada.
   const unitReleaseRef = useRef<UnitReleaseMap>({});
+
+  // CATÁLOGO DE FILIAIS POR CONTRATO que o APP já conhece — a MESMA lista que
+  // alimenta o mapa de liberação. O seletor de contrato recebia apenas uma
+  // varredura do catálogo local, que pode vir vazia (configuração operacional
+  // gravada sem contrato, base interna ainda não espelhada), e então dizia
+  // «Nenhuma filial na base deste contrato» enquanto o próprio aviso apontava
+  // uma filial existente. Com esta lista, cartão e liberação nunca divergem.
+  const unitsByContract = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const unit of fullCompaniesWithStatus) {
+      const tenantid = String(unit.tenantid || user?.tenantid || '').trim().toUpperCase();
+      const name = String(unit.name || '').trim().toUpperCase();
+      if (!tenantid || !name) continue;
+      if (!map[tenantid]) map[tenantid] = [];
+      if (!map[tenantid].includes(name)) map[tenantid].push(name);
+    }
+    return map;
+  }, [fullCompaniesWithStatus, user?.tenantid]);
+
+
   const unitReleaseMap = useMemo(
     () =>
       buildUnitReleaseMap(
@@ -7778,6 +7798,7 @@ useEffect(() => {
               user={user}
               contexts={workContexts}
               unitRelease={unitReleaseMap}
+              availableFiliais={unitsByContract}
               initialSelection={workContextPreselection}
               onSelect={handleWorkContextModuleSelect}
               onOpenAdmin={(target, params) => pushScreen(target, params)}

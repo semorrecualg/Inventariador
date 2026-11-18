@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — «Nenhuma filial na base» com a filial configurada
+
+- **A lista de filiais e o estado de liberação vinham de fontes diferentes:** o
+  cartão do contrato (`WorkContextSelector`) montava as filiais a partir de uma
+  varredura do catálogo local (`listContracts`, feita uma única vez no mount),
+  enquanto o aviso de liberação usava o catálogo vivo do App
+  (`fullCompaniesWithStatus`). Num aparelho cuja configuração operacional foi
+  gravada **sem contrato** (`unit_configs` sem `tenantid`, que o catálogo
+  descarta) o ecrã dizia «Nenhuma filial na base deste contrato» e, ao mesmo
+  tempo, avisava «Unidade aguardando liberação (falta campanha)» — um aviso a
+  apontar uma filial que não existia na lista, com o acesso travado e sem
+  saída.
+- **O catálogo vivo passou a alimentar o seletor:** o App entrega
+  `availableFiliais` (`tenantid` → filiais) ao `WorkContextSelector`, a MESMA
+  lista que gera o mapa de liberação (ativos, base interna, âncoras, campanhas,
+  lista da nuvem). A filial que o aviso menciona passa a ter cartão para tocar.
+- **Pré-seleção validada:** a última escolha só é pré-selecionada quando é uma
+  unidade real deste contrato (opção da lista ou configuração gravada com a
+  chave exata `TENANTID::FILIAL`); uma escolha antiga de outra base deixa de
+  produzir o aviso órfão.
+- *Testes:* `workContextUnitReleaseAction` — catálogo local vazio + catálogo
+  vivo com a filial (cartão listado), pré-seleção de unidade configurada sem
+  campanha (cartão + aviso) e pré-seleção inexistente (sem aviso órfão).
+
 ### Corrigido — «Nenhum Endereço Cadastrado» com a base cheia
 
 - **O ecrã de endereços lia a base com o contrato do PERFIL:** `getCurrentTenantid`
