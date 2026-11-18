@@ -112,6 +112,9 @@ const Scanner: React.FC<ScannerProps> = ({
   // registo ficava pendente sem ninguém notar.
   const [scanFailure, setScanFailure] = useState<string | null>(null);
   const [isFlashing, setIsFlashing] = useState(false);
+  // Flash vermelho da falha de gravação: no armazém o cartão de aviso sozinho
+  // passa despercebido, e o branco/verde do sucesso não pode ser reutilizado.
+  const [isFailureFlashing, setIsFailureFlashing] = useState(false);
   const trackRef = useRef<MediaStreamTrack | null>(null);
   // Guarda contra a repetição do MESMO código enquanto ele fica à frente da
   // câmara, e contra duas leituras concorrentes em cima da mesma frame.
@@ -446,6 +449,7 @@ const Scanner: React.FC<ScannerProps> = ({
 
         // PESIMISMO SAUDÁVEL: Só apita e brilha se o banco aceitar
         setScanFailure(null);
+        setIsFailureFlashing(false);
         try {
           await onScanRef.current(decodedText);
 
@@ -469,6 +473,10 @@ const Scanner: React.FC<ScannerProps> = ({
           // ecrã, não contra uma nova tentativa de gravação.
           lastReadRef.current = { text: '', at: 0 };
           const reason = err instanceof Error ? err.message : String(err ?? '').trim();
+          setIsFailureFlashing(true);
+          setTimeout(() => {
+            if (isMounted.current) setIsFailureFlashing(false);
+          }, 700);
           setScanFailure(reason || 'O registro não foi gravado na base local.');
         } finally {
           isHandlingScanRef.current = false;
@@ -747,6 +755,11 @@ const Scanner: React.FC<ScannerProps> = ({
       {/* Flash Effect */}
       {isFlashing && !isPaused && (
         <div className="absolute inset-0 bg-white z-[100] pointer-events-none animate-pulse"></div>
+      )}
+
+      {/* Leitura recusada pelo banco: flash vermelho, o oposto do «Lido!» */}
+      {isFailureFlashing && !isPaused && (
+        <div id="scanner-save-failure-flash" className="absolute inset-0 bg-red-600/50 z-[100] pointer-events-none animate-pulse"></div>
       )}
 
       {/* Success Feedback */}

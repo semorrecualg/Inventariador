@@ -85,6 +85,7 @@ describe('Scanner — leitura gravada vs leitura recusada', () => {
     expect(screen.getByText('Código lido — NÃO gravado')).toBeTruthy();
     expect(screen.getByText(/QuotaExceededError/)).toBeTruthy();
     expect(screen.queryByText('Lido!')).toBeNull();
+    expect(document.getElementById('scanner-save-failure-flash')).not.toBeNull();
   });
 
   it('confirma a leitura quando a gravação passa', async () => {
@@ -98,6 +99,7 @@ describe('Scanner — leitura gravada vs leitura recusada', () => {
     expect(onScan).toHaveBeenCalledWith('7891234567890');
     expect(screen.getByText('Lido!')).toBeTruthy();
     expect(screen.queryByText('Código lido — NÃO gravado')).toBeNull();
+    expect(document.getElementById('scanner-save-failure-flash')).toBeNull();
   });
 
   it('deixa reler o mesmo código de imediato depois de uma falha', async () => {
