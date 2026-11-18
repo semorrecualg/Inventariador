@@ -2266,17 +2266,49 @@ export const fetchFullInventory = async (
  * continua a bastar para o item voltar marcado como conferido (só perde
  * autor/data, que a nuvem nunca guardou).
  */
+/**
+ * A conferência de UMA linha da nuvem, numa só regra.
+ *
+ * A coluna `conferido` (scripts/assets-conferencia.sql) manda; `status` com
+ * CONFERIDO é o marcador legado e continua a valer quando o script ainda não
+ * correu. Nenhuma leitura da nuvem repete esta derivação.
+ */
+const conferidoDaNuvem = (row: Record<string, unknown>): boolean => {
+  const rawConferido = row.conferido;
+  return (
+    rawConferido === true ||
+    String(rawConferido).toLowerCase() === 'true' ||
+    String(row.status || '').toUpperCase().includes('CONFERIDO') ||
+    String(row.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM'
+  );
+};
+
+/**
+ * Acrescenta à linha CRUA a conferência no vocabulário do app (`_conferido`,
+ * `_auditor`, `_dataLeitura`), sem mexer em mais nada.
+ *
+ * É o que o laudo da campanha arquiva e conta. Ali a linha é artefacto fiscal:
+ * `tenantid`/`filial` ficam exatamente como estavam no Postgres e não entra o
+ * `unitid` legado — por isso NÃO se usa `mapCloudAssetRow`, que normaliza a
+ * identidade para o runtime (`tenantid`/`filial` em maiúsculas, `unitid`).
+ */
+export const comConferenciaLocal = (row: Record<string, unknown>): Record<string, unknown> => {
+  const auditor = row.auditor !== undefined && row.auditor !== null ? String(row.auditor).trim() : '';
+  const dataLeitura = row.data_leitura !== undefined && row.data_leitura !== null ? String(row.data_leitura) : '';
+
+  return {
+    ...row,
+    _conferido: conferidoDaNuvem(row),
+    ...(auditor ? { _auditor: auditor } : {}),
+    ...(dataLeitura ? { _dataLeitura: dataLeitura } : {}),
+  };
+};
+
 export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
   const tId = String(row.tenantid || '').trim().toUpperCase();
   const uId = String(row.filial || row.unit_id || row.unitid || '').trim().toUpperCase();
 
-  const rawConferido = row.conferido;
-  const statusUpper = String(row.status || '').toUpperCase();
-  const conferido =
-    rawConferido === true ||
-    String(rawConferido).toLowerCase() === 'true' ||
-    statusUpper.includes('CONFERIDO') ||
-    String(row.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+  const conferido = conferidoDaNuvem(row);
 
   const auditor = row.auditor !== undefined && row.auditor !== null ? String(row.auditor).trim() : '';
   const dataLeitura = row.data_leitura !== undefined && row.data_leitura !== null ? String(row.data_leitura) : '';
@@ -3603,10 +3635,24 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             return false;
         }
 
-        // 3. Calcula metadados/stats para o laudo consolidado
+        // 3. Calcula metadados/stats para o laudo consolidado.
+        // A linha do Postgres chama à conferência `conferido`; o app chama
+        // `_conferido`. Contar `a._conferido` na linha crua dava SEMPRE 0 — o
+        // laudo dizia que nada foi inventariado e o snapshot arquivado não
+        // guardava quem conferiu nem quando.
+        //
+        // O que se grava: a linha ORIGINAL do Postgres, acrescentada só da
+        // conferência no vocabulário do app (`comConferenciaLocal`). Não é
+        // `mapCloudAssetRow` de propósito: dentro de um laudo fechado a
+        // identidade tem de ficar como estava (sem `tenantid`/`filial`
+        // normalizados, sem `unitid` legado) — o artefacto fiscal não se reescreve.
+        const ativosDoLaudo = (assets as Record<string, unknown>[]).map(comConferenciaLocal);
         const stats = {
-            total: assets.length,
-            inventoried: assets.filter((a: Record<string, unknown>) => a._conferido).length,
+            total: ativosDoLaudo.length,
+            inventoried: ativosDoLaudo.filter((a) => isConferido(a)).length,
+            // TAG_INVENTARIO é runtime local (não existe no public); a
+            // divergência canónica deriva-se de status/databaixa — fica para
+            // tarefa própria, porque muda números já publicados.
             divergences: assets.filter((a: Record<string, unknown>) => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
             generated_at: new Date().toISOString(),
             cpc_compliance: 'CPC 27 / NBC TG 27'
@@ -3618,7 +3664,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             await persistSnapshotLocally({
                 id: `snap_${campaignId}_${Date.now()}`,
                 campaign_id: campaignId,
-                assets_data: assets as unknown as Asset[],
+                assets_data: ativosDoLaudo as unknown as Asset[],
                 metadata: stats,
                 snapshot_date: new Date().toISOString(),
                 closed_by: closedBy,
@@ -3635,7 +3681,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             .from('campaign_snapshots')
             .insert([{
                 campaign_id: campaignId,
-                assets_data: assets as Asset[],
+                assets_data: ativosDoLaudo as unknown as Asset[],
                 metadata: stats as Record<string, unknown>,
                 closed_at: new Date().toISOString(),
                 closed_by: closedBy,
