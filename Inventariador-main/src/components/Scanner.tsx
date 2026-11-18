@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { X, Maximize, Minimize, Camera, RefreshCw, ShieldCheck, Flashlight } from 'lucide-react';
+import { X, Maximize, Minimize, Camera, RefreshCw, ShieldCheck, ShieldAlert, Flashlight } from 'lucide-react';
 import { ScannerMode, ScanFeedbackMode } from '../types';
 import { logger } from '../utils/logger';
 import { playScanFeedback } from '../utils/scanFeedback';
@@ -108,7 +108,14 @@ const Scanner: React.FC<ScannerProps> = ({
   const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  // Leitura descodificada que o banco recusou. Só existe para o operador saber
+  // que o item NÃO foi gravado: sem isto, a câmara seguia em silêncio e o
+  // registo ficava pendente sem ninguém notar.
+  const [scanFailure, setScanFailure] = useState<string | null>(null);
   const [isFlashing, setIsFlashing] = useState(false);
+  // Flash vermelho da falha de gravação: no armazém o cartão de aviso sozinho
+  // passa despercebido, e o branco/verde do sucesso não pode ser reutilizado.
+  const [isFailureFlashing, setIsFailureFlashing] = useState(false);
   const trackRef = useRef<MediaStreamTrack | null>(null);
   // Guarda contra a repetição do MESMO código enquanto ele fica à frente da
   // câmara, e contra duas leituras concorrentes em cima da mesma frame.
@@ -428,6 +435,7 @@ const Scanner: React.FC<ScannerProps> = ({
       document.getElementById('reader')?.style.removeProperty('--scanner-zoom');
       setZoomMode(null);
       setZoomLevel(1);
+      setScanFailure(null);
 
       // `formatsToSupport` pertence ao construtor do Html5Qrcode: passado ao
       // `start()` era simplesmente ignorado. Ficamos no descodificador ZXing, o
@@ -456,6 +464,8 @@ const Scanner: React.FC<ScannerProps> = ({
         resetInactivityTimeout();
 
         // PESIMISMO SAUDÁVEL: Só apita e brilha se o banco aceitar
+        setScanFailure(null);
+        setIsFailureFlashing(false);
         try {
           await onScanRef.current(decodedText);
 
@@ -471,7 +481,19 @@ const Scanner: React.FC<ScannerProps> = ({
           }, 150);
         } catch (err) {
           logger.error(">>> [SCAN] Falha na persistência pós-scan:", err);
-          // Aqui poderíamos ter um feedback de erro visual se necessário
+          if (!isMounted.current) return;
+          // O código foi descodificado mas o banco recusou a gravação. Um
+          // "Lido!" verde aqui faria o operador seguir para o próximo item com
+          // este por gravar. O mesmo código pode voltar a ser lido de
+          // imediato: a janela de guarda existe contra repetições do MESMO
+          // ecrã, não contra uma nova tentativa de gravação.
+          lastReadRef.current = { text: '', at: 0 };
+          const reason = err instanceof Error ? err.message : String(err ?? '').trim();
+          setIsFailureFlashing(true);
+          setTimeout(() => {
+            if (isMounted.current) setIsFailureFlashing(false);
+          }, 700);
+          setScanFailure(reason || 'O registro não foi gravado na base local.');
         } finally {
           isHandlingScanRef.current = false;
         }
@@ -755,6 +777,11 @@ const Scanner: React.FC<ScannerProps> = ({
         <div className="absolute inset-0 bg-white z-[100] pointer-events-none animate-pulse"></div>
       )}
 
+      {/* Leitura recusada pelo banco: flash vermelho, o oposto do «Lido!» */}
+      {isFailureFlashing && !isPaused && (
+        <div id="scanner-save-failure-flash" className="absolute inset-0 bg-red-600/50 z-[100] pointer-events-none animate-pulse"></div>
+      )}
+
       {/* Success Feedback */}
       {showSuccess && !isPaused && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] pointer-events-none">
@@ -915,6 +942,26 @@ const Scanner: React.FC<ScannerProps> = ({
       {children && (
         <div className="absolute inset-0 z-[200] pointer-events-none animate-fadeIn">
           {children}
+        </div>
+      )}
+
+      {scanFailure && !isPaused && !error && (
+        <div
+          id="scanner-save-failure"
+          role="alert"
+          className={`absolute ${isInline ? 'bottom-4' : ''} left-6 right-6 z-[120] p-4 bg-amber-500/25 backdrop-blur-md border-2 border-amber-400 rounded-2xl text-center shadow-2xl pointer-events-none`}
+          style={isInline ? undefined : { top: 'calc(var(--ion-safe-area-top, 0px) + 9rem)' }}
+        >
+          <div className="flex items-center justify-center gap-2 mb-1">
+            <ShieldAlert size={16} className="text-amber-300" />
+            <p className="text-white text-xs font-black uppercase tracking-widest">Código lido — NÃO gravado</p>
+          </div>
+          <p className="text-amber-100 text-[9px] font-bold uppercase tracking-wider break-words">
+            {scanFailure}
+          </p>
+          <p className="text-white/70 text-[8px] font-bold uppercase tracking-widest mt-1">
+            Aponte novamente para repetir a gravação
+          </p>
         </div>
       )}
 
