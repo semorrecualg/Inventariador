@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — «SESSÃO EXPIRADA» em autosave sem contrato
+
+- **Um save em segundo plano deixava de encerrar a sessão:** `syncConfigToCloud`
+  desistia da gravação quando não tinha `tenantid` e disparava
+  `gbr_session_expired` — o App respondia com o modal «SESSÃO EXPIRADA · o envio
+  das configurações foi bloqueado», derrubava a sessão e voltava ao login. Isso
+  acontecia em navegação normal: logout, dono global antes de escolher o
+  contrato, base ainda sem unidades. Agora o envio é ignorado com aviso no log e
+  a sessão fica intacta; a expiração real continua a ser tratada pelo listener
+  de auth do Supabase.
+- **O autosave passa a levar o contrato da sessão:**
+  `persistenceService.saveInventory` resolve `readSessionTenantId()` /
+  `readLocalTenantId()` e envia a configuração para `config_<TENANT>` em vez de
+  depender de um `tenantid` que o chamador não passava.
+
 ### Adicionado — desbloqueio biométrico como primeira etapa no mobile
 
 - **A biometria passou a ser o primeiro passo, não o segundo:** no casco nativo

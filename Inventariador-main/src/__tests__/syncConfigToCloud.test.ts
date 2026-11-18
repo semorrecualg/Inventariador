@@ -78,6 +78,25 @@ describe('syncConfigToCloud — modo nuvem', () => {
     expect(options).toEqual({ onConflict: 'id' });
   });
 
+  it('sem contrato não envia config e NÃO encerra a sessão', async () => {
+    // Autosave em segundo plano (logout, dono global antes de escolher o
+    // contrato): antes disparava `gbr_session_expired` e o utilizador levava
+    // com o modal "SESSÃO EXPIRADA · envio das configurações bloqueado" sem
+    // ter perdido sessão nenhuma.
+    const events: Event[] = [];
+    const listener = (event: Event) => events.push(event);
+    window.addEventListener('gbr_session_expired', listener);
+
+    try {
+      await syncConfigToCloud(config as never);
+    } finally {
+      window.removeEventListener('gbr_session_expired', listener);
+    }
+
+    expect(stubs.upsert).not.toHaveBeenCalled();
+    expect(events).toHaveLength(0);
+  });
+
   it('registra CONFIG_SYNC_FAIL em audit_logs quando a gravação falha', async () => {
     stubs.upsert.mockResolvedValue({
       error: { code: '42501', message: 'permission denied for table inventory_config' }

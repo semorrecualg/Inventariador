@@ -1698,12 +1698,13 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
 
   const built = buildConfigCloudPayload(config, tenantid);
   if (!built) {
-    logger.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantid ausente.");
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
-        detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. O envio das configurações foi bloqueado." }
-      }));
-    }
+    // Autosave em segundo plano sem contrato resolvido (logout, dono global
+    // antes de escolher o contrato, base ainda vazia): NÃO é perda de sessão.
+    // Antes este caminho disparava `gbr_session_expired`, que encerrava a
+    // sessão e mostrava "SESSÃO EXPIRADA · o envio das configurações foi
+    // bloqueado" a quem só estava a navegar. A expiração real continua a ser
+    // tratada pelo listener de auth do Supabase; aqui só se ignora o envio.
+    logger.warn('>>> [Session] syncConfigToCloud ignorado: sem contrato (tenantid) para isolar a configuração — sessão preservada.');
     return; // Interrompe a operação de sync
   }
 
