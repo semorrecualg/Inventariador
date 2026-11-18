@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existe só na nuvem nunca libertava o cartão. Agora lê o local **sem filtro**
   (registros antigos sem contrato continuam a valer) e acrescenta
   `fetchCampaigns(contrato)` — local do contrato + nuvem, sem filtro de unidade.
+- **`mergeCampaignRows` deduplica pelo `id`:** a chave era prefixada pela
+  fonte (`local-<id>` / `scoped-<id>`), portanto a MESMA campanha vinda do
+  banco local e da nuvem entrava duas vezes — o comentário prometia dedupe por
+  `id` e não havia nenhum. Agora é uma linha por campanha e, no mesmo `id`,
+  vale a versão da nuvem; linhas sem `id` continuam a entrar todas.
+- *Testes:* `campaignRelease` (novo, 10) — dedupe por `id` (incluindo `42` vs
+  `'42'`), ids distintos preservados, linhas sem `id` sem colisão, campanha só
+  da nuvem a libertar, contrato ausente sem chamada remota e falha de cada
+  fonte sem perder a outra.
 - **A reunião das fontes saiu do App para `utils/campaignRelease`:**
   `loadCampaignUnitsForRelease` lê o local sem filtro e acrescenta o contrato
   (local + nuvem); devolve as unidades `ACTIVE`/gravadas. É a peça que o App

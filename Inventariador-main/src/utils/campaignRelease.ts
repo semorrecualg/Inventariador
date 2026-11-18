@@ -11,7 +11,8 @@
 //   • local SEM filtro — registros antigos sem contrato (ou de outro casing)
 //     continuam a valer, como antes;
 //   • `fetchScoped` (local do contrato + nuvem, sem filtro de unidade) só
-//     ACRESCENTA — nunca esconde um registro local.
+//     acrescenta campanhas: um registro local nunca desaparece, exceto quando
+//     é a MESMA campanha (mesmo `id`), caso em que vale a versão da nuvem.
 //
 // Em modo INTERNAL (`fetchScoped` devolve só o local, por soberania) o
 // resultado é o mesmo da leitura local: campanha que só exista na nuvem NÃO
@@ -49,14 +50,23 @@ export interface CampaignReleaseUnits {
   recorded: Set<string>;
 }
 
-/** Mescla por `id`; linhas sem id mantêm-se pelo índice (nenhuma se perde). */
-const mergeRows = (
+/**
+ * Junta as duas fontes **por `id`**: a mesma campanha no local e na nuvem é UMA
+ * linha, e a nuvem vence (é a autoridade da campanha — mesma regra do merge de
+ * `fetchCampaigns`). Registros sem `id` não podem colidir entre si nem com os
+ * identificados: cada um entra pela posição dentro da sua fonte.
+ */
+export const mergeCampaignRows = (
   local: readonly CampaignReleaseRow[],
   scoped: readonly CampaignReleaseRow[]
 ): CampaignReleaseRow[] => {
+  const keyOf = (row: CampaignReleaseRow, source: 'local' | 'scoped', index: number): string => {
+    const id = String(row?.id ?? '').trim();
+    return id ? `id:${id}` : `${source}:${index}`;
+  };
   const byId = new Map<string, CampaignReleaseRow>();
-  local.forEach((row, index) => byId.set(`local-${String(row.id ?? index)}`, row));
-  scoped.forEach((row, index) => byId.set(`scoped-${String(row.id ?? index)}`, row));
+  local.forEach((row, index) => byId.set(keyOf(row, 'local', index), row));
+  scoped.forEach((row, index) => byId.set(keyOf(row, 'scoped', index), row));
   return Array.from(byId.values());
 };
 
@@ -80,7 +90,7 @@ export async function loadCampaignUnitsForRelease(
   if (scope) {
     try {
       const scopedRows = await sources.fetchScoped(scope);
-      rows = mergeRows(localRows, scopedRows || []);
+      rows = mergeCampaignRows(localRows, scopedRows || []);
     } catch {
       rows = localRows;
     }
