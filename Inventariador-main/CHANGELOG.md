@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — «Nenhum Endereço Cadastrado» com os ativos na tabela de trabalho
+
+- **O ecrã lia as tabelas erradas:** `getLocationsWithStats` consultava
+  `addresses`, `assets` e `local_assets`, mas no modo INTERNAL os ativos vivem
+  em **`ativos`** — é a tabela que o Dashboard, a Consulta e o Mapa leem. Num
+  aparelho com a base carregada só em `ativos` o ENDEREÇO FÍSICO anunciava
+  «Nenhum Endereço Cadastrado» (e não havia caminho para o cadastro de ativos).
+  Passa a ler as três, por esta ordem: canónica (`assets`), trabalho (`ativos`),
+  baseline (`local_assets`) — índice exacto em cada uma e, só se todas vierem
+  vazias, a varredura tolerante do mesmo contrato.
+- **Endereço efetivo, igual ao do inventário:** a extração e as estatísticas
+  usavam só `endereco`. Passam a usar a mesma regra de `assetAddressKey`
+  (`Inventory.tsx`): `_localMaster` (local auditado) vence, e as colunas legadas
+  `LOCALIZACAO`/`CENTRO_CUSTO` também identificam a localidade.
+- *Testes:* `addressSearch` (+5) — localidades só em `ativos`, ordem
+  canónica `assets` → `ativos`, filial com `_` a partir do cartão com espaços,
+  `_localMaster`/`LOCALIZACAO` como endereço e isolamento por contrato.
+
 ### Corrigido — campanha ativa aparecia como «falta campanha»
 
 - **O filtro de unidade ia literal para o PostgREST:** `fetchCampaigns` pedia à

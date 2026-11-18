@@ -1,4 +1,4 @@
-import { db, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
+import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
@@ -436,28 +436,74 @@ export const localDb = {
       // `_`/`-`). Antes, o rótulo do cartão (`010101 CICOPAL GO`) não achava a
       // filial gravada como `010101_CICOPAL_GO` e o ecrã anunciava «Nenhum
       // Endereço Cadastrado» com a base cheia.
+      //
+      // A tabela de trabalho do modo INTERNAL é `ativos` (é ela que o
+      // Dashboard, a Consulta e o Mapa leem). Ler só `assets`/`local_assets`
+      // deixava o ecrã vazio num aparelho com os ativos carregados em `ativos`
+      // — por isso as três tabelas entram, por esta ordem: canónica, trabalho,
+      // baseline.
       const unitMatch = normalizeUnitMatchKey(unitId);
-      const doContrato = async <T extends { tenantid?: unknown; filial?: unknown }>(
-        table: typeof db.addresses | typeof db.assets | typeof db.local_assets
-      ): Promise<T[]> => {
-        const rows = (await table.where('[tenantid+filial]').between([tenant, ''], [tenant, '\uffff']).toArray()) as unknown as T[];
+      /** Tabela lida como estrutura: só `tenantid`/`filial` e os campos usados. */
+      type UnitRow = {
+        tenantid?: unknown;
+        filial?: unknown;
+        endereco?: unknown;
+        codigo_endereco?: unknown;
+        _is_deleted?: unknown;
+        _conferido?: unknown;
+        _localMaster?: unknown;
+        LOCALIZACAO?: unknown;
+        CENTRO_CUSTO?: unknown;
+      };
+      /**
+       * Endereço EFETIVO do ativo — a MESMA regra do inventário
+       * (`assetAddressKey`, Inventory.tsx): o local auditado (`_localMaster`)
+       * vence o endereço da base, e as colunas legadas (`LOCALIZACAO`,
+       * `CENTRO_CUSTO`) também identificam a localidade. Ler só `endereco`
+       * deixava a tela vazia com os ativos presentes em outras colunas.
+       */
+      const addressOf = (row: UnitRow): string =>
+        String(row._localMaster || row.endereco || row.LOCALIZACAO || row.CENTRO_CUSTO || '').trim();
+      type UnitTable = {
+        where: (index: string) => {
+          equals: (key: unknown) => { toArray: () => Promise<unknown[]> };
+          between: (lower: unknown, upper: unknown) => { toArray: () => Promise<unknown[]> };
+        };
+      };
+      const exactRowsOf = async (table: UnitTable): Promise<UnitRow[]> =>
+        (await table.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray()) as UnitRow[];
+      const doContrato = async (table: UnitTable): Promise<UnitRow[]> => {
+        const rows = (await table
+          .where('[tenantid+filial]')
+          .between([tenant, ''], [tenant, '\uffff'])
+          .toArray()) as UnitRow[];
         if (!unitMatch) return [];
         return rows.filter(r => normalizeUnitMatchKey(r.filial) === unitMatch);
       };
-      const addressRows = async () => {
-        const exatos = await db.addresses.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
-        if (exatos.length > 0 || !unitMatch) return exatos;
-        return doContrato<typeof exatos[number]>(db.addresses);
+      const workTables: UnitTable[] = [
+        db.assets as unknown as UnitTable,
+        db.ativos as unknown as UnitTable,
+        db.local_assets as unknown as UnitTable
+      ];
+      const addressRows = async (): Promise<DexieAddress[]> => {
+        const table = db.addresses as unknown as UnitTable;
+        const exatos = await exactRowsOf(table);
+        if (exatos.length > 0 || !unitMatch) return exatos as unknown as DexieAddress[];
+        return (await doContrato(table)) as unknown as DexieAddress[];
       };
-      const assetRows = async () => {
-        const exatos = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
-        if (exatos.length > 0 || !unitMatch) return exatos;
-        return doContrato<typeof exatos[number]>(db.assets);
-      };
-      const baselineRows = async () => {
-        const exatos = await db.local_assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
-        if (exatos.length > 0 || !unitMatch) return exatos;
-        return doContrato<typeof exatos[number]>(db.local_assets);
+      /** Ativos da filial: índice exato em cada tabela e, só se todas vierem
+       *  vazias, a varredura tolerante do mesmo contrato. */
+      const assetRows = async (): Promise<UnitRow[]> => {
+        for (const table of workTables) {
+          const exatos = await exactRowsOf(table);
+          if (exatos.length > 0) return exatos;
+        }
+        if (!unitMatch) return [];
+        for (const table of workTables) {
+          const tolerantes = await doContrato(table);
+          if (tolerantes.length > 0) return tolerantes;
+        }
+        return [];
       };
 
       const indexedAddrs = await addressRows();
@@ -467,13 +513,10 @@ export const localDb = {
       //    localidades da tabela de trabalho (assets canônica — decisão DBA
       //    2026-08-06; fallback local_assets baseline para restore .dat)
       if (addrList.length === 0) {
-        let workAssets = await assetRows();
-        if (workAssets.length === 0) {
-          workAssets = await baselineRows();
-        }
+        const workAssets = await assetRows();
         const extractedAddrs = new Map<string, typeof addrList[0]>();
         workAssets.forEach(a => {
-          const addrStr = String(a.endereco || '').trim();
+          const addrStr = addressOf(a);
           if (!addrStr) return;
           const key = addrStr.toUpperCase();
           if (!extractedAddrs.has(key)) {
@@ -495,16 +538,13 @@ export const localDb = {
       //    maiúsculas contra termo minúsculo — “CONTAB” nunca encontrava nada.
       addrList = addrList.filter(a => matchesAddressSearch(a.codigo_endereco, searchTerm));
 
-      // 4. Busca reativa das estatísticas de conferência na tabela de trabalho (assets canônica)
-      let listAssets = await assetRows();
-      if (listAssets.length === 0) {
-        listAssets = await baselineRows();
-      }
+      // 4. Busca reativa das estatísticas de conferência (assets → ativos → baseline)
+      const listAssets = await assetRows();
       const nonDeleted = listAssets.filter(a => a._is_deleted !== 1);
 
       const statsMap = new Map<string, { total: number; checked: number }>();
       nonDeleted.forEach(asset => {
-        const address = String(asset.endereco || '').trim().toUpperCase();
+        const address = addressOf(asset).toUpperCase();
         const key = address !== '' ? address : 'GERAL - NÃO ESPECIFICADO';
         const stats = statsMap.get(key) || { total: 0, checked: 0 };
         stats.total += 1;
