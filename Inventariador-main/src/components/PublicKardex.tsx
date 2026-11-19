@@ -10,6 +10,8 @@ import {
   Tag,
   AlertTriangle
 } from 'lucide-react';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
+import { mesmoEnderecoAuditado } from '../utils/assetAddress';
 
 interface PublicKardexProps {
   asset: Asset;
@@ -51,7 +53,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
               <TagIcon className={`${meta.color.text} drop-shadow`} size={40} />
             </div>
             <h1 className="text-sm font-black uppercase tracking-[0.3em] text-white/90 mb-1">AUDIT AUTHORITY</h1>
-            <p className="text-[10px] font-black uppercase tracking-widest text-white/60">KARDEX DIGITAL v24.50.3</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-white/60">KARDEX DIGITAL {APP_VERSION_LABEL}</p>
           </div>
         </div>
 
@@ -122,7 +124,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
             </div>
           )}
 
-          {asset._localMaster && asset._localMaster !== asset.endereco && (
+          {!mesmoEnderecoAuditado(asset) && (
             <div className="flex items-start space-x-4">
               <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-400 shrink-0 border border-indigo-100">
                 <MapPin size={18} />

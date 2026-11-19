@@ -10,16 +10,27 @@ import { logger } from '../utils/logger';
 import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
-import { buildUnitFlags, mergeUnitFlags, pickUnitFlags } from '../utils/unitConfigFlags';
+import { isRevokedAnchor } from '../utils/revokedAnchors';
+import { isConferido } from '../utils/conferencia';
+import { resolveCanonicalUnitAnchor } from '../utils/unitAnchorPriority';
+import { buildUnitConfigRowPayload } from '../utils/unitConfigPayload';
+import { buildUnitFlags, mergeUnitFlags } from '../utils/unitConfigFlags';
 import { isAdminEmail } from '../utils/authUtils';
 import { pullDedupKey } from '../utils/syncDedup';
-import { normalizeKey } from '../utils/schema';
+import { matchUnitKeys, normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
-import { checkCloudPushGuard, findIdentityConflicts, CloudPushBlockedError, CloudPushIdentityConflictError } from '../utils/cloudPushGuard';
+import {
+  checkCloudPushGuard,
+  findIdentityConflicts,
+  formatCloudPushIdentityConflicts,
+  formatIdentityCopiesNotice,
+  CloudPushBlockedError
+} from '../utils/cloudPushGuard';
 import type { DedupRow } from '../utils/dedupAssets';
+import { assertCampaignHasNoAuditWork, assertNoOpenCampaign, CampaignGovernanceError, requireCampaignFilial } from '../utils/campaignGuard';
 
 export class SupabaseNetworkException extends Error {
   constructor(message: string) {
@@ -964,9 +975,23 @@ let assetsIdMode: 'key' | 'uuid' = 'key';
  */
 let lastCloudPushBlockedNoticeKey: string | null = null;
 
-/** Rearranque do aviso (fim de episódio, testes). */
+/** Ultimo aviso informativo de identidade repetida / ja existente na nuvem. */
+let lastIdentityNoticeKey: string | null = null;
+
+/** Rearranque do aviso (fim de episodio, testes). */
 export const resetCloudPushBlockedNotice = (): void => {
   lastCloudPushBlockedNoticeKey = null;
+  lastIdentityNoticeKey = null;
+};
+
+/**
+ * Aviso INFORMATIVO, uma vez por episodio: linhas distintas da planilha com a
+ * mesma etiqueta seguem para a nuvem e o terminal diz que foram vistas.
+ */
+const announceIdentityOnce = (lines: string[]): void => {
+  if (lines.length === 0 || lines[0] === lastIdentityNoticeKey) return;
+  lines.forEach((line) => logger.warn(`>>> [Supabase] ${line}`));
+  lastIdentityNoticeKey = lines[0];
 };
 
 
@@ -1039,10 +1064,12 @@ const fetchCloudIdentities = async (rows: Record<string, unknown>[]): Promise<Cl
 };
 
 /**
- * Recusa o lote antes do upsert quando a identidade já está na nuvem com outro
- * `primarykey`: gravar criaria uma segunda linha para o mesmo ativo.
+ * Reporta (sem recusar) as linhas cuja identidade ja esta na nuvem com outro
+ * `primarykey`. Duas linhas legitimas da planilha para a mesma etiqueta caem
+ * aqui sempre que a primeira ja subiu; recusar a segunda seria perder registo.
+ * A nuvem guarda uma linha por `(tenantid, primarykey)`, portanto convivem.
  */
-const assertCloudIdentities = async (rows: Record<string, unknown>[]): Promise<void> => {
+const warnIdentityConflicts = async (rows: Record<string, unknown>[]): Promise<void> => {
   const cloudRows = await fetchCloudIdentities(rows);
   if (cloudRows.length === 0) return;
   const conflicts = findIdentityConflicts(
@@ -1050,9 +1077,7 @@ const assertCloudIdentities = async (rows: Record<string, unknown>[]): Promise<v
     cloudRows as unknown as DedupRow[]
   );
   if (conflicts.length === 0) return;
-  const error = new CloudPushIdentityConflictError(conflicts);
-  announceBlockedOnce(error.lines);
-  throw error;
+  announceIdentityOnce(formatCloudPushIdentityConflicts(conflicts));
 };
 
 export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<string[]> => {
@@ -1066,17 +1091,20 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   // delta de boot (`pushLocalChanges`), a fila da nuvem (`flushCloudQueue`) e
   // os envios de uma linha (conferência, unitização, restauro, exclusão).
   //
-  // A tabela `assets` guarda uma linha por tenantid + filial + etiqueta. Um
-  // payload com duas linhas da mesma identidade (`primarykey` diferentes) grava
-  // as duas — é assim que as 1.195 cópias voltam para todos os dispositivos,
-  // uma linha de cada vez, mesmo com a nuvem já consolidada. O envio é recusado
-  // antes de tocar na rede; nada é perdido, os ativos ficam por sincronizar.
+  // A tabela `assets` guarda uma linha por (tenantid, primarykey). Duas linhas da
+  // planilha com a mesma etiqueta tem `primarykey` diferentes e sao registos
+  // distintos: sobem as duas. O que o envio recusa e o MESMO registo repetido no
+  // payload - o upsert por (tenantid, id) aborta o lote com "ON CONFLICT DO
+  // UPDATE command cannot affect row a second time". Nada e enviado e os ativos
+  // ficam por sincronizar ate o payload vir sem a chave repetida.
   const cloudPushGuard = checkCloudPushGuard(assets as unknown as DedupRow[]);
   if (cloudPushGuard.blocked) {
     announceBlockedOnce(cloudPushGuard.message);
-    // Erro de política: os chamadores fazem recuo em vez de nova tentativa.
-    throw new CloudPushBlockedError(cloudPushGuard.audit);
+    // Erro de politica: os chamadores fazem recuo em vez de nova tentativa.
+    throw new CloudPushBlockedError(cloudPushGuard.duplicates);
   }
+  // Etiquetas repetidas na planilha: informativo, o envio segue.
+  announceIdentityOnce(formatIdentityCopiesNotice(cloudPushGuard.audit));
 
   if (!supabase || !navigator.onLine) {
     logger.warn('>>> [Supabase] Sincronização ignorada: Sem conexão ou Supabase não configurado.');
@@ -1196,12 +1224,11 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         // CONFERÊNCIA (quem e quando): viaja no schema quando as colunas existem
         // (scripts/assets-conferencia.sql). Se ainda não existirem, o sendBatch
         // remove a coluna e reenvia o lote — nunca derruba a sincronização.
-        conferido: Boolean(
-          cleanAsset._conferido === true ||
-          Number(cleanAsset._conferido) === 1 ||
-          String(cleanAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM' ||
-          String(cleanAsset.status || '').toUpperCase().includes('CONFERIDO')
-        ),
+        // A decisão é a do predicado único; só o `status` textual com CONFERIDO
+        // (marcador legado) é que continua a valer aqui além dele.
+        conferido:
+          isConferido(cleanAsset) ||
+          String(cleanAsset.status || '').toUpperCase().includes('CONFERIDO'),
         auditor: (cleanAsset._auditor !== undefined && cleanAsset._auditor !== null
           ? String(cleanAsset._auditor).trim()
           : '') || null,
@@ -1279,7 +1306,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
     // Identidade na nuvem: um `primarykey` novo para uma identidade existente é
     // uma cópia — o upsert por (tenantid, id) não a impede. A consulta é
     // limitada às etiquetas deste lote e corre antes de qualquer escrita.
-    await assertCloudIdentities(rows);
+    await warnIdentityConflicts(rows);
     const lote = batchIndex + 1;
 
     try {
@@ -1387,6 +1414,28 @@ export const syncAssetsToCloudAndMark = async (
     }
   }
   return synced;
+};
+
+/**
+ * Placar do SRE: quantos registos existem HOJE na Nuvem (Supabase) para o
+ * contrato ativo. É só leitura (`head: true`, `count: exact`) — não envia, não
+ * altera e não apaga nada. Sem contrato, conta a tabela inteira (dono global).
+ */
+export const countCloudAssets = async (tenantid?: string | null): Promise<number> => {
+  if (isInternalMode) {
+    throw new SupabaseNetworkException('Supabase não configurado neste ambiente.');
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new SupabaseNetworkException('Sem conexão para consultar a Nuvem.');
+  }
+  const tenant = String(tenantid ?? '').trim().toUpperCase();
+  let query = supabase.from('assets').select('id', { count: 'exact', head: true });
+  if (tenant) query = query.eq('tenantid', tenant);
+  const { count, error } = await query;
+  if (error) {
+    throw new SupabaseNetworkException(`Falha ao contar a base da Nuvem: ${error.message || 'Erro de esquema.'}`);
+  }
+  return count || 0;
 };
 
 /**
@@ -1649,12 +1698,13 @@ export const syncConfigToCloud = async (config: Omit<InventoryState, 'assets'>, 
 
   const built = buildConfigCloudPayload(config, tenantid);
   if (!built) {
-    logger.warn(">>> [Session] Falha crítica de isolamento no syncConfigToCloud: tenantid ausente.");
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('gbr_session_expired', {
-        detail: { message: "Sua sessão expirou ou o identificador de Contrato foi perdido. O envio das configurações foi bloqueado." }
-      }));
-    }
+    // Autosave em segundo plano sem contrato resolvido (logout, dono global
+    // antes de escolher o contrato, base ainda vazia): NÃO é perda de sessão.
+    // Antes este caminho disparava `gbr_session_expired`, que encerrava a
+    // sessão e mostrava "SESSÃO EXPIRADA · o envio das configurações foi
+    // bloqueado" a quem só estava a navegar. A expiração real continua a ser
+    // tratada pelo listener de auth do Supabase; aqui só se ignora o envio.
+    logger.warn('>>> [Session] syncConfigToCloud ignorado: sem contrato (tenantid) para isolar a configuração — sessão preservada.');
     return; // Interrompe a operação de sync
   }
 
@@ -2097,7 +2147,7 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
           logger.error('Erro ao buscar ativo por etiqueta (retry):', retryError);
           return null;
         }
-        return retryData as Asset;
+        return retryData ? mapCloudAssetRow(retryData as Record<string, unknown>) : null;
       }
 
       if (error.code !== 'PGRST116') {
@@ -2106,7 +2156,10 @@ export const getAssetByTag = async (tag: string, tenantid?: string): Promise<Ass
       return null;
     }
 
-    return data as Asset;
+    // A linha do Postgres chega com `conferido`/`auditor`/`data_leitura`, nomes
+    // que o app não lê: sem a conversão, um ativo conferido na nuvem abria por
+    // QR Code como «pendente» e sem autor/data.
+    return mapCloudAssetRow(data as Record<string, unknown>);
   } catch (err) {
     logger.error('Erro inesperado ao buscar ativo:', err);
     return null;
@@ -2203,6 +2256,53 @@ export const fetchFullInventory = async (
  * fetchFullInventory (que resolve o tenantid e deduplica requisições).
  */
 /**
+ * A conferência de UMA linha da nuvem, numa só regra.
+ *
+ * A coluna `conferido` (scripts/assets-conferencia.sql) manda; `status` com
+ * CONFERIDO é o marcador legado e continua a valer quando o script ainda não
+ * correu. A flag e a coluna de auditoria leem-se pelo predicado — o mesmo dos
+ * ecrãs —, para o `conferido` da nuvem (`true`, 1, '1', 'true') não valer menos
+ * lá do que no aparelho. Nenhuma leitura da nuvem repete esta derivação.
+ */
+const conferidoDaNuvem = (row: Record<string, unknown>): boolean =>
+  isConferido({
+    _conferido: row.conferido,
+    AUDITOR_STATUS_CONFERENCIA: row.AUDITOR_STATUS_CONFERENCIA
+  }) || String(row.status || '').toUpperCase().includes('CONFERIDO');
+
+/**
+ * Os campos de conferência de uma linha da nuvem, no vocabulário do app.
+ *
+ * É o único sítio que traduz `conferido`/`auditor`/`data_leitura` para
+ * `_conferido`/`_auditor`/`_dataLeitura` — tanto o runtime (`mapCloudAssetRow`)
+ * como o laudo da campanha (`comConferenciaLocal`) passam por aqui.
+ */
+const camposDeConferencia = (row: Record<string, unknown>): Record<string, unknown> => {
+  const auditor = row.auditor !== undefined && row.auditor !== null ? String(row.auditor).trim() : '';
+  const dataLeitura = row.data_leitura !== undefined && row.data_leitura !== null ? String(row.data_leitura) : '';
+
+  return {
+    _conferido: conferidoDaNuvem(row),
+    ...(auditor ? { _auditor: auditor } : {}),
+    ...(dataLeitura ? { _dataLeitura: dataLeitura } : {}),
+  };
+};
+
+/**
+ * Acrescenta à linha CRUA a conferência no vocabulário do app, sem mexer em
+ * mais nada.
+ *
+ * É o que o laudo da campanha arquiva e conta. Ali a linha é artefacto fiscal:
+ * `tenantid`/`filial` ficam exatamente como estavam no Postgres e não entra o
+ * `unitid` legado — por isso NÃO se usa `mapCloudAssetRow`, que normaliza a
+ * identidade para o runtime.
+ */
+export const comConferenciaLocal = (row: Record<string, unknown>): Record<string, unknown> => ({
+  ...row,
+  ...camposDeConferencia(row),
+});
+
+/**
  * Converte uma linha do Postgres em `Asset`, preservando a CONFERÊNCIA.
  *
  * O upsert só envia colunas do schema remoto, e a conferência (quem conferiu e
@@ -2216,26 +2316,13 @@ export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
   const tId = String(row.tenantid || '').trim().toUpperCase();
   const uId = String(row.filial || row.unit_id || row.unitid || '').trim().toUpperCase();
 
-  const rawConferido = row.conferido;
-  const statusUpper = String(row.status || '').toUpperCase();
-  const conferido =
-    rawConferido === true ||
-    String(rawConferido).toLowerCase() === 'true' ||
-    statusUpper.includes('CONFERIDO') ||
-    String(row.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-
-  const auditor = row.auditor !== undefined && row.auditor !== null ? String(row.auditor).trim() : '';
-  const dataLeitura = row.data_leitura !== undefined && row.data_leitura !== null ? String(row.data_leitura) : '';
-
   return {
     ...(row as unknown as Asset),
     id: row.id as string | number,
     tenantid: tId,
     filial: uId,
     unitid: uId, // Legado
-    _conferido: conferido,
-    ...(auditor ? { _auditor: auditor } : {}),
-    ...(dataLeitura ? { _dataLeitura: dataLeitura } : {}),
+    ...camposDeConferencia(row),
   };
 };
 
@@ -2946,9 +3033,54 @@ export const findAssetGlobally = async (etiqueta: string, tenantid: string): Pro
 };
 
 /**
+ * Campanhas locais do contrato — base das regras de filial única (Fase 1).
+ * Lidas do SQLite para a guarda valer também offline; sem base inicializada
+ * devolve lista vazia (a nuvem não entra aqui de propósito: a criação da
+ * campanha não pode depender da rede).
+ */
+const listLocalCampaigns = async (tenantid: string): Promise<InventoryCampaign[]> => {
+  try {
+    if (!sqliteService.getIsInitialized()) return [];
+    const rows = await sqliteService.getCampaigns(tenantid);
+    // O tenantid vai para a guarda COMO ESTÁ na base: preencher aqui o contrato
+    // consultado transformava uma campanha legada sem `tenantid` numa campanha
+    // de todos os contratos e bloqueava a abertura em filiais homónimas.
+    return (rows || []).map((row) => ({
+      ...row,
+      filial: String(row.filial || row.unit_id || row._unitid || ''),
+      tenantid: String(row.tenantid || ''),
+      status: (row.status as CampaignStatus) || CampaignStatus.ACTIVE
+    })) as unknown as InventoryCampaign[];
+  } catch (err) {
+    logger.warn('>>> [Governance] Falha ao ler campanhas locais para a guarda de filial:', err);
+    return [];
+  }
+};
+
+/**
+ * Ativos com trabalho de auditoria dentro da campanha (`currentCampaignId`).
+ * Excluir campanha com leitura feita apagaria o lastro do laudo.
+ */
+export const campaignAuditWorkCount = async (campaignId: string): Promise<number> => {
+  try {
+    const rows = await db.local_assets
+      .filter((asset) => String((asset as { currentCampaignId?: string | null }).currentCampaignId || '') === String(campaignId))
+      .limit(1)
+      .toArray();
+    return rows.length;
+  } catch (err) {
+    logger.warn('>>> [Governance] Falha ao contar trabalho de auditoria da campanha:', err);
+    return 0;
+  }
+};
+
+/**
  * Exclui uma campanha
  */
 export const deleteCampaign = async (campaignId: string): Promise<boolean> => {
+  // Fase 1 — campanha com leitura feita não se exclui: o laudo perderia o lastro.
+  assertCampaignHasNoAuditWork(await campaignAuditWorkCount(campaignId));
+
   // Mesma regra do fetchCampaigns: um `app_database_mode: INTERNAL` herdado de
   // uma sessão anterior não pode transformar a exclusão em local-only — a
   // campanha continuava na nuvem e voltava na leitura seguinte (merge).
@@ -3042,10 +3174,14 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
   // Se for apenas interno, filtramos e retornamos
   if (isInternal) {
     if (unitid) {
-      const cleanUnitId = unitid.trim().toUpperCase();
+      const cleanUnitId = unitid.trim();
+      // Comparação tolerante (`010101_CICOPAL_GO` = `010101 CICOPAL GO`): a
+      // igualdade exata escondia a campanha já gravada e a tela abria o cadastro
+      // em branco, criando uma segunda campanha para a mesma filial.
       return localCampaigns.filter(c => {
-        const cUnit = (String(c.filial || c.unit_id || c._unitid || '')).trim().toUpperCase();
-        return cUnit === cleanUnitId || cUnit === '' || cUnit === 'GLOBAL';
+        const cUnit = String(c.filial || c.unit_id || c._unitid || '').trim();
+        const cUpper = cUnit.toUpperCase();
+        return cUpper === '' || cUpper === 'GLOBAL' || matchUnitKeys(cUnit, cleanUnitId);
       });
     }
     return localCampaigns;
@@ -3055,16 +3191,17 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
   if (!supabase || !cleanTenantid) return localCampaigns;
 
   try {
-    let query = supabase
+    // SEM filtro de unidade no PostgREST: a coluna pode gravar
+    // `010101_CICOPAL_GO` enquanto o cartão mostra `010101 CICOPAL GO`, e
+    // `.or('filial.eq.<rótulo com espaços>')` é sintaxe inválida — o erro
+    // devolvia ZERO campanhas e a unidade liberada aparecia «falta campanha».
+    // A unidade é filtrada depois do merge, com a mesma chave tolerante do
+    // caminho local (`matchUnitKeys`).
+    const { data: cloudData, error } = await supabase
       .from('campaigns')
       .select('*')
-      .eq('tenantid', cleanTenantid);
-    
-    if (unitid) {
-      query = query.or(`filial.eq.${unitid},filial.is.null`);
-    }
-
-    const { data: cloudData, error } = await query.order('start_date', { ascending: false });
+      .eq('tenantid', cleanTenantid)
+      .order('start_date', { ascending: false });
 
     if (error) {
       logger.warn('>>> [Supabase] Falha ao buscar nuvem (mantendo local):', error);
@@ -3086,7 +3223,14 @@ export const fetchCampaigns = async (tenantid: string, unitid?: string | null): 
 
     const merged = Array.from(campaignMap.values());
     logger.info(`>>> [Governance] Merge concluído: ${localCampaigns.length} locais, ${cloudCampaigns.length} nuvem. Total: ${merged.length}`);
-    return merged;
+    if (!unitid) return merged;
+
+    const cleanUnitId = unitid.trim();
+    return merged.filter(c => {
+      const cUnit = String(c.filial || c.unit_id || c._unitid || '').trim();
+      const cUpper = cUnit.toUpperCase();
+      return cUpper === '' || cUpper === 'GLOBAL' || matchUnitKeys(cUnit, cleanUnitId);
+    });
 
   } catch (err) {
     logger.warn('>>> [Supabase] Erro de rede ao buscar campanhas. Retornando apenas locais.', err);
@@ -3153,16 +3297,25 @@ export const fetchAllCampaigns = async (): Promise<InventoryCampaign[]> => {
  */
 export const createCampaign = async (campaign: Partial<InventoryCampaign>): Promise<InventoryCampaign | null> => {
 
-  const tenantVal = campaign.tenantid || campaign.tenantid || campaign.tenantid || '';
+  const tenantVal = String(campaign.tenantid || '').trim();
   const unitVal = campaign.filial || campaign._unitid || campaign.unit_id || '';
+
+  // Fase 1 — a campanha é a chave de controlo da filial: sem filial é
+  // "Negativo!" e, por filial, só pode existir uma campanha aberta (CREATED
+  // também reserva a unidade). A guarda corre antes de gravar qualquer coisa.
+  const filialObrigatoria = requireCampaignFilial(unitVal);
+  assertNoOpenCampaign(await listLocalCampaigns(tenantVal), {
+    tenantid: tenantVal,
+    filial: filialObrigatoria
+  });
 
   // 1. DADO LOCAL PRIMEIRO (Soberania SQL)
   const newCampaign = {
     ...campaign,
     id: campaign.id || generateUUID(),
     tenantid: tenantVal,
-    unit_id: String(unitVal || '').trim(),
-    filial: String(unitVal || '').trim(),
+    unit_id: filialObrigatoria,
+    filial: filialObrigatoria,
     created_at: new Date().toISOString(),
     status: campaign.status || 'ACTIVE'
   } as InventoryCampaign;
@@ -3187,8 +3340,8 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
       description: newCampaign.description,
       status: newCampaign.status,
       tenantid: tenantVal,
-      filial: unitVal,
-      unit_id: unitVal,
+      filial: filialObrigatoria,
+      unit_id: filialObrigatoria,
       created_by: campaign.created_by,
       start_date: newCampaign.start_date || new Date().toISOString()
     };
@@ -3241,6 +3394,16 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
         filial: String(rowExtras.filial || rowExtras._unitid || '')
       };
 
+      // Fase 1 — ativar a campanha também exige filial e respeita a regra de
+      // uma só campanha aberta por filial (a própria campanha não conta).
+      if (status === CampaignStatus.ACTIVE) {
+        assertNoOpenCampaign(await listLocalCampaigns(currentCampaign.tenantid), {
+          tenantid: currentCampaign.tenantid,
+          filial: requireCampaignFilial(currentCampaign.filial),
+          excludeId: campaignId
+        });
+      }
+
       const updated: InventoryCampaign = { 
         ...currentCampaign, 
         status, 
@@ -3265,6 +3428,9 @@ export const updateCampaignStatus = async (campaignId: string, status: CampaignS
       localFound = true;
     }
   } catch (err) {
+    // Guarda de filial (Fase 1): o bloqueio é regra de negócio e tem de chegar
+    // ao ecrã com a mensagem do domínio, não como falha silenciosa do SQLite.
+    if (err instanceof CampaignGovernanceError) throw err;
     logger.error(">>> [SQLite] Erro ao atualizar status localmente:", err);
     return false;
   }
@@ -3410,10 +3576,12 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
           logger.warn('>>> [SQLite] Nenhum ativo encontrado para o snapshot.');
         }
 
-        // 3. Stats
+        // 3. Stats — a conferência pela coluna da base (`AUDITOR_STATUS_CONFERENCIA
+        // = 'SIM'`) não deixa `_conferido` local; a contagem tem de usar a regra
+        // única, senão o laudo subconta o que a planilha já conferiu.
         const stats = {
           total: assets.length,
-          inventoried: assets.filter(a => a._conferido || a.status === 'CONFERIDO').length,
+          inventoried: assets.filter(a => isConferido(a as unknown as Asset)).length,
           divergences: assets.filter(a => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
           generated_at: new Date().toISOString(),
           cpc_compliance: 'CPC 27 / NBC TG 27 (MODO LOCAL)'
@@ -3468,10 +3636,24 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             return false;
         }
 
-        // 3. Calcula metadados/stats para o laudo consolidado
+        // 3. Calcula metadados/stats para o laudo consolidado.
+        // A linha do Postgres chama à conferência `conferido`; o app chama
+        // `_conferido`. Contar `a._conferido` na linha crua dava SEMPRE 0 — o
+        // laudo dizia que nada foi inventariado e o snapshot arquivado não
+        // guardava quem conferiu nem quando.
+        //
+        // O que se grava: a linha ORIGINAL do Postgres, acrescentada só da
+        // conferência no vocabulário do app (`comConferenciaLocal`). Não é
+        // `mapCloudAssetRow` de propósito: dentro de um laudo fechado a
+        // identidade tem de ficar como estava (sem `tenantid`/`filial`
+        // normalizados, sem `unitid` legado) — o artefacto fiscal não se reescreve.
+        const ativosDoLaudo = (assets as Record<string, unknown>[]).map(comConferenciaLocal);
         const stats = {
-            total: assets.length,
-            inventoried: assets.filter((a: Record<string, unknown>) => a._conferido).length,
+            total: ativosDoLaudo.length,
+            inventoried: ativosDoLaudo.filter((a) => isConferido(a)).length,
+            // TAG_INVENTARIO é runtime local (não existe no public); a
+            // divergência canónica deriva-se de status/databaixa — fica para
+            // tarefa própria, porque muda números já publicados.
             divergences: assets.filter((a: Record<string, unknown>) => a.TAG_INVENTARIO === 'DIVERGÊNCIA').length,
             generated_at: new Date().toISOString(),
             cpc_compliance: 'CPC 27 / NBC TG 27'
@@ -3483,7 +3665,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             await persistSnapshotLocally({
                 id: `snap_${campaignId}_${Date.now()}`,
                 campaign_id: campaignId,
-                assets_data: assets as unknown as Asset[],
+                assets_data: ativosDoLaudo as unknown as Asset[],
                 metadata: stats,
                 snapshot_date: new Date().toISOString(),
                 closed_by: closedBy,
@@ -3500,7 +3682,7 @@ export const createCampaignSnapshot = async (campaignId: string, closedBy: strin
             .from('campaign_snapshots')
             .insert([{
                 campaign_id: campaignId,
-                assets_data: assets as Asset[],
+                assets_data: ativosDoLaudo as unknown as Asset[],
                 metadata: stats as Record<string, unknown>,
                 closed_at: new Date().toISOString(),
                 closed_by: closedBy,
@@ -3584,15 +3766,30 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
       .select('*', { count: 'exact', head: true })
       .eq('tenantid', tenantid);
       
-    // Ativos inventariados — contrato public.assets: `currentCampaignId` é
-    // runtime LOCAL (coluna inexistente no public → PGRST204; não sincronizada).
-    // O marcador sincronizado de conferência é `status = 'CONFERIDO'` (espelha o
-    // snapshot local: a._conferido || a.status === 'CONFERIDO').
-    const { count: inventoriedCount } = await supabase
+    // Ativos inventariados — a conferência canónica na nuvem é a coluna
+    // `conferido` (scripts/assets-conferencia.sql). Contar por `status`
+    // subconta tudo o que foi conferido no aparelho depois da coluna existir,
+    // porque conferir não mexe no `status`. Se a coluna ainda não existir
+    // (script pendente, 42703) a consulta falha e o contador cai no `status`
+    // legado, em vez de devolver zero.
+    let inventoriedCount = 0;
+    const { count: byConferido, error: byConferidoError } = await supabase
       .from('assets')
       .select('*', { count: 'exact', head: true })
       .eq('tenantid', tenantid)
-      .eq('status', 'CONFERIDO');
+      .eq('conferido', true);
+
+    if (!byConferidoError) {
+      inventoriedCount = byConferido || 0;
+    } else {
+      logger.warn('>>> [Stats] Contagem por `conferido` indisponível — a usar `status` (script pendente).', byConferidoError);
+      const { count: byStatus } = await supabase
+        .from('assets')
+        .select('*', { count: 'exact', head: true })
+        .eq('tenantid', tenantid)
+        .eq('status', 'CONFERIDO');
+      inventoriedCount = byStatus || 0;
+    }
 
     // Divergências — contrato public.assets: `TAG_INVENTARIO` é runtime LOCAL
     // (coluna inexistente no public → PGRST204; não sincronizada). A divergência
@@ -3626,7 +3823,8 @@ export const fetchCampaignStats = async (campaignId: string, tenantid: string) =
  *
  * Antes estas regras (exigir NF/seriado/plaqueta, permitir novo ativo/baixa) só
  * existiam no SQLite/Dexie do aparelho: trocar de dispositivo mostrava a filial
- * "sem regras". A âncora continua em `inventory_config`; aqui vai a política.
+ * "sem regras". A âncora está AQUI (fonte canónica); `inventory_config` passa a
+ * ser compatibilidade de leitura para builds antigos.
  *
  * Não-destrutivo: lê o que já está na nuvem e faz merge antes do upsert, para
  * um aparelho que só conhece `hasGps` não apagar a regra configurada noutro.
@@ -3641,8 +3839,6 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
   const filial = (config.filial || config.unit_id || config._unitid || '')
     .toString().trim();
   if (!tenantid || !filial) return false;
-
-  const flags = buildUnitFlags(config, hasRealAnchor(config.lat, config.lng));
 
   try {
     // 1. Flags já gravadas (outro dispositivo pode saber mais do que este)
@@ -3659,18 +3855,9 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
       /* leitura opcional: segue só com o que este aparelho conhece */
     }
 
-    const payload = {
-      tenantid,
-      filial,
-      unit_id: filial,
-      lat: Number(config.lat) || 0,
-      lng: Number(config.lng) || 0,
-      radius_meters: Number(config.radius_meters) || 0,
-      is_active: config.is_active !== false,
-      updated_by: String(config.updated_by || 'system'),
-      updated_at: new Date().toISOString(),
-      flags: { ...pickUnitFlags(stored), ...flags }
-    };
+    // Sem coordenada real a linha não recebe lat/lng: um salvamento só de
+    // flags não pode zerar a âncora canónica da filial.
+    const payload = buildUnitConfigRowPayload(config, stored, tenantid, filial);
 
     const { error } = await supabase
       .from('unit_configs')
@@ -3692,6 +3879,18 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
 };
 
 export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | string> => {
+  // Âncora revogada na nuvem (apagada em 2026-11-16) não pode voltar por um
+  // formulário que ainda traga o valor do cache do aparelho. Recusa aqui, antes
+  // de gravar em SQLite/Dexie/nuvem; uma posição nova passa normalmente.
+  const revokedUnit = (config as unknown as Record<string, unknown>).filial
+    || config.unit_id
+    || (config as unknown as Record<string, unknown>)._unitid;
+  if (isRevokedAnchor(revokedUnit, config.lat, config.lng)) {
+    const msg = `ÂNCORA REVOGADA: ${String(revokedUnit)} ainda tem a coordenada antiga (${String(config.lat)}, ${String(config.lng)}) em cache. Marque a posição correcta no mapa.`;
+    logger.warn(`>>> [GPS] ${msg}`);
+    return msg;
+  }
+
   try {
     // A sincronizacao com a nuvem so acontece em modo de nuvem (try-catch
     // interno = offline-first): em INTERNAL nada sai do aparelho.
@@ -3818,6 +4017,45 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
 };
 
 /**
+ * Converte uma linha de `inventory_config` na config DA FILIAL dela.
+ *
+ * Devolve `null` quando a linha não é de filial (a linha `config_<tenant>` tem
+ * `filial` e `data` nulos) ou quando `data` não traz coordenada utilizável. Era
+ * isto que faltava: essas linhas caíam na filial da sessão e sobrescreviam a
+ * config com `lat/lng = 0`, deixando a unidade em "FALTA ÂNCORA GPS" mesmo com
+ * a âncora gravada no aparelho ou em outro dispositivo.
+ */
+export const mapInventoryConfigRow = (
+  item: Record<string, unknown>,
+  fallbackTenantid?: string
+): UnitConfig | null => {
+  const raw = item.data;
+  const itemData = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+  if (!itemData || !hasRealAnchor(itemData.lat, itemData.lng)) return null;
+
+  const filial = String(
+    item.filial || item.unit_id || item._unitid ||
+    itemData.filial || itemData.unit_id || itemData._unitid || ''
+  ).trim();
+  if (!filial) return null;
+
+  const tenantid = String(
+    item.tenantid || resolveTenantId(itemData) || fallbackTenantid || ''
+  ).trim();
+
+  return {
+    ...(itemData as unknown as UnitConfig),
+    filial,
+    unit_id: filial,
+    ...(tenantid ? { tenantid } : {}),
+    lat: Number(itemData.lat),
+    lng: Number(itemData.lng),
+    radius_meters: Number(itemData.radius_meters ?? 0),
+    is_active: itemData.is_active !== false
+  } as UnitConfig;
+};
+
+/**
  * Busca as configurações de geofencing combinando Local e Nuvem
  */
 export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> => {
@@ -3827,6 +4065,16 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
   
   try {
     const configs: Record<string, UnitConfig> = {};
+
+    // O que o app "vê" nunca inclui âncora revogada, venha ela do SQLite, do
+    // Dexie, do localStorage ou da nuvem (que pode ainda ter cache de outro
+    // aparelho). Sem este filtro o formulário abria pré-preenchido com o valor
+    // apagado e o SALVAR recriava a linha.
+    const visibleConfigs = (): UnitConfig[] =>
+      Object.values(configs).filter(cfg => {
+        const unit = cfg?.filial || cfg?.unit_id || (cfg as unknown as Record<string, unknown>)?._unitid;
+        return !isRevokedAnchor(unit, cfg?.lat, cfg?.lng);
+      });
 
     // 1. Carrega do LocalStorage (Sempre disponível)
     const localData = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
@@ -3842,6 +4090,24 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
         });
         localStorage.setItem('local_unit_configs', JSON.stringify(localData));
       }
+    }
+
+    // 1.0 Âncoras revogadas na nuvem saem do cache do aparelho. Sem isto o
+    // `local_unit_configs` do telemóvel devolvia a coordenada antiga e o próximo
+    // salvamento recriava a linha em `inventory_config`.
+    try {
+      const revokedKeys = Object.keys(localData).filter(k => {
+        const cfg = localData[k] as UnitConfig | undefined;
+        const unit = cfg?.filial || cfg?.unit_id || (cfg as unknown as Record<string, unknown>)?._unitid;
+        return isRevokedAnchor(unit, cfg?.lat, cfg?.lng);
+      });
+      if (revokedKeys.length > 0) {
+        revokedKeys.forEach(k => delete localData[k]);
+        localStorage.setItem('local_unit_configs', JSON.stringify(localData));
+        logger.info(`>>> [GPS] ${revokedKeys.length} âncora(s) revogada(s) removidas do cache local.`);
+      }
+    } catch (err) {
+      logger.warn('>>> [GPS] Falha ao limpar âncoras revogadas do cache local:', err);
     }
 
     // 1.1 Carrega do SQLite Físico (Soberania de Dados)
@@ -3961,10 +4227,10 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
     // Se for modo interno, retornamos apenas o que está no local
     if (isInternal) {
       logger.info(`>>> [Local] fetchUnitConfigs retornando ${Object.values(configs).length} configs locais.`);
-      return Object.values(configs);
+      return visibleConfigs();
     }
 
-    if (!supabase) return Object.values(configs);
+    if (!supabase) return visibleConfigs();
     
     // 2. Tenta carregar da Nuvem (inventory_config) para atualizar o local
     try {
@@ -3975,33 +4241,28 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
 
       if (data && !error) {
         data.forEach((item: Record<string, unknown>) => {
-          const itemData = item.data as Record<string, unknown> | undefined;
-          const tenantidResolved = String(item.tenantid || (itemData && resolveTenantId(itemData)) || tenantid);
-          const filialUnit = String(item.filial || item._unitid || (itemData && (itemData.filial || itemData._unitid || itemData.unit_id)) || localStorage.getItem('filial') || sessionStorage.getItem('filial') || '');
-          
-          configs[filialUnit] = {
-            ...(itemData || {}),
-            filial: filialUnit,
-            tenantid: tenantidResolved,
-            unit_id: filialUnit,
-            lat: Number((itemData && itemData.lat) ?? 0),
-            lng: Number((itemData && itemData.lng) ?? 0),
-            radius_meters: Number((itemData && itemData.radius_meters) ?? 0),
-            is_active: !itemData || itemData.is_active !== false
-          } as UnitConfig;
+          const mapped = mapInventoryConfigRow(item, tenantid);
+          // Linha sem âncora (ex.: `config_<tenant>`, com `data` nulo) não é
+          // configuração de filial: não cria nem substitui config nenhuma.
+          if (!mapped) return;
+          configs[String(mapped.filial)] = mapped;
         });
-        
+
         // Atualiza o local com o que veio da nuvem, mas preserva dados locais mais recentes
         const updatedLocal = { ...localData };
-        data.forEach((item: Record<string, unknown>) => { 
+        data.forEach((item: Record<string, unknown>) => {
+          const mapped = mapInventoryConfigRow(item, tenantid);
+          if (!mapped) return; // linha global/sem âncora nunca entra no cache de filial
           const cloudTime = new Date(String(item.updated_at || '') || 0).getTime();
-          const itemKey = String(item.filial || item.unit_key || `${item.tenantid || tenantid}_${item.filial || localStorage.getItem('filial') || sessionStorage.getItem('filial') || ''}`);
+          // Mesma chave do `saveUnitConfig` (tenant_filial) — antes a linha da
+          // nuvem era gravada com outra chave e o cache local não a encontrava.
+          const itemKey = `${String(mapped.tenantid || tenantid)}_${String(mapped.filial)}`.replace(/\s+/g, '_');
           const localItem = localData[itemKey];
           const localTime = localItem ? new Date(String(localItem.updated_at || '') || 0).getTime() : 0;
-          
+
           // Só sobrescreve se o dado da nuvem for realmente mais novo
           if (cloudTime >= localTime) {
-            updatedLocal[itemKey] = item.data || item; 
+            updatedLocal[itemKey] = mapped;
           }
         });
         localStorage.setItem('local_unit_configs', JSON.stringify(updatedLocal));
@@ -4028,22 +4289,23 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
             if (!filial) return;
 
             const existing = configs[filial];
-            if (existing) {
-              configs[filial] = mergeUnitFlags(existing, row.flags);
+            // `unit_configs` é a fonte canónica: quando tem âncora real, vence a
+            // que veio de `inventory_config`. Sem âncora canónica valem as
+            // flags e/ou a âncora antiga (compatibilidade com builds antigos).
+            const canonical = resolveCanonicalUnitAnchor(existing, row);
+            if (!canonical) {
+              if (existing) configs[filial] = mergeUnitFlags(existing, row.flags);
               return;
             }
-            // Sem âncora em inventory_config: só a linha de flags não vira
-            // configuração — evita unidade fantasma com coordenada 0.
-            if (!hasRealAnchor(row.lat, row.lng)) return;
             configs[filial] = mergeUnitFlags(
               {
                 tenantid,
                 filial,
                 unit_id: filial,
-                lat: Number(row.lat),
-                lng: Number(row.lng),
-                radius_meters: Number(row.radius_meters) || 0,
-                is_active: true
+                lat: canonical.lat,
+                lng: canonical.lng,
+                radius_meters: canonical.radius_meters,
+                is_active: existing?.is_active ?? true
               } as UnitConfig,
               row.flags
             );
@@ -4056,7 +4318,7 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
       logger.warn('>>> [Supabase] Falha ao buscar configs da nuvem, usando apenas locais.', err);
     }
 
-    return Object.values(configs);
+    return visibleConfigs();
   } catch (err) {
     logger.error('Erro ao buscar configs Local-First:', err);
     return [];

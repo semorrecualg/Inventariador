@@ -1,16 +1,19 @@
 import type { Asset } from '../types';
+import { isConferido } from './conferencia';
 import { normalizeKey } from './schema';
 
 /**
- * Agrupamento por plaqueta OU registro, para a conferência em lote.
+ * Agrupamento por plaqueta (etiqueta), para a conferência em lote.
  * ============================================================================
- * Um lote pode ser identificado de duas formas na base:
- *   - pela **plaqueta** (etiqueta) repetida, com sub-itens diferentes; ou
- *   - pelo **registro** repetido (ex.: `NFE2013010`) com sub-itens diferentes.
- * A leitura digitada agrupava; o clique item a item só agrupava quando a base
- * trazia `TAG_DUPLICIDADE = 'ETIQUETA+1REGISTRO'` (ausente na maioria) e ainda
- * exigia a mesma filial. Agora a regra é a mesma nos dois caminhos, dentro da
- * unidade (todos os endereços), como o auditor espera.
+ * Lote é **somente** o conjunto de registros com a MESMA etiqueta consultada
+ * (a plaqueta lida no item ou digitada na busca), dentro da unidade e em
+ * qualquer endereço.
+ *
+ * O **registro** NÃO identifica lote: um registro repetido (ex.: `FISIC2020`)
+ * costuma juntar sub-itens de plaquetas diferentes, e o modal abria com itens
+ * que o auditor não consultou (`PLAQUETA A 005830 · REGISTRO FISIC2020` com 26
+ * linhas de etiqueta `FISIC2020`). O registro continua a servir para buscar e
+ * filtrar a lista, mas não para agrupar a conferência em lote.
  *
  * Funções puras: recebem a lista em memória, para ser testável sem IndexedDB.
  */
@@ -36,10 +39,6 @@ export const hasUsableTag = (value: unknown): boolean => chaveUtil(value) !== ''
 /** Chave do registro, ou vazio quando é placeholder/curto demais para ser lote. */
 export const registroKey = (asset: Partial<Asset>): string => chaveUtil(asset.registro, 3);
 
-/** Já conferido (flag local ou a coluna de auditoria da base). */
-export const isConferido = (asset: Partial<Asset>): boolean =>
-  !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-
 /** Baixado no patrimônio: não entra na conferência. */
 export const isBaixado = (asset: Partial<Asset>): boolean =>
   String(asset.status || '').toUpperCase().includes('BAIXA') || !!asset.databaixa;
@@ -59,21 +58,19 @@ export const addressKey = (asset: Partial<Asset>): string =>
 
 /**
  * Dois registros pertencem ao mesmo lote quando compartilham a plaqueta
- * utilizável **ou** o registro utilizável.
+ * (etiqueta) utilizável. Registro igual, sozinho, não faz lote.
  */
 export const sameBatch = (a: Partial<Asset>, b: Partial<Asset>): boolean => {
   const etqA = plaquetaKey(a);
   const etqB = plaquetaKey(b);
-  if (etqA && etqB && etqA === etqB) return true;
-  const regA = registroKey(a);
-  const regB = registroKey(b);
-  return !!regA && !!regB && regA === regB;
+  return !!etqA && !!etqB && etqA === etqB;
 };
 
 /**
  * Lote do ativo: todos os **pendentes** da MESMA unidade (qualquer endereço)
- * que compartilham plaqueta ou registro com ele. Inclui o próprio ativo.
- * Devolve `[]` quando não forma lote (menos de 2 registros).
+ * com a MESMA plaqueta (etiqueta) que ele. Inclui o próprio ativo.
+ * Devolve `[]` quando a etiqueta não serve de identidade ou quando não forma
+ * lote (menos de 2 registros).
  */
 export const findBatchGroup = (
   asset: Partial<Asset>,
@@ -87,10 +84,8 @@ export const findBatchGroup = (
     return unidadeCandidata === unidade;
   };
 
-  // A chave do ativo pode estar vazia de um dos lados; usa a do outro membro.
   const basePlaqueta = plaquetaKey(asset);
-  const baseRegistro = registroKey(asset);
-  if (!basePlaqueta && !baseRegistro) return [];
+  if (!basePlaqueta) return [];
 
   const seen = new Set<string>();
   const group: Asset[] = [];
@@ -106,13 +101,51 @@ export const findBatchGroup = (
   for (const candidate of all) {
     if (isBaixado(candidate) || isConferido(candidate)) continue;
     if (!dentroDaUnidade(candidate)) continue;
-    const shared =
-      (!!basePlaqueta && plaquetaKey(candidate) === basePlaqueta) ||
-      (!!baseRegistro && registroKey(candidate) === baseRegistro);
-    if (shared) push(candidate);
+    if (plaquetaKey(candidate) === basePlaqueta) push(candidate);
   }
 
   return group.length >= 2 ? group : [];
+};
+
+/**
+ * Lote a partir do código CONSULTADO na busca (digitado ou lido): todos os
+ * pendentes da unidade cuja ETIQUETA **contém** o termo — não precisa ser
+ * idêntica (`0058` acha `A 005830`, `A005830` também).
+ *
+ * Traz para a tela em andamento os irmãos que estão em OUTROS endereços: o lote
+ * é conferido no endereço do inventário e cada um cai como ADOTADO.
+ *
+ * Só é lote quando todos os encontrados têm a MESMA etiqueta; um termo curto
+ * que casa com etiquetas diferentes devolve `[]` e a lista fica para o auditor
+ * escolher qual grupo abrir.
+ */
+/**
+ * Comparação do campo ETIQUETA: ignora espaços e separadores, como a busca do
+ * ecrã (`A 005830` e `a0058` casam).
+ */
+const buscaKey = (value: unknown): string => normalizeKey(value || '').replace(/[^A-Z0-9]/g, '');
+
+export const findBatchGroupBySearch = (
+  term: string,
+  all: Asset[],
+  unidadeAtual?: string | null
+): Asset[] => {
+  const alvo = buscaKey(term);
+  if (!alvo) return [];
+
+  const unidade = normalizeKey(unidadeAtual || '');
+  const matches = all.filter((candidate) => {
+    if (isBaixado(candidate) || isConferido(candidate)) return false;
+    const unidadeCandidata = unitKey(candidate);
+    if (unidade && unidadeCandidata && unidadeCandidata !== unidade) return false;
+    const etiqueta = buscaKey(candidate.etiqueta);
+    return !!etiqueta && !KEY_PLACEHOLDERS.has(etiqueta) && etiqueta.includes(alvo);
+  });
+  if (matches.length < 2) return [];
+
+  const etiqueta = plaquetaKey(matches[0]);
+  if (!etiqueta || matches.some((candidate) => plaquetaKey(candidate) !== etiqueta)) return [];
+  return matches;
 };
 
 /** Separa quem já está no endereço do inventário de quem vem de outro endereço. */
@@ -132,21 +165,12 @@ export const splitByAddress = (
   return { noEndereco, outroEndereco };
 };
 
-/** Título do modal: mostra a plaqueta e, quando for o caso, o registro do lote. */
+/** Título do modal: a etiqueta consultada, que é o que define o lote. */
 export const batchLabel = (group: Asset[]): { titulo: string; subtitulo: string } => {
   const primeira = group[0] || {};
-  const plaqueta = plaquetaKey(primeira);
-  const registro = registroKey(primeira);
-  const porRegistro = !plaqueta && !!registro;
-  const etiquetaVisivel = plaqueta ? String(primeira.etiqueta || '') : '';
-  const registroVisivel = registro ? String(primeira.registro || '') : '';
+  const etiquetaVisivel = plaquetaKey(primeira) ? String(primeira.etiqueta || '') : '';
   return {
-    titulo: porRegistro ? 'Registro repetido' : 'Plaqueta repetida',
-    subtitulo: [
-      etiquetaVisivel ? `Plaqueta ${etiquetaVisivel}` : '',
-      registroVisivel ? `Registro ${registroVisivel}` : ''
-    ]
-      .filter(Boolean)
-      .join(' · ')
+    titulo: etiquetaVisivel ? 'Plaqueta repetida' : 'Lote',
+    subtitulo: etiquetaVisivel ? `Plaqueta ${etiquetaVisivel}` : ''
   };
 };

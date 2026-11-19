@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { motion } from 'motion/react';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 import { 
   Palette, 
   CheckCircle2, 
@@ -104,7 +105,7 @@ const ThemePalette: React.FC = () => {
     <div className="max-w-6xl mx-auto p-6 animate-fadeIn">
       <div className="mb-12 text-center">
         <h2 className="text-3xl font-bold text-ink mb-2 tracking-tight uppercase">Guia Visual de Cores e Regras</h2>
-        <p className="text-ink-muted uppercase font-bold text-xs tracking-[0.2em]">Padronização Visual GBR v24.50</p>
+        <p className="text-ink-muted uppercase font-bold text-xs tracking-[0.2em]">Padronização Visual GBR {APP_VERSION_LABEL}</p>
       </div>
 
       <ColorSection 

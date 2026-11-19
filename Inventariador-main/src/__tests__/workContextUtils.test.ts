@@ -273,6 +273,7 @@ describe('lembrar escolha (Etapa 4 FLUXO_ACESSO_INICIAL)', () => {
     const stored = { tenantid: 'CICOPAL', filial: '010201 SNACKS PA', module: AppModule.ASSET_CONTROL, savedAt: '' };
     const auditor = { role: 'AUDITOR', tenantid: 'CICOPAL', units: ['010201 SNACKS PA'], filial: '010201 SNACKS PA' };
     expect(isValidLastContext(stored, contexts, auditor)).toBe(false);
+    // Grafia legada: o AUXILIARY_AUDITOR é lido como AUDITOR (papel fundido).
     expect(isValidLastContext(stored, contexts, { ...auditor, role: 'AUXILIARY_AUDITOR' })).toBe(false);
     const owner = { role: 'ADMIN', tenantid: 'CICOPAL', units: [], filial: 'TODAS' };
     expect(isValidLastContext(stored, contexts, owner)).toBe(true);

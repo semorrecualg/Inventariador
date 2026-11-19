@@ -3,25 +3,19 @@ import { assetIdentityKey, type DedupRow } from './dedupAssets';
 /**
  * GUARDA DE ENVIO PARA A NUVEM (Supabase).
  *
- * A tabela `assets` é consolidada: uma linha por `tenantid + filial + etiqueta`.
- * Se um aparelho que ainda tem 12 636 linhas (as 1 195 cópias) enviar a base,
- * o upsert grava os dois `primarykey` de cada grupo e as cópias voltam para
- * TODOS os dispositivos — nenhum pull posterior consegue distinguir a cópia
- * legítima, porque a nuvem não guarda o critério de desempate local
- * (`_is_synced`).
+ * A tabela `assets` guarda uma linha por `(tenantid, primarykey)`. Duas linhas
+ * da planilha com a mesma etiqueta (`tenantid + filial + etiqueta` iguais, cada
+ * uma com a sua `primarykey` de origem) são registos DISTINTOS e sobem as duas —
+ * apagá-las ou recusá-las seria perder registo, que é o que o produto proíbe.
  *
- * Duas defesas, nesta ordem:
- *  1. `checkCloudPushGuard` — recusa um payload com duas linhas da mesma
- *     identidade (a base local ainda tem cópias).
- *  2. `findIdentityConflicts` — recusa uma linha cuja identidade já existe na
- *     nuvem com outro `primarykey`; é o caso que o payload sozinho não vê,
- *     porque o lote traz uma única linha (push delta) e o upsert é por
- *     `(tenantid, id)`, não por identidade.
+ * O que a guarda recusa é outra coisa: o MESMO registo duas vezes no payload
+ * (mesmo `tenantid` e mesma `primarykey`). O upsert `onConflict(tenantid, id)`
+ * aborta o lote inteiro com "ON CONFLICT DO UPDATE command cannot affect row a
+ * second time", por isso o envelope é recusado antes de tocar na rede.
  *
- * Regras herdadas de `dedupAssets`:
- *  - identidade = `tenantid + filial + etiqueta`, normalizados;
- *  - linha sem etiqueta não tem identidade, fica fora do agrupamento e nunca
- *    provoca bloqueio (não pode colidir com outra linha).
+ * Identidades repetidas continuam a ser medidas e reportadas — é o diagnóstico
+ * que mostra quais etiquetas aparecem mais de uma vez na planilha — mas como
+ * informação, não como bloqueio.
  */
 
 export interface CloudPushFilialAudit {
@@ -31,7 +25,7 @@ export interface CloudPushFilialAudit {
   rows: number;
   /** Identidades distintas dessa filial. */
   identities: number;
-  /** Cópias que a limpeza removeria nessa filial. */
+  /** Linhas a mais para a mesma identidade nessa filial. */
   copies: number;
 }
 
@@ -42,16 +36,25 @@ export interface CloudPushAudit {
   identities: number;
   /** Grupos com mais de uma linha. */
   groupsWithCopies: number;
-  /** Linhas a mais — o que a limpeza remove. */
+  /** Linhas a mais para a mesma identidade (registos distintos da planilha). */
   copies: number;
-  /** Linhas sem etiqueta: não têm identidade, não bloqueiam. */
+  /** Linhas sem etiqueta: não têm identidade, não entram no agrupamento. */
   withoutIdentity: number;
   perFilial: CloudPushFilialAudit[];
+}
+
+/** O mesmo registo (`tenantid` + `primarykey`) repetido no payload. */
+export interface DuplicateRecord {
+  tenantid: string;
+  primarykey: string;
+  count: number;
 }
 
 export interface CloudPushGuardResult {
   blocked: boolean;
   audit: CloudPushAudit;
+  /** Chaves repetidas no payload — o motivo de bloqueio. */
+  duplicates: DuplicateRecord[];
   /** Linhas prontas para o terminal SRE e para o aviso na tela. */
   message: string[];
 }
@@ -65,7 +68,7 @@ interface IdentityBucket {
   filialKey: string;
 }
 
-/** Mede os grupos com cópias na base que se pretende enviar. Não escreve nada. */
+/** Mede os grupos com a mesma identidade na base que se pretende enviar. Não escreve nada. */
 export function auditCloudPush(rows: DedupRow[]): CloudPushAudit {
   const buckets = new Map<string, IdentityBucket>();
   let withoutIdentity = 0;
@@ -116,27 +119,65 @@ export function auditCloudPush(rows: DedupRow[]): CloudPushAudit {
 }
 
 /**
- * Texto do bloqueio por cópias. Fonte única: o erro de política e a tela
- * mostram exatamente estas linhas.
+ * Texto informativo das identidades repetidas. Não bloqueia: cada linha tem a
+ * sua `primarykey` de origem, portanto são registos distintos que a nuvem
+ * guarda lado a lado.
  */
-export function formatCloudPushAudit(audit: CloudPushAudit): string[] {
+export function formatIdentityCopiesNotice(audit: CloudPushAudit): string[] {
   if (audit.copies === 0) return [];
 
   return [
-    `ENVIO BLOQUEADO: ${audit.copies} cópia(s) repetida(s) em ${audit.groupsWithCopies} grupo(s) — ${audit.total} linhas para ${audit.identities} ativos distintos (tenantid + filial + etiqueta).`,
-    'A nuvem guarda uma linha por identidade: enviar esta base recria as cópias em todos os dispositivos.',
-    'Execute CÓPRIAS REPETIDAS → LIMPAR CÓPIAS (a conferência é preservada) e confira os três espelhos antes de enviar.',
-    ...audit.perFilial.map(
-      (f) => `${f.filial}: ${f.rows} linhas · ${f.identities} identidade(s) · ${f.copies} cópia(s)`
-    )
+    `Identidades repetidas (tenantid + filial + etiqueta): ${audit.copies} linha(s) a mais em ${audit.groupsWithCopies} grupo(s) — ${audit.total} linhas para ${audit.identities} identidade(s).`,
+    'São registos distintos da planilha (primarykey própria em cada linha) e seguem para a nuvem: a tabela guarda uma linha por (tenantid, primarykey).',
+    ...audit.perFilial
+      .filter((f) => f.copies > 0)
+      .map((f) => `${f.filial}: ${f.rows} linhas · ${f.identities} identidade(s) · ${f.copies} repetida(s)`)
   ];
 }
 
-/** Decide se o envio pode seguir. Com qualquer cópia, bloqueia e explica. */
+/** Chaves (`tenantid` + `primarykey`) que aparecem mais de uma vez no payload. */
+export function findDuplicateRecords(rows: DedupRow[]): DuplicateRecord[] {
+  const counts = new Map<string, DuplicateRecord>();
+
+  for (const row of rows) {
+    const primarykey = String(row.primarykey ?? '').trim();
+    if (!primarykey) continue;
+    const tenantid = String(row.tenantid ?? '').trim().toUpperCase();
+    const key = `${tenantid}\u0000${primarykey}`;
+    const found = counts.get(key);
+    if (found) found.count += 1;
+    else counts.set(key, { tenantid, primarykey, count: 1 });
+  }
+
+  return Array.from(counts.values())
+    .filter((entry) => entry.count > 1)
+    .sort((a, b) => b.count - a.count);
+}
+
+/** Texto do bloqueio por registo repetido. Fonte única: erro e tela mostram o mesmo. */
+export function formatDuplicateRecords(duplicates: DuplicateRecord[]): string[] {
+  if (duplicates.length === 0) return [];
+
+  const extra = duplicates.reduce((sum, entry) => sum + entry.count - 1, 0);
+  const lines = [
+    `ENVIO BLOQUEADO: ${extra} linha(s) repetida(s) do mesmo registo em ${duplicates.length} primarykey(s).`,
+    'O envio grava por (tenantid, primarykey) e um lote com a mesma chave duas vezes é recusado pelo Postgres. Nada foi enviado; o registo continua na base local.'
+  ];
+
+  duplicates.slice(0, 5).forEach((entry) => {
+    lines.push(`contrato ${entry.tenantid || '(sem contrato)'} · primarykey ${entry.primarykey}: ${entry.count} linha(s)`);
+  });
+  if (duplicates.length > 5) lines.push(`… e mais ${duplicates.length - 5} chave(s).`);
+
+  return lines;
+}
+
+/** Decide se o envio pode seguir. Só o mesmo registo repetido bloqueia. */
 export function checkCloudPushGuard(rows: DedupRow[]): CloudPushGuardResult {
   const audit = auditCloudPush(rows);
-  if (audit.copies === 0) return { blocked: false, audit, message: [] };
-  return { blocked: true, audit, message: formatCloudPushAudit(audit) };
+  const duplicates = findDuplicateRecords(rows);
+  if (duplicates.length === 0) return { blocked: false, audit, duplicates, message: [] };
+  return { blocked: true, audit, duplicates, message: formatDuplicateRecords(duplicates) };
 }
 
 export interface CloudPushIdentityConflict {
@@ -151,10 +192,10 @@ export interface CloudPushIdentityConflict {
 /**
  * Identidades do payload que já existem na nuvem com outro `primarykey`.
  *
- * É o buraco que a checagem de cópias locais não cobre: com uma única linha suja
- * (push delta), o payload não tem duplicados, mas gravar essa linha cria uma
- * segunda linha para um ativo que a nuvem já tem. Quando a nuvem já contém o
- * `primarykey` enviado, o upsert atualiza a linha certa — não há cópia nova.
+ * É DIAGNÓSTICO, não bloqueio: com duas linhas legítimas da planilha para a
+ * mesma etiqueta, a segunda chega quando a primeira já está na nuvem e a
+ * identidade é a mesma — recusar seria perder a linha. A nuvem guarda uma linha
+ * por `(tenantid, primarykey)`, então as duas convivem.
  */
 export function findIdentityConflicts(
   payload: DedupRow[],
@@ -185,13 +226,13 @@ export function findIdentityConflicts(
   return conflicts;
 }
 
-/** Texto do bloqueio por identidade já existente na nuvem. */
+/** Texto informativo das identidades já presentes na nuvem. */
 export function formatCloudPushIdentityConflicts(conflicts: CloudPushIdentityConflict[]): string[] {
   if (conflicts.length === 0) return [];
 
   const lines = [
-    `ENVIO BLOQUEADO: ${conflicts.length} ativo(s) com identidade (tenantid + filial + etiqueta) já presente na nuvem sob outro primarykey.`,
-    'Enviar gravaria uma segunda linha para o mesmo ativo. Puxe a base para adotar as linhas da nuvem, ou execute CÓPIAS REPETIDAS → LIMPAR CÓPIAS antes de enviar.'
+    `Identidade já presente na nuvem com outro primarykey: ${conflicts.length} linha(s) — seguem como registos distintos.`,
+    'A conferência aplica-se ao conjunto; o upsert grava por (tenantid, primarykey) e não toca na linha já existente.'
   ];
 
   conflicts.slice(0, 5).forEach((conflict) => {
@@ -200,7 +241,7 @@ export function formatCloudPushIdentityConflicts(conflicts: CloudPushIdentityCon
       `${filial} · etiqueta ${etiqueta}: local ${conflict.attempted} × nuvem ${conflict.existing.join(', ')}`
     );
   });
-  if (conflicts.length > 5) lines.push(`… e mais ${conflicts.length - 5} ativo(s).`);
+  if (conflicts.length > 5) lines.push(`… e mais ${conflicts.length - 5} linha(s).`);
 
   return lines;
 }
@@ -221,32 +262,23 @@ export class CloudPushPolicyError extends Error {
   }
 }
 
-/** A base local ainda tem cópias (mesma identidade duas vezes no payload). */
+/** O payload traz o mesmo registo (tenantid + primarykey) mais de uma vez. */
 export class CloudPushBlockedError extends CloudPushPolicyError {
-  constructor(audit: CloudPushAudit) {
-    const lines = formatCloudPushAudit(audit);
-    super(lines[0] ?? 'Envio bloqueado por cópias locais.', lines);
+  readonly duplicates: DuplicateRecord[];
+
+  constructor(duplicates: DuplicateRecord[]) {
+    const lines = formatDuplicateRecords(duplicates);
+    super(lines[0] ?? 'Envio bloqueado: registo repetido no lote.', lines);
     this.name = 'CloudPushBlockedError';
-  }
-}
-
-/** A identidade já existe na nuvem com outro `primarykey`. */
-export class CloudPushIdentityConflictError extends CloudPushPolicyError {
-  readonly conflicts: CloudPushIdentityConflict[];
-
-  constructor(conflicts: CloudPushIdentityConflict[]) {
-    const lines = formatCloudPushIdentityConflicts(conflicts);
-    super(lines[0] ?? 'Envio bloqueado por identidade já existente na nuvem.', lines);
-    this.name = 'CloudPushIdentityConflictError';
-    this.conflicts = conflicts;
+    this.duplicates = duplicates;
   }
 }
 
 /**
- * Recuo do envio bloqueado por cópias.
+ * Recuo do envio bloqueado por registo repetido.
  *
  * A fila da nuvem volta a tentar sozinha; sem recuo, um bloqueio que só o
- * operador resolve (LIMPAR CÓPIAS) repetia o aviso a cada 1,2 s. Os valores
+ * operador resolve repetia o aviso a cada 1,2 s. Os valores
  * crescem até ao teto e voltam a zero no primeiro envio aceito.
  */
 export const CLOUD_PUSH_BLOCKED_BASE_BACKOFF_MS = 30_000;

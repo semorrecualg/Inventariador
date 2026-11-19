@@ -1,4 +1,5 @@
 // src/types/inventory.ts
+import type { MarcaDeConferencia } from '../utils/conferencia';
 
 export interface CargaExpertRow {
   tenantid: string;         // Índice 0 (Tranca Invisível de Segurança)
@@ -52,7 +53,8 @@ export interface Asset {
   sn3_recno: number | null; // Índice 20
 
   // Controle de Auditoria SRE e Sincronização Local-First (Underline / Metadados)
-  _conferido?: boolean;
+  // Grafias aceitas pela regra: `true`/`false`, `1`/`0` e o texto legado.
+  _conferido?: MarcaDeConferencia;
   _photoUrl?: string;
   // @deprecated Legado (somente leitura): a coluna canônica é 'filial' (Índice 1).
   _unitid?: string;

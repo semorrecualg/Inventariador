@@ -1,18 +1,19 @@
 import { db } from './sqliteService';
 import { buildDedupPlan, type DedupRow } from '../utils/dedupAssets';
-import { logger } from '../utils/logger';
+import { redactTenantId } from '../utils/diagnosticRedaction';
 
 /**
- * Limpeza de cópias repetidas de ativos (mesmo `tenantid + filial + etiqueta`).
+ * DIAGNÓSTICO de cópias repetidas de ativos (`tenantid + filial + etiqueta`).
  *
- * Contexto: o mesmo conjunto pode ser gravado várias vezes na base local com
- * `primarykey` diferente, então o `bulkPut` não substitui — a Unidade Operacional
- * passa a somar 4× os mesmos ativos (50 544 no lugar de 12 636).
+ * Histórico: esta rotina também APLICAVA uma limpeza — apagava linhas da base
+ * local para reduzir 50 544 registos a 12 636. Isso viola a regra do produto
+ * ("não podemos excluir por nenhum motivo nenhum registro"): a causa das cópias
+ * é a carga, e a resposta passou a ser bloquear a carga quando planilha e base
+ * não batem (ver `utils/importReconciliation`), nunca apagar registos.
  *
- * O plano é sempre calculado primeiro e exposto em relatório (antes/depois).
- * `previewAssetDuplicateCleanup` NÃO escreve nada; só
- * `applyAssetDuplicateCleanup` remove linhas — e apenas as que têm identidade
- * completa (tenantid + filial + etiqueta).
+ * O que fica: apenas leitura. `previewAssetDuplicateCleanup` mede o que está
+ * repetido, mostra as chaves divergentes e NÃO escreve nada — nem na base, nem
+ * em `audit_logs`.
  */
 
 export const ASSET_MIRROR_TABLES = ['local_assets', 'ativos', 'assets'] as const;
@@ -41,14 +42,13 @@ export interface DedupExample {
 }
 
 export interface DedupReport {
-  /** Id da entrada em `audit_logs` (vazio no diagnóstico, que não escreve nada). */
-  auditId: string;
   /**
    * Até 5 grupos com as chaves envolvidas. É o que mostra QUAL caminho gravou a
    * cópia (maiúsculas vs minúsculas, com/sem espaços, `ALT-` aleatório, etc.).
    */
   examples: DedupExample[];
   before: number;
+  /** Quantas linhas restariam SOMANDO identidades — não é uma alteração feita. */
   after: number;
   removed: number;
   groupsWithCopies: number;
@@ -61,7 +61,7 @@ export interface DedupReport {
 const filialLabelOf = (row: DedupRow): string =>
   String(row.filial_raw || row.filial || '').trim() || '(sem filial)';
 
-/** Resumo por filial: quantas linhas existem e quantas saem da limpeza. */
+/** Resumo por filial: quantas linhas existem e quantas são cópias. */
 const summarizePerFilial = (rows: DedupRow[], removedKeys: Set<string>): DedupFilialReport[] => {
   const map = new Map<string, DedupFilialReport>();
   for (const row of rows) {
@@ -83,9 +83,7 @@ const tableOf = (table: AssetMirrorTable) => db.table(table);
 
 /**
  * Chave primária REAL dos espelhos desde o schema v7: composta
- * `[tenantid+primarykey]`. Apagar só pelo `primarykey` não remove nada — a
- * chave não coincide e o `bulkDelete` termina sem apagar (era o que acontecia
- * numa primeira versão desta limpeza).
+ * `[tenantid+primarykey]`.
  */
 const primaryKeyOf = (row: DedupRow): [string, string] => [String(row.tenantid ?? ''), String(row.primarykey)];
 
@@ -93,7 +91,8 @@ const primaryKeyOf = (row: DedupRow): [string, string] => [String(row.tenantid ?
 const keyIdOf = (row: DedupRow): string => primaryKeyOf(row).join('\u0000');
 
 /**
- * Calcula o relatório sem tocar na base. `after` é o que ficaria após a limpeza.
+ * Mede as cópias sem tocar na base. `after` é uma PROJEÇÃO (o que restaria se
+ * as identidades fossem somadas), nunca um resultado de limpeza.
  */
 export async function previewAssetDuplicateCleanup(): Promise<DedupReport> {
   const tables: DedupTableReport[] = [];
@@ -126,7 +125,7 @@ export async function previewAssetDuplicateCleanup(): Promise<DedupReport> {
       withoutIdentity = plan.withoutIdentity;
       patched = plan.groups.filter((group) => Object.keys(group.patch).length > 0).length;
       examples = plan.groups.slice(0, 5).map((group) => ({
-        key: group.key,
+        key: redactIdentityKey(group.key),
         keeper: String(group.keeper.primarykey),
         removed: group.removed.map((row) => String(row.primarykey))
       }));
@@ -134,105 +133,40 @@ export async function previewAssetDuplicateCleanup(): Promise<DedupReport> {
     }
   }
 
-  return { auditId: '', examples, before, after: before - removed, removed, groupsWithCopies, withoutIdentity, patched, tables, perFilial };
+  return { examples, before, after: before - removed, removed, groupsWithCopies, withoutIdentity, patched, tables, perFilial };
 }
 
 /**
- * Aplica a limpeza nos três espelhos (`local_assets`, `ativos`, `assets`) e
- * devolve o relatório antes/depois. A conferência (`_conferido`, `_auditor`,
- * `_dataLeitura`) da cópia conferida é preservada no registo que fica.
+ * Identidade do grupo no relatório (`tenantid|filial|etiqueta`): o tenantid sai
+ * mascarado como no pacote de diagnóstico — o relatório é copiado para tickets —
+ * e filial/etiqueta ficam legíveis para dizer qual caminho gravou a cópia.
  */
-export async function applyAssetDuplicateCleanup(): Promise<DedupReport> {
-  const report = await previewAssetDuplicateCleanup();
-
-  for (const tableName of ASSET_MIRROR_TABLES) {
-    const table = tableOf(tableName);
-    const rows = (await table.toArray()) as unknown as DedupRow[];
-    const plan = buildDedupPlan(rows);
-    const keysToDelete = plan.groups.flatMap((group) => group.removed.map(primaryKeyOf));
-    const patches = plan.groups.filter((group) => Object.keys(group.patch).length > 0);
-    if (keysToDelete.length === 0 && patches.length === 0) continue;
-
-    await db.transaction('rw', table, async () => {
-      if (keysToDelete.length > 0) await table.bulkDelete(keysToDelete);
-      for (const group of patches) {
-        await table.update(primaryKeyOf(group.keeper), group.patch);
-      }
-    });
-  }
-
-  const auditId = await logDedupAudit(report);
-  report.auditId = auditId;
-
-  // A Unidade Operacional guarda o total em estado: sem este aviso o ecrã
-  // continua a somar as linhas que acabaram de sair da base.
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('gbr_local_assets_changed', { detail: { removed: report.removed } }));
-  }
-
-  logger.info(
-    `[DEDUP] Cópias removidas: ${report.removed} (antes ${report.before} · depois ${report.after}) em ${report.groupsWithCopies} grupo(s).`
-  );
-
-  return report;
-}
-
-const currentUserEmail = (): string => {
-  try {
-    const raw = typeof window !== 'undefined' ? sessionStorage.getItem('app_current_user') : null;
-    if (!raw) return '';
-    const parsed = JSON.parse(raw) as { email?: string };
-    return String(parsed?.email || '').trim();
-  } catch {
-    return '';
-  }
+const redactIdentityKey = (key: string): string => {
+  const [tenant, ...rest] = key.split('|');
+  return [redactTenantId(tenant), ...rest].join('|');
 };
-
-/**
- * Grava o resultado da limpeza em `audit_logs` (antes/depois, removidos e o
- * detalhe por filial). `delta` leva os números em JSON para poderem ser lidos
- * sem interpretar texto.
- */
-async function logDedupAudit(report: DedupReport): Promise<string> {
-  const auditId = `DEDUP_${Date.now()}_${Math.random().toString(36).slice(2, 9).toUpperCase()}`;
-  const porFilial = report.perFilial.map((f) => `${f.filial} ${f.before}→${f.after} (-${f.removed})`).join(' · ');
-  await db.audit_logs.put({
-    id: auditId,
-    usuario: currentUserEmail() || 'SISTEMA',
-    acao: 'DEDUP_ASSETS',
-    tabela: 'assets',
-    registro_id: 'DEDUP_ASSETS',
-    details: `Limpeza de cópias por tenantid + filial + etiqueta: ${report.before} → ${report.after} (removidas ${report.removed}) em ${report.groupsWithCopies} grupo(s); sem etiqueta (intocados): ${report.withoutIdentity}. Por filial: ${porFilial}`,
-    delta: JSON.stringify({
-      before: report.before,
-      after: report.after,
-      removed: report.removed,
-      groupsWithCopies: report.groupsWithCopies,
-      withoutIdentity: report.withoutIdentity,
-      patched: report.patched,
-      perFilial: report.perFilial,
-      examples: report.examples,
-      tables: report.tables
-    }),
-    updated_at: new Date().toISOString()
-  });
-  return auditId;
-}
 
 /** Linhas do relatório, para o log do Gestor de Base. */
 export function formatDedupReport(report: DedupReport): string[] {
+  // `after` é uma projeção de LINHAS: soma cada linha sem etiqueta como se fosse
+  // uma identidade própria. Essas linhas não têm identidade (`assetIdentityKey`
+  // devolve vazio), portanto o rótulo separa as duas contas em vez de chamar
+  // "identidades" a todas — 11 437 identidades + 395 sem etiqueta = 11 832 linhas.
+  const identities = report.after - report.withoutIdentity;
   const lines = [
-    `[DEDUP] ANTES: ${report.before} linhas em local_assets · DEPOIS: ${report.after} · remover: ${report.removed}`,
-    `[DEDUP] Grupos com cópias (tenantid+filial+etiqueta): ${report.groupsWithCopies} · sem etiqueta (intocados): ${report.withoutIdentity}`
+    `[DEDUP] ANTES: ${report.before} linhas em local_assets · ${report.after} linha(s) após somar identidades · cópias: ${report.removed}`,
+    `[DEDUP] Identidades distintas (tenantid+filial+etiqueta): ${identities} · linhas sem etiqueta (fora do agrupamento, contadas uma a uma): ${report.withoutIdentity}`,
+    `[DEDUP] Grupos com cópias (tenantid+filial+etiqueta): ${report.groupsWithCopies}`,
+    '[DEDUP] Diagnóstico apenas: nenhum registo é apagado. Cópias resolvem-se na origem (planilha) e a carga bloqueia quando os números não batem.'
   ];
   report.tables.forEach((table) => {
-    lines.push(`[DEDUP] ${table.table}: ${table.before} → ${table.after} (-${table.removed})`);
+    lines.push(`[DEDUP] ${table.table}: ${table.before} linhas · ${table.after} linha(s) após somar identidades · ${table.removed} cópia(s)`);
   });
   report.perFilial.slice(0, 8).forEach((filial) => {
-    lines.push(`[DEDUP] ${filial.filial}: ${filial.before} → ${filial.after} (-${filial.removed})`);
+    lines.push(`[DEDUP] ${filial.filial}: ${filial.before} linhas · ${filial.after} linha(s) após somar identidades · ${filial.removed} cópia(s)`);
   });
   report.examples.forEach((example) => {
-    lines.push(`[DEDUP] ex. fica "${example.keeper}" · saem ${example.removed.map((k) => `"${k}"`).join(', ')}`);
+    lines.push(`[DEDUP] ex. identidade "${example.key}" · grafias ${[example.keeper, ...example.removed].map((k) => `"${k}"`).join(', ')}`);
   });
   return lines;
 }

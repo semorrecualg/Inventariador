@@ -8,6 +8,8 @@ import { QR_FIELD_ORDER } from '../utils/qrUtils';
 import { updateAssetInProtheus } from '../services/protheusService';
 import { localDb } from '../services/localDbService';
 import { canonicalKey } from '../utils/normalize';
+import { isConferido, marcarConferido } from '../utils/conferencia';
+import { mesmoEnderecoAuditado } from '../utils/assetAddress';
 
 import { 
   Edit2, 
@@ -226,83 +228,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     );
   };
 
-  useEffect(() => {
-    const calculateDynamicLocation = async () => {
-      try {
-        const filialName = (workingAsset.filial || '').toUpperCase().trim();
-        if (!filialName) return;
-        const configs = await localDb.unitConfigs.toArray();
-        const config = configs.find(c => {
-          const uId = (c._unitid || c.unit_id || '').toUpperCase().trim();
-          return uId === filialName || uId.replace(/_/g, ' ') === filialName.replace(/_/g, ' ');
-        });
-
-        const anchorLat = config?.lat ? Number(config.lat) : -23.5505; // default SP
-        const anchorLng = config?.lng ? Number(config.lng) : -46.6333;
-
-        // Obter deslocamento físico do terminal
-        let dispLat = 0;
-        let dispLng = 0;
-
-        const getGPSPosition = () => {
-          return new Promise<{ lat: number; lng: number }>((resolve, reject) => {
-            if (!navigator.geolocation) {
-              reject(new Error('GPS indisponível'));
-              return;
-            }
-            navigator.geolocation.getCurrentPosition(
-              (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-              (err) => reject(err),
-              { enableHighAccuracy: false, timeout: 3000 }
-            );
-          });
-        };
-
-        try {
-          const gps = await getGPSPosition();
-          // Guarda Defensiva: GPS pode vir nulo/incompleto - nunca ler .lng de undefined
-          if (!gps || !Number.isFinite(Number(gps.lat)) || !Number.isFinite(Number(gps.lng))) {
-            throw new Error('GPS invalido retornado pelo hardware');
-          }
-          // Se temos o GPS real, o vetor de deslocamento é a diferença entre o GPS real e a âncora
-          dispLat = gps.lat - anchorLat;
-          dispLng = gps.lng - anchorLng;
-
-          // Se a diferença for muito absurda (fora do limite razoável) ou precisão baixa, limitamos usando amortecimento
-          if (Math.abs(dispLat) > 0.05 || Math.abs(dispLng) > 0.05) {
-            // Fallback matemático (Simulação de sensor de movimento)
-            dispLat = (Math.random() - 0.5) * 0.001;
-            dispLng = (Math.random() - 0.5) * 0.001;
-          }
-        } catch (gpsErr) {
-          logger.warn('>>> [AssetDetail GPS Fallback] Sem sinal real, simulando vetor de odometria de movimento:', gpsErr);
-          // Fallback matemático baseado em sensores de movimento simulados/Capacitor para Modo Avião
-          dispLat = (Math.random() - 0.5) * 0.0005;
-          dispLng = (Math.random() - 0.5) * 0.0005;
-        }
-
-        // Equação: Coordenada da Âncora da Filial + Vetor de Deslocamento Físico
-        const finalLat = Number((anchorLat + dispLat).toFixed(6));
-        const finalLng = Number((anchorLng + dispLng).toFixed(6));
-
-        setWorkingAsset(prev => ({
-          ...prev,
-          latitude: String(finalLat),
-          longitude: String(finalLng)
-        }));
-      } catch (e) {
-        logger.error('>>> [AssetDetail] Erro ao calcular deslocamento dinâmico:', e);
-      }
-    };
-
-    if (!workingAsset?.id) return;
-    // Debounce: a dep workingAsset?.filial re-executa o effect a cada tecla digitada
-    // no campo filial; agrupa as chamadas em uma única consulta de GPS após pausa.
-    const timer = setTimeout(() => {
-      calculateDynamicLocation();
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [workingAsset?.id, workingAsset?.filial]);
+  // O ativo fica SÓ com o GPS que já tem (leitura do inventário) ou vazio. A
+  // versão anterior gravava aqui a âncora da filial mais um deslocamento
+  // aleatório — e São Paulo como default quando a filial não tinha config —, o
+  // que inventava coordenadas no registo do ativo.
 
 
   const effectiveAssets = dexieAssets.length > 0 ? dexieAssets : assets;
@@ -473,7 +402,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
       onBulkUpdate(assets.map(a => String(a.id)), manualUpdates);
     } else {
-      onUpdate({ ...finalAsset, _conferido: true });
+      onUpdate({ ...finalAsset, ...marcarConferido() });
     }
 
     // Limpa rascunho de memória volátil (Pilar 2 de Conectividade)
@@ -595,7 +524,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     return current === 'ETIQUETAR' || original === 'ETIQUETAR';
   }, [workingAsset.etiqueta, workingAsset._valoresOriginais]);
 
-  const isConferido = !!workingAsset._conferido || String(workingAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+  const conferido = isConferido(workingAsset);
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
 
   const meta = getTagMetadata(visualStatus);
@@ -769,7 +698,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             </div>
           </div>
 
-          {(workingAsset._localMaster && workingAsset._localMaster !== workingAsset.endereco) && (
+          {!mesmoEnderecoAuditado(workingAsset) && (
             <div className="bg-white/10 border border-white/20 rounded-2xl p-4 backdrop-blur-md mb-2">
               <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
                 <span className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Fluxo de Adoção</span>
@@ -811,7 +740,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       {/* KARDEX BODY */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-[60vh] bg-bg-main">
           {/* SITUAÇÃO DO ATIVO (REGRA DE OURO) */}
-          {(isAdopted || workingAsset._is_divergent_baixa || isConferido) && (
+          {(isAdopted || workingAsset._is_divergent_baixa || conferido) && (
             <div className="bg-white border border-border rounded-2xl p-5 shadow-sm space-y-4 animate-slideIn">
               <div className="flex items-center justify-between mb-1">
                 <h4 className="text-[10px] font-black text-ink-muted uppercase tracking-[0.2em] flex items-center">
@@ -847,7 +776,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                       </div>
                     )}
 
-                    {(isAdopted || isConferido) && (
+                    {(isAdopted || conferido) && (
                       <div className="flex items-start">
                         <div className="w-8 h-8 rounded-xl bg-blue-500 text-white flex items-center justify-center mr-3 shrink-0 shadow-lg shadow-blue-500/20">
                           <MapPin size={14} />

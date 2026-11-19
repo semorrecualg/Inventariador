@@ -8,9 +8,11 @@
  *   node scripts/verify-governance.cjs                # git + env + Supabase
  *   node scripts/verify-governance.cjs --offline      # git + env (modo INTERNAL)
  *   node scripts/verify-governance.cjs --use-example  # testa o host do .env.example
+ *   node scripts/verify-governance.cjs --ci         # gate de PR: estrutura + changelog
  *
  * Regras (docs/GOVERNANCA.md § 8):
  *   - nunca imprime valores de chaves, apenas presença;
+ *   - a versão do package.json tem de ter entrada no CHANGELOG (governança § 9.1);
  *   - exit 0 = íntegro, exit 1 = pelo menos uma falha.
  */
 
@@ -23,6 +25,10 @@ const REPO_DIR = path.resolve(APP_DIR, '..');
 const FLAGS = new Set(process.argv.slice(2));
 const OFFLINE = FLAGS.has('--offline');
 const USE_EXAMPLE = FLAGS.has('--use-example');
+// Modo CI: o job não tem .env nem credenciais de nuvem, e a branch do PR pode estar
+// atrás de main (normal). Verifica o que é do repositório — estrutura e changelog —
+// e rebaixa a aviso o que é do ambiente local.
+const CI_MODE = FLAGS.has('--ci');
 const TIMEOUT_MS = 8000;
 const REQUIRED_TABLES = ['assets', 'user_permissions', 'inventory_config', 'audit_logs'];
 const TAG = { ok: '[ OK ]', fail: '[FALHA]', warn: '[AVISO]' };
@@ -125,6 +131,33 @@ function checkStructure() {
   return pkg;
 }
 
+function checkChangelog(pkg) {
+  if (!pkg || !pkg.version) {
+    warn('changelog', 'versão do package.json indisponível — entrada no CHANGELOG não verificada');
+    return;
+  }
+  const changelogPath = path.join(APP_DIR, 'CHANGELOG.md');
+  let raw;
+  try {
+    raw = fs.readFileSync(changelogPath, 'utf8');
+  } catch {
+    fail('changelog', 'Inventariador-main/CHANGELOG.md ausente — a governança § 9.1 exige a entrada da versão');
+    return;
+  }
+  const version = String(pkg.version).trim();
+  // Cabeçalhos aceites: "## [2.7.5] — 2026-11-16", "## 2.7.5", "## [v2.7.5]".
+  const versions = [...raw.matchAll(/^##\s+\[?v?(\d+\.\d+\.\d+)\]?/gm)].map((m) => m[1]);
+  if (versions.includes(version)) {
+    ok('changelog', `versão ${version} tem entrada no CHANGELOG (governança § 9.1)`);
+    return;
+  }
+  fail(
+    'changelog',
+    `versão ${version} do package.json sem entrada em CHANGELOG.md — ` +
+      `acrescente "## [${version}] — AAAA-MM-DD" antes do merge (governança § 9.1)`,
+  );
+}
+
 function checkGit() {
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
   if (!branch) {
@@ -155,7 +188,11 @@ function checkGit() {
   const behind = Number(git('rev-list', '--count', 'HEAD..origin/main') || 0);
   const ahead = Number(git('rev-list', '--count', 'origin/main..HEAD') || 0);
   if (behind > 0) {
-    fail('git', `${behind} commit(s) atrás de origin/main — atualize antes de trabalhar`);
+    if (CI_MODE) {
+      warn('git', `${behind} commit(s) atrás de origin/main — esperado num PR`);
+    } else {
+      fail('git', `${behind} commit(s) atrás de origin/main — atualize antes de trabalhar`);
+    }
   } else if (ahead > 0) {
     warn('git', `${ahead} commit(s) locais à frente de origin/main — push pendente`);
   } else {
@@ -167,6 +204,10 @@ function checkGit() {
 }
 
 function checkEnv() {
+  if (CI_MODE) {
+    warn('env', '--ci: ambiente local não verificado (o ci.yml valida as credenciais)');
+    return { url: '', key: '', ready: false };
+  }
   const env = resolveEnv();
   const url = (env.VITE_SUPABASE_URL || '').trim();
   const key = (env.VITE_SUPABASE_ANON_KEY || '').trim();
@@ -252,7 +293,8 @@ async function main() {
   console.log(`app: ${APP_DIR}`);
   console.log(`repo: ${REPO_DIR}\n`);
 
-  checkStructure();
+  const pkg = checkStructure();
+  checkChangelog(pkg);
   checkGit();
   const env = checkEnv();
   await checkSupabase(env);

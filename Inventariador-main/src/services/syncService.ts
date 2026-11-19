@@ -8,6 +8,7 @@ import { sanitizeAssetKey } from '../utils/assetKey';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { matchUnitKeys } from '../utils/schema';
 import { UPSERT_TIMEOUT_MS, withUpsertTimeout } from './syncQueueGuards';
+import { isConferido } from '../utils/conferencia';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -110,6 +111,60 @@ const auditDiscardedPending = async (
   }
 };
 
+const SYNC_RECORD_FAIL_AUDIT = 'SYNC_RECORD_FAIL';
+const SYNC_RECORD_EXCEPTION_AUDIT = 'SYNC_RECORD_EXCEPTION';
+/** Janela em que a mesma falha (primarykey + erro) não volta a ser registada. */
+const SYNC_FAILURE_AUDIT_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * Uma linha de auditoria por registo falhado, por janela — e não a cada ciclo.
+ *
+ * O ciclo de sincronização corre a cada 60 s (`App.tsx`). Sem janela, um ativo
+ * recusado por RLS escrevia `SYNC_RECORD_FAIL` ~1.440 vezes por dia, e um lote
+ * de 200 escrevia muito mais. A mesma janela cobre os dois desfechos do
+ * upsert: a recusa devolvida pela nuvem (`SYNC_RECORD_FAIL`) e a excepção
+ * lançada no envio (`SYNC_RECORD_EXCEPTION`), que também escrevia uma linha por
+ * registo em cada ciclo. `audit_logs` é a ferramenta com que se diagnosticou o
+ * «PENDENTE NUVEM» do #95: inundada, o diagnóstico seguinte fica mais lento
+ * exactamente quando é preciso. A assinatura `primarykey|erro` fica no `delta`
+ * e é comparada com o que já foi registado na janela.
+ */
+const loadRecentSyncAuditSignatures = async (acao: string): Promise<Set<string>> => {
+  const cutoffIso = new Date(Date.now() - SYNC_FAILURE_AUDIT_WINDOW_MS).toISOString();
+  const recentes = await db.audit_logs.where('updated_at').above(cutoffIso).toArray();
+  const signatures = new Set<string>();
+  for (const log of recentes) {
+    if (log.acao !== acao) continue;
+    try {
+      const signature = JSON.parse(String(log.delta || '{}')).signature;
+      if (typeof signature === 'string' && signature) signatures.add(signature);
+    } catch {
+      // Linha antiga sem delta legível não conta como falha já registada.
+    }
+  }
+  return signatures;
+};
+
+const auditSyncRecordFailure = async (
+  userId: string,
+  acao: string,
+  primaryKey: string,
+  details: string,
+  jaAuditadas: Set<string>,
+): Promise<void> => {
+  const signature = `${primaryKey}|${details}`;
+  if (jaAuditadas.has(signature)) return;
+  await sqliteService.logAuditEvent(
+    userId,
+    acao,
+    'local_assets',
+    primaryKey,
+    details,
+    JSON.stringify({ signature })
+  );
+  jaAuditadas.add(signature);
+};
+
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
 const CAMPAIGN_QUEUE_STORE = 'gbr_campaign_sync_queue';
 
@@ -153,6 +208,29 @@ const isStringInvalid = (val: unknown): boolean => {
   if (val === null || val === undefined) return true;
   const s = String(val).trim().toUpperCase();
   return s === '' || s === 'UNDEFINED' || s === 'NULL' || s === 'NULO';
+};
+
+/**
+ * Filial de trabalho activa, com a mesma cascata que a UI usa (App.tsx).
+ *
+ * O Android esvazia o `sessionStorage` quando mata a WebView em segundo plano,
+ * e todas as guardas de envio liam a filial SÓ dali. Depois de um reinício do
+ * processo o ciclo de sincronização voltava em silêncio sem enviar nada: os
+ * ativos conferidos continuavam `_is_synced = 0` e a etiqueta «PENDENTE NUVEM»
+ * ficava para sempre, mesmo com a unidade visível no ecrã (a UI já caía para o
+ * `localStorage`/sessão). Por isso aqui a leitura segue a mesma ordem.
+ */
+const readActiveFilial = (): string | null => {
+  const candidates = [
+    sessionStorage.getItem('filial'),
+    sessionStorage.getItem('selectedUnit'),
+    localStorage.getItem('filial'),
+    localStorage.getItem('app_selected_unit'),
+  ];
+  for (const candidate of candidates) {
+    if (!isStringInvalid(candidate)) return candidate;
+  }
+  return null;
 };
 
 /**
@@ -284,7 +362,7 @@ export const processCampaignSyncQueue = async (): Promise<{ success: boolean; pr
   }
   const user = getUserFromLocalStorage();
   const rawTenant = user ? resolveTenantId(user) : null;
-  const rawFilial = sessionStorage.getItem('filial');
+  const rawFilial = readActiveFilial();
 
   if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
     if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
@@ -360,7 +438,7 @@ export const photoSyncManager = {
     }
     const user = getUserFromLocalStorage();
     const rawTenant = user ? resolveTenantId(user) : null;
-    const rawFilial = sessionStorage.getItem('filial');
+    const rawFilial = readActiveFilial();
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
       if (user && (isStringInvalid(rawTenant) || isStringInvalid(rawFilial))) {
@@ -480,7 +558,7 @@ const _syncService = {
     }
     const user = getUserFromLocalStorage();
     const rawTenant = user ? resolveTenantId(user) : null;
-    const rawFilial = sessionStorage.getItem('filial');
+    const rawFilial = readActiveFilial();
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
       return { success: false, processedCount: 0, error: "Sincronização abortada: Usuário ou filial indisponíveis." };
@@ -522,6 +600,10 @@ const _syncService = {
 
       const syncedPrimaryKeys: string[] = [];
       const failedPrimaryKeys: string[] = [];
+      // Assinaturas das recusas já auditadas na janela. Carregadas no primeiro
+      // erro do ciclo (não em todos os ciclos) e actualizadas a cada registo.
+      let failureSignatures: Set<string> | null = null;
+      let exceptionSignatures: Set<string> | null = null;
 
       for (const record of records) {
         // GUARDA DE CONECTIVIDADE EM TEMPO REAL: Evita enchentes de erros caso o sinal caia no meio do laço
@@ -584,10 +666,17 @@ const _syncService = {
             currentCampaignId: record.currentCampaignId !== undefined && record.currentCampaignId !== null ? String(record.currentCampaignId).trim() : null,
             // CONFERÊNCIA (quem e quando): sem estas três colunas o ativo subia,
             // mas a nuvem nunca sabia que ele tinha sido conferido no aparelho.
-            conferido: Boolean(
-              Number(record._conferido) === 1 ||
-              String(record.status || '').toUpperCase().includes('CONFERIDO')
-            ),
+            // A flag local sobe pela MESMA regra das leituras (`isConferido`),
+            // que aceita booleano, 1/0, `'1'`/`'true'` e a coluna da base
+            // (`AUDITOR_STATUS_CONFERENCIA = 'SIM'`). Antes só valia
+            // `Number(_conferido) === 1`: conferido no aparelho como `true` (ou
+            // conferido pela planilha) subia PENDENTE e a nuvem ficava sem a
+            // conferência. O `status` textual continua a valer pelo mesmo
+            // motivo de sempre: é o marcador legado que a planilha/ERP traz e
+            // que a nuvem lê (`status = 'CONFERIDO'`).
+            conferido:
+              isConferido(record) ||
+              String(record.status || '').toUpperCase().includes('CONFERIDO'),
             auditor: record._auditor !== undefined && record._auditor !== null ? String(record._auditor).trim() || null : null,
             data_leitura: record._dataLeitura !== undefined && record._dataLeitura !== null ? String(record._dataLeitura) : null
           };
@@ -627,26 +716,31 @@ const _syncService = {
             
             logger.warn(`>>> [Sync Isolator] Erro Supabase detectado silenciosamente para chave ${pKey}:`, detailsStr);
 
-            await sqliteService.logAuditEvent(
-              user.id,
-              'SYNC_RECORD_FAIL',
-              'local_assets',
-              String(pKey),
-              detailsStr
-            ).catch(console.error);
+            try {
+              failureSignatures ??= await loadRecentSyncAuditSignatures(SYNC_RECORD_FAIL_AUDIT);
+              await auditSyncRecordFailure(user.id, SYNC_RECORD_FAIL_AUDIT, String(pKey), detailsStr, failureSignatures);
+            } catch (auditErr) {
+              logger.warn('>>> [Sync Audit] Falha ao registrar a recusa do registo:', auditErr);
+            }
           }
         } catch (err: unknown) {
           failedPrimaryKeys.push(String(pKey));
           const errMsg = err instanceof Error ? err.message : String(err);
           logger.warn(`>>> [Sync Isolator] Exceção capturada silenciosamente para chave ${pKey}:`, errMsg);
 
-          await sqliteService.logAuditEvent(
-            user.id,
-            'SYNC_RECORD_EXCEPTION',
-            'local_assets',
-            String(pKey),
-            `Exceção ao sincronizar registro: ${errMsg}`
-          ).catch(console.error);
+          const exceptionDetails = `Exceção ao sincronizar registro: ${errMsg}`;
+          try {
+            exceptionSignatures ??= await loadRecentSyncAuditSignatures(SYNC_RECORD_EXCEPTION_AUDIT);
+            await auditSyncRecordFailure(
+              user.id,
+              SYNC_RECORD_EXCEPTION_AUDIT,
+              String(pKey),
+              exceptionDetails,
+              exceptionSignatures
+            );
+          } catch (auditErr) {
+            logger.warn('>>> [Sync Audit] Falha ao registrar a excepção do registo:', auditErr);
+          }
           
           if (!navigator.onLine) break; // Força a saída do laço se o erro foi decorrente de queda de rede físico
         }
@@ -688,7 +782,7 @@ const _syncService = {
   backupContingencyLocal: async (): Promise<boolean> => {
     const user = getUserFromLocalStorage();
     const rawTenant = user ? resolveTenantId(user) : null;
-    const rawFilial = sessionStorage.getItem('filial');
+    const rawFilial = readActiveFilial();
 
     if (!user || isStringInvalid(rawTenant) || isStringInvalid(rawFilial)) {
       return false;
@@ -728,7 +822,7 @@ export const getUnsyncedAssetsCount = async (): Promise<number> => {
    try {
      const user = getUserFromLocalStorage();
      const rawTenant = user ? resolveTenantId(user) : null;
-     const rawFilial = sessionStorage.getItem('filial');
+     const rawFilial = readActiveFilial();
      
      const unsynced = await db.local_assets.where('_is_synced').equals(0).toArray();
      
@@ -880,7 +974,7 @@ const runSyncLoopCycle = async () => {
 
   // Barreira de guarda para evitar loops infinitos de sincronização antes do operador estar logado
   const user = getUserFromLocalStorage();
-  const rawFilial = sessionStorage.getItem('filial');
+  const rawFilial = readActiveFilial();
   if (!user || isStringInvalid(rawFilial)) {
     // Retorna silenciosamente e agenda o próximo ciclo sem incrementar falhas
     scheduleNextCycle();

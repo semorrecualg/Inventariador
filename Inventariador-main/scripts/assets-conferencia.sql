@@ -15,6 +15,10 @@
 -- legados com datas já gravadas como texto no SQLite e a conversão falharia.
 --
 -- Idempotente: pode ser executado mais de uma vez.
+--
+-- Verificação depois de aplicar (somente leitura, passo a passo em
+-- docs/DIAGNOSTICO_CONFERENCIA.md):
+--   psql "$SUPABASE_DB_URL" -f scripts/assets-conferencia-diagnostico.sql
 -- ============================================================================
 
 ALTER TABLE public.assets

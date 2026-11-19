@@ -10,6 +10,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import BackButton from './BackButton';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 
 interface FieldConfiguratorProps {
   assets: Asset[];
@@ -62,7 +63,7 @@ const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({ assets, currentEd
         <div className="flex items-center justify-between mb-6">
           <BackButton onClick={onBack} label="Voltar" subLabel="Autoridade de Escrita" />
           <div className="bg-accent-soft px-4 py-2 rounded-full border border-accent/10 text-accent shadow-sm">
-            <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Protocolo v24.40</span>
+            <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Protocolo {APP_VERSION_LABEL}</span>
           </div>
         </div>
         <div className="flex items-center space-x-5">
@@ -97,10 +98,10 @@ const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({ assets, currentEd
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 p-8 bg-white/80 backdrop-blur-md border-t border-accent/10 z-30 flex items-center justify-between shadow-2xl">
-         <div className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.5em]">Field Guard v24.40</div>
+         <div className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.5em]">Field Guard {APP_VERSION_LABEL}</div>
          <button onClick={() => { onSave(selectedFields); onBack(); }} className="bg-accent text-white px-10 py-5 rounded-2xl text-[11px] font-bold uppercase tracking-widest shadow-xl active:scale-95 transition-all flex items-center space-x-3 shadow-accent/20">
             <Save size={20} />
-            <span>Aplicar v24.40</span>
+            <span>Aplicar {APP_VERSION_LABEL}</span>
          </button>
       </div>
     </div>

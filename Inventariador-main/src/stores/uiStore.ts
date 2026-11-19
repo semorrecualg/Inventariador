@@ -41,7 +41,6 @@ export interface UiStoreState {
   // Feature flags & panels
   isPrivacyCenterOpen: boolean;
   isPaletteOpen: boolean;
-  isAIAssistantOpen: boolean;
   isHelpMenuOpen: boolean;
   isSafeMode: boolean;
   securityThreats: string[];
@@ -102,7 +101,6 @@ export interface UiStoreState {
   setDatabaseMode: (mode: DatabaseMode) => void;
   setIsPrivacyCenterOpen: (open: boolean) => void;
   setIsPaletteOpen: (open: boolean) => void;
-  setIsAIAssistantOpen: (open: boolean) => void;
   setIsHelpMenuOpen: (open: boolean) => void;
   setIsSafeMode: (safe: boolean) => void;
   setSecurityThreats: (threats: string[]) => void;
@@ -201,7 +199,6 @@ const initialState: StoreData<UiStoreState> = {
   databaseMode: getInitialDatabaseMode(),
   isPrivacyCenterOpen: false,
   isPaletteOpen: false,
-  isAIAssistantOpen: false,
   isHelpMenuOpen: false,
   isSafeMode: true,
   securityThreats: [],
@@ -288,7 +285,6 @@ export const useUiStore = create<UiStoreState>((set) => ({
   },
   setIsPrivacyCenterOpen: (isPrivacyCenterOpen) => set({ isPrivacyCenterOpen }),
   setIsPaletteOpen: (isPaletteOpen) => set({ isPaletteOpen }),
-  setIsAIAssistantOpen: (isAIAssistantOpen) => set({ isAIAssistantOpen }),
   setIsHelpMenuOpen: (isHelpMenuOpen) => set({ isHelpMenuOpen }),
   setIsSafeMode: (isSafeMode) => set({ isSafeMode }),
   setSecurityThreats: (securityThreats) => set({ securityThreats }),

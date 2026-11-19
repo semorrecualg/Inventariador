@@ -236,7 +236,7 @@ Varredura concluída nos arquivos restantes (~560 ocorrências; regras r1/r2/r3 
 - **Serviços/utils:** `supabaseService` (filtros `.eq/.in('etiqueta')` no schema public;
   payloads de sync já canônico-primeiro), `reportService`, `tagService`, `protheusService`
   (inclusive `sn1/sn3_recno` lower + `?? undefined`), `demoSeed`, `stressTestService`,
-  `reportGenerator`, `persistenceService`, `geminiService` (`a.filial` no lugar de `a.UNIDADE`),
+  `reportGenerator`, `persistenceService`,
   `auditService`, `depreciationService` (cadeia `vlraquisic || VLRAQUISIC`).
 - **Infra de leitura:** `localDbService.where()` passou a ler via `pickCanonical` (busca por
   `etiqueta` funciona para dados UPPER e lower); `assetRepository` alinhou os nomes de campo do

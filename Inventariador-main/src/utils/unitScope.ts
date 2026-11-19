@@ -13,6 +13,7 @@
 // ============================================================================
 
 import { normalizeKey } from './schema';
+import { canonicalRole } from './roles';
 
 export interface UnitScopeUser {
   role?: string | null;
@@ -25,11 +26,11 @@ export interface UnitScopeUser {
   email?: string | null;
 }
 
-/** Perfis sujeitos ao escopo de unidades. Admin/Gestor operam o contrato inteiro. */
-const AUDITOR_ROLES = new Set(['AUDITOR', 'AUXILIARY_AUDITOR']);
+/** Perfis sujeitos ao escopo de unidades. Admin/Master operam o contrato inteiro. */
+const AUDITOR_ROLES = new Set(['AUDITOR']);
 
 export function isAuditorScope(user: UnitScopeUser | null | undefined): boolean {
-  return AUDITOR_ROLES.has(String(user?.role || '').toUpperCase().trim());
+  return AUDITOR_ROLES.has(canonicalRole(user?.role));
 }
 
 /**

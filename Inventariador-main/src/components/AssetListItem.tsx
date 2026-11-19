@@ -3,7 +3,8 @@ import React, { useMemo } from 'react';
 import { Asset, TagInventario } from '../types';
 import { resolvePersistedTag, getTagMetadata } from '../services/tagService';
 import { formatMonthYearBR, formatEtiqueta } from '../utils/formatUtils';
-import { syncBadgeState } from '../utils/syncBadge';
+import { isConferido } from '../utils/conferencia';
+import { syncBadgeState, syncPendingInfo } from '../utils/syncBadge';
 import { 
   Camera, 
   Check, 
@@ -70,7 +71,7 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
 
   const meta = getTagMetadata(visualStatus);
   const StatusIcon = meta.icon;
-  const isConferido = !!asset._conferido || String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+  const conferido = isConferido(asset);
 
   const fullDescription = [
     asset.qt || '1',
@@ -89,6 +90,8 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
 
   // Selo do cartão (ver utils/syncBadge): base vinda da nuvem não é "conferência".
   const seloSync = syncBadgeState(asset);
+  // «Pendente Nuvem» sozinho não diz o motivo nem se é de agora ou da semana passada.
+  const pendencia = syncPendingInfo(asset);
 
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
   const isAdotadoExterno = visualStatus === TagInventario.ADOTADO_EXTERNO;
@@ -98,7 +101,7 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
       className={`mb-2.5 p-3.5 pl-4 bg-white rounded-2xl border border-[#F1F5F9] relative overflow-hidden transition-all active:scale-[0.99] shadow-[0_2px_8px_rgba(0,0,0,0.04)] ${isAdotadoExterno ? 'ring-2 ring-amber-400 shadow-lg' : ''} ${isSelected ? 'ring-2 ring-accent' : ''}`} 
       onClick={() => {
         if (isBatchMode && onToggleSelect) {
-          if (!isConferido) onToggleSelect(String(asset.id));
+          if (!conferido) onToggleSelect(String(asset.id));
         } else if (onSelect) {
           onSelect(asset);
         }
@@ -215,10 +218,15 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
                 Sincronizado
               </span>
             )}
-            {seloSync === 'pendente' && (
-              <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tight bg-amber-50/60 border border-amber-100 px-1.5 py-0.5 rounded-md flex items-center gap-1 animate-pulse">
-                <span className="w-1 h-1 bg-amber-400 rounded-full animate-ping"></span>
+            {/* `pendencia` só existe quando o selo está pendente: uma condição, não duas. */}
+            {pendencia && (
+              <span className="max-w-full text-[9px] font-bold text-amber-500 uppercase tracking-tight bg-amber-50/60 border border-amber-100 px-1.5 py-0.5 rounded-md flex flex-wrap items-center gap-1 animate-pulse">
+                <span className="w-1 h-1 shrink-0 bg-amber-400 rounded-full animate-ping"></span>
                 Pendente Nuvem
+                <span className="min-w-0 break-words text-amber-600/80 normal-case tracking-normal font-semibold">
+                  · {pendencia.motivo}
+                  {pendencia.idade ? ` · ${pendencia.idade}` : ''}
+                </span>
               </span>
             )}
             {asset.registro && (
@@ -244,19 +252,19 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
             baixa a altura (antes era um botão redondo na coluna da direita). */}
         {isBatchMode ? (
           <div
-            aria-label={isSelected ? 'Ativo selecionado' : isConferido ? 'Ativo já conferido' : 'Ativo não selecionado'}
+            aria-label={isSelected ? 'Ativo selecionado' : conferido ? 'Ativo já conferido' : 'Ativo não selecionado'}
             className={`mt-2.5 w-full h-10 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm text-[10px] font-black uppercase tracking-widest ${isSelected
               ? 'bg-accent text-white shadow-accent/20'
-              : isConferido
+              : conferido
                 ? 'bg-slate-100 text-slate-400 border border-slate-200'
                 : 'border border-[#CBD5E1] bg-white text-slate-500'
             }`}
           >
             {isSelected && <Check size={16} strokeWidth={4} />}
-            {isSelected ? 'Selecionado' : isConferido ? 'Já conferido' : 'Selecionar'}
+            {isSelected ? 'Selecionado' : conferido ? 'Já conferido' : 'Selecionar'}
           </div>
         ) : onMakeDecision ? (
-          isConferido ? (
+          conferido ? (
             <div
               aria-label={`${meta.label} — ativo já processado`}
               title={meta.label}
@@ -276,7 +284,7 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
               <span className="text-[11px] font-black uppercase tracking-widest leading-none">Confirmar</span>
             </button>
           )
-        ) : isConferido ? (
+        ) : conferido ? (
           <div
             aria-label={`${meta.label} — ativo já processado`}
             className={`mt-2.5 w-full h-9 rounded-xl flex items-center justify-center gap-2 shadow-sm ring-1 ring-inset ring-slate-900/5 ${meta.color.softBg} ${meta.color.icon}`}

@@ -1,5 +1,9 @@
-import { db, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
+import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
+import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
+import { pickAssetAddress } from '../utils/assetAddress';
+import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
+import { normalizeFlag } from '../utils/normalize';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
@@ -54,15 +58,48 @@ export const matchesAddressSearch = (address: unknown, term: unknown): boolean =
   return normalizeAddressSearch(address).includes(needle);
 };
 
+/**
+ * Chave de UNIDADE para comparar filiais: caixa, acentos, espaços e os
+ * separadores `_`/`-` não distinguem a mesma filial (`010101_CICOPAL_GO` ≡
+ * `010101 CICOPAL GO`). Mesma tolerância da lista do inventário (`normalizeKey`).
+ */
+export const normalizeUnitMatchKey = (value: unknown): string =>
+  normalizeAddressSearch(value)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * Contrato efetivo para as consultas locais: perfil → sessão → armazenamento.
+ *
+ * O dono global (`ADMIN`) NÃO declara `tenantid` no perfil: se a leitura parasse
+ * no utilizador, todas as consultas `[tenantid+filial]` (endereços, localidades,
+ * estatísticas) rodavam com contrato vazio e devolviam «Nenhum Endereço
+ * Cadastrado» mesmo com a base carregada. A cadeia é a mesma de
+ * `resolveTenantId` (utils/tenantUtils) usada no resto do app.
+ */
 export const getCurrentTenantid = (): string => {
+  const candidatos: string[] = [];
   try {
     const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
     if (userStr) {
       const user = JSON.parse(userStr);
-      return user.tenantid || '';
+      candidatos.push(
+        String(user?.tenantid || user?.tenantId || user?.tenant_id || user?.tenantid_ || '')
+      );
     }
   } catch { /* ignore */ }
-  return '';
+  try {
+    candidatos.push(sessionStorage.getItem('tenantid') || '', sessionStorage.getItem('tenantId') || '');
+  } catch { /* ignore */ }
+  try {
+    candidatos.push(localStorage.getItem('tenantid') || '', localStorage.getItem('tenantId') || '');
+  } catch { /* ignore */ }
+
+  const valido = candidatos
+    .map(c => c.trim())
+    .find(c => c !== '' && !['NULL', 'UNDEFINED', 'N/A'].includes(c.toUpperCase()));
+  return valido || '';
 };
 
 const handleDemoAuditIncrement = () => {
@@ -87,6 +124,13 @@ function toDexieAsset(asset: Asset): DexieAsset {
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
   ];
   boolKeys.forEach(k => {
+    // `_conferido` é a única flag com grafias de texto: o JSON importado e as
+    // linhas antigas trazem `'true'`/`'1'`, e `Number('true')` gravava 0. As
+    // restantes mantêm a conversão de sempre.
+    if (k === '_conferido') {
+      obj[k] = normalizeFlag(obj[k]) ? 1 : 0;
+      return;
+    }
     if (k in obj) {
       if (typeof obj[k] === 'boolean') {
         obj[k] = obj[k] ? 1 : 0;
@@ -120,7 +164,11 @@ function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
   ];
   boolKeys.forEach(k => {
-    if (k in asset) {
+    // Mesma exceção do lado da escrita: só `_conferido` tem grafias de texto,
+    // e uma linha com `'1'`/`'true'` tem de chegar à UI como conferida.
+    if (k === '_conferido') {
+      asset[k] = normalizeFlag(asset[k]);
+    } else if (k in asset) {
       asset[k] = asset[k] === 1 || asset[k] === true;
     } else {
       asset[k] = false;
@@ -137,6 +185,66 @@ function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
 
   return asset as unknown as Asset;
 }
+
+/**
+ * Uma linha das três tabelas de ativos, para a união de cópias.
+ * (Só os campos que a contagem por localidade lê.)
+ */
+export type CopiaDeAtivo = {
+  tenantid?: unknown;
+  filial?: unknown;
+  primarykey?: unknown;
+  id?: unknown;
+  endereco?: unknown;
+  codigo_endereco?: unknown;
+  _is_deleted?: unknown;
+  _conferido?: MarcaDeConferencia;
+  _auditor?: unknown;
+  _dataLeitura?: unknown;
+  AUDITOR_STATUS_CONFERENCIA?: unknown;
+  _localMaster?: unknown;
+  LOCALIZACAO?: unknown;
+  CENTRO_CUSTO?: unknown;
+  status?: unknown;
+};
+
+/**
+ * Duas cópias do MESMO ativo em tabelas diferentes → uma linha só.
+ *
+ * A decisão está escrita em `docs/DECISAO_MERGE_CONFERIDO.md`:
+ *  · `_conferido`: **monotónico** — conferido se QUALQUER cópia conferir, pela
+ *    regra única. As cópias só divergem quando uma está atrasada (pull,
+ *    restore, base antiga); nesse caso a conferência de campo não pode ser
+ *    apagada pela leitura. A desmarcação legítima escreve as três tabelas na
+ *    mesma transacção, por isso continua a chegar aqui como três zeros.
+ *  · `_auditor`/`_dataLeitura`/`AUDITOR_STATUS_CONFERENCIA`: vêm da cópia que
+ *    CONFERIU, não da cópia de maior precedência — senão a linha unida dizia
+ *    «conferido» com a data vazia de quem não conferiu.
+ *  · endereço: da cópia que o tiver.
+ *  · `_is_deleted`: o da cópia de MAIOR precedência (`ativos` → `assets` →
+ *    `local_assets`) — uma baixa feita no aparelho esconde o ativo, e uma
+ *    reposição feita em `ativos` volta a mostrá-lo, mesmo que a canónica ainda
+ *    esteja atrasada. Só quando a cópia viva não declara o campo é que se desce
+ *    para a seguinte.
+ */
+export const mergeCopiasDeAtivo = (prev: CopiaDeAtivo, next: CopiaDeAtivo): CopiaDeAtivo => {
+  const conferido = isConferido(prev) || isConferido(next);
+  const prova = isConferido(prev) ? prev : isConferido(next) ? next : null;
+
+  return {
+    ...prev,
+    _localMaster: prev._localMaster || next._localMaster,
+    endereco: prev.endereco || next.endereco,
+    LOCALIZACAO: prev.LOCALIZACAO || next.LOCALIZACAO,
+    CENTRO_CUSTO: prev.CENTRO_CUSTO || next.CENTRO_CUSTO,
+    _conferido: conferido ? 1 : 0,
+    _auditor: prova ? prova._auditor : undefined,
+    _dataLeitura: prova ? prova._dataLeitura : undefined,
+    AUDITOR_STATUS_CONFERENCIA: prova ? prova.AUDITOR_STATUS_CONFERENCIA : undefined,
+    // `prev` é sempre a cópia de maior precedência (ordem de `workTables`).
+    _is_deleted: prev._is_deleted ?? next._is_deleted
+  };
+};
 
 export const localDb = {
   assets: {
@@ -398,20 +506,100 @@ export const localDb = {
       const tenant = getCurrentTenantid().trim().toUpperCase();
       const uIdUpper = unitId.toUpperCase().trim();
 
-      const indexedAddrs = await db.addresses.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
+      // Leitura por filial: caminho rápido pelo índice EXATO e, se ele vier
+      // vazio, varredura do MESMO contrato com chave tolerante (caixa, acentos,
+      // `_`/`-`). Antes, o rótulo do cartão (`010101 CICOPAL GO`) não achava a
+      // filial gravada como `010101_CICOPAL_GO` e o ecrã anunciava «Nenhum
+      // Endereço Cadastrado» com a base cheia.
+      //
+      // A tabela de trabalho do modo INTERNAL é `ativos` (é ela que o
+      // Dashboard, a Consulta e o Mapa leem). Ler só `assets`/`local_assets`
+      // deixava o ecrã vazio num aparelho com os ativos carregados em `ativos`.
+      //
+      // As três tabelas são UNIDAS — nunca «a primeira que tem linhas»: uma
+      // filial pode ter em `assets` só as linhas sem endereço e as localidades
+      // em `ativos`, e parar na primeira deixava o ecrã vazio. A união é feita
+      // pela chave do ativo (`[tenantid+primarykey]`), para o mesmo ativo
+      // espelhado nas três tabelas contar UMA vez nas estatísticas.
+      const unitMatch = normalizeUnitMatchKey(unitId);
+      /**
+       * Endereço EFETIVO do ativo — a MESMA regra do inventário
+       * (`assetAddressKey`, Inventory.tsx): o local auditado (`_localMaster`)
+       * vence o endereço da base, e as colunas legadas (`LOCALIZACAO`,
+       * `CENTRO_CUSTO`) também identificam a localidade. Ler só `endereco`
+       * deixava a tela vazia com os ativos presentes em outras colunas.
+       */
+      const addressOf = (row: CopiaDeAtivo): string => pickAssetAddress(row);
+      type UnitTable = {
+        where: (index: string) => {
+          equals: (key: unknown) => { toArray: () => Promise<unknown[]> };
+          between: (lower: unknown, upper: unknown) => { toArray: () => Promise<unknown[]> };
+        };
+      };
+      const exactRowsOf = async (table: UnitTable): Promise<CopiaDeAtivo[]> =>
+        (await table.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray()) as CopiaDeAtivo[];
+      const doContrato = async (table: UnitTable): Promise<CopiaDeAtivo[]> => {
+        const rows = (await table
+          .where('[tenantid+filial]')
+          .between([tenant, ''], [tenant, '\uffff'])
+          .toArray()) as CopiaDeAtivo[];
+        if (!unitMatch) return [];
+        return rows.filter(r => normalizeUnitMatchKey(r.filial) === unitMatch);
+      };
+      // ORDEM = PRECEDÊNCIA da união. `ativos` é a tabela VIVA (é onde o
+      // trabalho de campo grava e apaga); `assets` é a canónica do último
+      // carregamento e `local_assets` o baseline do restore. A ordem só decide
+      // `_is_deleted` (ver `mergeAssetCopies`) — endereço e conferência são
+      // combinados, não sobrepostos.
+      const workTables: UnitTable[] = [
+        db.ativos as unknown as UnitTable,
+        db.assets as unknown as UnitTable,
+        db.local_assets as unknown as UnitTable
+      ];
+      const addressRows = async (): Promise<DexieAddress[]> => {
+        const table = db.addresses as unknown as UnitTable;
+        const exatos = await exactRowsOf(table);
+        if (exatos.length > 0 || !unitMatch) return exatos as unknown as DexieAddress[];
+        return (await doContrato(table)) as unknown as DexieAddress[];
+      };
+      /**
+       * Ativos da filial nas TRÊS tabelas, pela ordem de precedência (`ativos`
+       * viva → `assets` canónica → `local_assets` baseline), com índice exato
+       * em cada uma e a varredura tolerante do mesmo contrato quando a tabela
+       * não tem o índice exato. A união é deduplicada pela chave do ativo;
+       * linhas sem chave são mantidas individualmente.
+       */
+      const assetRows = async (): Promise<CopiaDeAtivo[]> => {
+        const byKey = new Map<string, CopiaDeAtivo>();
+        const anonymous: CopiaDeAtivo[] = [];
+        for (const table of workTables) {
+          let rows = await exactRowsOf(table);
+          if (rows.length === 0 && unitMatch) rows = await doContrato(table);
+          rows.forEach(row => {
+            const id = String(row.primarykey ?? row.id ?? '').trim();
+            if (!id) {
+              anonymous.push(row);
+              return;
+            }
+            const key = `${String(row.tenantid || tenant).trim().toUpperCase()}::${id.toUpperCase()}`;
+            const prev = byKey.get(key);
+            byKey.set(key, prev ? mergeCopiasDeAtivo(prev, row) : row);
+          });
+        }
+        return [...byKey.values(), ...anonymous];
+      };
+
+      const indexedAddrs = await addressRows();
       let addrList = indexedAddrs;
 
       // 2. Só se o ÍNDICE estiver vazio (nunca por causa do filtro): extrai as
       //    localidades da tabela de trabalho (assets canônica — decisão DBA
       //    2026-08-06; fallback local_assets baseline para restore .dat)
       if (addrList.length === 0) {
-        let workAssets = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
-        if (workAssets.length === 0) {
-          workAssets = await db.local_assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
-        }
+        const workAssets = await assetRows();
         const extractedAddrs = new Map<string, typeof addrList[0]>();
         workAssets.forEach(a => {
-          const addrStr = String(a.endereco || '').trim();
+          const addrStr = addressOf(a);
           if (!addrStr) return;
           const key = addrStr.toUpperCase();
           if (!extractedAddrs.has(key)) {
@@ -433,35 +621,67 @@ export const localDb = {
       //    maiúsculas contra termo minúsculo — “CONTAB” nunca encontrava nada.
       addrList = addrList.filter(a => matchesAddressSearch(a.codigo_endereco, searchTerm));
 
-      // 4. Busca reativa das estatísticas de conferência na tabela de trabalho (assets canônica)
-      let listAssets = await db.assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
-      if (listAssets.length === 0) {
-        listAssets = await db.local_assets.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray();
-      }
+      // 4. Busca reativa das estatísticas de conferência (ativos → assets → baseline)
+      const listAssets = await assetRows();
       const nonDeleted = listAssets.filter(a => a._is_deleted !== 1);
 
       const statsMap = new Map<string, { total: number; checked: number }>();
       nonDeleted.forEach(asset => {
-        const address = String(asset.endereco || '').trim().toUpperCase();
+        const address = addressOf(asset).toUpperCase();
         const key = address !== '' ? address : 'GERAL - NÃO ESPECIFICADO';
         const stats = statsMap.get(key) || { total: 0, checked: 0 };
         stats.total += 1;
-        if (asset._conferido === 1) {
+        if (isConferido(asset)) {
           stats.checked += 1;
         }
         statsMap.set(key, stats);
       });
 
-      const finalResults = addrList.map(addr => {
-        const displayName = String(addr.codigo_endereco || '').trim() || 'GERAL - NÃO ESPECIFICADO';
-        const stats = statsMap.get(displayName.toUpperCase()) || { total: 0, checked: 0 };
-        return {
-          displayName,
-          total: Math.max(0, stats.total),
-          checked: Math.max(0, stats.checked),
-          locKey: displayName.toUpperCase().replace(/[^A-Z0-9]/g, '')
-        };
-      });
+      // 4b. «SEM LOCAL»: ativos sem endereço efectivo viram uma localidade
+      //     sintética com a MESMA chave do inventário (`assetAddressKey` →
+      //     `SEM_LOCAL_LABEL`), para o toque abrir exactamente esses ativos.
+      //     Entra também quando a filial JÁ tem localidades — senão esses
+      //     ativos ficavam sem caminho para a lista/cadastro. Respeita a busca
+      //     digitada e nunca duplica uma localidade real com o mesmo nome.
+      const semLocalAssets = nonDeleted.filter(a => !addressOf(a));
+      const semLocalBucket = statsMap.get(SEM_LOCAL_LABEL) || { total: 0, checked: 0 };
+      const semEnderecoBucket = statsMap.get('GERAL - NÃO ESPECIFICADO') || { total: 0, checked: 0 };
+      const semLocalStats = {
+        total: semLocalBucket.total + semEnderecoBucket.total,
+        checked: semLocalBucket.checked + semEnderecoBucket.checked
+      };
+      const semLocalJaListada = addrList.some(
+        a => String(a.codigo_endereco || '').trim().toUpperCase() === SEM_LOCAL_LABEL
+      );
+      if (semLocalAssets.length > 0 && !semLocalJaListada && matchesAddressSearch(SEM_LOCAL_LABEL, searchTerm)) {
+        addrList = [...addrList, {
+          tenantid: tenant,
+          filial: uIdUpper,
+          codigo_endereco: SEM_LOCAL_LABEL,
+          setor: '',
+          bloco: '',
+          _is_synced: 1
+        }];
+      }
+
+      // «GERAL - NÃO ESPECIFICADO» é uma chave interna de contagem, nunca uma
+      // localidade: uma linha do índice `addresses` com `codigo_endereco`
+      // vazio aparecia com esse nome AO LADO de «SEM LOCAL», as duas a apontar
+      // para os mesmos ativos. Os ativos sem endereço têm uma única entrada.
+      const finalResults = addrList
+        .filter(addr => String(addr.codigo_endereco || '').trim() !== '')
+        .map(addr => {
+          const displayName = String(addr.codigo_endereco || '').trim();
+          const stats = displayName.toUpperCase() === SEM_LOCAL_LABEL
+            ? semLocalStats
+            : (statsMap.get(displayName.toUpperCase()) || { total: 0, checked: 0 });
+          return {
+            displayName,
+            total: Math.max(0, stats.total),
+            checked: Math.max(0, stats.checked),
+            locKey: displayName.toUpperCase().replace(/[^A-Z0-9]/g, '')
+          };
+        });
 
       // Deduplicação dos endereços resultantes para evitar duplicidade de renderização
       const uniqueResults = new Map<string, typeof finalResults[0]>();
@@ -476,7 +696,19 @@ export const localDb = {
         }
       });
 
-      return Array.from(uniqueResults.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
+      // «SEM LOCAL» no topo enquanto tiver itens por conferir. A entrada do
+      // #97 existia, mas a ordenação alfabética deixava-a no fim de uma filial
+      // com muitas localidades — o auditor continuava sem a encontrar. Assim
+      // que fica sem pendentes, volta à ordem alfabética como as outras.
+      const semLocalPendente = (r: { displayName: string; total: number; checked: number }): boolean =>
+        r.displayName.trim().toUpperCase() === SEM_LOCAL_LABEL && r.total > r.checked;
+
+      return Array.from(uniqueResults.values()).sort((a, b) => {
+        const aFixo = semLocalPendente(a) ? 0 : 1;
+        const bFixo = semLocalPendente(b) ? 0 : 1;
+        if (aFixo !== bFixo) return aFixo - bFixo;
+        return a.displayName.localeCompare(b.displayName);
+      });
     },
 
     /**

@@ -92,6 +92,31 @@ describe('fetchUnitConfigs — merge local + fallback de tenant + âncoras de st
     expect(Number(found?.lng)).toBeCloseTo(-47.9);
   });
 
+  it('descarta a âncora revogada do cache local e mantém as posições válidas', async () => {
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    localStorage.setItem(
+      'local_unit_configs',
+      JSON.stringify({
+        CICOPAL_010101_CICOPAL_GO: {
+          tenantid: 'CICOPAL', filial: '010101 CICOPAL GO', unit_id: '010101 CICOPAL GO',
+          lat: -15.7942, lng: -47.8825
+        },
+        CICOPAL_010201_SNACKS_PA: {
+          tenantid: 'CICOPAL', filial: '010201 SNACKS PA', unit_id: '010201 SNACKS PA',
+          lat: -1.3555577, lng: -48.252235
+        }
+      })
+    );
+
+    const res = await fetchUnitConfigs('CICOPAL');
+    expect(res.some(c => c.filial === '010101 CICOPAL GO')).toBe(false);
+    expect(res.some(c => c.filial === '010201 SNACKS PA')).toBe(true);
+
+    // E sai do cache: o próximo boot não a volta a oferecer.
+    const cache = JSON.parse(localStorage.getItem('local_unit_configs') || '{}');
+    expect(Object.keys(cache).some(k => k.includes('CICOPAL_GO'))).toBe(false);
+  });
+
   it('não quebra com storage vazio ou local_unit_configs malformado', async () => {
     localStorage.setItem('app_database_mode', 'INTERNAL');
     localStorage.setItem('local_unit_configs', '{not-json');

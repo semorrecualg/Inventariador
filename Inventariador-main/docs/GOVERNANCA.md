@@ -16,7 +16,7 @@
 |---|---|---|
 | Código | `github.com/semorrecualg/Inventariador` · branch `main` | Nenhuma cópia paralela. O diretório local de trabalho é `E:\Inventariador_11_2026\Inventariador` |
 | Versão | `Inventariador-main/package.json` → `version` | Nenhum outro arquivo chumbra versão. Workflows leem daqui |
-| Runtime | `.nvmrc` (Node 22) + `engines` no `package.json` | CI e dev usam a mesma major (Node 20 chegou ao EOL em 2026-04; jsdom 30 + undici do lockfile exigem Node ≥ 22) |
+| Runtime | `.nvmrc` (Node 22.22.2, versão exacta) + `engines` no `package.json` | CI e dev usam a mesma versão, lida do `.nvmrc` pelos dois workflows. Node 20 chegou ao EOL em 2026-04; jsdom 30 + undici do lockfile exigem Node ≥ 22 |
 | Variáveis | `.env.example` (template) / `.env` (local, gitignored) | Ver § 3 |
 | Schema local | `docs/SCHEMA_BASELINE.md` (Dexie v7) | Congelado; `schemaBaseline.test.ts` quebra se mudar |
 | Schema nuvem | `docs/supabase_bootstrap.sql` | Idempotente; é o único DDL autorizado |
@@ -30,7 +30,7 @@
 
 ```
 Inventariador/                  ← raiz do repositório git
-├── .nvmrc                      ← Node 22 (lido pelo CI)
+├── .nvmrc                      ← Node 22.22.2 fixo (lido pelos dois workflows)
 ├── .github/workflows/
 │   ├── ci.yml                  ← gate de qualidade (lint · tipos · testes · build)
 │   └── android-build.yml       ← APK debug (Capacitor)
@@ -60,7 +60,6 @@ na raiz do repositório é erro — os órfãos herdados foram removidos.
 | `VITE_ADMIN_EMAIL` | obrigatória | `vars` (fallback `semorr@gmail.com`) | idem | não |
 | `VITE_ENVIRONMENT` | `development` / `production` | default | `production` | não |
 | `VITE_PROTHEUS_API_URL` | opcional | — | — | não |
-| `GEMINI_API_KEY` | opcional, **sem** prefixo `VITE_` | secret | — | **sim** |
 
 **Modo do banco** é derivado, nunca configurado à mão:
 `isInternalMode = !(VITE_SUPABASE_URL && VITE_SUPABASE_ANON_KEY)`.
@@ -85,7 +84,7 @@ Arquivos de ambiente:
    **publishable key** `sb_publishable_...` (formato atual) ou anon key JWT (projetos
    antigos) — e `VITE_ADMIN_EMAIL`. Ela é pública por design do Supabase; a proteção
    real é **RLS** (§ 7).
-2. **Secret** (nunca no cliente, nunca em `VITE_*`): `service_role`, `GEMINI_API_KEY`,
+2. **Secret** (nunca no cliente, nunca em `VITE_*`): `service_role`,
    senhas, tokens de CI. Vai em *Settings → Secrets* (GitHub) ou no `.env` local.
 3. `service_role` **jamais** em variável `VITE_*`: tudo que tem esse prefixo é embutido
    no JS público. Uma `service_role` no front = banco inteiro exposto.
@@ -197,6 +196,7 @@ nunca entra em variável `VITE_*`.
 npm run verify:governanca              # git + env + Supabase (rede)
 npm run verify:governanca -- --offline # só git + env (uso em modo INTERNAL)
 npm run verify:governanca -- --use-example  # testa o host do .env.example
+npm run verify:governanca -- --ci          # gate de PR (estrutura + changelog, sem ambiente)
 npm run check:docs                     # links e referências dos docs (roda no CI)
 ```
 
@@ -206,9 +206,16 @@ planeadas («a criar», «Criar» em checklist, «planejada», «nunca foi criad
 aceites **só quando o marcador está colado à referência** (antes ou depois dela):
 a palavra solta noutro ponto da linha não isenta nada.
 
-`verify:governanca` checa, em sequência: estrutura do repo → branch/limpeza/fast-forward vs `origin/main`
-→ presença das variáveis → REST + AUTH do Supabase → tabelas essenciais.
+`verify:governanca` checa, em sequência: estrutura do repo → **versão do `package.json`
+com entrada no `CHANGELOG.md`** (falha se faltar — governança § 9.1) →
+branch/limpeza/fast-forward vs `origin/main` → presença das variáveis → REST + AUTH do
+Supabase → tabelas essenciais.
 **Nunca imprime valores de chaves**, apenas presença.
+
+`--ci` é o modo usado no `ci.yml`: valida **estrutura** e **versão ↔ CHANGELOG**,
+ignora ambiente/Supabase (o próprio `ci.yml` valida as credenciais no passo seguinte)
+e trata "branch atrás de `main`" como aviso — num PR isso é normal. Sem `--ci`, os
+dois continuam a falhar.
 
 Saída: `0` = governança íntegra · `1` = pelo menos uma falha (com o motivo).
 

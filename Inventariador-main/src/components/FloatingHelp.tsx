@@ -3,13 +3,13 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Info, Sparkles, ShieldCheck, Zap, Palette, MapPin } from 'lucide-react';
 import { AppScreen } from '../types';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 
 interface FloatingHelpProps {
   currentScreen: AppScreen;
   onCloseOnboarding: () => void;
   onOpenOnboarding: () => void;
   onOpenPalette: () => void;
-  onOpenAIAssistant: () => void;
   isOpen: boolean;
   onToggle: (val: boolean) => void;
 }
@@ -19,7 +19,6 @@ const FloatingHelp: React.FC<FloatingHelpProps> = ({
   onCloseOnboarding, 
   onOpenOnboarding, 
   onOpenPalette,
-  onOpenAIAssistant,
   isOpen,
   onToggle
 }) => {
@@ -43,7 +42,7 @@ const FloatingHelp: React.FC<FloatingHelpProps> = ({
       default:
         return [
           { icon: <Info size={14} />, text: "Seus dados estão protegidos por criptografia AES-256." },
-          { icon: <ShieldCheck size={14} />, text: "App em conformidade com a LGPD v24.50." }
+          { icon: <ShieldCheck size={14} />, text: `App em conformidade com a LGPD ${APP_VERSION_LABEL}.` }
         ];
     }
   };
@@ -102,17 +101,6 @@ const FloatingHelp: React.FC<FloatingHelpProps> = ({
             </div>
 
             <div className="mt-6 pt-6 border-t border-white/5 flex flex-col space-y-3">
-              <button 
-                onClick={() => {
-                  onOpenAIAssistant();
-                  onToggle(false);
-                }}
-                className="w-full py-4 bg-gradient-to-r from-[#4F46E5] to-[#2563EB] text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:opacity-90 transition-all flex items-center justify-center space-x-3 shadow-lg shadow-blue-500/20"
-              >
-                <Sparkles size={14} />
-                <span>Assistente IA</span>
-              </button>
-
               <button 
                 onClick={() => {
                   onOpenOnboarding();

@@ -5,6 +5,8 @@ import * as XLSX from 'xlsx';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 import { normalizeFlag } from '../utils/normalize';
+import { isConferido } from '../utils/conferencia';
+import { rotuloDePara } from '../utils/assetAddress';
 import { readSessionTenantId } from '../utils/tenantUtils';
 import BackButton from './BackButton';
 import { 
@@ -247,7 +249,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
       const statusUpper = String(a.status || a.SITUACAO || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXADO');
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      const conferido = isConferido(a);
       const tag = a.TAG_INVENTARIO || TagInventario.PENDENTE;
       const etq = String(a.etiqueta || '').toUpperCase().trim();
       const plaquetaMaster = String(a._plaquetaMaster || '').toUpperCase().trim();
@@ -264,13 +266,13 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
       if (!isBaixado) {
         s.totalAtivos++;
-        if (isConferido) s.conferidoAtivos++;
+        if (conferido) s.conferidoAtivos++;
         
         // Unit Progress
         if (!unitMap[unit]) unitMap[unit] = { total: 0, conferido: 0 };
         unitMap[unit].total++;
-        if (isConferido) unitMap[unit].conferido++;
-      } else if (isConferido) {
+        if (conferido) unitMap[unit].conferido++;
+      } else if (conferido) {
         s.baixadosLocalizados++;
       }
 
@@ -424,8 +426,12 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
         res['AUDITOR_LOCAL_ORIGINAL'] = a.endereco;
         res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.endereco;
-        res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (a.endereco === (a._localMaster || a.endereco) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
-        res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
+        // A exportação é a prova que sai para fora: lê a conferência pelo mesmo
+        // predicado dos ecrãs, senão um item conferido pela coluna de auditoria
+        // sai como PENDENTE/NAO.
+        const conferido = isConferido(a);
+        res['AUDITOR_DE_PARA'] = rotuloDePara(a, conferido);
+        res['AUDITOR_STATUS_CONFERENCIA'] = conferido ? 'SIM' : 'NAO';
         res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
         // REGISTRO ADOTADO: rótulo rad_<UNIDADE>_<DISPOSITIVO>_<SEQUENCIA> do item
         // criado por cópia de outra unidade (vazio em tudo o que não é adotado).

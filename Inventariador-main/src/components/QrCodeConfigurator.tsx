@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Asset } from '../types';
 import { Check, Save } from 'lucide-react';
 import BackButton from './BackButton';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 
 interface QrCodeConfiguratorProps {
   assets: Asset[];
@@ -62,7 +63,7 @@ const QrCodeConfigurator: React.FC<QrCodeConfiguratorProps> = ({ assets, current
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 p-8 bg-white/80 backdrop-blur-md border-t border-slate-200 flex items-center justify-between z-30 shadow-2xl">
-         <div className="text-[9px] font-bold text-slate-300 uppercase tracking-[0.5em]">QR Guard v24.40</div>
+         <div className="text-[9px] font-bold text-slate-300 uppercase tracking-[0.5em]">QR Guard {APP_VERSION_LABEL}</div>
          <button onClick={() => { onSave(Array.from(selectedFields)); onBack(); }} className='bg-slate-900 text-white px-10 py-5 rounded-2xl text-[11px] font-bold uppercase tracking-widest shadow-xl active:scale-95 flex items-center space-x-3 transition-all'>
             <Save size={20} />
             <span>Salvar Configuração</span>

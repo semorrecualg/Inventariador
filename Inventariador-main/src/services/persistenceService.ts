@@ -10,6 +10,9 @@ import { normalizeAssetContract } from '../utils/schema';
 import { FileSystemStorageService } from './FileSystemStorageService';
 import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
+import { readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
+import { marcarConferido } from '../utils/conferencia';
 import { reportRecnoConflictForAsset } from './recnoGuardService';
 import type { RecnoCandidate } from '../utils/recnoGuard';
 
@@ -250,15 +253,15 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
       ...(existingLocal || {}),
       ...assetData,
       tenantid: String(assetData.tenantid || existingLocal?.tenantid || existingActive?.tenantid || '').trim().toUpperCase(),
-      _conferido: 1,
-      _is_synced: 0,
+      ...marcarConferido(),
+      ...marcarAlteracaoLocal(),
       updated_at: new Date().toISOString()
     } as unknown as DexieAsset;
 
     // Escrita atômica sequencial
     await db.local_assets.put(mergedData as DexieAsset);
     if (existingActive) {
-      await db.ativos.update(assetKey, { _conferido: 1 });
+      await db.ativos.update(assetKey, { ...marcarConferido() });
     }
   });
 
@@ -405,17 +408,21 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     // 2. Tenta sincronizar com a nuvem (Supabase) - Apenas se estiver em modo SUPABASE
     if (mode.startsWith('SUPABASE')) {
       const assetsToSync = dirtyAssets || [];
-      
+      // O autosave não conhece o perfil: o contrato vem da sessão. Sem ele a
+      // configuração não tem como ser isolada — e o serviço agora ignora o
+      // envio em vez de encerrar a sessão por causa de um save em segundo plano.
+      const tenantForSync = (readSessionTenantId() || readLocalTenantId() || '').trim() || undefined;
+
       if (assetsToSync.length > 0) {
         logger.info(`>>> [Persistence] Sincronizando ${assetsToSync.length} ativos sujos com a nuvem...`);
         // syncAssetsToCloudAndMark: marca _is_synced = 1 nos ids aceites, para a
         // etiqueta "PENDENTE NUVEM" desaparecer sem depender de novo download.
         syncAssetsToCloudAndMark(assetsToSync).catch(err => logger.warn('Cloud sync failed (offline?):', err));
         // Se sincronizou ativos, sincroniza a config também para atualizar o lastUpdated na nuvem
-        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => logger.warn('Config sync failed (offline?):', err));
+        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>, tenantForSync).catch(err => logger.warn('Config sync failed (offline?):', err));
       } else if (forceCloudSync) {
         logger.info('>>> [Persistence] Sincronizando configurações com a nuvem (forced)...');
-        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => logger.warn('Config sync failed (offline?):', err));
+        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>, tenantForSync).catch(err => logger.warn('Config sync failed (offline?):', err));
       }
     }
 

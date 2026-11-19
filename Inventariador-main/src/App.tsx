@@ -9,14 +9,19 @@ import { startSecurityMonitor, checkRuntimeIntegrity } from './services/security
 import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
+import { effectiveAssetAddress, rotuloDePara } from './utils/assetAddress';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
-import { collectGpsAnchorsFromStorage, isRealAnchorRecord } from './utils/gpsAnchors';
+import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
+import { marcarAlteracaoLocal, preservarPendenciaLocal } from './utils/pendencia';
+import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
+import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, isAuditorUser, userHasPermission } from './services/rbacService';
+import { canonicalRole, isFieldAuditorRole } from './utils/roles';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -41,7 +46,7 @@ import Labeling from './components/Labeling';
 import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
 import localforage from 'localforage';
-import { getCurrentLocation, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
+import { getCurrentLocation, persistableAssetGps, shouldAttemptAssetGpsCapture, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
 import UnitSelector from './components/UnitSelector';
 import AddressSelector from './components/AddressSelector';
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -59,11 +64,12 @@ import ModuleSelector from './components/ModuleSelector';
 import AssetControlModule from './components/AssetControlModule';
 import TenantWorkSelector from './components/TenantWorkSelector';
 import WorkContextSelector from './components/WorkContextSelector';
-import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, SupabaseUserProfile } from './utils/routingUtils';
+import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturnHubToWorkContext, SupabaseUserProfile } from './utils/routingUtils';
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
-import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, isValidLastContext } from './utils/workContextUtils';
+import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
-import { buildUnitReleaseMap, collectActiveCampaignUnits, describeUnitReleaseMissing, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
+import { buildUnitReleaseMap, campaignUnitKeys, collectConfiguredUnitNames, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
+import { loadCampaignUnitsForRelease } from './utils/campaignRelease';
 import { markPullCompleted, wasPullCompleted, shouldSkipPull, hasLocalBaseData } from './utils/syncDedup';
 import {
   readCheckpointForDelta,
@@ -91,7 +97,6 @@ import StressTestManager from './components/StressTestManager';
 import { sqliteService, db, DexieAsset } from './services/sqliteService';
 import { auditService } from './services/auditService';
 import { telemetryService } from './services/telemetryService';
-import AIAssistant from './components/AIAssistant';
 import { motion } from 'motion/react';
 import { APP_LOGO } from './constants';
 import Building2 from 'lucide-react/dist/esm/icons/building-2';
@@ -102,7 +107,6 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import X from 'lucide-react/dist/esm/icons/x';
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert';
-import Sparkles from 'lucide-react/dist/esm/icons/sparkles';
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
 import Activity from 'lucide-react/dist/esm/icons/activity';
 import HardDrive from 'lucide-react/dist/esm/icons/hard-drive';
@@ -113,9 +117,16 @@ import { saveInventory, loadInventory, clearInventory, clearMultipleInventories,
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
 import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
 import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
-import { getPendingSyncItems, processSyncQueue, syncService, photoSyncManager } from './services/syncService';
-import { isSyncLockStuck } from './services/syncQueueGuards';
-import { isBiometricSupported, hasBiometricRegistered } from './services/biometricService';
+import { getPendingSyncItems, processSyncQueue } from './services/syncService';
+import { checkNativeBiometry, isBiometricSupported, hasBiometricRegistered, isNativeAppShell } from './services/biometricService';
+import {
+  BIOMETRIC_FALLBACK_ACTION,
+  BIOMETRIC_REGISTER_ACTION,
+  biometricReasonText,
+  resolveBiometricStep,
+  type BiometricDecision,
+  type BiometricReason
+} from './utils/biometricPolicy';
 import { safeStringify } from './services/utils';
 import { determineAssetTag } from './services/tagService';
 
@@ -124,7 +135,7 @@ import { demoService } from './services/demoService';
 import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
 import { logger } from './utils/logger';
-import pkg from '../package.json';
+import { APP_VERSION_LABEL } from './utils/appVersion';
 
 export class AppBootstrapError extends Error {
   constructor(message: string) {
@@ -186,10 +197,9 @@ const checkIsAdmin = (u: User | null | undefined) => {
     } catch { /* ignore */ }
   }
 
-  const roleStr = String(role || '').toUpperCase();
+  const roleStr = canonicalRole(role);
   return roleStr === 'ADMIN' || 
          roleStr === 'MASTER' || 
-         roleStr === 'GESTOR' || 
          !!isAdm || 
          email === ADMIN_EMAIL.toLowerCase();
 };
@@ -484,7 +494,6 @@ const App: React.FC = () => {
 
   const [isPrivacyCenterOpen, setIsPrivacyCenterOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
-  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
   const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
   // "Novo usuário" a partir do CONTRATO DE TRABALHO: a tela de Acessos abre já
   // com o formulário de cadastro, e o voltar regressa ao contrato.
@@ -623,7 +632,7 @@ useEffect(() => {
                     // Chave composta [tenantid+primarykey] (v6).
                     await db.ativos.update(
                       [String(asset.tenantid || '').trim().toUpperCase(), String(asset.primarykey || '')],
-                      { _conferido: 1, _is_synced: 0 }
+                      { ...marcarConferido(asset._dataLeitura || undefined), ...marcarAlteracaoLocal() }
                     );
                   }
                 }
@@ -768,6 +777,9 @@ useEffect(() => {
   // filtro de ecrã/unidade aplicado à lista `campaigns`). É a fonte do chip
   // CAMPANHA no cartão do contrato de trabalho e da trava de liberação.
   const [activeCampaignUnits, setActiveCampaignUnits] = useState<Set<string>>(() => new Set());
+  // Campanhas GRAVADAS (CREATED/ACTIVE) por unidade: o cartão da filial usa
+  // este conjunto para não marcar como "não criada" uma campanha apenas criada.
+  const [recordedCampaignUnits, setRecordedCampaignUnits] = useState<Set<string>>(() => new Set());
 
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -787,7 +799,13 @@ useEffect(() => {
   // Etapa 2 da trilha única: "segurança biométrica" é um passo da esteira.
   // Fica true quando o usuário registra a biometria OU a dispensa na tela —
   // sem isso, voltar ao LOGIN depois de dispensar reabriria a tela em loop.
+  // Fase 2: a dispensa é POR SESSÃO (este estado) e a tela recebe o modo e o
+  // motivo decididos por `resolveBiometricStep`.
   const [biometricGateDone, setBiometricGateDone] = useState(false);
+  const [biometricRequirement, setBiometricRequirement] = useState<{
+    mode: 'register' | 'fallback';
+    reason: BiometricReason;
+  } | null>(null);
 
   const [sqlDashboardStats, setSqlDashboardStats] = useState<{
     totalAtivos: number;
@@ -916,9 +934,6 @@ useEffect(() => {
   useEffect(() => {
     userRef.current = user;
   }, [user]);
-  const isSyncRunningRef = useRef<boolean>(false);
-  // Início do ciclo em andamento: base do watchdog que liberta uma trava presa.
-  const syncCycleStartedAtRef = useRef<number>(0);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyAssetsRef = useRef<Set<string>>(new Set());
   const inventoryRef = useRef<InventoryState>(inventory);
@@ -1177,96 +1192,8 @@ useEffect(() => {
      };
   }, [isSyncLocked, databaseMode, dbInitialized, sqliteStatus.loading]);
 
-  // Agendador Automático Oculto (Background Sync Timer)
-  useEffect(() => {
-    const triggerBackgroundSync = async () => {
-      // Barreira de guarda declarativa rigorosa:
-      if (!user || (!user.tenantid && !user.tenantid) || !sessionStorage.getItem('filial')) {
-        return;
-      }
-      // Watchdog: se o ciclo anterior passou de 2 minutos, a trava ficou presa
-      // (pedido sem resposta). Liberta e segue, em vez de ficar mudo para sempre.
-      if (isSyncLockStuck(isSyncRunningRef.current, syncCycleStartedAtRef.current)) {
-        logger.warn(
-          `>>> [Background Sync Watchdog] Ciclo anterior preso há mais de 2 min — libertando a trava (iniciado em ${new Date(syncCycleStartedAtRef.current).toISOString()}).`
-        );
-        isSyncRunningRef.current = false;
-        syncCycleStartedAtRef.current = 0;
-      }
-
-      // Se o dispositivo estiver offline ou uma sincronização já estiver ativa, aborta o ciclo
-      if (!navigator.onLine || isSyncRunningRef.current) {
-        return;
-      }
-
-      isSyncRunningRef.current = true;
-      syncCycleStartedAtRef.current = Date.now();
-      logger.info(">>> [Background Sync] Iniciando ciclo automático de atualização...");
-
-      try {
-        // 1. Processa primeiro o lote de metadados de ativos (Até 200 registros por loop)
-        const dataResult = await syncService.processDataSyncQueue();
-        
-        // 2. Na sequência, processa sequencialmente as imagens pendentes da fila
-        const photoResult = await photoSyncManager.processPhotoSyncQueue();
-        
-        if (dataResult.processedCount > 0 || photoResult.uploadCount > 0) {
-          logger.info(`>>> [Background Sync Completed] Dados: ${dataResult.processedCount}, Fotos: ${photoResult.uploadCount}`);
-        }
-      } catch (syncError) {
-        logger.error(">>> [Background Sync Fail] Erro no agendador oculto:", syncError);
-      } finally {
-        // Libera a trava para o próximo ciclo de 60 segundos ou evento
-        isSyncRunningRef.current = false;
-        syncCycleStartedAtRef.current = 0;
-      }
-    };
-
-    // Configura o Timer Oculto para rodar a cada 60 segundos (60000ms)
-    const syncIntervalId = setInterval(triggerBackgroundSync, 60000);
-
-    // Gatilho reativo: Dispara imediatamente se o auditor sair de uma zona de sombra e o sinal voltar
-    const handleNetworkReconnection = () => {
-      logger.info(">>> [Network Guard] Conexão restaurada detectada. Forçando sincronização...");
-      triggerBackgroundSync();
-    };
-
-    window.addEventListener('online', handleNetworkReconnection);
-
-    // Gatilho de retomada: o Android suspende os timers da WebView em segundo
-    // plano, então o ciclo de 60 s não corre com o app minimizado — e ao voltar
-    // o operador esperava até um minuto sem nada subir. Com o listener, o ciclo
-    // roda no instante em que o app volta ao primeiro plano.
-    let appStateHandle: { remove: () => Promise<void> } | null = null;
-    let disposed = false;
-    const registerAppStateListener = async () => {
-      try {
-        const { App: CapacitorApp } = await import('@capacitor/app');
-        const handle = await CapacitorApp.addListener('appStateChange', ({ isActive }) => {
-          if (!isActive) return;
-          logger.info('>>> [Background Sync] App voltou ao primeiro plano: disparando ciclo.');
-          triggerBackgroundSync();
-        });
-        if (disposed) {
-          void handle.remove();
-        } else {
-          appStateHandle = handle;
-        }
-      } catch (err) {
-        // PWA/browser sem plugin nativo: o timer e o evento `online` continuam.
-        logger.warn('>>> [Background Sync] appStateChange indisponível nesta plataforma:', err);
-      }
-    };
-    void registerAppStateListener();
-
-    // Limpeza de memória ao desmontar o ecossistema do App
-    return () => {
-      disposed = true;
-      clearInterval(syncIntervalId);
-      window.removeEventListener('online', handleNetworkReconnection);
-      if (appStateHandle) void appStateHandle.remove();
-    };
-  }, [user]);
+  // Ciclo oculto de sincronização (hook próprio, testável com temporizadores falsos).
+  useBackgroundSyncTimer(user);
 
   // Rastreamento Autônomo v24.50
   useEffect(() => {
@@ -2283,12 +2210,24 @@ useEffect(() => {
    */
   const loadActiveCampaignUnits = useCallback(async () => {
     try {
-      const rows = await sqliteService.getCampaigns();
-      setActiveCampaignUnits(collectActiveCampaignUnits(rows));
+      // Local SEM filtro (registros antigos sem contrato seguem valendo) + as
+      // campanhas do CONTRATO (local + nuvem, sem filtro de unidade). Ler só o
+      // banco local escondia a campanha que existe apenas na nuvem: o cartão da
+      // unidade ficava vermelho («falta campanha») com a campanha já ativa.
+      // Em modo INTERNAL a segunda fonte devolve só o local (soberania): a
+      // campanha que só exista na nuvem não liberta a unidade nesse aparelho.
+      const scope = String(currentTenantid || user?.tenantid || '').trim();
+      const units = await loadCampaignUnitsForRelease({
+        scope,
+        readLocal: () => sqliteService.getCampaigns(),
+        fetchScoped: tenant => fetchCampaigns(tenant, null)
+      });
+      setActiveCampaignUnits(units.active);
+      setRecordedCampaignUnits(units.recorded);
     } catch (err) {
       logger.warn('>>> [Governance] Falha ao ler campanhas persistidas para a liberação:', err);
     }
-  }, []);
+  }, [currentTenantid, user?.tenantid]);
 
   useEffect(() => {
     if (!dbInitialized) return;
@@ -2525,6 +2464,18 @@ useEffect(() => {
       return;
     }
     
+    // HUB ("Auditoria Inteligente", #/menu) exige CONTEXTO ATIVO — Fase 1 da
+    // padronização do acesso. O hub era a única tela isenta da trava de unidade
+    // e virava destino de qualquer atalho sem filial (URL directa, reentrada,
+    // pós-troca de senha). Os PAINÉIS DE GOVERNAÇA abertos a partir do contrato
+    // (`openPanel`) ficam isentos: não leem a unidade e já têm RBAC próprio.
+    if (user && shouldReturnHubToWorkContext(screen, selectedUnit, !!menuPanelToOpen)) {
+      logger.warn('>>> [RouteGuard] Hub sem contexto ativo: devolvendo ao contrato de trabalho.');
+      setScreenParams(null);
+      pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
+      return;
+    }
+
     if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
       const campaignId = inventory.currentCampaignId;
       // Alinhado à regra de Soberania Admin, se a unidade física ou string literal existir e for compatível com a filial ativa,
@@ -2536,36 +2487,13 @@ useEffect(() => {
         setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
       }
     }
-  }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode, setHistory, pushScreen]);
+  }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode, setHistory, pushScreen, menuPanelToOpen]);
 
-  // Efeito de reparo automático de GPS para ativos conferidos sem coordenadas
-  useEffect(() => {
-    const inv = inventoryRef.current;
-    if (inv.assets.length > 0 && inv.unitConfigs && inv.unitConfigs.length > 0) {
-      let hasRepaired = false;
-      const repairedAssets = inv.assets.map(a => {
-        const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-        if (isConferido && (!a.latitude || !a.longitude)) {
-          const unitId = a.filial || a._unidade;
-          const config = inv.unitConfigs?.find(c => c.unit_id === unitId);
-          // Só âncora com leitura de sensor posiciona o ativo: o pino manual não
-          // pode virar ponto no mapa de calor (não é leitura de sensor).
-          if (config && isRealAnchorRecord(config)) {
-            hasRepaired = true;
-            return { ...a, latitude: config.lat, longitude: config.lng };
-          }
-        }
-        return a;
-      });
-
-      if (hasRepaired) {
-        logger.info('>>> [GPS] Reparo automático de coordenadas aplicado a ativos conferidos sem GPS.');
-        const repairedState = { ...inv, assets: repairedAssets };
-        setInventory(prev => ({ ...prev, assets: repairedAssets }));
-        saveInventory(repairedState);
-      }
-    }
-  }, [inventory.assets, inventory.unitConfigs]);
+  // NÃO existe preenchimento automático do GPS dos ativos a partir da âncora da
+  // unidade. `assets.latitude/longitude` (nuvem: gps_lat/gps_lng) só é gravado
+  // na conferência do inventário: se estava vazio, continua vazio. Repartir a
+  // âncora pela base inteira inventava coordenadas para ativos que nunca foram
+  // lidos e ia parar à nuvem no envio seguinte.
 
   const currentUnitConfig = useMemo(() => {
     if (!selectedUnit || !inventory.unitConfigs) return null;
@@ -2627,7 +2555,7 @@ useEffect(() => {
         }
       } catch (err) {
         // Bloqueio por cópias é política, não falha: o operador tem de ver o
-        // número e a instrução de LIMPAR CÓPIAS, não um "erro" genérico.
+        // número e a instrução de DIAGNÓSTICO DE CÓPIAS, não um "erro" genérico.
         setSyncError(
           err instanceof CloudPushPolicyError ? err.message : 'Erro ao enviar alterações locais'
         );
@@ -2879,7 +2807,13 @@ useEffect(() => {
           const localById = new Map(prev.assets.map(a => [String(a.id), a]));
           const mergedAssets = cloudAssets.map(cloudAsset => {
             const local = localById.get(String(cloudAsset.id));
-            return local && Number(local._is_synced) === 0 ? { ...cloudAsset, _is_synced: 0 } : cloudAsset;
+            // O pull não apaga a pendência local — nem a data do toque que a
+            // originou, que é o que o selo mostra como idade. Pendentes anteriores
+            // a `_lastUpdated` ficam sem data (o selo omite a idade) em vez de
+            // receberem «agora» a cada descarga, que reiniciava a contagem.
+            return local && Number(local._is_synced) === 0
+              ? { ...cloudAsset, ...preservarPendenciaLocal(local._lastUpdated) }
+              : cloudAsset;
           });
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           
@@ -2893,7 +2827,7 @@ useEffect(() => {
                   const cloudAsset = mergedAssets[index];
                   
                   // Detecção de Conflito: Se o item na nuvem também foi alterado (versão diferente ou conferido por outro)
-                  const isConflict = cloudAsset._conferido && 
+                  const isConflict = isConferido(cloudAsset) && 
                                    cloudAsset._auditor && 
                                    cloudAsset._auditor !== (user?.email || 'unknown') &&
                                    cloudAsset._dataLeitura !== localDirty._dataLeitura;
@@ -3307,8 +3241,8 @@ useEffect(() => {
           let hasChanges = false;
 
           const updatedAssets = saved.assets.map(a => {
-            const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-            if (isConferido) {
+            const conferido = isConferido(a);
+            if (conferido) {
               let needsUpdate = false;
               if (!a._dataLeitura) {
                 needsUpdate = true;
@@ -3330,13 +3264,15 @@ useEffect(() => {
 
               if (needsUpdate) {
                 hasChanges = true;
-                return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
+                return { ...a, ...marcarConferido(yesterdayStr) };
               }
               
-              // Se já é conferido mas _conferido está falso, atualiza para true para consistência interna
-              if (!a._conferido) {
+              // Conferido pela regra mas com a marca local fora da grafia
+              // canônica (veio só da coluna de auditoria, ou em texto legado):
+              // normaliza para `true`, mantendo a data de leitura que já tinha.
+              if (!marcaLocalConferida(a)) {
                 hasChanges = true;
-                return { ...a, _conferido: true };
+                return { ...a, ...marcarConferido(a._dataLeitura) };
               }
             }
             return a;
@@ -3377,8 +3313,8 @@ useEffect(() => {
               const yesterdayStr = '2026-03-15T12:00:00Z';
               
               parsed.assets = parsed.assets.map((a: Asset) => {
-                const isConferido = normalizeFlag(a._conferido) || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-                if (isConferido) {
+                const conferido = isConferido(a);
+                if (conferido) {
                   let needsUpdate = false;
                   if (!a._dataLeitura) {
                     needsUpdate = true;
@@ -3398,10 +3334,12 @@ useEffect(() => {
                     }
                   }
                   if (needsUpdate) {
-                    return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
+                    return { ...a, ...marcarConferido(yesterdayStr) };
                   }
-                  if (!a._conferido) {
-                    return { ...a, _conferido: true };
+                  // Mesma normalização do arranque: só reescreve quando a
+                  // marca local ainda não está na grafia canônica.
+                  if (!marcaLocalConferida(a)) {
+                    return { ...a, ...marcarConferido(a._dataLeitura) };
                   }
                 }
                 return a;
@@ -3732,12 +3670,6 @@ useEffect(() => {
     return map;
   }, [inventory.assets]);
 
-  // Ref para o handler de contexto (Etapa 4 — "lembrar escolha"): o dispatcher
-  // pós-login fica declarado ANTES do useCallback que aplica a escolha; a ref
-  // sincronizada evita o erro de uso antes da declaração (TDZ) e mantém o
-  // dispatcher sempre com a identidade mais recente do handler.
-  const applyWorkContextRef = useRef<((ctx: WorkContext, module: AppModule) => Promise<void>) | null>(null);
-
   // 🚀 SEQUENTIAL POST-LOGIN ROUTING DISPATCHER (DESACOPLAMENTO SRE v4.90)
   useEffect(() => {
     if (!isUserAuthenticated || !user) return;
@@ -3748,21 +3680,46 @@ useEffect(() => {
     const executePostLoginRouting = async () => {
       logger.info(">>> [SRE_NAV] Usuário autenticado consolidado. Iniciando roteamento pós-login sequencial...");
 
-      // ETAPA 2 DA TRILHA ÚNICA (vale para TODOS os perfis): a segurança
-      // biométrica é um passo da esteira, antes do contrato de trabalho —
-      // não um aviso disparado por timer depois do login (o timer corria com
-      // o roteamento e a tela podia ser encoberta).
+      // ETAPA 2 DA TRILHA ÚNICA (Fase 2 do acesso padronizado, vale para TODOS
+      // os perfis exceto DEMO): a segurança biométrica é um passo da esteira,
+      // antes do contrato de trabalho — não um aviso disparado por timer.
+      // Onde o aparelho pode verificar a biometria, o cadastro é OBRIGATÓRIO.
+      // Onde não pode (WebView do app nativo, hardware sem autenticador), a
+      // tela abre na mesma e o acesso segue por uma dispensa EXPLÍCITA — o
+      // passo nunca desaparece em silêncio.
       if (!biometricGateDone) {
-        let biometricPending = false;
+        let biometricDecision: BiometricDecision;
         try {
           const bioSupported = await isBiometricSupported();
+          const isNativeApp = isNativeAppShell();
+          // Fase 2b: no casco nativo quem responde é o plugin — e a resposta
+          // entra na política (disponível → cadastro nativo; indisponível →
+          // fallback com o motivo real; sem resposta → fallback do WebView).
+          const nativeFacts = isNativeApp
+            ? await checkNativeBiometry()
+            : { status: 'unknown' as const };
           const bioUser = String(user.username || user.email || '').toLowerCase().trim();
-          biometricPending = !!bioSupported && !!bioUser && !(await hasBiometricRegistered(bioUser));
+          const bioRegistered = !!bioUser && (await hasBiometricRegistered(bioUser));
+          biometricDecision = resolveBiometricStep({
+            supported: bioSupported,
+            registered: bioRegistered,
+            isNativeApp,
+            nativeBiometry: nativeFacts.status,
+            fallbackAccepted: false,
+            role: user.role
+          });
         } catch (bioErr) {
           logger.warn('[Biometric] Falha ao checar biometria:', bioErr);
+          // Sem conseguir verificar o aparelho, a etapa não é saltada: abre o
+          // fallback com o motivo real e a dispensa fica auditada.
+          biometricDecision = {
+            step: 'fallback',
+            reason: isNativeAppShell() ? 'webview-without-webauthn' : 'device-without-authenticator'
+          };
         }
-        if (biometricPending) {
-          logger.info('>>> [SRE_NAV] Biometria pendente: abrindo a segurança biométrica antes do contrato.');
+        if (biometricDecision.step !== 'proceed') {
+          logger.info(`>>> [SRE_NAV] Passo biométrico (${biometricDecision.step}): ${biometricReasonText(biometricDecision.reason)}`);
+          setBiometricRequirement({ mode: biometricDecision.step, reason: biometricDecision.reason });
           await pushScreen(AppScreen.BIOMETRIC_REGISTRATION);
           return;
         }
@@ -3774,26 +3731,11 @@ useEffect(() => {
       // contrato selecionado (isolamento SRE por contrato).
       const workContexts = buildWorkContexts(user, users, workContextFiliais);
 
-      // ETAPA 4 (FLUXO_ACESSO_INICIAL): "lembrar escolha" — se o usuário já
-      // escolheu contrato+filial+módulo numa sessão anterior e a escolha
-      // continua autorizada (valida contra a lista atual de contextos e o
-      // papel), pula o seletor e vai direto para o módulo daquela filial.
-      // A troca fica disponível pelo botão "Trocar" no hub (MainMenu).
-      const lastCtx = readLastWorkContext();
-      if (workContexts.length > 0 && isValidLastContext(lastCtx, workContexts, user)) {
-        logger.info(`>>> [SRE_NAV] Etapa 4: última escolha válida (${String(lastCtx?.tenantid)}/${String(lastCtx?.filial || 'TODAS')} · ${String(lastCtx?.module)}). Pulando seletor de contexto.`);
-        if (applyWorkContextRef.current) {
-          await applyWorkContextRef.current(
-            { tenantid: String(lastCtx?.tenantid), filial: String(lastCtx?.filial || '') },
-            lastCtx?.module as AppModule
-          );
-        } else {
-          // Sem handler pronto (borda rara) → mantém o seletor como fallback seguro.
-          await pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
-        }
-        return;
-      }
-
+      // ETAPA 4 REVISADA (Fase 1 do acesso padronizado): a última escolha NÃO
+      // salta mais o contrato. Ela entra no seletor apenas como PRÉ-SELEÇÃO
+      // (`resolveWorkContextPreselection` → `initialSelection`), e o utilizador
+      // confirma em "Acessar o Módulo". Assim todo o acesso segue a mesma
+      // esteira: biometria → contrato → SaaS.
       // FLUXO ÚNICO DE ACESSO: a autenticação não escolhe mais filial — a tela
       // de contrato de trabalho (/contexto) faz contrato + filial + módulo para
       // todo perfil com contrato autorizado.
@@ -3860,6 +3802,7 @@ useEffect(() => {
   // etapa de segurança volta a ser exigida.
   useEffect(() => {
     setBiometricGateDone(false);
+    setBiometricRequirement(null);
   }, [user?.email]);
 
   // Sincronização automática de usuários com o Supabase e persistência local
@@ -4054,8 +3997,8 @@ useEffect(() => {
         continue;
       }
 
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
-      const effectiveLoc = a._localMaster || a.endereco || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL';
+      const conferido = isConferido(a);
+      const effectiveLoc = effectiveAssetAddress(a);
       const locDisplay = String(effectiveLoc).trim().toUpperCase();
       const locKey = normalizeKey(effectiveLoc);
       
@@ -4064,13 +4007,13 @@ useEffect(() => {
       const statusUpper = String(a.status || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXA') || !!a.databaixa;
       
-      if (isBaixado && !isConferido) continue;
+      if (isBaixado && !conferido) continue;
 
       if (!stats[locKey]) stats[locKey] = { total: 0, checked: 0, displayName: locDisplay };
       
       if (!isBaixado) stats[locKey].total++;
       
-      if (isConferido) {
+      if (conferido) {
         stats[locKey].checked++;
         if (isBaixado) stats[locKey].total++;
       }
@@ -4293,8 +4236,8 @@ useEffect(() => {
           isOpen: true,
           title: 'Unidade aguardando liberação',
           message: isAdminUser(user)
-            ? `A unidade ${newFilial} ainda não foi liberada para inventário. Configure ${pending} na Unidade Operacional para liberar.`
-            : `A unidade ${newFilial} ainda não foi liberada para inventário. O administrador precisa configurar ${pending} na Unidade Operacional.`,
+            ? `A unidade ${newFilial} ainda não foi liberada para inventário. Falta ${pending} — resolva na Unidade Operacional ou pelo cartão da filial.`
+            : `A unidade ${newFilial} ainda não foi liberada para inventário. O administrador precisa resolver: ${pending}.`,
           type: 'error',
           onConfirm: () => {}
         });
@@ -4357,11 +4300,6 @@ useEffect(() => {
     await pushScreen(resolveModuleEntryScreen(module, newFilial));
   }, [user, databaseMode, syncFromCloud, setInventory, setUser, setSelectedUnit, pushScreen]);
 
-  // Sincroniza a ref usada pelo dispatcher pós-login (Etapa 4).
-  useEffect(() => {
-    applyWorkContextRef.current = handleWorkContextModuleSelect;
-  }, [handleWorkContextModuleSelect]);
-
   // HUB → INVENTÁRIO: última porta antes do endereço físico. O auditor só passa
   // se a unidade ATIVA estiver liberada (âncora GPS + campanha configuradas
   // pelo admin/master). Reavalia aqui porque o mapa de liberação pode ficar
@@ -4379,8 +4317,8 @@ useEffect(() => {
           isOpen: true,
           title: 'Unidade aguardando liberação',
           message: isAdminUser(user)
-            ? `A unidade ${selectedUnit} ainda não foi liberada para inventário. Configure ${pending} na Unidade Operacional para liberar.`
-            : `A unidade ${selectedUnit} ainda não foi liberada para inventário. O administrador precisa configurar ${pending} na Unidade Operacional.`,
+            ? `A unidade ${selectedUnit} ainda não foi liberada para inventário. Falta ${pending} — resolva na Unidade Operacional ou pelo cartão da filial.`
+            : `A unidade ${selectedUnit} ainda não foi liberada para inventário. O administrador precisa resolver: ${pending}.`,
           type: 'error',
           onConfirm: () => {}
         });
@@ -4393,6 +4331,16 @@ useEffect(() => {
 
   // Contextos de trabalho do usuário logado (fonte do seletor)
   const workContexts = useMemo(() => buildWorkContexts(user, users, workContextFiliais), [user, users, workContextFiliais]);
+
+  // Etapa 4 revisada: a última escolha chega ao CONTRATO como pré-seleção —
+  // nunca como navegação automática. Recalculada a cada entrada na tela para
+  // apanhar alterações de autorização feitas pelo admin entretanto.
+  const workContextPreselection = useMemo(
+    () => screen === AppScreen.WORK_CONTEXT_SELECTION
+      ? resolveWorkContextPreselection(readLastWorkContext(), workContexts, user)
+      : null,
+    [screen, workContexts, user]
+  );
 
   // 1. Auth Listener para Supabase (Magic Link, Convites, Sessão)
   useEffect(() => {
@@ -5288,7 +5236,7 @@ useEffect(() => {
     const updates = { ...updatedAsset } as Asset;
     // Se vier com _conferido explicitamente definido, respeitamos (para permitir desmarcar no bumerangue)
     if (updates._conferido === undefined) {
-      updates._conferido = true;
+      Object.assign(updates, marcarConferido(updates._dataLeitura));
     }
     if (!updates._dataLeitura) {
       updates._dataLeitura = new Date().toISOString();
@@ -5483,35 +5431,28 @@ useEffect(() => {
   const enrichAssetWithGps = useCallback(async (baseAsset: Asset, alreadySynced = false) => {
     try {
       const metrics = await telemetryService.getDeviceMetrics();
-      const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
       const isGpsBypassed = localStorage.getItem('gbr_gps_bypass') === 'true';
 
-      // null = sem leitura válida e precisa; nunca gravamos 0,0 inventado.
+      // Sem leitura real não há coordenada: a âncora da unidade não é GPS do
+      // ativo. O PERFIL já não decide nada aqui — admin/master lê o sensor como
+      // qualquer operador; só o bypass explícito (`gbr_gps_bypass`) e a bateria
+      // crítica dispensam a captura. E `persistableAssetGps` recusa qualquer
+      // posição marcada como bypass (âncora), venha de onde vier.
       let loc: import('./utils/gpsUtils').GpsLocation | null = null;
-      if (isAdmin || isGpsBypassed) {
-        if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-          loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-        }
-      } else if (metrics.battery > 5) {
+      if (shouldAttemptAssetGpsCapture({ bypassed: isGpsBypassed, battery: metrics.battery })) {
         loc = await Promise.race([
           getCurrentLocation(),
           new Promise<null>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
         ]).catch(e => {
-          logger.warn('>>> [GPS] Falha na captura rápida, usando âncora:', e);
-          if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-            return { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-          }
+          logger.warn('>>> [GPS] Falha na captura rápida; registro segue sem coordenada:', e);
           return null;
         });
       } else {
-        logger.warn('>>> [GPS] Bloqueio crítico de GPS: bateria de', metrics.battery, '% ou inferior!');
-        if (currentUnitConfig?.lat && currentUnitConfig?.lng) {
-          loc = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng, altitude: 0 };
-        }
+        logger.info('>>> [GPS] Captura dispensada (bypass explícito ou bateria crítica): registro segue sem coordenada.');
       }
 
       const { convertAltitudeToFloor } = await import('./utils/gpsUtils');
-      if (!loc) {
+      if (!loc || !persistableAssetGps(loc)) {
         queueCloudSync([baseAsset]);
         return;
       }
@@ -5552,7 +5493,7 @@ useEffect(() => {
       logger.warn('>>> [GPS] Captura em background falhou; envio do registro segue sem coordenadas:', e);
       queueCloudSync([baseAsset]);
     }
-  }, [currentUnitConfig, queueCloudSync, user]);
+  }, [queueCloudSync, user]);
 
   const updateAsset = useCallback(async (updatedAsset: Asset) => {
     // ALERTA DE DUPLICIDADE DE ETIQUETA
@@ -5601,7 +5542,7 @@ useEffect(() => {
       // `_is_synced = 1` vindo do pull e o cartão dizia "Sincronizado" antes de
       // a fila enviar (ou para sempre, offline). A fila só volta a marcar 1
       // depois do upsert confirmado.
-      _is_synced: 0,
+      ...marcarAlteracaoLocal(),
       currentCampaignId: inventory.currentCampaignId || assetWithGps.currentCampaignId,
       _version: nextVersion,
       _history: [...(assetWithGps._history || []), auditEntry],
@@ -5611,10 +5552,10 @@ useEffect(() => {
 
     // Commit local + estado visual imediatamente; GPS e nuvem não bloqueiam o
     // toque. A captura de posição (até 3 s) corre depois e completa o registro.
-    const committed = await commitAssetUpdate(assetWithHistory, { deferCloud: Boolean(updatedAsset._conferido) });
+    const committed = await commitAssetUpdate(assetWithHistory, { deferCloud: isConferido(updatedAsset) });
     dirtyAssetsRef.current.add(String(assetWithHistory.id));
 
-    if (updatedAsset._conferido) {
+    if (isConferido(updatedAsset)) {
       void enrichAssetWithGps(committed, Boolean(updatedAsset._is_synced));
     }
   }, [inventory.assets, commitAssetUpdate, user, enrichAssetWithGps, inventory.currentCampaignId]);
@@ -5668,11 +5609,10 @@ useEffect(() => {
     const updatedParent: Asset = {
       ...parentAsset,
       _is_unitized: true,
-      _conferido: true,
+      ...marcarConferido(timestamp),
       // Unitarizar altera o pai neste aparelho: pendente de nuvem como qualquer
       // outra conferência (o pai sai do giro e sobe unitarizado).
-      _is_synced: 0,
-      _dataLeitura: timestamp,
+      ...marcarAlteracaoLocal(timestamp),
       _auditor: auditor,
       TAG_INVENTARIO: TagInventario.CONFERIDO,
       _history: [
@@ -5697,6 +5637,9 @@ useEffect(() => {
         _parent_id: parentAsset.id,
         _isNew: true,
         _conferido: false,
+        // A unidade criada não nasce conferida: herdar o `status` CONFERIDO do
+        // pai fazia o envio gravá-la conferida na nuvem (o status é marcador).
+        status: statusAoDesmarcar(parentAsset.status),
         etiqueta: 'ETIQUETAR',
         qt: 1,
         _plaquetaMaster: 'ETIQUETAR',
@@ -5914,27 +5857,19 @@ useEffect(() => {
       origin = TransactionOrigin.ACCOUNT_RECONCILIATION;
     }
 
-    let gpsCoords: { lat?: number; lng?: number } = {};
+    // Sem leitura real não há coordenada a aplicar: a âncora da unidade não é
+    // GPS do ativo. O merge abaixo só escreve latitude/longitude quando existe
+    // fix — coordenada vazia continua vazia, e a que já existia não é apagada.
+    let gpsCoords: { lat: number; lng: number } | null = null;
     try {
       const metrics = await telemetryService.getDeviceMetrics();
       if (metrics.battery > 5) {
-        const loc = await getCurrentLocation();
-        if (loc) {
-          gpsCoords = { lat: loc.lat, lng: loc.lng };
-        } else if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
-          gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
-        }
+        gpsCoords = persistableAssetGps(await getCurrentLocation());
       } else {
         logger.warn('>>> [GPS Lote] Bloqueio crítico de GPS por bateria de', metrics.battery, '% ou inferior!');
-        if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
-          gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
-        }
       }
     } catch (e) {
-      logger.warn('GPS não capturado para lote, tentando fallback da unidade:', e);
-      if (currentUnitConfig && currentUnitConfig.lat && currentUnitConfig.lng) {
-        gpsCoords = { lat: currentUnitConfig.lat, lng: currentUnitConfig.lng };
-      }
+      logger.warn('GPS não capturado para lote; segue sem coordenada:', e);
     }
 
     // 1. CALCULAMOS OS NOVOS OBJETOS (MERGE NÃO DESTRUTIVO)
@@ -5944,8 +5879,7 @@ useEffect(() => {
         const updates: Asset & Record<string, unknown> = { 
           ...a, 
           ...(manualUpdates || {}), 
-          latitude: gpsCoords.lat, 
-          longitude: gpsCoords.lng,
+          ...(gpsCoords ? { latitude: gpsCoords.lat, longitude: gpsCoords.lng } : {}),
           _origemTransacao: origin // Aplica o código fixo
         };
         
@@ -5975,8 +5909,7 @@ useEffect(() => {
               ? inventoryLocation.toUpperCase().trim() 
               : (updates.endereco || "").toString().toUpperCase().trim());
 
-        updates._conferido = true;
-        updates._dataLeitura = new Date().toISOString();
+        Object.assign(updates, marcarConferido());
         updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
         
         const wasLabelingCandidate = 
@@ -6082,7 +6015,7 @@ useEffect(() => {
     } finally {
       setIsProcessing(false);
     }
-  }, [inventoryLocation, determineTag, user, databaseMode, history, currentUnitConfig, inventory.assets, queueCloudSync]);
+  }, [inventoryLocation, determineTag, user, databaseMode, history, inventory.assets, queueCloudSync]);
 
   const handleUpdateScannerMode = useCallback((mode: ScannerMode) => {
     setInventory(prev => ({ ...prev, scannerMode: mode }));
@@ -6144,8 +6077,12 @@ useEffect(() => {
 
       res['AUDITOR_LOCAL_ORIGINAL'] = a.endereco;
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.endereco;
-      res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (normalizeKey(String(a.endereco)) === normalizeKey(String(a._localMaster || a.endereco)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
-      res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
+      // A exportação é a prova que sai para fora: lê a conferência pelo mesmo
+      // predicado dos ecrãs, senão um item conferido pela coluna de auditoria
+      // sai como PENDENTE/NAO.
+      const conferido = isConferido(a);
+      res['AUDITOR_DE_PARA'] = rotuloDePara(a, conferido);
+      res['AUDITOR_STATUS_CONFERENCIA'] = conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
       // REGISTRO ADOTADO: rótulo rad_<UNIDADE>_<DISPOSITIVO>_<SEQUENCIA> do item
       // criado por cópia de outra unidade (vazio em tudo o que não é adotado).
@@ -6427,7 +6364,7 @@ useEffect(() => {
   const handleSignatureConfirm = useCallback(async (signature: string) => {
     if (!selectedUnit) return;
 
-    const confirmedAssets = filteredAssetsByUnit.filter(a => a._conferido);
+    const confirmedAssets = filteredAssetsByUnit.filter(a => isConferido(a));
     if (confirmedAssets.length === 0) {
       setModalConfig({
         isOpen: true,
@@ -6511,9 +6448,11 @@ useEffect(() => {
       return [];
     }
 
-    const userTenant = user?.tenantid || '';
+    // Contrato resolvido (perfil → sessão → base): o dono global não declara
+    // tenantid no perfil e a lista precisa da mesma chave usada na liberação.
+    const userTenant = (user?.tenantid || currentTenantid || '').trim().toUpperCase();
     const userUnits = user?.units || (userTenant ? [userTenant] : []);
-    const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
+    const isAuditor = isFieldAuditorRole(user?.role);
     const assets = inventory.assets;
     
     if (assets.length === 0) {
@@ -6579,18 +6518,18 @@ useEffect(() => {
       }
     }
 
-    // Pre-calculate units with direct ACTIVE campaigns for O(1) lookup
+    // Pre-calculate units with direct campaigns for O(1) lookup.
+    //  · `unitsWithDirectCampaign`: só ACTIVE libera o inventário;
+    //  · `unitsWithRecordedCampaign`: CREATED ou ACTIVE — a campanha já existe
+    //    (abre a ficha em vez do cadastro em branco).
     const unitsWithDirectCampaign = new Set<string>();
+    const unitsWithRecordedCampaign = new Set<string>();
     campaigns.forEach(c => {
-      // REGRA DE GOVERNANÇA: Apenas campanhas com status exatamente igual a 'ACTIVE' habilitam o botão visual
-      if (String(c.status) === 'ACTIVE') {
-        // `filial` é o campo canónico da unidade; `_unitid`/`unit_id` são legado e
-        // podem trazer outro valor, o que deixava o chip CAMPANHA desabilitado.
-        const uId = c.filial || c._unitid || c.unit_id;
-        if (uId) {
-          const norm = normalizeKey(uId);
-          unitsWithDirectCampaign.add(norm);
-        }
+      // Todas as grafias da unidade (`filial`/`unit_id`/`_unitid`): comparar só
+      // o primeiro campo escondia campanha gravada e o cartão pedia "criar".
+      for (const key of campaignUnitKeys(c)) {
+        unitsWithRecordedCampaign.add(key);
+        if (isActiveCampaign(c)) unitsWithDirectCampaign.add(key);
       }
     });
 
@@ -6599,13 +6538,14 @@ useEffect(() => {
       typeof localStorage !== 'undefined' ? localStorage : null
     );
 
-    // Pré-cálculo das unidades com âncora contável como leitura de sensor.
-    // Pino posicionado manualmente no mapa (source: 'manual') NÃO conta aqui —
-    // e é daqui que saem a liberação da unidade e o chip de GPS.
+    // Pré-cálculo das unidades com âncora CONFIGURADA — é daqui que saem a
+    // liberação da unidade e o chip de GPS. O pino fixado à mão no mapa
+    // (`source: 'manual'`) conta: FIXAR ÂNCORA GPS é o ato administrativo que
+    // configura a filial. A proveniência (`source`) não decide mais nada aqui.
     const unitsWithGps = new Set<string>();
     unitConfigs.forEach(c => {
       const uId = c.filial || c._unitid || c.unit_id;
-      if (uId && isRealAnchorRecord(c)) {
+      if (uId && isConfiguredAnchorRecord(c)) {
         const norm = normalizeKey(uId);
         unitsWithGps.add(norm);
       }
@@ -6642,6 +6582,21 @@ useEffect(() => {
           baseCompaniesSet.add(cleanU);
         }
       }
+    }
+
+    // Unidades que existem na CONFIGURAÇÃO OPERACIONAL (âncora GPS e campanha)
+    // entram na lista mesmo quando a tabela de ativos do contrato ainda não foi
+    // carregada — são filiais reais, com cartão para conferir/liberar. Sem isto
+    // o seletor dizia «Nenhuma filial na base deste contrato» num contrato com
+    // âncoras e campanhas gravadas. O escopo do auditor é aplicado no 4b.
+    collectConfiguredUnitNames([unitConfigs, campaigns], userTenant).forEach(name => {
+      baseCompaniesSet.add(name);
+    });
+    // Âncoras persistidas no aparelho (leitura durável, independente do estado
+    // React) também provam a existência da filial. Só entram para ADMIN/MASTER:
+    // o auditor continua limitado às unidades do perfil (filtro do 4b).
+    if (isAdmin) {
+      unitsWithGps.forEach(norm => baseCompaniesSet.add(norm));
     }
     
     const baseCompanies = Array.from(baseCompaniesSet);
@@ -6755,6 +6710,11 @@ useEffect(() => {
         isUnitInReleaseSet(unitsWithDirectCampaign, unit.name) ||
         isUnitInReleaseSet(activeCampaignUnits, unit.name) ||
         isUnitInReleaseSet(cachedActiveCampaignUnits, unit.name);
+      // Campanha já GRAVADA na filial: inclui a criada e ainda não ativada.
+      const hasCampaignRecord =
+        hasDirectCampaign ||
+        isUnitInReleaseSet(unitsWithRecordedCampaign, unit.name) ||
+        isUnitInReleaseSet(recordedCampaignUnits, unit.name);
       const hasGps = unitsWithGps.has(norm);
 
       let assetCount = 0;
@@ -6779,7 +6739,8 @@ useEffect(() => {
         tenantid: unit.tenantid,
         hasData: unit.hasData,
         hasActiveAssets: unit.hasActiveAssets,
-        hasCampaign: hasDirectCampaign, // Stricter governance: only ACTIVE campaign in table or cached enables button
+        hasCampaign: hasDirectCampaign, // Só ACTIVE libera o inventário.
+        hasCampaignRecord, // CREATED ou ACTIVE: a campanha já existe (ficha, não cadastro).
         hasGps,
         assetCount
       };
@@ -6811,6 +6772,7 @@ useEffect(() => {
             hasData: true,
             hasActiveAssets: true,
             hasCampaign: false,
+            hasCampaignRecord: false,
             hasGps: false,
             assetCount
           };
@@ -6829,13 +6791,33 @@ useEffect(() => {
 
     logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
-  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, campaigns, activeCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
+  }, [inventory.companies, inventory.assets, inventory.databaseMode, user, currentTenantid, campaigns, activeCampaignUnits, recordedCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref
   // porque o handler do contrato de trabalho (declarado antes deste memo) é
   // quem aplica a trava de entrada.
   const unitReleaseRef = useRef<UnitReleaseMap>({});
+
+  // CATÁLOGO DE FILIAIS POR CONTRATO que o APP já conhece — a MESMA lista que
+  // alimenta o mapa de liberação. O seletor de contrato recebia apenas uma
+  // varredura do catálogo local, que pode vir vazia (configuração operacional
+  // gravada sem contrato, base interna ainda não espelhada), e então dizia
+  // «Nenhuma filial na base deste contrato» enquanto o próprio aviso apontava
+  // uma filial existente. Com esta lista, cartão e liberação nunca divergem.
+  const unitsByContract = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const unit of fullCompaniesWithStatus) {
+      const tenantid = String(unit.tenantid || user?.tenantid || '').trim().toUpperCase();
+      const name = String(unit.name || '').trim().toUpperCase();
+      if (!tenantid || !name) continue;
+      if (!map[tenantid]) map[tenantid] = [];
+      if (!map[tenantid].includes(name)) map[tenantid].push(name);
+    }
+    return map;
+  }, [fullCompaniesWithStatus, user?.tenantid]);
+
+
   const unitReleaseMap = useMemo(
     () =>
       buildUnitReleaseMap(
@@ -6843,7 +6825,8 @@ useEffect(() => {
           name: c.name,
           tenantid: c.tenantid,
           hasAnchor: c.hasGps,
-          hasCampaign: c.hasCampaign
+          hasCampaign: c.hasCampaign,
+          hasCampaignRecord: c.hasCampaignRecord
         }))
       ),
     [fullCompaniesWithStatus]
@@ -6969,7 +6952,7 @@ useEffect(() => {
           <Building2 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-emerald-500 opacity-50" size={24} />
         </div>
         <div className="flex flex-col items-center space-y-2">
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-emerald-400">Inventariador GBR v{pkg.version}</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-emerald-400">Inventariador GBR {APP_VERSION_LABEL}</p>
           <p className="text-[9px] text-slate-500 font-medium uppercase tracking-[0.2em] animate-pulse">
             Carregando Ecossistema GBR...
           </p>
@@ -7098,7 +7081,7 @@ useEffect(() => {
           setBootError={(errStr) => setBootstrapError(new AppBootstrapError(errStr || 'Erro de Permissão'))} 
         />
         <footer className="bg-slate-900 px-6 py-4 text-center border-t border-white/5 shrink-0">
-          <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR v{pkg.version} • MOBILE SOBERANO</p>
+          <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Inventariador GBR {APP_VERSION_LABEL} • MOBILE SOBERANO</p>
         </footer>
       </div>
     );
@@ -7152,12 +7135,9 @@ useEffect(() => {
                     <span className="text-[7px] font-black uppercase tracking-widest">{isSafeMode ? 'SAFE' : 'RISK'}</span>
                   </div>
                   <div className="px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-600">
-                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">Inventariador GBR v{pkg.version}</span>
+                    <span className="text-[7px] font-bold uppercase tracking-[0.1em]">Inventariador GBR {APP_VERSION_LABEL}</span>
                   </div>
-                  <div 
-                    onClick={() => setIsAIAssistantOpen(true)}
-                    className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center space-x-1 cursor-pointer hover:bg-indigo-100 transition-all text-indigo-600"
-                  >
+                  <div className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center space-x-1 text-indigo-600">
                     <Activity size={10} />
                     <span className="text-[7px] font-black uppercase tracking-widest">DEV</span>
                   </div>
@@ -7165,12 +7145,6 @@ useEffect(() => {
                     <ShieldCheck size={10} />
                     <span className="text-[7px] font-black uppercase tracking-widest">{permissionsGranted ? 'OPERACIONAL' : 'BLOQUEADO'}</span>
                   </div>
-                  {import.meta.env.VITE_GEMINI_API_KEY && (
-                    <div className="px-2 py-0.5 bg-purple-50 border border-purple-100 rounded-lg flex items-center space-x-1 text-purple-600">
-                      <Sparkles size={8} />
-                      <span className="text-[7px] font-black uppercase tracking-widest">AI</span>
-                    </div>
-                  )}
                </div>
                </div>
             </div>
@@ -7197,7 +7171,7 @@ useEffect(() => {
               
               <div className="flex items-center shrink-0">
                 <span className="px-2.5 py-1 bg-slate-900 border border-slate-950 rounded-lg text-white font-extrabold text-[8px] uppercase tracking-widest shadow-sm font-sans">
-                  GBR v{pkg.version}
+                  GBR {APP_VERSION_LABEL}
                 </span>
               </div>
             </div>
@@ -7362,8 +7336,6 @@ useEffect(() => {
             onToggleGpsBypass={handleToggleGpsBypass}
             isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
             onCheckIntegrity={handleCheckIntegrity}
-            isAIAssistantOpen={isAIAssistantOpen}
-            setIsAIAssistantOpen={setIsAIAssistantOpen}
             campaignsCount={campaigns.length}
             currentCampaignId={inventory.currentCampaignId}
           />} />
@@ -7390,15 +7362,34 @@ useEffect(() => {
           {screen === AppScreen.BIOMETRIC_REGISTRATION && (
             <BiometricRegistration 
               username={user?.username || user?.email || ''} 
+              mode={biometricRequirement?.mode === 'fallback' ? 'fallback' : 'required'}
+              reason={biometricRequirement?.reason}
               onComplete={() => {
                 // Etapa 2 concluída: libera o gate e devolve ao LOGIN, de onde o
                 // dispatcher pós-login retoma a trilha (CONTRATO DE TRABALHO →
                 // hub do módulo → ENDEREÇO), para qualquer perfil.
                 setBiometricGateDone(true);
+                logAuditEvent({
+                  user_email: user?.email || 'unknown',
+                  action: BIOMETRIC_REGISTER_ACTION,
+                  details: isNativeAppShell()
+                    ? 'Biometria registada neste aparelho (plugin nativo).'
+                    : 'Biometria registada neste aparelho (autenticador de plataforma).',
+                  tenantid: user?.tenantid || ''
+                });
                 popScreen();
               }}
-              onSkip={() => {
+              onSkip={(skipReason) => {
+                // Fallback da Fase 2: dispensa explícita, válida só nesta sessão
+                // e registada na auditoria com o motivo real — aparelho incapaz
+                // (WebView/sem sensor) ou cadastro obrigatório que falhou.
                 setBiometricGateDone(true);
+                logAuditEvent({
+                  user_email: user?.email || 'unknown',
+                  action: BIOMETRIC_FALLBACK_ACTION,
+                  details: biometricReasonText(skipReason),
+                  tenantid: user?.tenantid || ''
+                });
                 popScreen();
               }}
             />
@@ -7596,7 +7587,7 @@ useEffect(() => {
             />
           ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}{screen === AppScreen.SIGNATURE && (userHasPermission(user, 'sign_documents') ? (
             <Signature 
-              assets={filteredAssetsByUnit.filter(a => a._conferido)}
+              assets={filteredAssetsByUnit.filter(a => isConferido(a))}
               onBack={popScreen}
               onConfirm={handleSignatureConfirm}
               unitName={selectedUnit || ''}
@@ -7605,7 +7596,7 @@ useEffect(() => {
           {screen === AppScreen.UNIT_SELECTION && (
             <UnitSelector 
               isAdmin={isAdminUser(user) || canAccessDatabaseManager(user)}
-              isAuditor={!!(user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
+              isAuditor={!!(isFieldAuditorRole(user?.role) || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
               onNavigate={pushScreen}
    onLoadDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
    databaseMode={databaseMode}
@@ -7616,7 +7607,7 @@ useEffect(() => {
        // Se estiver no modo nuvem, mostramos todas para permitir o primeiro sync
        // No modo local, mostramos todas as unidades encontradas na base
        const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
-                  const isAuditor = user?.role === UserRole.AUDITOR || user?.role === UserRole.AUXILIARY_AUDITOR;
+                  const isAuditor = isFieldAuditorRole(user?.role);
                   
                   if (isAdmin) return true; // Admin vê tudo que foi detectado
                   
@@ -7746,6 +7737,8 @@ useEffect(() => {
               user={user}
               contexts={workContexts}
               unitRelease={unitReleaseMap}
+              availableFiliais={unitsByContract}
+              initialSelection={workContextPreselection}
               onSelect={handleWorkContextModuleSelect}
               onOpenAdmin={(target, params) => pushScreen(target, params)}
               onOpenDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
@@ -7789,10 +7782,11 @@ useEffect(() => {
               onUpdateConfigs={handleUpdateUnitConfigs}
               onNavigate={pushScreen}
               initialUnit={screenParams?.unitName || selectedUnit}
-              onBypassApplied={(cfg) => {
-                // Bypass de seguranca (Fase Ancora GPS): grava coordenada padrao e abre a
-                // flag de Campanha para liberar a esteira operacional (ADDRESS_SELECTION > INVENTORY).
-                const unitKey = cfg?.unit_id || selectedUnit || ("UNIDADE");
+              onBypassApplied={(unit) => {
+                // Bypass de seguranca (Fase Ancora GPS): abre a campanha para liberar a
+                // esteira operacional (ADDRESS_SELECTION > INVENTORY) SEM gravar coordenada —
+                // a filial segue em FALTA ANCORA GPS e nenhum ativo recebe GPS inventado.
+                const unitKey = unit || selectedUnit || ("UNIDADE");
                 const bypassCampaignId = `BYPASS_${unitKey}_${Date.now()}`;
                 setInventory(prev => ({ ...prev, currentCampaignId: bypassCampaignId }));
                 sessionStorage.setItem("kardek_campaign_open", bypassCampaignId);
@@ -7922,12 +7916,13 @@ useEffect(() => {
               campaigns={campaigns}
               onRefresh={refreshCampaigns}
               initialUnit={screenParams?.unitName || selectedUnit}
+              initialAction={screenParams?.campaignAction}
               tenantid={currentTenantid}
               unitId={currentUnitId}
               databaseMode={databaseMode}
             />
           ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
-          {screen === AppScreen.GLOBAL_PERFORMANCE && (userHasPermission(user, 'view_global_performance') ? <GlobalPerformance assets={filteredAssetsByUnit} campaigns={campaigns} onBack={() => setHistory([AppScreen.MAIN_MENU])} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
+          {screen === AppScreen.GLOBAL_PERFORMANCE && (userHasPermission(user, 'view_global_performance') ? <GlobalPerformance assets={filteredAssetsByUnit} onBack={() => setHistory([AppScreen.MAIN_MENU])} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.ACCOUNT_RECONCILIATION && (userHasPermission(user, 'view_reconciliation') ? <AccountReconciliation assets={filteredAssetsByUnit} onBack={popScreen} onUpdateAsset={updateAsset} onBulkUpdateAssets={bulkUpdateAssets} /> : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
           {screen === AppScreen.SYNC_MANAGER && (
             <SyncManager 
@@ -7960,7 +7955,6 @@ useEffect(() => {
             pushScreen(AppScreen.ONBOARDING);
           }}
           onOpenPalette={() => setIsPaletteOpen(true)}
-          onOpenAIAssistant={() => setIsAIAssistantOpen(true)}
           isOpen={isHelpMenuOpen}
           onToggle={setIsHelpMenuOpen}
         />
@@ -8079,11 +8073,6 @@ useEffect(() => {
           </motion.div>
         </div>
       )}
-
-      <AIAssistant 
-        isOpen={isAIAssistantOpen} 
-        onClose={() => setIsAIAssistantOpen(false)} 
-      />
 
       <Modal
         isOpen={modalConfig.isOpen}

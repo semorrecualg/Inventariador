@@ -10,16 +10,21 @@ import {
   Calculator,
   ChevronRight,
   Check,
-  Lock
+  Lock,
+  MapPin,
+  Megaphone
 } from 'lucide-react';
 import BackButton from './BackButton';
 import type { NavigationParams, User } from '../types';
-import { AppModule, AppScreen, UserRole } from '../types';
+import { AppModule, AppScreen } from '../types';
 import { isAdminUser } from '../services/rbacService';
+import { isFieldAuditorRole } from '../utils/roles';
 import {
   WorkContext,
   type FilialOption,
+  type WorkContextPreselection,
   buildFilialOptions,
+  canConfirmWorkContext,
   groupContextsByTenant,
   normalizeWorkTenant,
   normalizeWorkFilial
@@ -28,6 +33,7 @@ import { canAccessDatabaseManager } from '../utils/authUtils';
 import {
   describeUnitReleaseMissing,
   readUnitRelease,
+  unitReleaseKey,
   type UnitReleaseMap
 } from '../utils/unitRelease';
 import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
@@ -51,11 +57,29 @@ interface WorkContextSelectorProps {
   /**
    * Navegação administrativa a partir do próprio CONTRATO DE TRABALHO: as
    * liberações exclusivas de ADMIN/MASTER (filiais, campanhas, campos, QR,
-   * base de dados, cargas, licenças). A UNIDADE OPERACIONAL (âncora GPS +
-   * campanha que liberam o inventário) é aberta pelo badge "Âncora e Campanha"
-   * de cada unidade desta tela — o painel não a duplica.
+   * base de dados, cargas, licenças). A liberação da unidade (âncora GPS +
+   * campanha) é aberta pelos dois botões de cada cartão desta tela — o painel
+   * não a duplica e o formulário intermediário não é mais necessário.
    */
   onOpenAdmin?: (screen: AppScreen, params?: NavigationParams) => void;
+  /**
+   * Fase 1 (acesso padronizado): a ÚLTIMA ESCOLHA do usuário chega aqui apenas
+   * como PRÉ-SELEÇÃO (contrato/filial/módulo já apontados) — o seletor deixou de
+   * ser saltado no pós-login. O utilizador confirma em "Acessar o Módulo".
+   */
+  initialSelection?: WorkContextPreselection | null;
+  /**
+   * Unidades que o APP já conhece por contrato (`TENANTID` → filiais) — o
+   * catálogo vivo de ativos, base interna, âncoras, campanhas e lista da nuvem.
+   *
+   * O catálogo da base local (`listContracts`) não enxerga a configuração
+   * operacional gravada SEM contrato e pode vir vazio num aparelho com as
+   * filiais configuradas; era aí que a tela dizia «Nenhuma filial na base deste
+   * contrato» e, ao mesmo tempo, o aviso de liberação apontava uma filial
+   * existente. Esta é a MESMA fonte do mapa de liberação, para que a lista e o
+   * estado de cada unidade nunca divirjam.
+   */
+  availableFiliais?: Record<string, string[]>;
 }
 
 /**
@@ -77,7 +101,9 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   onLogout,
   onOpenDatabase,
   unitRelease,
-  onOpenAdmin
+  onOpenAdmin,
+  initialSelection,
+  availableFiliais
 }) => {
   const groups = groupContextsByTenant(contexts);
 
@@ -94,17 +120,21 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
 
   const selectedTenantBaseline = activeGroup?.tenantid || '';
 
-  const [selectedModule, setSelectedModule] = useState<AppModule | null>(null);
+  // Fase 1: a escolha anterior NÃO salta mais o contrato — entra como
+  // pré-seleção (já validada contra a autorização atual em
+  // `resolveWorkContextPreselection`).
+  const preselectedTenant = initialSelection ? normalizeWorkTenant(initialSelection.tenantid) : '';
+  const [selectedModule, setSelectedModule] = useState<AppModule | null>(initialSelection?.module ?? null);
   // null = ainda não escolheu explicitamente (a tela pré-seleciona a filial do
   // perfil ou a primeira disponível). '' é uma escolha REAL: contrato inteiro.
-  const [selectedFilial, setSelectedFilial] = useState<string | null>(null);
+  const [selectedFilial, setSelectedFilial] = useState<string | null>(initialSelection?.filial || null);
 
   // DONO GLOBAL (admin sem contrato no perfil): o contrato vem da BASE — o
   // tenantid é a primeira coluna dos ativos. Liberado somente pelo gate
   // administrativo; um usuário comum nunca vê os contratos de outros clientes.
   const isGlobalAdmin = !activeGroup && canAccessDatabaseManager(user);
   const [baseContracts, setBaseContracts] = useState<ContractSummary[]>([]);
-  const [manualTenant, setManualTenant] = useState('');
+  const [manualTenant, setManualTenant] = useState(preselectedTenant);
 
   // Catálogo de contratos/filiais da base local: alimenta as opções de filial
   // de TODOS os perfis (leitura local, sem rede).
@@ -122,9 +152,11 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     };
   }, []);
 
-  const selectedTenant = selectedTenantBaseline || manualTenant;
+  // Contrato escolhido pelo utilizador (pré-seleção da última escolha ou toque
+  // num cartão) sobrepõe-se ao contrato do perfil.
+  const selectedTenant = manualTenant || selectedTenantBaseline;
 
-  const isAuditor = user.role === UserRole.AUDITOR || user.role === UserRole.AUXILIARY_AUDITOR;
+  const isAuditor = isFieldAuditorRole(user.role);
   // AUDITOR DE CAMPO: quem não administra a unidade. O admin/master configura a
   // unidade (âncora + campanha) e libera o inventário — para ele esta tela não
   // muda nada.
@@ -137,6 +169,22 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     const tenant = normalizeWorkTenant(selectedTenant);
     return baseContracts.find((c) => normalizeWorkTenant(c.tenantid) === tenant)?.filiais ?? [];
   }, [baseContracts, selectedTenant]);
+
+  // Filiais que o APP já conhece neste contrato (catálogo vivo). Somam-se às da
+  // base local: uma filial configurada sem contrato na configuração operacional
+  // não aparece no catálogo, mas é uma unidade real — e é ela que o aviso de
+  // liberação aponta.
+  const knownFiliais = useMemo(() => {
+    const tenant = normalizeWorkTenant(selectedTenant);
+    const list = (availableFiliais && availableFiliais[tenant]) || [];
+    const out: string[] = [];
+    for (const raw of list) {
+      const f = normalizeWorkFilial(raw);
+      if (!f || f === tenant || out.includes(f)) continue;
+      out.push(f);
+    }
+    return out;
+  }, [availableFiliais, selectedTenant]);
 
   // A lista do perfil manda para quem é de campo; o DONO do contrato (admin/
   // master) administra a unidade inteira, então ele também enxerga as filiais
@@ -152,21 +200,14 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
     const tenant = normalizeWorkTenant(selectedTenant);
     const seen = new Set(authorized.map((o) => normalizeWorkFilial(o.filial)));
     const fromBase: FilialOption[] = [];
-    for (const raw of baseFiliais) {
+    for (const raw of [...baseFiliais, ...knownFiliais]) {
       const f = normalizeWorkFilial(raw);
       if (!f || f === tenant || seen.has(f)) continue;
       seen.add(f);
       fromBase.push({ filial: f, label: f });
     }
     return fromBase.length ? [...authorized, ...fromBase] : authorized;
-  }, [selectedTenant, contexts, baseFiliais, isAdmin]);
-
-  // Pré-seleção: a filial resolvida no login (quando autorizada) ou a primeira
-  // opção. O usuário pode trocar livremente entre as autorizadas.
-  const defaultFilial = filialOptions.some((o) => o.filial === activeFilial)
-    ? activeFilial
-    : (filialOptions[0]?.filial ?? '');
-  const chosenFilial = selectedFilial !== null ? selectedFilial : defaultFilial;
+  }, [selectedTenant, contexts, baseFiliais, knownFiliais, isAdmin]);
 
   // Estado de liberação da filial escolhida: âncora GPS + campanha configuradas
   // pelo administrador. Unidade sem as duas NÃO entra no inventário de campo.
@@ -175,6 +216,32 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   const showRelease = isAuditorOnly || isAdmin;
   const releaseOf = (filial: string) =>
     showRelease && filial ? readUnitRelease(unitRelease, selectedTenant, filial) : null;
+  // Chave EXATA do contrato: a leitura acima é tolerante e atravessa contratos
+  // para o dono global — não serve para decidir se a unidade é desta lista.
+  const exactReleaseOf = (filial: string) =>
+    filial && unitRelease ? unitRelease[unitReleaseKey(selectedTenant, filial)] : undefined;
+
+  // Pré-seleção: a filial resolvida no login (quando autorizada) ou a primeira
+  // opção. O usuário pode trocar livremente entre as autorizadas.
+  const defaultFilial = filialOptions.some((o) => o.filial === activeFilial)
+    ? activeFilial
+    : (filialOptions[0]?.filial ?? '');
+  // A escolha anterior só vale para uma unidade REAL deste contrato: uma opção
+  // da lista ou uma unidade com configuração gravada. Uma escolha antiga de
+  // outra base deixava o rodapé a falar de uma filial que a lista não mostrava
+  // («falta campanha» sem filial para tocar) e o acesso travado, sem saída.
+  const preselectionKnown =
+    selectedFilial !== null &&
+    (filialOptions.some((o) => o.filial === selectedFilial) || !!exactReleaseOf(selectedFilial));
+  const chosenFilial = preselectionKnown ? (selectedFilial as string) : defaultFilial;
+
+  // Unidade pré-selecionada e configurada, mas fora do catálogo local: entra na
+  // lista — é ela que o aviso de liberação está a apontar.
+  const filialOptionsView: FilialOption[] =
+    chosenFilial && !filialOptions.some((o) => o.filial === chosenFilial)
+      ? [...filialOptions, { filial: chosenFilial, label: chosenFilial }]
+      : filialOptions;
+
   const chosenRelease = releaseOf(chosenFilial);
   const chosenPending = chosenRelease && !chosenRelease.released
     ? describeUnitReleaseMissing(chosenRelease)
@@ -184,10 +251,16 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   // INVENTÁRIO — vale para TODOS os perfis, inclusive o admin (bug real: o
   // admin escolhia a unidade "AGUARDANDO LIBERAÇÃO", escolhia INVENTARIADOR e
   // caía na Auditoria Inteligente). O admin não perde o caminho de configuração:
-  // o card e o badge continuam abrindo a Unidade Operacional, onde ele define a
-  // âncora e a campanha que liberam a unidade.
+  // o cartão e os dois botões dele abrem diretamente a âncora e a campanha.
   const blockedByRelease = selectedModule === AppModule.INVENTORY && !!chosenPending;
-  const canProceed = !!selectedTenant && !!selectedModule && !blockedByRelease;
+  // Fase 1: INVENTARIADOR exige FILIAL escolhida (ver `canConfirmWorkContext`).
+  const missingFilialForInventory =
+    selectedModule === AppModule.INVENTORY && !String(chosenFilial || '').trim();
+  const canProceed =
+    !!selectedTenant &&
+    !!selectedModule &&
+    !blockedByRelease &&
+    canConfirmWorkContext(selectedModule, chosenFilial);
 
   const getTenantIdentity = (tenantid: string) => {
     const hash = tenantid.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
@@ -397,13 +470,13 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                 <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted">
                   Filial · Unidade Operacional
                 </p>
-                {filialOptions.length > 1 && (
+                {filialOptionsView.length > 1 && (
                   <span className="text-[8px] font-black uppercase tracking-widest text-ink-muted/50">
-                    {filialOptions.length} opções
+                    {filialOptionsView.length} opções
                   </span>
                 )}
               </div>
-              {filialOptions.length === 0 ? (
+              {filialOptionsView.length === 0 ? (
                 <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3.5">
                   <p className="text-[9px] font-extrabold text-amber-700 uppercase tracking-widest leading-relaxed text-center">
                     Nenhuma filial na base deste contrato — a unidade será escolhida na próxima tela.
@@ -411,25 +484,62 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                 </div>
               ) : (
                 <div className="space-y-2" data-testid="filial-options">
-                  {filialOptions.map((opt) => {
+                  {filialOptionsView.map((opt) => {
                     const isChosen = chosenFilial === opt.filial;
                     const release = releaseOf(opt.filial);
                     const pending = release && !release.released
                       ? describeUnitReleaseMissing(release)
                       : '';
                     const released = !!release?.released;
+                    // Estado de cada uma das DUAS configurações que liberam a
+                    // unidade — é o que colore os botões do cartão (vermelho =
+                    // pendente, verde = OK).
+                    const anchorReady = release?.hasAnchor === true;
+                    // ATIVA libera o inventário; CRIADA (ainda não ativada) já
+                    // existe na filial — o botão fica verde e abre essa campanha,
+                    // em vez de pedir "criar" e gerar duplicado.
+                    const campaignActive = release?.hasCampaign === true;
+                    const campaignReady = release?.hasCampaignRecord === true;
+                    // Sem leitura da unidade, o botão continua acionável e nasce
+                    // vermelho: configurar é sempre seguro.
+                    // O botão da CAMPANHA leva a intenção junto: com campanha
+                    // gravada a tela abre na campanha da filial; sem campanha, já
+                    // no cadastro (botão vermelho).
+                    const campaignParams: NavigationParams = {
+                      unitName: opt.filial,
+                      campaignAction: campaignReady ? 'OPEN' : 'CREATE'
+                    };
+                    const openRelease = (screen: AppScreen, params?: NavigationParams) =>
+                      (event: React.SyntheticEvent) => {
+                        event.stopPropagation();
+                        setSelectedFilial(opt.filial);
+                        onOpenAdmin?.(screen, params || { unitName: opt.filial });
+                      };
+                    const releaseKeyDown = (screen: AppScreen, params?: NavigationParams) =>
+                      (event: React.KeyboardEvent) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          openRelease(screen, params)(event);
+                        }
+                      };
                     return (
                       <button
                         key={opt.filial}
                         type="button"
                         onClick={() => {
-                          // Registra a escolha (o retorno do configurador cai com a
-                          // filial certa) e, para ADMIN/MASTER, abre a configuração
-                          // desta unidade — âncora GPS + campanha — já com a filial
-                          // em parâmetro. O auditor apenas escolhe onde vai inventariar.
+                          // ESCOLHA, não navegação — com uma exceção: ADMIN/
+                          // MASTER numa unidade AGUARDANDO LIBERAÇÃO. Aí o toque
+                          // leva direto ao que falta (a âncora primeiro; com a
+                          // âncora já fixada, a campanha), sem passar pelo
+                          // formulário da UNIDADE OPERACIONAL. Unidade liberada
+                          // (ou auditor) segue só marcando a filial, para não
+                          // quebrar a trilha filial → módulo → ACESSAR.
                           setSelectedFilial(opt.filial);
-                          if (isAdmin) {
-                            onOpenAdmin?.(AppScreen.UNIT_SELECTION, { unitName: opt.filial });
+                          if (isAdmin && pending) {
+                            onOpenAdmin?.(
+                              anchorReady ? AppScreen.CAMPAIGN_MANAGEMENT : AppScreen.UNIT_CONFIGURATOR,
+                              anchorReady ? campaignParams : { unitName: opt.filial }
+                            );
                           }
                         }}
                         aria-pressed={isChosen}
@@ -456,43 +566,69 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                             </p>
                           </div>
                         </div>
-                        {pending ? (
-                          isAdmin ? (
-                            /* BADGE "ÂNCORA E CAMPANHA" (admin/master): abre a UNIDADE
-                               OPERACIONAL — a tela que configura âncora GPS + campanha e
-                               com isso libera o inventário. Antes era só decorativo (o
-                               caminho era Painel Completo → Unidade Operacional) e o
-                               clique não fazia nada. `stopPropagation` impede que o
-                               clique selecione a filial em vez de abrir a config. */
+                        {isAdmin ? (
+                          /* LIBERAÇÃO NO PRÓPRIO CARTÃO (admin/master): um botão
+                             para a ÂNCORA GPS e outro para a CAMPANHA, cada um
+                             com o estado real da unidade — vermelho = pendente,
+                             verde = OK. Abrem a configuração diretamente na
+                             filial, sem o formulário intermediário da UNIDADE
+                             OPERACIONAL. `stopPropagation` impede que o clique
+                             dispare também o toque do cartão. */
+                          <div className="flex items-center space-x-1.5 flex-shrink-0">
                             <div
                               role="button"
                               tabIndex={0}
-                              title="Âncora e campanha que liberam o inventário"
-                              aria-label={`Configurar âncora e campanha de ${opt.label}`}
-                              data-testid={`unit-release-action-${opt.filial}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onOpenAdmin?.(AppScreen.UNIT_SELECTION);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  onOpenAdmin?.(AppScreen.UNIT_SELECTION);
-                                }
-                              }}
-                              className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0 cursor-pointer hover:bg-amber-100 active:scale-95 transition-all"
+                              title={anchorReady
+                                ? `Âncora GPS OK · editar ${opt.label}`
+                                : `Âncora GPS pendente · configurar ${opt.label}`}
+                              aria-label={anchorReady
+                                ? `Âncora GPS de ${opt.label} configurada`
+                                : `Definir âncora GPS de ${opt.label}`}
+                              data-testid={`unit-anchor-action-${opt.filial}`}
+                              data-state={anchorReady ? 'ok' : 'pending'}
+                              onClick={openRelease(AppScreen.UNIT_CONFIGURATOR)}
+                              onKeyDown={releaseKeyDown(AppScreen.UNIT_CONFIGURATOR)}
+                              className={`w-8 h-8 rounded-lg border flex items-center justify-center flex-shrink-0 cursor-pointer active:scale-95 transition-all ${
+                                anchorReady
+                                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'
+                                  : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                              }`}
                             >
-                              <Lock size={14} />
+                              <MapPin size={14} />
                             </div>
-                          ) : (
                             <div
-                              className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0"
-                              title="O administrador define âncora e campanha na Unidade Operacional"
+                              role="button"
+                              tabIndex={0}
+                              title={campaignActive
+                                ? `Campanha OK · ativa · gerenciar ${opt.label}`
+                                : campaignReady
+                                  ? `Campanha criada · ativar/gerenciar ${opt.label}`
+                                  : `Campanha pendente · criar ${opt.label}`}
+                              aria-label={campaignActive
+                                ? `Campanha de ${opt.label} ativa`
+                                : campaignReady
+                                  ? `Campanha de ${opt.label} criada`
+                                  : `Criar campanha de ${opt.label}`}
+                              data-testid={`unit-campaign-action-${opt.filial}`}
+                              data-state={campaignReady ? 'ok' : 'pending'}
+                              onClick={openRelease(AppScreen.CAMPAIGN_MANAGEMENT, campaignParams)}
+                              onKeyDown={releaseKeyDown(AppScreen.CAMPAIGN_MANAGEMENT, campaignParams)}
+                              className={`w-8 h-8 rounded-lg border flex items-center justify-center flex-shrink-0 cursor-pointer active:scale-95 transition-all ${
+                                campaignReady
+                                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'
+                                  : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                              }`}
                             >
-                              <Lock size={14} />
+                              <Megaphone size={14} />
                             </div>
-                          )
+                          </div>
+                        ) : pending ? (
+                          <div
+                            className="w-8 h-8 rounded-full bg-amber-50 border border-amber-100 text-amber-500 flex items-center justify-center flex-shrink-0"
+                            title="O administrador define âncora e campanha nesta unidade"
+                          >
+                            <Lock size={14} />
+                          </div>
                         ) : isChosen ? (
                           <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0">
                             <Check size={16} />
@@ -513,7 +649,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                   </p>
                   <p className="text-[8px] font-bold text-amber-600 uppercase tracking-wider leading-relaxed text-center mt-1">
                     {isAdmin
-                      ? 'Configure âncora e campanha na Unidade Operacional para liberar.'
+                      ? 'Toque na filial ou nos botões para resolver o que falta.'
                       : 'O administrador define âncora e campanha na Unidade Operacional.'}
                   </p>
                 </div>
@@ -580,8 +716,8 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                 (acessos, filiais, campanhas, campos, QR, base, cargas, licenças,
                 integridade, fotos e Protheus) vivem no PAINEL COMPLETO do hub;
                 manter a lista aqui duplicava cada botão sem acrescentar nenhuma
-                regra. A exceção é a UNIDADE OPERACIONAL (âncora + campanha), que
-                é configurada pelo badge de cada unidade, logo acima. */}
+                regra. A exceção é a liberação da unidade (âncora + campanha),
+                configurada pelos botões de cada cartão, logo acima. */}
             {isAdmin && (
               <div>
                 <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
@@ -628,10 +764,17 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
           <ShieldCheck size={15} />
           Acessar o Módulo
         </button>
+        {missingFilialForInventory && (
+          <p className="text-[9px] font-extrabold uppercase tracking-wider text-amber-600 text-center leading-relaxed">
+            {filialOptionsView.length === 0
+              ? 'Este contrato ainda não tem filial na base. Cadastre a filial na Unidade Operacional ou use CONTROLE DE ATIVO, que não exige endereço de campo.'
+              : 'Escolha a filial para entrar no INVENTARIADOR.'}
+          </p>
+        )}
         {blockedByRelease && (
           <p className="text-[9px] font-extrabold uppercase tracking-wider text-amber-600 text-center leading-relaxed">
             {isAdmin
-              ? `Unidade aguardando liberação (falta ${chosenPending}). Configure âncora GPS e campanha na Unidade Operacional.`
+              ? `Unidade aguardando liberação (falta ${chosenPending}). Toque na filial para abrir a configuração.`
               : `Unidade aguardando liberação (falta ${chosenPending}). Peça ao administrador para liberar.`}
           </p>
         )}

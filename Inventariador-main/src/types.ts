@@ -3,7 +3,6 @@ export enum UserRole {
   ADMIN = 'ADMIN',
   MASTER = 'MASTER',
   AUDITOR = 'AUDITOR',
-  AUXILIARY_AUDITOR = 'AUXILIARY_AUDITOR',
   USER = 'USER', // OPERADOR de campo (Trilha C)
   DEMO = 'DEMO',
   MOBILE_SINGLE = 'MOBILE_SINGLE'
@@ -348,9 +347,17 @@ export interface CampaignSnapshot {
   tenantid: string;
 }
 
+/**
+ * Intenção do botão CAMPANHA do cartão da filial: `OPEN` abre direto a
+ * campanha ativa daquela filial; `CREATE` já mostra o cadastro de campanha.
+ */
+export type CampaignOpenIntent = 'CREATE' | 'OPEN';
+
 export interface NavigationParams {
   assets?: Asset[];
   unitName?: string;
+  /** Botão CAMPANHA do cartão da filial: abrir a campanha ativa ou o cadastro. */
+  campaignAction?: CampaignOpenIntent;
   campaign?: InventoryCampaign | null;
   mode?: 'PARTIAL' | 'FINAL';
   responsibleName?: string;

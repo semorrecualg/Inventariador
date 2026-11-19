@@ -7,10 +7,14 @@ import { describe, it, expect } from 'vitest';
 import {
   ACTIVE_CAMPAIGN_CACHE_PREFIX,
   buildUnitReleaseMap,
+  campaignUnitKeys,
   campaignUnitOf,
   collectActiveCampaignUnits,
+  collectConfiguredUnitNames,
+  collectRecordedCampaignUnits,
   describeUnitReleaseMissing,
   isActiveCampaign,
+  isRecordedCampaign,
   isUnitInReleaseSet,
   readActiveCampaignCache,
   readUnitRelease,
@@ -23,6 +27,7 @@ describe('unitRelease · regra âncora + campanha', () => {
     expect(resolveUnitReleaseStatus({ hasAnchor: true, hasCampaign: true })).toEqual({
       hasAnchor: true,
       hasCampaign: true,
+      hasCampaignRecord: true,
       released: true,
       missing: []
     });
@@ -45,6 +50,7 @@ describe('unitRelease · regra âncora + campanha', () => {
     expect(resolveUnitReleaseStatus({})).toEqual({
       hasAnchor: false,
       hasCampaign: false,
+      hasCampaignRecord: false,
       released: false,
       missing: ['ANCHOR', 'CAMPAIGN']
     });
@@ -90,6 +96,53 @@ describe('unitRelease · mapa por contrato + filial', () => {
     expect(describeUnitReleaseMissing(resolveUnitReleaseStatus({ hasAnchor: true }))).toBe('campanha');
     expect(describeUnitReleaseMissing(resolveUnitReleaseStatus({ hasAnchor: true, hasCampaign: true }))).toBe('');
   });
+
+  it('filiais com âncora/campanha entram na lista mesmo sem ativos carregados', () => {
+    // Regressão: o seletor dizia «Nenhuma filial na base deste contrato» num
+    // contrato cuja tabela de ativos ainda não tinha sido baixada, apesar de
+    // âncoras GPS e campanhas gravadas nas filiais.
+    const configs = [
+      { tenantid: 'CICOPAL', filial: '010101_CICOPAL_GO', lat: -16, lng: -49 },
+      { tenantid: 'CICOPAL', unit_id: '010201 SNACKS PA' }
+    ];
+    const campaigns = [
+      { tenantid: 'CICOPAL', _unitid: '010401 CARPER BA', status: 'ACTIVE' },
+      // Mesma filial, outra grafia: não duplica o cartão.
+      { filial: '010101 CICOPAL GO', status: 'ACTIVE' },
+      // Outro contrato não vaza para este.
+      { tenantid: 'OUTRO', filial: '020101 OUTRA CONTRATO' },
+      // Sentinelas nunca são filiais.
+      { tenantid: 'CICOPAL', filial: 'TODAS' },
+      { tenantid: 'CICOPAL', filial: '' }
+    ];
+
+    const nomes = collectConfiguredUnitNames([configs, campaigns], 'CICOPAL');
+
+    expect(nomes).toEqual(['010101 CICOPAL GO', '010201 SNACKS PA', '010401 CARPER BA']);
+  });
+
+  it('sem contrato resolvido aceita os registros que não declaram tenantid', () => {
+    const nomes = collectConfiguredUnitNames([[{ filial: '010101_CICOPAL_GO' }]], '');
+    expect(nomes).toEqual(['010101 CICOPAL GO']);
+  });
+
+  it('campanha criada troca "falta campanha" por "falta ativar a campanha"', () => {
+    // A campanha existe (botão do cartão verde): o pendente é a ativação.
+    expect(
+      describeUnitReleaseMissing(
+        resolveUnitReleaseStatus({ hasAnchor: true, hasCampaignRecord: true })
+      )
+    ).toBe('ativar a campanha');
+    expect(
+      describeUnitReleaseMissing(resolveUnitReleaseStatus({ hasCampaignRecord: true }))
+    ).toBe('âncora GPS e ativar a campanha');
+    // Com campanha ativa não sobra nada a apontar.
+    expect(
+      describeUnitReleaseMissing(
+        resolveUnitReleaseStatus({ hasAnchor: true, hasCampaign: true, hasCampaignRecord: true })
+      )
+    ).toBe('');
+  });
 });
 
 describe('unitRelease · campanha lida do banco persistido', () => {
@@ -98,6 +151,48 @@ describe('unitRelease · campanha lida do banco persistido', () => {
     expect(campaignUnitOf({ unit_id: '010101_CICOPAL_GO' })).toBe('010101_CICOPAL_GO');
     expect(campaignUnitOf({ _unitid: '010101 CICOPAL GO' })).toBe('010101 CICOPAL GO');
     expect(campaignUnitOf({})).toBe('');
+  });
+
+  it('reúne todas as grafias da unidade gravadas na campanha', () => {
+    expect(
+      campaignUnitKeys({ filial: '010101 CICOPAL GO', unit_id: '010101_CICOPAL_GO' })
+    ).toEqual(['010101 CICOPAL GO']);
+    expect(
+      campaignUnitKeys({ filial: 'CICOPAL GO', unit_id: '010101 CICOPAL GO', _unitid: 'MATRIZ' })
+    ).toEqual(['CICOPAL GO', '010101 CICOPAL GO', 'MATRIZ']);
+    expect(campaignUnitKeys({})).toEqual([]);
+  });
+
+  it('campanha apenas CRIADA já conta como gravada, mas não libera o inventário', () => {
+    const status = resolveUnitReleaseStatus({
+      hasAnchor: true,
+      hasCampaign: false,
+      hasCampaignRecord: true
+    });
+
+    expect(status.hasCampaignRecord).toBe(true);
+    expect(status.hasCampaign).toBe(false);
+    expect(status.released).toBe(false);
+    expect(status.missing).toEqual(['CAMPAIGN']);
+    // Ativa implica gravada.
+    expect(resolveUnitReleaseStatus({ hasCampaign: true }).hasCampaignRecord).toBe(true);
+  });
+
+  it('distingue campanha gravada de campanha ativa', () => {
+    expect(isRecordedCampaign({ status: 'CREATED' })).toBe(true);
+    expect(isRecordedCampaign({ status: ' created ' })).toBe(true);
+    expect(isRecordedCampaign({ status: 'ACTIVE' })).toBe(true);
+    expect(isRecordedCampaign({ status: 'CLOSED' })).toBe(false);
+    expect(isRecordedCampaign({})).toBe(false);
+  });
+
+  it('reduz as campanhas GRAVADAS (criadas ou ativas) ao conjunto de unidades', () => {
+    const units = collectRecordedCampaignUnits([
+      { filial: '010101_CICOPAL_GO', status: 'CREATED' },
+      { unit_id: '020202 CICOPAL RJ', status: 'ACTIVE' },
+      { _unitid: '030303 CICOPAL BA', status: 'CLOSED' }
+    ]);
+    expect(Array.from(units).sort()).toEqual(['010101 CICOPAL GO', '020202 CICOPAL RJ']);
   });
 
   it('só ACTIVE libera a unidade', () => {

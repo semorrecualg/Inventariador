@@ -83,7 +83,9 @@ vi.mock('../services/supabaseService', () => ({
   getCampaignSnapshot: vi.fn(),
   createCampaignSnapshot: vi.fn(),
   fetchCampaigns: fetchCampaignsMock,
-  fetchAllCampaigns: vi.fn().mockResolvedValue([])
+  fetchAllCampaigns: vi.fn().mockResolvedValue([]),
+  // Guarda da Fase 1: só exclui campanha sem trabalho de auditoria.
+  campaignAuditWorkCount: vi.fn().mockResolvedValue(0)
 }));
 
 import CampaignManager from '../components/CampaignManager';

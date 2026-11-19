@@ -12,6 +12,9 @@ import {
   ArrowRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { effectiveAssetAddress } from '../utils/assetAddress';
+import { normalizeKey } from '../utils/schema';
+import { isConferido } from '../utils/conferencia';
 
 interface ActiveSearchProps {
   assets: Asset[];
@@ -34,22 +37,28 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
 
   // Filtra apenas os itens não conferidos
   const missingAssets = useMemo(() => {
-    return assets.filter(a => !a._conferido);
+    return assets.filter(a => !isConferido(a));
   }, [assets]);
 
-  // Agrupa por localização (ENDERECO)
+  // Agrupa por ENDEREÇO EFETIVO — MESMA regra do inventário (`assetAddressKey`)
+  // e do ENDEREÇO FÍSICO: `_localMaster` vence `endereco`, e `LOCALIZACAO`/
+  // `CENTRO_CUSTO` também são localidade. Antes só `endereco` contava e o
+  // fallback era «SEM LOCALIZAÇÃO», por isso os ativos sem endereço (que o
+  // ENDEREÇO FÍSICO lista como «SEM LOCAL») não apareciam aqui.
   const groupedByLocation = useMemo(() => {
-    const groups: Record<string, Asset[]> = {};
-    
+    const groups = new Map<string, { label: string; items: Asset[] }>();
+
     missingAssets.forEach(asset => {
-      const loc = asset.endereco || 'SEM LOCALIZAÇÃO';
-      if (!groups[loc]) groups[loc] = [];
-      groups[loc].push(asset);
+      const address = effectiveAssetAddress(asset);
+      const key = normalizeKey(address);
+      const group = groups.get(key);
+      if (group) group.items.push(asset);
+      else groups.set(key, { label: address, items: [asset] });
     });
 
     // Ordena por quantidade de itens faltantes (decrescente)
-    return Object.entries(groups)
-      .sort((a, b) => b[1].length - a[1].length);
+    return Array.from(groups.values())
+      .sort((a, b) => b.items.length - a.items.length);
   }, [missingAssets]);
 
   // Filtra a lista de ativos baseada no termo de busca e localização selecionada
@@ -57,7 +66,7 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
     let list = missingAssets;
     
     if (selectedLocation) {
-      list = list.filter(a => (a.endereco || 'SEM LOCALIZAÇÃO') === selectedLocation);
+      list = list.filter(a => normalizeKey(effectiveAssetAddress(a)) === selectedLocation);
     }
 
     if (committedSearch) {
@@ -154,19 +163,22 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
               <span className="text-[10px] font-bold text-ink-muted">{missingAssets.length}</span>
             </button>
             
-            {groupedByLocation.map(([loc, items]) => (
-              <button
-                key={loc}
-                onClick={() => setSelectedLocation(loc)}
-                className={`w-full p-4 text-left flex items-center justify-between transition-colors ${selectedLocation === loc ? 'bg-accent-soft border-l-4 border-accent' : 'hover:bg-bg-main'}`}
-              >
-                <div className="flex flex-col min-w-0 pr-2">
-                  <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{loc}</span>
-                  <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">Busca Ativa Recomendada</span>
-                </div>
-                <span className="text-[10px] font-bold text-ink-muted shrink-0">{items.length}</span>
-              </button>
-            ))}
+            {groupedByLocation.map(({ label, items }) => {
+              const key = normalizeKey(label);
+              return (
+                <button
+                  key={key}
+                  onClick={() => setSelectedLocation(key)}
+                  className={`w-full p-4 text-left flex items-center justify-between transition-colors ${selectedLocation === key ? 'bg-accent-soft border-l-4 border-accent' : 'hover:bg-bg-main'}`}
+                >
+                  <div className="flex flex-col min-w-0 pr-2">
+                    <span className="text-xs font-bold text-ink uppercase tracking-tight truncate">{label}</span>
+                    <span className="text-[8px] font-bold text-ink-muted uppercase tracking-widest">Busca Ativa Recomendada</span>
+                  </div>
+                  <span className="text-[10px] font-bold text-ink-muted shrink-0">{items.length}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -199,7 +211,7 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
                       <div className="flex items-center space-x-1.5">
                         <MapPin size={10} className="text-ink-muted" />
                         <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest truncate max-w-[150px]">
-                          {asset.endereco || 'SEM LOCAL'}
+                          {effectiveAssetAddress(asset)}
                         </span>
                       </div>
                       <div className="flex items-center space-x-1.5">

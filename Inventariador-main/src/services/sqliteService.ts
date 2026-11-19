@@ -3,6 +3,8 @@ import { Capacitor } from '@capacitor/core';
 import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
+import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
@@ -45,13 +47,35 @@ export interface DexieAsset {
   rad_recno?: string | null;
   _is_synced: number; // 0 or 1
   _is_deleted: number; // 0 or 1
-  _conferido: number; // 0 or 1
+  // 0/1 nas linhas do SQLite; as escritas do Dexie gravam o booleano da
+  // decisão (`utils/conferencia.ts`). O tipo admite todas as grafias que a
+  // regra aceita (`MarcaDeConferencia`): linhas antigas guardaram `'1'`/
+  // `'true'` e o JSON importado também.
+  _conferido: MarcaDeConferencia;
   _plaquetado: number; // 0 or 1
   _aprovado: number; // 0 or 1
   _isNew: number; // 0 or 1
   _is_unitized: number; // 0 or 1
   _is_divergent_baixa: number; // 0 or 1
   _history: string | null;
+  /**
+   * Cópia LITERAL da linha da planilha (21 colunas do contrato), do jeito que
+   * está escrita: sem trim, sem mudança de caixa, sem expurgo e sem colapso de
+   * espaços. É o que garante o retorno 1:1 ao ERP, inclusive para datas e
+   * valores que a app guarda também em formato tipado (`dataaqusic`,
+   * `databaixa`, `vlraquisic`).
+   */
+  _sourceRow?: Record<string, string> | null;
+  /**
+   * Fase 2 — a coluna `primarykey` da planilha, exatamente como escrita. É a
+   * ORIGEM do registo; a identidade do ativo é interna (`primarykey`/`id`), para
+   * duas linhas com a mesma chave de origem não se substituírem na carga.
+   */
+  source_primarykey?: string | null;
+  /** Linha da planilha que originou o registo (1 = primeira linha de dados). */
+  source_row?: number | null;
+  /** Carga (`CARGA-…`) que gravou o registo — rastreio de reimportações. */
+  import_batch?: string | null;
   DE_PARA: string | null;
   _photoUrl: string | null;
   gps_lat: number | null;
@@ -536,7 +560,7 @@ export class SqliteService {
           String(a.filial || '').toUpperCase().trim() === f &&
           String(a.tenantid || '').toUpperCase().trim() === t
         );
-        const checkedAssets = filialAssets.filter(a => a._conferido === 1);
+        const checkedAssets = filialAssets.filter(a => isConferido(a));
         // O rótulo espelha a coluna 'filial' da planilha (filial_raw), sem uppercase
         // nem reformatação. A chave (f) segue normalizada — é identidade, não texto.
         const rotulo = filialAssets.find(a => String(a.filial || '').trim() !== '');
@@ -572,7 +596,7 @@ export class SqliteService {
       }
 
       const totalAssets = assets.length;
-      const checkedAssets = assets.filter(a => a._conferido === 1).length;
+      const checkedAssets = assets.filter(a => isConferido(a)).length;
       const pendingAssets = totalAssets - checkedAssets;
       const discrepancyCount = assets.filter(a => a._is_divergent_baixa === 1).length;
 
@@ -784,7 +808,7 @@ export class SqliteService {
               sn3_recno: asset.sn3_recno !== undefined && asset.sn3_recno !== null ? Number(asset.sn3_recno) : null,
               _is_synced: options?.markSynced ? 1 : (Number(asset._is_synced) === 1 ? 1 : 0),
               _is_deleted: asset._is_deleted ? 1 : 0,
-              _conferido: asset._conferido ? 1 : 0,
+              _conferido: isConferido(asset) ? 1 : 0,
               _auditor: asset._auditor !== undefined && asset._auditor !== null ? String(asset._auditor) : null,
               _dataLeitura: asset._dataLeitura !== undefined && asset._dataLeitura !== null ? String(asset._dataLeitura) : null,
               _plaquetado: asset._plaquetado ? 1 : 0,
@@ -1324,8 +1348,8 @@ export class SqliteService {
       }
 
       const totalAtivos = assets.length;
-      const conferidoAtivos = assets.filter(a => a._conferido === 1).length;
-      const baixadosLocalizados = assets.filter(a => a._conferido === 1 && a.status === 'B').length;
+      const conferidoAtivos = assets.filter(a => isConferido(a)).length;
+      const baixadosLocalizados = assets.filter(a => isConferido(a) && a.status === 'B').length;
       const totalLido = conferidoAtivos;
       const pendentesAtivos = totalAtivos - conferidoAtivos;
       const avancoPercent = totalAtivos > 0 ? Math.round((conferidoAtivos / totalAtivos) * 100) : 0;
@@ -1413,7 +1437,7 @@ export class SqliteService {
           tenantid: String(asset.tenantid || existing?.tenantid || '').trim().toUpperCase(),
           primarykey: primaryKeyVal,
           id: primaryKeyVal,
-          _is_synced: 0
+          ...marcarAlteracaoLocal()
         } as DexieAsset;
         
         await db.ativos.put(updatedItem);

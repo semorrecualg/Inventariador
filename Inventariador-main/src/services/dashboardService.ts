@@ -1,6 +1,7 @@
 import { db, DexieAsset } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
+import { isConferido } from '../utils/conferencia';
 
 export interface MasterDashboardStats {
   tenantid: string;
@@ -78,7 +79,7 @@ export async function getMasterDashboardStats(tenantid: string, userEmail?: stri
     }
 
     const totalAtivos = assets.length;
-    const conferidoAtivos = assets.filter(a => a._conferido === 1).length;
+    const conferidoAtivos = assets.filter(a => isConferido(a)).length;
     const pendentesAtivos = totalAtivos - conferidoAtivos;
     const avancoPercent = totalAtivos > 0 ? Math.round((conferidoAtivos / totalAtivos) * 100) : 0;
 

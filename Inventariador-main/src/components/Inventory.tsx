@@ -15,6 +15,8 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, AppScreen } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
+import { effectiveAssetAddress } from '../utils/assetAddress';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { generateUUID } from '../services/supabaseService';
 import { telemetryService } from '../services/telemetryService';
 import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
@@ -25,10 +27,11 @@ import { queueAssetBackupMirror } from '../services/persistenceService';
 import { sqliteService } from '../services/sqliteService';
 import { MemoryGuardService } from '../services/MemoryGuardService';
 import { normalizeKey } from '../utils/schema';
+import { isConferido, marcarConferido } from '../utils/conferencia';
 import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
-import { findBatchGroup, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
+import { findBatchGroup, findBatchGroupBySearch, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
 import {
   buildCopyForNewItem,
   getDeviceCode,
@@ -93,11 +96,11 @@ const normalizeKeyFast = (s: string | null | undefined) => {
 };
 
 /**
- * Endereço efetivo do ativo — MESMA regra de `getLocationsWithStats` (App.tsx) e
- * do `AddressSelector`: o local auditado (`_localMaster`) vence o endereço da base.
+ * Endereço efetivo do ativo — MESMA regra de `getLocationsWithStats`, do
+ * `AddressSelector`, do App e da busca ativa (`utils/assetAddress`): o local
+ * auditado (`_localMaster`) vence o endereço da base.
  */
-const assetAddressKey = (a: Asset): string =>
-  normalizeKeyFast(a._localMaster || a.endereco || a.LOCALIZACAO || a.CENTRO_CUSTO || 'SEM LOCAL');
+const assetAddressKey = (a: Asset): string => normalizeKeyFast(effectiveAssetAddress(a));
 
 /**
  * Pertence à unidade em auditoria? Tolera divergência de grafia entre `filial`
@@ -312,7 +315,7 @@ const Inventory: React.FC<InventoryProps> = ({
         let recoveredCount = 0;
         for (const backedAsset of backupArray) {
           const currentLocalObj = allAssetsRef.current.find(a => String(a.id) === String(backedAsset.id));
-          const isAlreadyConferido = currentLocalObj && (currentLocalObj._conferido || String(currentLocalObj.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM');
+          const isAlreadyConferido = !!currentLocalObj && isConferido(currentLocalObj);
           
           if (!isAlreadyConferido) {
             logger.info(`>>> [Recovery Boot] Recuperando ativo órfão/pendente de gravação local: ${backedAsset.id} (Etiqueta: ${backedAsset.etiqueta})`);
@@ -681,17 +684,17 @@ const Inventory: React.FC<InventoryProps> = ({
         // Avaliada sobre o estado ANTERIOR (com o `_localMaster` antigo) para detectar
         // a movimentação em tempo real e marcar RE-ADOTADO corretamente.
         const auditTag = resolvePersistedTag(
-          { ...foundAsset, _conferido: true },
+          { ...foundAsset, ...marcarConferido() },
           auditLocation,
           currentUnit
         );
 
         await localDb.assets.update(id, {
-          _conferido: true,
+          ...marcarConferido(),
           ...(isBaixado ? {} : { status: 'CONFERIDO' }),
           TAG_INVENTARIO: auditTag,
           _localMaster: auditLocation,
-          _is_synced: 0
+          ...marcarAlteracaoLocal()
         }, user?.email || 'operador');
 
         // Adiciona um log de auditoria de conferência
@@ -710,10 +713,10 @@ const Inventory: React.FC<InventoryProps> = ({
         // Se tiver o callback onUpdateAsset da prop, notificamos o React para atualizar o state global do app
         const cleanAsset = cleanAndCapitalizeAsset({
           ...foundAsset,
-          _conferido: true,
+          ...marcarConferido(),
           ...(isBaixado ? {} : { status: 'CONFERIDO' }),
           TAG_INVENTARIO: auditTag,
-          _is_synced: 0,
+          ...marcarAlteracaoLocal(),
           _localMaster: auditLocation
         });
         await onUpdateAssetRef.current(cleanAsset);
@@ -780,6 +783,12 @@ const Inventory: React.FC<InventoryProps> = ({
         message: 'Falha no Motor Dexie',
         subText: `Ocorreu uma exceção física: ${err instanceof Error ? err.message : String(err)}`
       });
+
+      // Relança para o Scanner: só ele está por cima da câmara e pode dizer ao
+      // operador que o código foi lido MAS não gravado. Engolir o erro aqui
+      // deixava o scanner a apitar e a mostrar "Lido!" sobre um registo que
+      // nunca entrou na base.
+      throw err;
     } finally {
       setIsPersistingScan(false);
     }
@@ -1130,7 +1139,7 @@ const Inventory: React.FC<InventoryProps> = ({
     for (const a of source) {
       if (!belongsToUnit(a, activeFilialKey)) continue;
 
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      const conferido = isConferido(a);
 
       if (term) {
         const etq = normalizeKeyFast(a.etiqueta || '');
@@ -1140,10 +1149,10 @@ const Inventory: React.FC<InventoryProps> = ({
       } else {
         // Baixado não conferido não entra no giro (o hub só o conta quando localizado).
         const isBaixado = String(a.status || '').toUpperCase().includes('BAIXA') || !!a.databaixa;
-        if (isBaixado && !isConferido) continue;
+        if (isBaixado && !conferido) continue;
       }
 
-      if (activeFilter === 'checked' ? isConferido : !isConferido) result.push(a);
+      if (activeFilter === 'checked' ? conferido : !conferido) result.push(a);
     }
 
     return result.sort((a, b) => {
@@ -1163,7 +1172,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const isSearchResultBatch = useMemo(() => {
     if (!committedSearch || filteredAssets.length <= 1) return false;
-    const pendingInSearch = filteredAssets.filter(a => !a._conferido);
+    const pendingInSearch = filteredAssets.filter(a => !isConferido(a));
     if (pendingInSearch.length <= 1) return false;
     
     const firstEtq = normalizeKey(pendingInSearch[0].etiqueta || "");
@@ -1179,11 +1188,11 @@ const Inventory: React.FC<InventoryProps> = ({
     let checked = 0;
     for (const a of addressAssets) {
       if (!belongsToUnit(a, activeFilialKey)) continue;
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      const conferido = isConferido(a);
       const isBaixado = String(a.status || '').toUpperCase().includes('BAIXA') || !!a.databaixa;
-      if (isBaixado && !isConferido) continue;
+      if (isBaixado && !conferido) continue;
       if (!isBaixado) total++;
-      if (isConferido) {
+      if (conferido) {
         checked++;
         if (isBaixado) total++;
       }
@@ -1194,7 +1203,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const locationProgress = locationStats.total > 0
     ? Math.round((locationStats.checked / locationStats.total) * 100)
     : 0;
-  const pendingSearchCount = filteredAssets.filter(a => !a._conferido).length;
+  const pendingSearchCount = filteredAssets.filter(a => !isConferido(a)).length;
 
   /**
    * Leitura digitada e clique no item usam o MESMO modal de conferência em
@@ -1202,33 +1211,28 @@ const Inventory: React.FC<InventoryProps> = ({
    * a lista para o auditor ver e confirmar, em vez de conferir às cegas.
    */
   const handleConfirmSearchBatch = () => {
-    const pendingInSearch = filteredAssets.filter(a => !a._conferido);
+    const pendingInSearch = filteredAssets.filter(a => !isConferido(a));
     if (pendingInSearch.length === 0) return;
-    const grupo = findBatchGroup(pendingInSearch[0], allAssets, selectedUnit || activeFilialKey);
-    const alvo = grupo.length >= 2 ? grupo : pendingInSearch;
-    setBatchGroup(alvo);
-    setBatchCheckedIds(new Set(alvo.map(a => String(a.id)).filter(Boolean)));
+    // Lote = mesma etiqueta consultada, por CONTER o código digitado (`0058`
+    // acha `A 005830`) e em qualquer endereço. Sem 2+ pendentes dessa etiqueta
+    // não há lote: a lista continua a mostrar o resultado, mas não confere em bloco.
+    const grupo = findBatchGroupBySearch(committedSearch, allAssets, selectedUnit || activeFilialKey);
+    if (grupo.length < 2) return;
+    setBatchGroup(grupo);
+    setBatchCheckedIds(new Set(grupo.map(a => String(a.id)).filter(Boolean)));
     setCommittedSearch('');
     setDisplayValue('');
   };
 
   /**
-   * Leitura digitada: quando o código digitado forma lote (plaqueta ou registro
-   * repetido), abre o modal automaticamente — antes o resultado só aparecia
-   * como lista filtrada e o auditor tinha de conferir um a um.
+   * Leitura digitada: quando o código digitado casa (por conter) com a ETIQUETA
+   * de 2+ pendentes, abre o modal com todos eles — inclusive os que estão em
+   * outro endereço, que passam a ser conferidos no endereço do inventário.
+   * Busca por registro não abre lote: registro repetido junta plaquetas
+   * diferentes, que é justamente o que não pode entrar no mesmo lote.
    */
   useEffect(() => {
-    const term = normalizeKeyFast(committedSearch || '');
-    if (!term) return;
-    const daUnidade = allAssets.filter(a => belongsToUnit(a, activeFilialKey));
-    const alvo = daUnidade.find(a => {
-      if (a._conferido) return false;
-      const etq = normalizeKeyFast(a.etiqueta || '');
-      const reg = normalizeKeyFast(a.registro || '');
-      return etq === term || reg === term;
-    });
-    if (!alvo) return;
-    const grupo = findBatchGroup(alvo, allAssets, selectedUnit || activeFilialKey);
+    const grupo = findBatchGroupBySearch(committedSearch || '', allAssets, selectedUnit || activeFilialKey);
     if (grupo.length < 2) return;
     setBatchGroup(grupo);
     setBatchCheckedIds(new Set(grupo.map(a => String(a.id)).filter(Boolean)));
@@ -1252,7 +1256,7 @@ const Inventory: React.FC<InventoryProps> = ({
         const sameComp = normalizeKey(a.filial || a._unitid || "") === currentCompKey;
         const sUpper = String(a.status || '').toUpperCase();
         const isNotB = !sUpper.includes('BAIXA') && !a.databaixa;
-        return sameEtq && sameComp && isNotB && !a._conferido;
+        return sameEtq && sameComp && isNotB && !isConferido(a);
       });
 
       if (related.length > 1) {
@@ -1266,14 +1270,14 @@ const Inventory: React.FC<InventoryProps> = ({
     // TAG de auditoria calculada e PERSISTIDA na conferência (Regras de Ouro).
     const auditLocation = selectedLocation || asset.endereco || '';
     const preservedTag = resolvePersistedTag(
-      { ...asset, _conferido: true },
+      { ...asset, ...marcarConferido() },
       auditLocation,
       selectedUnit
     );
 
     await handleUpdateAssetWithBackup({
       ...asset,
-      _conferido: true,
+      ...marcarConferido(),
       TAG_INVENTARIO: preservedTag,
       _localMaster: auditLocation
     });
@@ -1285,7 +1289,7 @@ const Inventory: React.FC<InventoryProps> = ({
     const assetCompKey = normalizeKey(asset.filial || asset._unitid || '');
 
     // BLOQUEIO DE SEGURANÇA: Se já foi conferido, mostra modal de duplicidade e impede abertura
-    if (asset._conferido) {
+    if (isConferido(asset)) {
       setDuplicateAsset(asset);
       return;
     }
@@ -1339,7 +1343,7 @@ const Inventory: React.FC<InventoryProps> = ({
     // Filtra apenas os que ainda não foram conferidos para preservar integridade De/Para
     const ids = Array.from(selectedIds).filter(id => {
       const asset = allAssets.find(a => String(a.id) === id);
-      return asset && !asset._conferido;
+      return !!asset && !isConferido(asset);
     });
 
     if (ids.length > 0) {
@@ -1462,10 +1466,10 @@ const Inventory: React.FC<InventoryProps> = ({
         ...manualAsset,
         id: generateUUID(),
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-        _conferido: true,
+        ...marcarConferido(),
         _isNew: true,
         // Item criado no aparelho: tem de subir, então nasce pendente.
-        _is_synced: 0,
+        ...marcarAlteracaoLocal(),
         currentCampaignId: currentCampaignId,
         _localMaster: selectedLocation || ""
     } as Asset;
@@ -1499,7 +1503,7 @@ const Inventory: React.FC<InventoryProps> = ({
   }, [displayValue]);
 
   useEffect(() => {
-    if (filteredAssets.length === 1 && committedSearch && !filteredAssets[0]._conferido) {
+    if (filteredAssets.length === 1 && committedSearch && !isConferido(filteredAssets[0])) {
       searchInputRef.current?.blur();
     }
   }, [filteredAssets, committedSearch]);
@@ -1575,7 +1579,7 @@ const Inventory: React.FC<InventoryProps> = ({
           document.body
         )}
 
-      {/* Modal de Conferência em Lote — plaqueta OU registro repetido (clique e leitura) */}
+      {/* Modal de Conferência em Lote — mesma ETIQUETA consultada (clique e leitura) */}
       {batchGroup.length > 0 && createPortal(
         <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md animate-fadeIn">
           <div className="bg-white w-full max-w-md rounded-[2rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn flex flex-col max-h-[90vh]">
@@ -1763,7 +1767,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
                         const auditLoc = selectedLocation || scannedAsset.endereco || '';
                         const auditTag = resolvePersistedTag(
-                          { ...scannedAsset, _conferido: true },
+                          { ...scannedAsset, ...marcarConferido() },
                           auditLoc,
                           selectedUnit
                         );
@@ -1772,13 +1776,13 @@ const Inventory: React.FC<InventoryProps> = ({
                           ...(assetCompKey !== "" && assetCompKey !== currentCompKey
                             ? { filial: selectedUnit || scannedAsset.filial }
                             : {}),
-                          _conferido: true,
+                          ...marcarConferido(),
                           ...(String(scannedAsset.status || '').toUpperCase().includes('BAIXA') || scannedAsset.databaixa
                             ? {}
                             : { status: 'CONFERIDO' }),
                           TAG_INVENTARIO: auditTag,
                           _localMaster: auditLoc,
-                          _is_synced: 0
+                          ...marcarAlteracaoLocal()
                         };
 
                         const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
@@ -1810,7 +1814,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
                         const auditLoc = selectedLocation || scannedAsset.endereco || '';
                         const auditTag = resolvePersistedTag(
-                          { ...scannedAsset, _conferido: true },
+                          { ...scannedAsset, ...marcarConferido() },
                           auditLoc,
                           selectedUnit
                         );
@@ -1819,13 +1823,13 @@ const Inventory: React.FC<InventoryProps> = ({
                           ...(assetCompKey !== "" && assetCompKey !== currentCompKey
                             ? { filial: selectedUnit || scannedAsset.filial }
                             : {}),
-                          _conferido: true,
+                          ...marcarConferido(),
                           ...(String(scannedAsset.status || '').toUpperCase().includes('BAIXA') || scannedAsset.databaixa
                             ? {}
                             : { status: 'CONFERIDO' }),
                           TAG_INVENTARIO: auditTag,
                           _localMaster: auditLoc,
-                          _is_synced: 0
+                          ...marcarAlteracaoLocal()
                         };
                         
                         const cleanAsset = cleanAndCapitalizeAsset(updatedAsset);
@@ -2444,7 +2448,12 @@ const Inventory: React.FC<InventoryProps> = ({
           onModeChange={onUpdateScannerMode}
           onScan={handleScan}
           onClose={closeScannerForTyping}
-          isPaused={isScannerPaused || isThermalBlocked || isCoolingDown || !!(scannedAsset || scannedResult || duplicateAsset || showGlobalSearchResolution)}
+          // O cooldown de 500 ms NÃO entra aqui: pausar o scanner desligava a
+          // câmara a cada leitura e obrigava a um ciclo completo de
+          // stop/start (libertação + reabertura do sensor) por item — caro em
+          // bateria e em calor. A repetição do mesmo código já é travada pelo
+          // leitor (janela de guarda) e por `isPersistingScan` no `handleScan`.
+          isPaused={isScannerPaused || isThermalBlocked || !!(scannedAsset || scannedResult || duplicateAsset || showGlobalSearchResolution)}
           scanFeedbackMode={scanFeedbackMode}
           batterySaver={batterySaver}
           torch={torch}
@@ -2486,7 +2495,9 @@ const Inventory: React.FC<InventoryProps> = ({
               </button>
             </div>
           )}
-          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center space-x-2 z-50">              <div className={`px-4 py-2 backdrop-blur-md rounded-full flex items-center space-x-3 shadow-2xl border border-white/20 ${isScannerPaused ? 'bg-amber-500/80' : 'bg-success/80'}`}>
+          {/* Sem `backdrop-blur`: o desfoque sobre o vídeo em direto é recalculado
+              a cada frame pelo GPU. O fundo já é 80% opaco, o efeito não se nota. */}
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center space-x-2 z-50">              <div className={`px-4 py-2 rounded-full flex items-center space-x-3 shadow-2xl border border-white/20 ${isScannerPaused ? 'bg-amber-500/80' : 'bg-success/80'}`}>
                 <div className="w-2.5 h-2.5 bg-white rounded-full animate-pulse"></div>
                 <span className="text-xs font-black text-white uppercase tracking-[0.2em]">
                   {isScannerPaused ? 'Scanner Pausado' : 'Scanner Ativo'}
@@ -2673,7 +2684,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     
                     const auditLoc = selectedLocation || scannedAsset.endereco || '';
                     const auditTag = resolvePersistedTag(
-                      { ...scannedAsset, _conferido: true },
+                      { ...scannedAsset, ...marcarConferido() },
                       auditLoc,
                       selectedUnit
                     );
@@ -2682,7 +2693,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       ...(assetCompKey !== "" && assetCompKey !== currentCompKey
                         ? { filial: selectedUnit || scannedAsset.filial }
                         : {}),
-                      _conferido: true,
+                      ...marcarConferido(),
                       TAG_INVENTARIO: auditTag,
                       _localMaster: auditLoc
                     };
