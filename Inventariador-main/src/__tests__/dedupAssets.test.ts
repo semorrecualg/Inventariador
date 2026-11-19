@@ -47,6 +47,21 @@ describe('dedupAssets — plano de limpeza de cópias', () => {
     expect(group.removed.map((r) => r.primarykey).sort()).toEqual(['A', 'C']);
   });
 
+  it('a coluna de auditoria também elege o keeper (a conferência não desaparece)', () => {
+    const rows = [
+      row({ primarykey: 'A', _is_synced: 1 }),
+      row({ primarykey: 'B', AUDITOR_STATUS_CONFERENCIA: 'SIM' }),
+      row({ primarykey: 'C' })
+    ];
+
+    const group = buildDedupPlan(rows).groups[0];
+    // B não tem a flag gravada, mas a planilha diz que está conferido: a cópia
+    // sincronizada de A não pode ganhar e levar a auditoria consigo.
+    expect(group.keeper.primarykey).toBe('B');
+    expect(group.patch._conferido).toBeUndefined();
+    expect(group.removed.map((r) => r.primarykey).sort()).toEqual(['A', 'C']);
+  });
+
   it('prefere o updated_at mais recente quando a linha desceu da nuvem', () => {
     const rows = [
       row({ primarykey: 'A', updated_at: '2026-11-01T00:00:00Z' }),

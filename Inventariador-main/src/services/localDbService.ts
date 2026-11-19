@@ -2,6 +2,7 @@ import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sq
 import { isAdminEmail } from '../utils/authUtils';
 import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
 import { pickAssetAddress } from '../utils/assetAddress';
+import { isConferido } from '../utils/conferencia';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
@@ -514,7 +515,7 @@ export const localDb = {
         LOCALIZACAO: prev.LOCALIZACAO || next.LOCALIZACAO,
         CENTRO_CUSTO: prev.CENTRO_CUSTO || next.CENTRO_CUSTO,
         _conferido:
-          prev._conferido === 1 || next._conferido === 1
+          isConferido(prev) || isConferido(next)
             ? 1
             : (prev._conferido ?? next._conferido),
         // `prev` é sempre a cópia de maior precedência (ordem de `workTables`).
@@ -595,7 +596,7 @@ export const localDb = {
         const key = address !== '' ? address : 'GERAL - NÃO ESPECIFICADO';
         const stats = statsMap.get(key) || { total: 0, checked: 0 };
         stats.total += 1;
-        if (asset._conferido === 1) {
+        if (isConferido(asset)) {
           stats.checked += 1;
         }
         statsMap.set(key, stats);

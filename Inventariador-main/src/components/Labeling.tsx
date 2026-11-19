@@ -6,6 +6,7 @@ import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { formatEtiqueta, formatMonthYearBR } from '../utils/formatUtils';
 import { Virtuoso } from 'react-virtuoso';
 import { localDb } from '../services/localDbService';
+import { isConferido } from '../utils/conferencia';
 
 import { 
   Check,
@@ -96,8 +97,8 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
 
   const filteredAssets = useMemo(() => {
     let base = [...assetsToLabel];
-    if (activeTab === 'checked') base = base.filter(a => !!a._conferido);
-    else base = base.filter(a => !a._conferido);
+    if (activeTab === 'checked') base = base.filter(a => isConferido(a));
+    else base = base.filter(a => !isConferido(a));
 
     if (advDesc) {
        const term = normalizeText(advDesc);
@@ -210,10 +211,10 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
               const isSelected = selectedIds.has(String(asset.id));
               const fullDescription = [asset.qt || '1', asset.descricaodoativo || 'SEM DESCRIÇÃO', asset.serial || 'S/N', formatMonthYearBR(asset.dataaqusic), asset.nomefornecedor || 'FORNECEDOR N/I'].join('; ');
 
-              const isConferido = !!asset._conferido;
+              const conferido = isConferido(asset);
               // Esta lista é, por definição, de itens sem plaqueta: a tag exibida
               // reflete o estado real do emplaquetamento, não o valor persistido.
-              const tagDisplay = isConferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
+              const tagDisplay = conferido ? TagInventario.ETIQUETADO : TagInventario.FALTA_ETIQUETAR;
               const colors = getColors(tagDisplay);
 
               const statusUpper = String(asset.status || '').toUpperCase();
@@ -263,7 +264,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
                       )}
                     </div>
 
-                    {!asset._conferido && !isBatchMode && (
+                    {!conferido && !isBatchMode && (
                       <button onClick={(e) => { 
                         e.stopPropagation(); 
                         onUpdateAsset({

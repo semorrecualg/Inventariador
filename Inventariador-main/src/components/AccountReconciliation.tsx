@@ -3,6 +3,7 @@ import { Virtuoso } from 'react-virtuoso';
 import { Asset, TagInventario } from '../types';
 import { logger } from '../utils/logger';
 import { normalizeFlag } from '../utils/normalize';
+import { isConferido } from '../utils/conferencia';
 import { 
   Search, 
   Filter, 
@@ -82,7 +83,7 @@ interface AssetCardProps {
 }
 
 const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }: AssetCardProps) => {
-  const isConferido = !!asset._conferido;
+  const conferido = isConferido(asset);
   const isSixDigit = isSixDigitNumeric(asset.etiqueta);
   const isLabeling = String(asset.etiqueta || '').toUpperCase().trim() === 'ETIQUETAR';
   const isLocked = isSixDigit || isLabeling;
@@ -92,9 +93,9 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
   const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;
 
   const visualStatus = useMemo(() => {
-    if (isBaixado && !asset._conferido) return TagInventario.BAIXADO;
+    if (isBaixado && !conferido) return TagInventario.BAIXADO;
 
-    if (!asset._conferido) {
+    if (!conferido) {
       const needsLabel =
         normalize(asset.etiqueta || '') === 'ETIQUETAR' ||
         normalize(asset._plaquetaMaster || '') === 'ETIQUETAR';
@@ -123,7 +124,7 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
     }
 
     return TagInventario.CONFERIDO;
-  }, [asset, isBaixado, normalize]);
+  }, [asset, isBaixado, normalize, conferido]);
 
   const getColors = (tag: TagInventario) => {
     switch (tag) {
@@ -152,11 +153,11 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
 
   const colors = useMemo(() => {
     const baseColors = getColors(visualStatus);
-    if (isBaixado && isConferido) {
+    if (isBaixado && conferido) {
       return { ...baseColors, bg: 'bg-red-50', border: 'border-red-200' };
     }
     return baseColors;
-  }, [visualStatus, isBaixado, isConferido]);
+  }, [visualStatus, isBaixado, conferido]);
 
   const isValueZeroForAsset = useMemo(() => {
     const val = asset.vlraquisic;
@@ -269,8 +270,8 @@ const AssetCard = React.memo(({ asset, onToggle, isSelected = false, onSelect }:
           </div>
         </div>
 
-        <div className={`absolute bottom-3 right-3 w-8 h-8 ${isConferido ? (isBaixado ? 'bg-red-400' : 'bg-accent') : 'bg-slate-100 text-slate-400 border border-slate-200'} rounded-lg flex items-center justify-center shadow-md transition-all`}>
-          {isConferido ? <Check size={16} strokeWidth={3} className="text-white" /> : <Circle size={16} />}
+        <div className={`absolute bottom-3 right-3 w-8 h-8 ${conferido ? (isBaixado ? 'bg-red-400' : 'bg-accent') : 'bg-slate-100 text-slate-400 border border-slate-200'} rounded-lg flex items-center justify-center shadow-md transition-all`}>
+          {conferido ? <Check size={16} strokeWidth={3} className="text-white" /> : <Circle size={16} />}
         </div>
       </div>
     </div>
@@ -343,16 +344,17 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
     assets.forEach(asset => {
       const statusUpper = String(asset.status || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;
-      
+      const conferido = isConferido(asset);
+
       // REGRA SÊNIOR: Itens baixados que não foram conferidos não entram no inventário
-      if (isBaixado && !asset._conferido) return;
+      if (isBaixado && !conferido) return;
 
       const account = asset.conta_contabil || 'SEM CONTA';
       if (!stats[account]) {
         stats[account] = { total: 0, checked: 0, totalValue: 0, itemsWithZeroValue: 0 };
       }
       stats[account].total++;
-      if (asset._conferido) {
+      if (conferido) {
         stats[account].checked++;
       }
 
@@ -384,8 +386,10 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       const statusUpper = String(asset.status || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXA') || !!asset.databaixa;
 
+      const conferido = isConferido(asset);
+
       // REGRA SÊNIOR: Itens baixados que não foram conferidos não entram no inventário
-      if (isBaixado && !asset._conferido) return false;
+      if (isBaixado && !conferido) return false;
 
       const account = asset.conta_contabil || 'SEM CONTA';
       const matchesAccount = account === selectedAccount;
@@ -399,8 +403,7 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
 
       if (!matchesAccount || !matchesSearch) return false;
 
-      if (activeFilter === 'checked') return !!asset._conferido;
-      return !asset._conferido;
+      return activeFilter === 'checked' ? conferido : !conferido;
     }).sort((a, b) => {
       if (activeFilter === 'checked') {
         const dateA = a._dataLeitura ? new Date(a._dataLeitura).getTime() : 0;
@@ -417,11 +420,15 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
     const etq = String(asset.etiqueta || '').toUpperCase().trim();
     if (isSixDigitNumeric(etq) || etq === 'ETIQUETAR') return;
     
+    // O que se inverte é o estado pela regra única: um ativo conferido só pela
+    // coluna de auditoria também tem de desmarcar (antes o `!_conferido` dava
+    // `true` e o toque não fazia nada).
+    const conferido = isConferido(asset);
     onUpdateAsset({
       ...asset,
-      _conferido: !asset._conferido,
-      TAG_INVENTARIO: !asset._conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE,
-      _dataLeitura: !asset._conferido ? new Date().toISOString() : undefined
+      _conferido: !conferido,
+      TAG_INVENTARIO: !conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE,
+      _dataLeitura: !conferido ? new Date().toISOString() : undefined
     });
   }, [onUpdateAsset]);
 

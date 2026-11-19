@@ -6,6 +6,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
 import { normalizeDateISO, normalizeNumeric } from '../utils/normalize';
+import { isConferido } from '../utils/conferencia';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { createAssetIdentityAllocator, newImportBatchId, sourcePrimarykeyOf, type AssetIdentityCandidate } from '../utils/assetIdentity';
 import { reconcileImport, ImportReconciliationError, type LoadedAssetRef } from '../utils/importReconciliation';
@@ -546,6 +547,9 @@ export class DatabaseLoaderService {
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
           const contaContabil = literalText(getRowValue(row, 'contacontabil', 'conta_contabil')) || 'SEM CONTA';
           const statusVal = literalText(getRowValue(row, 'status')) || 'Pendente';
+          // A planilha é a fonte da conferência: o texto `status` («CONFERIDO…»)
+          // e a coluna de auditoria dizem a mesma coisa, e quem lê é a regra única.
+          const conferidoNaPlanilha = statusVal.toLowerCase().includes('conferido');
 
           const serialVal = literalText(getRowValue(row, 'serial', 'serial_number'));
           const dataaqVal = normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic'));
@@ -627,7 +631,10 @@ export class DatabaseLoaderService {
             import_batch: importBatch,
             ...marcarAlteracaoLocal(),
             _is_deleted: 0,
-            _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
+            _conferido: isConferido({
+              _conferido: conferidoNaPlanilha,
+              AUDITOR_STATUS_CONFERENCIA: getRowValue(row as Record<string, unknown>, 'AUDITOR_STATUS_CONFERENCIA')
+            }) ? 1 : 0,
             _plaquetado: 0,
             _aprovado: 0,
             _isNew: 0,
@@ -846,6 +853,9 @@ export class DatabaseLoaderService {
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
           const contaContabil = literalText(getRowValue(row, 'contacontabil', 'conta_contabil')) || 'SEM CONTA';
           const statusVal = literalText(getRowValue(row, 'status')) || 'Pendente';
+          // A planilha é a fonte da conferência: o texto `status` («CONFERIDO…»)
+          // e a coluna de auditoria dizem a mesma coisa, e quem lê é a regra única.
+          const conferidoNaPlanilha = statusVal.toLowerCase().includes('conferido');
 
           const serialVal = literalText(getRowValue(row, 'serial', 'serial_number'));
           const dataaqVal = normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic'));
@@ -923,7 +933,10 @@ export class DatabaseLoaderService {
             import_batch: importBatch,
             ...marcarAlteracaoLocal(),
             _is_deleted: 0,
-            _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
+            _conferido: isConferido({
+              _conferido: conferidoNaPlanilha,
+              AUDITOR_STATUS_CONFERENCIA: getRowValue(row as Record<string, unknown>, 'AUDITOR_STATUS_CONFERENCIA')
+            }) ? 1 : 0,
             _plaquetado: 0,
             _aprovado: 0,
             _isNew: 0,

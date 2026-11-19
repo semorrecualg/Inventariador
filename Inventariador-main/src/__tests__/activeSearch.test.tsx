@@ -25,7 +25,10 @@ describe('busca ativa — localização efetiva', () => {
       asset({ id: 'B', etiqueta: 'ET-B', endereco: '151100 PRODUCAO - PV1 MILHO' }),
       // Nenhuma coluna de endereço: é o «SEM LOCAL» do ENDEREÇO FÍSICO.
       asset({ id: 'C', etiqueta: 'ET-C' }),
-      asset({ id: 'D', etiqueta: 'ET-D', endereco: 'JA CONFERIDO', _conferido: 1 })
+      asset({ id: 'D', etiqueta: 'ET-D', endereco: 'JA CONFERIDO', _conferido: 1 }),
+      // Sem a flag, mas com a coluna de auditoria: a regra única também o dá
+      // por conferido, por isso não é item faltante.
+      asset({ id: 'E', etiqueta: 'ET-E', endereco: 'SÓ AUDITORIA', _conferido: 0, AUDITOR_STATUS_CONFERENCIA: 'SIM' })
     ];
 
     render(<ActiveSearch assets={assets} onBack={vi.fn()} onSelectAsset={vi.fn()} />);
@@ -35,6 +38,7 @@ describe('busca ativa — localização efetiva', () => {
     expect(screen.getByText('ET-B')).toBeTruthy();
     expect(screen.getByText('ET-C')).toBeTruthy();
     expect(screen.queryByText('ET-D')).toBeNull();
+    expect(screen.queryByText('ET-E')).toBeNull();
     expect(screen.queryByText('SEM LOCALIZAÇÃO')).toBeNull();
 
     // «SEM LOCAL» filtra apenas o ativo sem nenhuma coluna de endereço.

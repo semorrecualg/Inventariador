@@ -1,5 +1,6 @@
 import { normalizeKey } from './schema';
 import { hasUsableTag } from './etiquetaGroup';
+import { isConferido } from './conferencia';
 
 /**
  * Identidade de um ativo para efeitos de limpeza de cópias:
@@ -18,6 +19,8 @@ export interface DedupRow {
   /** Quando a linha desceu da nuvem, traz `updated_at`; nem sempre existe. */
   updated_at?: string;
   _conferido?: number;
+  /** Coluna de auditoria, quando a linha desceu da planilha/nuvem. */
+  AUDITOR_STATUS_CONFERENCIA?: unknown;
   _is_synced?: number;
   _auditor?: string | null;
   _dataLeitura?: string | null;
@@ -65,8 +68,8 @@ const completenessOf = (row: DedupRow): number =>
  */
 export const pickKeeper = (rows: DedupRow[]): DedupRow =>
   rows.reduce((best, row) => {
-    if (Number(row._conferido) === 1 !== (Number(best._conferido) === 1)) {
-      return Number(row._conferido) === 1 ? row : best;
+    if (isConferido(row) !== isConferido(best)) {
+      return isConferido(row) ? row : best;
     }
     if (recencyOf(row) !== recencyOf(best)) return recencyOf(row) > recencyOf(best) ? row : best;
     if (Number(row._is_synced) === 1 !== (Number(best._is_synced) === 1)) {
@@ -118,10 +121,10 @@ export function buildDedupPlan(rows: DedupRow[]): DedupPlan {
     const keeper = pickKeeper(bucket);
     const removed = bucket.filter((row) => row !== keeper);
     // Conferência de qualquer cópia é preservada no keeper.
-    const conferida = bucket.find((row) => Number(row._conferido) === 1);
+    const conferida = bucket.find((row) => isConferido(row));
     const patch: DedupGroup['patch'] = {};
     if (conferida) {
-      if (Number(keeper._conferido) !== 1) patch._conferido = 1;
+      if (!isConferido(keeper)) patch._conferido = 1;
       const auditor = bucket.find((row) => row._auditor);
       const dataLeitura = bucket.find((row) => row._dataLeitura);
       if (!keeper._auditor && auditor?._auditor) patch._auditor = auditor._auditor;

@@ -4,6 +4,7 @@ import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
+import { isConferido } from '../utils/conferencia';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
@@ -555,7 +556,7 @@ export class SqliteService {
           String(a.filial || '').toUpperCase().trim() === f &&
           String(a.tenantid || '').toUpperCase().trim() === t
         );
-        const checkedAssets = filialAssets.filter(a => a._conferido === 1);
+        const checkedAssets = filialAssets.filter(a => isConferido(a));
         // O rótulo espelha a coluna 'filial' da planilha (filial_raw), sem uppercase
         // nem reformatação. A chave (f) segue normalizada — é identidade, não texto.
         const rotulo = filialAssets.find(a => String(a.filial || '').trim() !== '');
@@ -591,7 +592,7 @@ export class SqliteService {
       }
 
       const totalAssets = assets.length;
-      const checkedAssets = assets.filter(a => a._conferido === 1).length;
+      const checkedAssets = assets.filter(a => isConferido(a)).length;
       const pendingAssets = totalAssets - checkedAssets;
       const discrepancyCount = assets.filter(a => a._is_divergent_baixa === 1).length;
 
@@ -803,7 +804,7 @@ export class SqliteService {
               sn3_recno: asset.sn3_recno !== undefined && asset.sn3_recno !== null ? Number(asset.sn3_recno) : null,
               _is_synced: options?.markSynced ? 1 : (Number(asset._is_synced) === 1 ? 1 : 0),
               _is_deleted: asset._is_deleted ? 1 : 0,
-              _conferido: asset._conferido ? 1 : 0,
+              _conferido: isConferido(asset) ? 1 : 0,
               _auditor: asset._auditor !== undefined && asset._auditor !== null ? String(asset._auditor) : null,
               _dataLeitura: asset._dataLeitura !== undefined && asset._dataLeitura !== null ? String(asset._dataLeitura) : null,
               _plaquetado: asset._plaquetado ? 1 : 0,
@@ -1343,8 +1344,8 @@ export class SqliteService {
       }
 
       const totalAtivos = assets.length;
-      const conferidoAtivos = assets.filter(a => a._conferido === 1).length;
-      const baixadosLocalizados = assets.filter(a => a._conferido === 1 && a.status === 'B').length;
+      const conferidoAtivos = assets.filter(a => isConferido(a)).length;
+      const baixadosLocalizados = assets.filter(a => isConferido(a) && a.status === 'B').length;
       const totalLido = conferidoAtivos;
       const pendentesAtivos = totalAtivos - conferidoAtivos;
       const avancoPercent = totalAtivos > 0 ? Math.round((conferidoAtivos / totalAtivos) * 100) : 0;
