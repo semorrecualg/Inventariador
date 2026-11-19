@@ -1,3 +1,4 @@
+import { isValidCoordinate } from './gpsCore';
 import { normalizeKey } from './schema';
 import { isRevokedAnchor } from './revokedAnchors';
 
@@ -12,13 +13,22 @@ export interface AnchorRecordFields {
 }
 
 /**
- * Guarda Defensiva: só considera âncora real coordenadas finitas e não-zero.
+ * Guarda Defensiva: só considera âncora real uma coordenada geograficamente
+ * válida (`isValidCoordinate`: faixas de latitude/longitude e rejeição do par
+ * `(0,0)`) e com os dois componentes diferentes de zero.
+ *
+ * O zero continua a ser convenção de "ausente" — uma chave `gps_lng_<unidade>`
+ * faltando no `sessionStorage` é lida como `0`, e aceitar esse valor colocaria a
+ * unidade em cima do meridiano de Greenwich. Testar só "finito e não-zero"
+ * aceitava `lat 500`/`lng 999` como âncora real.
+ *
  * Usada tanto pelo caminho de estado (`unitConfigs`) quanto pela varredura de
  * armazenamento durável — fonte única de verdade (coberta por testes).
+ *
+ * @see docs/GPS_ANCORA_E_MAPA_DE_CALOR.md §2 (item 7) e §3.1
  */
 export const hasRealAnchor = (lat: unknown, lng: unknown): boolean =>
-  Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) &&
-  Number(lat) !== 0 && Number(lng) !== 0;
+  isValidCoordinate(lat, lng) && Number(lat) !== 0 && Number(lng) !== 0;
 
 /**
  * Âncora CONFIGURADA para a unidade — qualquer proveniência.
