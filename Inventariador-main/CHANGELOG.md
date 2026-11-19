@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — «CONFERIDO» passa a ter uma regra e uma escrita só
+
+- **Uma definição da regra:** os contadores (unidade, painel, conciliação), a
+  etiquetagem, a busca ativa, o seletor de unidade e a deduplicação de cópias
+  liam a conferência cada um à sua maneira — uns `_conferido === 1`, outros
+  `!!_conferido`, outros só a coluna de auditoria
+  (`AUDITOR_STATUS_CONFERENCIA === 'SIM'`). Todos passam a ler `isConferido`
+  (`src/utils/conferencia.ts`), que aceita a flag em qualquer das grafias
+  (`true`, `1`, `'1'`) e a coluna de auditoria. Deixa de haver ativo contado
+  como pendente num ecrã e conferido noutro só porque a marca veio da coluna.
+- **Uma escrita para marcar e desmarcar:** cada ecrã montava o patch à mão —
+  uns `_conferido: 1`, outros `true`, uns com `_dataLeitura`, outros sem —, e o
+  desmarcar de um não resistia ao envio do outro. `marcarConferido` e
+  `desmarcarConferido` são agora o par único (com `alternarConferencia` no
+  toque), gravado pelo cartão do inventário, pelo detalhe do ativo, pela
+  conciliação, pela etiquetagem, pela persistência e pelo espelho local; o
+  tipo local `_conferido` passa a aceitar `number | boolean`.
+- **Desmarcar apaga todas as provas de conferência:** o `status` textual com
+  «CONFERIDO» é marcador lido pelo envio e pelo pull da nuvem, por isso
+  desmarcar só a flag deixava o item voltar conferido na sincronização
+  seguinte. `statusAoDesmarcar` troca **só** o marcador por `PENDENTE` (um
+  status de outro teor fica como está), a coluna de auditoria vai a `NAO` e a
+  `_dataLeitura` é apagada. O filho criado na unitarização deixou de herdar o
+  `status` conferido do pai.
+- **A conferência da planilha sobrevive ao Gestor de Base:** a carga gravava
+  `_conferido: 0` fixo, pelo que um arquivo já conferido entrava inteiro como
+  pendente. A linha passa a ler o `status` e a coluna de auditoria pelo
+  predicado — o mesmo caminho que a exportação usa para devolver o estado.
+- **A exportação devolve o estado pela regra:** o de-para e a coluna de
+  auditoria do Excel/CSV saíam de `_conferido === 1`, e um ativo conferido pela
+  coluna de auditoria era exportado como «NAO».
+- **A nuvem lê o predicado:** `buildPayload` e `conferidoDaNuvem` deixaram de
+  repetir a derivação à mão; a coluna remota `conferido` é aceita em qualquer
+  das grafias (`true`, `1`, `'1'`, `'true'`) e o conflito do pull e o
+  enriquecimento GPS no arranque também. O marcador `status` com CONFERIDO
+  continua a valer — é o backfill dos registos anteriores à coluna.
+- **O gate deixou de ter exceções:** `conferenciaUsoUnico.test.ts` já não
+  carrega lista de sítios por migrar e falha em qualquer cópia da regra — e em
+  qualquer comparação de `AUDITOR_STATUS_CONFERENCIA` com `'SIM'` fora do
+  predicado. A cobertura nova fixa a escrita (`conferidoEscrita`), o desmarcar
+  (`conferidoDesmarcar`), a exportação (`conferidoExportacao`), os contadores e
+  a conciliação (`conferidoSitios`), a leitura da nuvem
+  (`cloudConferenciaLeitura`, `mapCloudAssetRow`) e a importação verbatim da
+  planilha (`importVerbatim`).
+
+### Adicionado — a conferência passa a ser verificável fora do app
+
+- **Prova da carga da planilha a correr no CI:** `provaCargaPlanilha.test.ts`
+  estava sempre `skipped` — existia, mas nunca provava nada. O passo dos testes
+  do `ci.yml` passa a definir `PROVA_CARGA_SINTETICA=1`, e a prova importa
+  4.000 linhas pelo caminho real do Gestor de Base (duas filiais, chaves de
+  origem repetidas e linhas sem chave), comparando planilha N · base N linha
+  por linha. Se a variável desaparecer do workflow, o ficheiro falha em vez de
+  voltar a saltar em silêncio; na máquina continua opt-in (`npm run
+  prova:carga`), para não pesar cada `npm test`.
+- **Diagnóstico da conferência na nuvem:**
+  `scripts/assets-conferencia-diagnostico.sql` reúne em blocos A–E, somente
+  leitura, a verificação da migração (colunas e índice), o backfill do marcador
+  legado, o autor e a data da leitura, o volume e o ritmo por filial, as chaves
+  de origem repetidas e um veredicto de cinco linhas.
+  `docs/DIAGNOSTICO_CONFERENCIA.md` diz a ordem dos passos e o que fazer em
+  cada falha, e `diagnosticoConferencia.test.ts` impede que o SQL ganhe
+  DML/DDL fora dos comentários ou se afaste da migração e do documento.
+
 ### Corrigido — Leitura de código de barras, lanterna e zoom do scanner
 
 - **Leitura 1D a 10 leituras/s:** a configuração anterior limitava a câmara a
