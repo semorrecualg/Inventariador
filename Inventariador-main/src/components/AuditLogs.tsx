@@ -45,6 +45,37 @@ interface AuditLogDB {
   origin?: string;
 }
 
+/** Ações que a trilha de ATIVOS mostra. */
+const ASSET_LOG_ACTIONS = new Set([
+  'CREATE', 'INSERT', 'UPDATE', 'DELETE', 'IMPAIRMENT', 'UNITARIZAÇÃO',
+  'ACQUISITION', 'TRANSFER', 'SALE', 'WRITE_OFF', 'RECONCILIAÇÃO'
+]);
+
+const isAssetLog = (log: AuditLogDB): boolean => {
+  const table = String(log.table_name || '').toLowerCase();
+  if (table === 'assets' || table === 'ativos') return true;
+  return ASSET_LOG_ACTIONS.has(String(log.action || '').toUpperCase());
+};
+
+const logKey = (log: AuditLogDB): string =>
+  log.id || `${log.timestamp}|${log.action}|${log.user_email}|${log.record_id || ''}`;
+
+/**
+ * Une a trilha da nuvem com a do aparelho. As duas fontes descrevem o mesmo
+ * evento quando o log local também chegou ao Supabase, por isso a chave evita
+ * a linha repetida; a ordem é sempre a mais recente primeiro.
+ */
+const mergeLogs = (cloudLogs: AuditLogDB[], localLogs: AuditLogDB[]): AuditLogDB[] => {
+  const byKey = new Map<string, AuditLogDB>();
+  [...cloudLogs, ...localLogs].forEach(log => {
+    const key = logKey(log);
+    if (!byKey.has(key)) byKey.set(key, { ...log, id: key });
+  });
+  return Array.from(byKey.values()).sort(
+    (a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || ''))
+  );
+};
+
 const JsonDiff = ({ oldData, newData }: { oldData: any, newData: any }) => { // eslint-disable-line @typescript-eslint/no-explicit-any
   if (!oldData || !newData) return null;
   
@@ -102,24 +133,36 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
     const loadLogs = async () => {
       setLoading(true);
       try {
-        const tenantid = user?.tenantid || user?.tenantid || user?.tenantid;
-        if (databaseMode.startsWith('SUPABASE') && tenantid) {
-          const data = logType === 'SYSTEM' 
-            ? await fetchAuditLogs(tenantid)
-            : await fetchAssetLogs(tenantid);
-          
-          const normalizedData = (data as Record<string, any>[]).map(log => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
-            ...log,
-            record_id: String(log.record_id || log.asset_id || ''),
-            table_name: (log.table_name || (logType === 'ASSET' ? 'assets' : '')) as string,
-            tenantid: (log.tenantid || log.tenantid || log.tenantid) as string
-          }));
+        // A trilha do APARELHO é a que sempre existe: a conferência grava em
+        // `audit_logs` (Dexie) por `auditService`, e isso nunca sobe para o
+        // Supabase. Ler só `asset_logs`/`audit_logs` da nuvem deixava o ecrã
+        // VAZIO num aparelho que acabou de conferir (modo SUPABASE).
+        const localLogs = (await localDb.auditLogs.reverse().limit(200).toArray()) as unknown as AuditLogDB[];
+        const tenantid = String(user?.tenantid || '').trim();
 
-          setLogs(normalizedData as AuditLogDB[]);
-        } else if (databaseMode === DatabaseMode.INTERNAL) {
-          const localLogs = await localDb.auditLogs.reverse().limit(200).toArray();
-          setLogs(localLogs as unknown as AuditLogDB[]);
+        let cloudLogs: AuditLogDB[] = [];
+        if (databaseMode.startsWith('SUPABASE') && tenantid) {
+          try {
+            const data = logType === 'SYSTEM'
+              ? await fetchAuditLogs(tenantid)
+              : await fetchAssetLogs(tenantid);
+
+            cloudLogs = (data as Record<string, any>[]).map(log => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+              ...log,
+              record_id: String(log.record_id || log.asset_id || ''),
+              table_name: (log.table_name || (logType === 'ASSET' ? 'assets' : '')) as string,
+              tenantid: String(log.tenantid || tenantid)
+            })) as AuditLogDB[];
+          } catch (cloudErr) {
+            // Sem rede ou sem as tabelas: a trilha do aparelho continua a abrir.
+            logger.warn('Trilha da nuvem indisponível; a mostrar a do aparelho:', cloudErr);
+          }
         }
+
+        const localForType = localLogs.filter(log =>
+          logType === 'ASSET' ? isAssetLog(log) : !isAssetLog(log)
+        );
+        setLogs(mergeLogs(cloudLogs, localForType));
       } catch (error) {
         logger.error('Erro ao carregar logs:', error);
       } finally {

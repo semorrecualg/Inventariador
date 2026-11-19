@@ -12,6 +12,7 @@ import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../util
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { isRevokedAnchor } from '../utils/revokedAnchors';
 import { isConferido } from '../utils/conferencia';
+import { assetGpsPair } from '../utils/assetGps';
 import { resolveCanonicalUnitAnchor } from '../utils/unitAnchorPriority';
 import { buildUnitConfigRowPayload } from '../utils/unitConfigPayload';
 import { buildUnitFlags, mergeUnitFlags } from '../utils/unitConfigFlags';
@@ -1221,6 +1222,13 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
           const num = Number(val);
           return isNaN(num) ? null : num;
         })(),
+        // PONTE GPS: a conferência grava `latitude`/`longitude` e a nuvem só tem
+        // `gps_lat`/`gps_lng`. Sem esta conversão o ponto ficava no aparelho e a
+        // linha subia sem coordenada.
+        ...(() => {
+          const gps = assetGpsPair(cleanAsset);
+          return { gps_lat: gps ? gps.lat : null, gps_lng: gps ? gps.lng : null };
+        })(),
         // CONFERÊNCIA (quem e quando): viaja no schema quando as colunas existem
         // (scripts/assets-conferencia.sql). Se ainda não existirem, o sendBatch
         // remove a coluna e reenvia o lote — nunca derruba a sincronização.
@@ -2315,6 +2323,10 @@ export const comConferenciaLocal = (row: Record<string, unknown>): Record<string
 export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
   const tId = String(row.tenantid || '').trim().toUpperCase();
   const uId = String(row.filial || row.unit_id || row.unitid || '').trim().toUpperCase();
+  // PONTE GPS: a nuvem devolve o ponto em `gps_lat`/`gps_lng`, mas a ficha
+  // (`AssetDetail`) e o mapa de calor leem `latitude`/`longitude`. Sem esta
+  // conversão a base descia com o GPS na linha crua e a ficha abria vazia.
+  const gps = assetGpsPair(row);
 
   return {
     ...(row as unknown as Asset),
@@ -2322,6 +2334,7 @@ export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
     tenantid: tId,
     filial: uId,
     unitid: uId, // Legado
+    ...(gps ? { latitude: gps.lat, longitude: gps.lng, gps_lat: gps.lat, gps_lng: gps.lng } : {}),
     ...camposDeConferencia(row),
   };
 };

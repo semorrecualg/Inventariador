@@ -5440,11 +5440,12 @@ useEffect(() => {
       // posição marcada como bypass (âncora), venha de onde vier.
       let loc: import('./utils/gpsUtils').GpsLocation | null = null;
       if (shouldAttemptAssetGpsCapture({ bypassed: isGpsBypassed, battery: metrics.battery })) {
-        loc = await Promise.race([
-          getCurrentLocation(),
-          new Promise<null>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 3000))
-        ]).catch(e => {
-          logger.warn('>>> [GPS] Falha na captura rápida; registro segue sem coordenada:', e);
+        // A captura corre DEPOIS do commit local, fora do caminho do toque: não
+        // há razão para a cortar aos 3 s. `getCurrentLocation` já tem os seus
+        // próprios limites (10 s nativo, 5 s web) e devolve `null` sem fix;
+        // cortar aqui só perdia a leitura que estava prestes a chegar.
+        loc = await getCurrentLocation().catch(e => {
+          logger.warn('>>> [GPS] Falha na captura; registro segue sem coordenada:', e);
           return null;
         });
       } else {
@@ -5469,6 +5470,11 @@ useEffect(() => {
       const patch = {
         latitude: loc.lat,
         longitude: loc.lng,
+        // Espelho local na grafia da nuvem: o envio prefere `latitude`, mas a
+        // linha antiga guardava o ponto anterior em `gps_lat`/`gps_lng` — sem
+        // esta actualização os dois pares divergiam no mesmo registo.
+        gps_lat: loc.lat,
+        gps_lng: loc.lng,
         _altitude_metros: loc.altitude || 0,
         _id_andar: andar,
         _history: history
@@ -5551,7 +5557,7 @@ useEffect(() => {
     };
 
     // Commit local + estado visual imediatamente; GPS e nuvem não bloqueiam o
-    // toque. A captura de posição (até 3 s) corre depois e completa o registro.
+    // toque. A captura de posição corre depois e completa o registro.
     const committed = await commitAssetUpdate(assetWithHistory, { deferCloud: isConferido(updatedAsset) });
     dirtyAssetsRef.current.add(String(assetWithHistory.id));
 

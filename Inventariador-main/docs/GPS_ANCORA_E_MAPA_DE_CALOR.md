@@ -137,7 +137,9 @@ Regras:
 
 ## 3.4 Contrato de `null` e consumo (atualizado)
 
-- `getCurrentLocation()` e `getCurrentDeviceLocation()` **não têm mais coordenada fixa de Goiânia**. Sem leitura válida e precisa (≤ 50 m) e sem âncora da unidade, devolvem `null`.
+- `getCurrentLocation()` e `getCurrentDeviceLocation()` **não têm mais coordenada fixa de Goiânia**. Sem leitura válida e utilizável e sem âncora da unidade, devolvem `null`.
+- A captura pontual do ativo aceita até ao limite de **descarte** (`DISCARD`, 150 m), e não só até aos 50 m de `COLLECT`: uma leitura de 60–150 m ainda situa o ativo no mapa de calor, e recusá-la deixava a conferência sem GPS em aparelhos cujo sensor não chega aos 50 m. Acima de 150 m continua a ser ruído e é recusado.
+- A captura do ativo já não é cortada por um prazo próprio de 3 s: corre depois do commit local e usa os limites do próprio sensor (10 s nativo, 5 s web), devolvendo `null` quando não há fix.
 - Chamadores tratam `null`: o cadastro de ativo (`AssetControlModule`) não grava coordenada e mostra aviso ao usuário; o registro de lote (`App.tsx`) segue sem coordenada; o guard de conformidade (`GPSComplianceGuard`) mostra "sem sinal".
 - `startAutonomousTracking` passa toda leitura por `GpsJitterFilter`; só leituras aceitas atualizam a última posição. As rejeitadas são logadas e não são guardadas. O filtro é zerado (`reset`) ao parar o rastreamento.
 - Mapa de calor (`AssetMap.tsx`): todos os pontos, o contador e as agregações passam por `hasValidCoords` (que delega a `isValidCoordinate`). Nenhum outro consumidor lê lat/lng cru para plotar.
@@ -149,6 +151,12 @@ Regras:
 - Captura pontual de ativo usa `getPreciseFix()` (alta precisão, cache de 10s), chamada apenas ao salvar.
 
 ### 3.6 Schema do banco
+
+O ponto do ativo viaja entre as duas grafias por uma única ponte
+(`src/utils/assetGps.ts`): `latitude`/`longitude` no app e `gps_lat`/`gps_lng`
+na tabela `assets`. A ponte é usada no envio (`syncAssetsToCloud`), no ciclo de
+fundo (`processDataSyncQueue`), no pull (`mapCloudAssetRow`) e na gravação
+local (`bulkInsertAssetsOfflineFirst`), que antes descartava `latitude`.
 
 **Não alterado nesta entrega.** O código novo não exige colunas novas: lat/lng continuam em `latitude`/`longitude` e `gps_lat`/`gps_lng`. A proposta da seção 5 (precisão, origem e data no servidor) é uma decisão de migração e fica para depois da aprovação do usuário.
 
