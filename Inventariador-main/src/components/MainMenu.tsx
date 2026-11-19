@@ -7,6 +7,7 @@ import { isAdminUser, isAuditorUser } from '../services/rbacService';
 import { canAccessDatabaseManager } from '../utils/authUtils';
 import Modal from './Modal';
 import BackButton from './BackButton';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 import { 
   Info,
   Download, 
@@ -38,7 +39,6 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import SecurityPinModal from './SecurityPinModal';
-import AIChatModal from './AIChatModal';
 import PreferencesPanel from './PreferencesPanel';
 
 import { sqliteService } from '../services/sqliteService';
@@ -101,8 +101,6 @@ interface MainMenuProps {
   isGpsBypassed?: boolean;
   onCheckIntegrity?: () => Promise<{ success: boolean; message: string }>;
   showModal: (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => void;
-  isAIAssistantOpen: boolean;
-  setIsAIAssistantOpen: (val: boolean) => void;
   onOpenHelp?: () => void;
   campaignsCount?: number;
   currentCampaignId?: string | null;
@@ -158,8 +156,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
   isGpsBypassed = false,
   onCheckIntegrity,
   showModal,
-  isAIAssistantOpen,
-  setIsAIAssistantOpen,
   onOpenHelp
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
@@ -501,12 +497,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
       <div className="p-4 bg-surface border-t border-border flex items-center justify-center">
         <span className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.4em]">Auditoria Inteligente • SaaS</span>
       </div>
-
-      <AIChatModal 
-        isOpen={isAIAssistantOpen}
-        onClose={() => setIsAIAssistantOpen(false)}
-        username={user?.username || 'Operador'}
-      />
 
       {isAdminMenuOpen && (
         <div className="fixed inset-0 z-[10000] bg-white/95 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-6 pt-28 pb-12 animate-fadeIn no-scrollbar">
@@ -1394,7 +1384,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <BackButton onClick={() => setIsDocModalOpen(false)} label="Voltar" />
               <div>
                 <h2 className="text-lg font-black uppercase tracking-tight">Manual do Sistema</h2>
-                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">Inventariador GBR v2.6</p>
+                <p className="text-[9px] font-bold text-white/70 uppercase tracking-[0.2em]">Inventariador GBR {APP_VERSION_LABEL}</p>
               </div>
             </div>
           </div>
@@ -1403,14 +1393,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <div className="max-w-3xl mx-auto prose prose-slate prose-sm prose-emerald">
               <div className="bg-white border border-border rounded-3xl p-6 md:p-10 shadow-sm mb-10 markdown-body">
                 <ReactMarkdown>
-                  {`# Documentação Técnica e Operacional - Inventariador GBR v2.6
+                  {`# Documentação Técnica e Operacional - Inventariador GBR ${APP_VERSION_LABEL}
 
 Este documento serve como o manual oficial e registro técnico de todas as funcionalidades operacionais do sistema de Inventário de Ativo Imobilizado.
 
 ---
 
 ## 1. Visão Geral do Sistema
-O **Inventariador GBR v2.6** é uma solução avançada para gestão de inventário físico de ativos imobilizados, projetada para auditores e gestores de patrimônio. O sistema foca em precisão, rastreabilidade e integração com ERPs (especificamente Protheus SIGAATF).
+O **Inventariador GBR ${APP_VERSION_LABEL}** é uma solução avançada para gestão de inventário físico de ativos imobilizados, projetada para auditores e gestores de patrimônio. O sistema foca em precisão, rastreabilidade e integração com ERPs (especificamente Protheus SIGAATF).
 
 ### 1.1. Pilares do Sistema
 - **Protocolo de Auditoria**: Regras rigorosas de eliminação e tratamento de dados (Ativos vs. Baixados).
@@ -1492,7 +1482,7 @@ O sistema possui um módulo dedicado para comunicação com o ERP TOTVS Protheus
 
 ---
 *Documentação atualizada em: 18 de Março de 2026*
-*Versão do App: 24.50.03*`}
+*Versão do App: ${APP_VERSION_LABEL}*`}
                 </ReactMarkdown>
               </div>
             </div>

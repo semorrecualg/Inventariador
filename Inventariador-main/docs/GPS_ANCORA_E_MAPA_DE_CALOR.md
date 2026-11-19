@@ -4,7 +4,7 @@ Documento de referência do subsistema de posição do app. Cobre **onde cada pe
 vive**, **como elas se ligam hoje**, **o que foi corrigido** e **qual é o modelo
 canônico** de coordenada que as rotinas internas devem consumir.
 
-Complementa `docs/ARCHITECTURE.md` e `docs/VISAO_MALHA_AUDITORIA_CAMPO.md`.
+Complementa `docs/ARCHITECTURE.md`.
 
 ---
 
@@ -15,7 +15,7 @@ Complementa `docs/ARCHITECTURE.md` e `docs/VISAO_MALHA_AUDITORIA_CAMPO.md`.
 | Arquivo | Papel |
 |---|---|
 | `src/utils/gpsCore.ts` | **Núcleo único** (novo): validação, faixas de precisão, filtro anti-jitter, suavização e conversão de leitura. Puro, sem React/Capacitor. |
-| `src/utils/gpsUtils.ts` | Porta de entrada do sensor: `getPreciseFix()` (leitura real ou `null`), `getCurrentDeviceLocation()` (com contingência marcada), `getCurrentLocation()` (cache de 30s), `startAutonomousTracking` / `stopAutonomousTracking` (`watchPosition`), `calculateDistance`, `convertAltitudeToFloor`. |
+| `src/utils/gpsUtils.ts` | Porta de entrada do sensor: `getPreciseFix()` (leitura real ou `null`), `getCurrentDeviceLocation()` (contingência só com âncora da unidade; sem ela, `null`), `getCurrentLocation()` (cache de 30s; `null` sem leitura precisa), `startAutonomousTracking` / `stopAutonomousTracking` (`watchPosition`), `calculateDistance`, `convertAltitudeToFloor`. |
 | `src/components/PermissionGate.tsx` | Pede a permissão de localização (`@capacitor/geolocation`). |
 | `src/services/permissionsService.ts` | Verifica/concede permissões de GPS no fluxo de onboarding. |
 
@@ -132,6 +132,25 @@ Regras:
 | `COLLECT` | 50 m | carimbar posição do ativo e decidir geocerca |
 | `DISCARD` | 150 m | acima disto é ruído: fora do mapa |
 | `MAX_JUMP_METERS` | 300 m | salto considerado impossível |
+
+---
+
+## 3.4 Contrato de `null` e consumo (atualizado)
+
+- `getCurrentLocation()` e `getCurrentDeviceLocation()` **não têm mais coordenada fixa de Goiânia**. Sem leitura válida e precisa (≤ 50 m) e sem âncora da unidade, devolvem `null`.
+- Chamadores tratam `null`: o cadastro de ativo (`AssetControlModule`) não grava coordenada e mostra aviso ao usuário; o registro de lote (`App.tsx`) segue sem coordenada; o guard de conformidade (`GPSComplianceGuard`) mostra "sem sinal".
+- `startAutonomousTracking` passa toda leitura por `GpsJitterFilter`; só leituras aceitas atualizam a última posição. As rejeitadas são logadas e não são guardadas. O filtro é zerado (`reset`) ao parar o rastreamento.
+- Mapa de calor (`AssetMap.tsx`): todos os pontos, o contador e as agregações passam por `hasValidCoords` (que delega a `isValidCoordinate`). Nenhum outro consumidor lê lat/lng cru para plotar.
+
+### 3.5 Bateria (valores escolhidos)
+
+- `watchPosition`: `enableHighAccuracy: false` (rede/Wi-Fi), `maximumAge: 60000` (no máximo 1 leitura por minuto aproveitada), `timeout: 15000`.
+- O watch só existe enquanto o rastreamento é necessário: parado no unmount do efeito de Field Mode ou quando a funcionalidade é desligada.
+- Captura pontual de ativo usa `getPreciseFix()` (alta precisão, cache de 10s), chamada apenas ao salvar.
+
+### 3.6 Schema do banco
+
+**Não alterado nesta entrega.** O código novo não exige colunas novas: lat/lng continuam em `latitude`/`longitude` e `gps_lat`/`gps_lng`. A proposta da seção 5 (precisão, origem e data no servidor) é uma decisão de migração e fica para depois da aprovação do usuário.
 
 ---
 

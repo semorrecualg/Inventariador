@@ -4,7 +4,7 @@
   "engines": {
     "node": ">=20"
   },
-  "version": "2.7.3",
+  "version": "2.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,9 @@
     "prepare": "husky",
     "postinstall": "node scripts/postinstall.cjs",
     "test": "vitest run",
+    "prova:carga": "vitest run src/__tests__/provaCargaPlanilha.test.ts",
     "verify:governanca": "node scripts/verify-governance.cjs",
+    "check:docs": "node scripts/check-docs.cjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug",
@@ -22,6 +24,7 @@
     "test:e2e:install": "npx playwright install --with-deps"
   },
   "dependencies": {
+    "@aparajita/capacitor-biometric-auth": "8.0.2",
     "@capacitor-community/sqlite": "^6.0.0",
     "@capacitor/android": "^6.2.1",
     "@capacitor/app": "^6.0.0",
@@ -32,7 +35,6 @@
     "@capacitor/geolocation": "^6.0.0",
     "@capacitor/keyboard": "^6.0.0",
     "@capawesome/capacitor-file-picker": "^8.0.3",
-    "@google/genai": "^2.0.1",
     "@supabase/supabase-js": "^2.105.4",
     "@tailwindcss/postcss": "^4.2.1",
     "@tailwindcss/vite": "^4.2.1",

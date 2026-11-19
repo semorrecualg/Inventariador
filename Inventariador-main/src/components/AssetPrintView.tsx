@@ -2,6 +2,8 @@
 import React from 'react';
 import { Asset, InventoryCampaign, CampaignStatus } from '../types';
 import { ArrowLeft, Printer, ShieldCheck, AlertCircle } from 'lucide-react';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
+import { isConferido } from '../utils/conferencia';
 
 interface AssetPrintViewProps {
   assets: Asset[];
@@ -150,7 +152,7 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
                     <div className="space-y-1">
                       <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em]">Status Auditoria</p>
                       <p className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full inline-block ${
-                          asset._conferido ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                          isConferido(asset) ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
                       }`}>
                           {asset.TAG_INVENTARIO || 'PENDENTE'}
                       </p>
@@ -245,7 +247,7 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
 
           <div className="text-center space-y-2">
             <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
-                Relatório Gerado via GBR Auditoria Patrimonial v24.50 Expert
+                Relatório Gerado via GBR Auditoria Patrimonial {APP_VERSION_LABEL} Expert
             </p>
             <p className="text-[9px] font-bold text-slate-400 uppercase max-w-lg mx-auto leading-tight italic">
                 &quot;Este laudo reflete a conformidade dos ativos físicos com os registros contábeis, atendendo às diretrizes do CPC 27 e NBC TG 27, validado via auditoria de campo georreferenciada.&quot;

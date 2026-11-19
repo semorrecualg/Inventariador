@@ -31,7 +31,6 @@ O modo de banco é definido pelas credenciais de ambiente:
 | `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` | Ativa o modo **SUPABASE** (nuvem multi-tenant) |
 | (ausentes) | Modo **INTERNAL** — 100% offline, sem chamadas de rede |
 | `VITE_ADMIN_EMAIL` | E-mail admin (default `semorr@gmail.com`) |
-| `GEMINI_API_KEY` | Insights de IA (`geminiService`) — opcional |
 
 ## Comandos
 

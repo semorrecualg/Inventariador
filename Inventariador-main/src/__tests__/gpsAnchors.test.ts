@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   hasRealAnchor,
+  isConfiguredAnchorRecord,
   collectGpsAnchorsFromStorage,
-  mergeUnitConfigIntoList
+  mergeUnitConfigIntoList,
+  unitConfigUnitOf,
+  findUnitConfigForUnit
 } from '../utils/gpsAnchors';
+import { buildUnitReleaseMap, readUnitRelease } from '../utils/unitRelease';
 
 /** Mock mínimo de Storage (sem jsdom) — expõe length/key/getItem como propriedade/métodos. */
 const makeStorage = (initial: Record<string, string> = {}) => {
@@ -33,6 +37,19 @@ describe('hasRealAnchor', () => {
     expect(hasRealAnchor(undefined, undefined)).toBe(false);
     expect(hasRealAnchor(NaN, NaN)).toBe(false);
     expect(hasRealAnchor('abc', '-49.1')).toBe(false);
+  });
+});
+
+describe('isConfiguredAnchorRecord', () => {
+  it('aceita âncora fixada à mão: o FIXAR ÂNCORA GPS configura a unidade', () => {
+    expect(isConfiguredAnchorRecord({ lat: -15.79, lng: -47.88, source: 'manual' })).toBe(true);
+    expect(isConfiguredAnchorRecord({ lat: -15.79, lng: -47.88, source: 'sensor' })).toBe(true);
+    expect(isConfiguredAnchorRecord({ lat: -15.79, lng: -47.88 })).toBe(true);
+  });
+  it('rejeita coordenada ausente ou zero', () => {
+    expect(isConfiguredAnchorRecord({ lat: 0, lng: 0, source: 'manual' })).toBe(false);
+    expect(isConfiguredAnchorRecord(null)).toBe(false);
+    expect(isConfiguredAnchorRecord(undefined)).toBe(false);
   });
 });
 
@@ -74,16 +91,60 @@ describe('collectGpsAnchorsFromStorage', () => {
     expect(anchors.has('OK')).toBe(true);
   });
 
+  it('conta âncora PERSISTIDA com pino manual (FIXAR ÂNCORA GPS)', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_MANUAL': JSON.stringify({
+        filial: 'MANUAL',
+        lat: -15.7,
+        lng: -47.9,
+        source: 'manual'
+      })
+    });
+    expect(collectGpsAnchorsFromStorage(local, makeStorage()).has('MANUAL')).toBe(true);
+  });
+
+  it('conta âncora gravada com source sensor', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_SENSOR': JSON.stringify({
+        filial: 'SENSOR',
+        lat: -15.7,
+        lng: -47.9,
+        source: 'sensor'
+      })
+    });
+    expect(collectGpsAnchorsFromStorage(local, makeStorage()).has('SENSOR')).toBe(true);
+  });
+
   it('não quebra com JSON malformado (ignora o registro)', () => {
     const local = makeStorage({ 'kardek_gps_ancora_QUEBRADA': '{not-json' });
     expect(() => collectGpsAnchorsFromStorage(local, makeStorage())).not.toThrow();
     expect(collectGpsAnchorsFromStorage(local, makeStorage()).size).toBe(0);
   });
 
-  it('coleta pares gps_lat_/gps_lng_ do sessionStorage', () => {
+  it('coleta pares gps_lat_/gps_lng_ do sessionStorage com config de sensor salva', () => {
+    const session = makeStorage({
+      'gps_lat_010105 CICOPAL PA': '-15.7',
+      'gps_lng_010105 CICOPAL PA': '-47.9',
+      'unit_gps_config_010105 CICOPAL PA': JSON.stringify({ source: 'sensor' })
+    });
+    const anchors = collectGpsAnchorsFromStorage(makeStorage(), session);
+    expect(anchors.has('010105 CICOPAL PA')).toBe(true);
+  });
+
+  it('não conta rascunho de sessão sem config salva (posicionamento manual)', () => {
     const session = makeStorage({
       'gps_lat_010105 CICOPAL PA': '-15.7',
       'gps_lng_010105 CICOPAL PA': '-47.9'
+    });
+    const anchors = collectGpsAnchorsFromStorage(makeStorage(), session);
+    expect(anchors.has('010105 CICOPAL PA')).toBe(false);
+  });
+
+  it('conta par de sessão de unidade cuja âncora salva é manual', () => {
+    const session = makeStorage({
+      'gps_lat_010105 CICOPAL PA': '-15.7',
+      'gps_lng_010105 CICOPAL PA': '-47.9',
+      'unit_gps_config_010105 CICOPAL PA': JSON.stringify({ source: 'manual' })
     });
     const anchors = collectGpsAnchorsFromStorage(makeStorage(), session);
     expect(anchors.has('010105 CICOPAL PA')).toBe(true);
@@ -105,6 +166,77 @@ describe('collectGpsAnchorsFromStorage', () => {
     };
     expect(() => collectGpsAnchorsFromStorage(throwing, makeStorage())).not.toThrow();
     expect(collectGpsAnchorsFromStorage(throwing, makeStorage()).size).toBe(0);
+  });
+});
+
+describe('âncora fixada → liberação da unidade (pipeline do App)', () => {
+  it('unidade com âncora manual PERSISTIDA e campanha ativa fica liberada', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_MATRIZ': JSON.stringify({
+        filial: 'MATRIZ',
+        lat: -15.7942,
+        lng: -47.8825,
+        source: 'manual'
+      })
+    });
+    const unitsWithGps = collectGpsAnchorsFromStorage(local, makeStorage());
+    const map = buildUnitReleaseMap([
+      {
+        name: 'MATRIZ',
+        tenantid: 'DEMO_DEFAULT',
+        hasAnchor: unitsWithGps.has('MATRIZ'),
+        hasCampaign: true
+      }
+    ]);
+    expect(readUnitRelease(map, 'DEMO_DEFAULT', 'MATRIZ')).toMatchObject({
+      hasAnchor: true,
+      released: true,
+      missing: []
+    });
+  });
+
+  it('cada filial guarda a sua própria âncora (não há âncora global)', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_010101 CICOPAL GO': JSON.stringify({
+        filial: '010101 CICOPAL GO', lat: -16.7, lng: -49.1, source: 'manual'
+      }),
+      'kardek_gps_ancora_010401 CARPER BA': JSON.stringify({
+        filial: '010401 CARPER BA', lat: -12.9, lng: -38.5, source: 'sensor'
+      })
+    });
+    const unitsWithGps = collectGpsAnchorsFromStorage(local, makeStorage());
+    expect(unitsWithGps.has('010101 CICOPAL GO')).toBe(true);
+    expect(unitsWithGps.has('010401 CARPER BA')).toBe(true);
+    expect(unitsWithGps.has('010201 SNACKS PA')).toBe(false);
+  });
+});
+
+describe('âncoras revogadas (apagadas na nuvem em 2026-11-16)', () => {
+  it('não conta a âncora revogada que ficou no localStorage do aparelho', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_010101 CICOPAL GO': JSON.stringify({
+        filial: '010101 CICOPAL GO', lat: -15.7942, lng: -47.8825, source: 'manual'
+      })
+    });
+    expect(collectGpsAnchorsFromStorage(local, makeStorage()).has('010101 CICOPAL GO')).toBe(false);
+  });
+
+  it('conta a mesma unidade depois de reposicionada noutro ponto', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_010101 CICOPAL GO': JSON.stringify({
+        filial: '010101 CICOPAL GO', lat: -16.68, lng: -49.25, source: 'manual'
+      })
+    });
+    expect(collectGpsAnchorsFromStorage(local, makeStorage()).has('010101 CICOPAL GO')).toBe(true);
+  });
+
+  it('não conta par de sessão com a coordenada revogada', () => {
+    const session = makeStorage({
+      'gps_lat_MATRIZ': '-16.7067189',
+      'gps_lng_MATRIZ': '-49.1064217',
+      'unit_gps_config_MATRIZ': JSON.stringify({ source: 'manual' })
+    });
+    expect(collectGpsAnchorsFromStorage(makeStorage(), session).has('MATRIZ')).toBe(false);
   });
 });
 
@@ -138,5 +270,34 @@ describe('mergeUnitConfigIntoList (contrato onUpdateConfigs)', () => {
   it('trata config sem unit_id como nova entrada', () => {
     const result = mergeUnitConfigIntoList([{ unit_id: 'A' }], { filial: 'SEM_ID' });
     expect(result).toHaveLength(2);
+  });
+});
+
+describe('findUnitConfigForUnit (âncora da filial no mapa)', () => {
+  it('lê o nome da unidade pela filial canônica e pelos legados', () => {
+    expect(unitConfigUnitOf({ filial: '010101 CICOPAL GO', unit_id: 'X' })).toBe('010101 CICOPAL GO');
+    expect(unitConfigUnitOf({ unit_id: 'SNACKS' })).toBe('SNACKS');
+    expect(unitConfigUnitOf({ _unitid: 'LEGADO' })).toBe('LEGADO');
+    expect(unitConfigUnitOf(null)).toBe('');
+  });
+
+  it('encontra âncora gravada só com `filial` (sem unit_id)', () => {
+    const configs = [
+      { filial: '010105 CICOPAL PA', lat: -16.7, lng: -49.1 },
+      { filial: '010101 CICOPAL GO', lat: -16.68, lng: -49.25 }
+    ];
+    const found = findUnitConfigForUnit(configs, '010101 CICOPAL GO');
+    expect(found?.lat).toBe(-16.68);
+  });
+
+  it('tolera caixa, underscore e hífen na comparação', () => {
+    const configs = [{ unit_id: '010101_CICOPAL-GO', lat: -16.68, lng: -49.25 }];
+    expect(findUnitConfigForUnit(configs, '010101 cicopal go')?.lat).toBe(-16.68);
+  });
+
+  it('devolve null quando a unidade não tem registro ou o nome está vazio', () => {
+    expect(findUnitConfigForUnit([{ filial: 'OUTRA', lat: 1, lng: 2 }], '010101 CICOPAL GO')).toBeNull();
+    expect(findUnitConfigForUnit([], 'MATRIZ')).toBeNull();
+    expect(findUnitConfigForUnit([{ filial: 'MATRIZ', lat: 1, lng: 2 }], '')).toBeNull();
   });
 });

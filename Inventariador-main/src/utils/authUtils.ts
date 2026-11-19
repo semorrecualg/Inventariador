@@ -11,6 +11,7 @@
  */
 
 import { User, UserRole } from '../types';
+import { canonicalRole } from './roles';
 
 /**
  * The configured admin email address.
@@ -83,8 +84,8 @@ export const isLocalAdminIdentity = (
  */
 export const isAdminRole = (role: string | null | undefined): boolean => {
   if (!role) return false;
-  const upper = role.toUpperCase().trim();
-  return upper === 'ADMIN' || upper === 'MASTER' || upper === 'GESTOR';
+  const upper = canonicalRole(role);
+  return upper === 'ADMIN' || upper === 'MASTER';
 };
 
 /**

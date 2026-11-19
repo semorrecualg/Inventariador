@@ -1,11 +1,16 @@
 import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
 import * as XLSX from 'xlsx';
-import { db, DexieAsset } from './sqliteService';
+import { db, DexieAsset, invalidateTenantCaseMarker } from './sqliteService';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
-import { normalizeFieldValue, normalizeDateISO, normalizeNumeric } from '../utils/normalize';
+import { normalizeDateISO, normalizeNumeric } from '../utils/normalize';
+import { isConferido } from '../utils/conferencia';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
+import { createAssetIdentityAllocator, newImportBatchId, sourcePrimarykeyOf, type AssetIdentityCandidate } from '../utils/assetIdentity';
+import { reconcileImport, ImportReconciliationError, type LoadedAssetRef } from '../utils/importReconciliation';
+import { reportRecnoCollisions } from './recnoGuardService';
 
 export interface AtivoPlanilha {
   tag?: string | number;
@@ -81,6 +86,54 @@ const CONTRACT_HEADERS = [
 
 const CONTRACT_HEADERS_TEXT = CONTRACT_HEADERS.join(';');
 
+/**
+ * CÓPIA LITERAL DA PLANILHA — regra da carga.
+ *
+ * O valor é gravado EXATAMENTE como está na célula: sem `trim`, sem mudança de
+ * caixa, sem expurgo de espaços/separadores e sem colapso de espaços duplos.
+ * Antes, `etiqueta`/`tag` passavam por `sanitizeAssetKey` e `008810 CICOPAL`
+ * entrava na base como `008810CICOPAL` — o registo deixava de ser a cópia do
+ * arquivo e não voltava 1:1 para o ERP.
+ *
+ * A identidade do registo continua a ser a chave canónica (`primarykey`
+ * calculada por `utils/assetIdentity`), que é interna e não substitui o dado.
+ */
+const literalText = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null;
+  return String(value);
+};
+
+/** Linha da planilha copiada campo a campo, com os 21 cabeçalhos do contrato. */
+const sourceRowLiteral = (row: Record<string, unknown>): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const header of CONTRACT_HEADERS) {
+    const value = getRowValue(row, header);
+    out[header] = value === null || value === undefined ? '' : String(value);
+  }
+  return out;
+};
+
+/**
+ * Valor de aquisição para a coluna numérica. Aceita número, `1.234,56`,
+ * `R$ 1.234,56` e `1234.56`. O texto original fica em `_sourceRow.vlraquisic`;
+ * aqui só se evita gravar `0` para um valor que a planilha trazia.
+ */
+const parseAssetValue = (raw: unknown): { value: number; invalid: boolean } => {
+  if (raw === null || raw === undefined || raw === '') return { value: 0, invalid: false };
+  if (typeof raw === 'number') return Number.isNaN(raw) ? { value: 0, invalid: true } : { value: raw, invalid: false };
+
+  const cleanStr = String(raw).replace(/[R$\s]/gi, '');
+  let value: number;
+  if (cleanStr.includes(',') && cleanStr.includes('.')) {
+    value = parseFloat(cleanStr.replace(/\./g, '').replace(/,/g, '.'));
+  } else if (cleanStr.includes(',')) {
+    value = parseFloat(cleanStr.replace(/,/g, '.'));
+  } else {
+    value = parseFloat(cleanStr);
+  }
+  return Number.isNaN(value) ? { value: 0, invalid: true } : { value, invalid: false };
+};
+
 function normalizeHeaderKey(value: unknown): string {
   return String(value ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '');
 }
@@ -153,6 +206,86 @@ export class DatabaseLoaderService {
   private BATCH_SIZE = 200;
   private static CHUNK_SIZE = 200; // Política SRE imperativa
 
+
+  /**
+   * Guardião suave de duplicidade por `tenantid + filial + sn1_recno`: roda no
+   * fim da carga, compara etiqueta/descrição/valor e registra em `audit_logs` o
+   * que divergir. Falha aqui NUNCA derruba a carga.
+   */
+  private static async reportRecnoAfterLoad(): Promise<void> {
+    try {
+      await reportRecnoCollisions('CARGA_PLANILHA');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn('[RECNO] Falha ao verificar duplicidade por recno após a carga:', message);
+    }
+  }
+
+  /**
+   * RECONCILIAÇÃO DA CARGA (planilha × base, por filial).
+   *
+   * Lê de volta da base as chaves que esta carga mandou gravar e exige
+   * `planilha N = base N`. Se o `bulkPut` substituiu uma linha (chave repetida
+   * no arquivo) ou trocou a filial (mesma chave noutra filial), a carga para
+   * aqui, com o relatório no terminal e em `audit_logs` — em vez de devolver
+   * "sucesso" contando linhas que não ficaram na base.
+   */
+  private static async verifyLoadedRows(carregadas: LoadedAssetRef[]): Promise<void> {
+    if (carregadas.length === 0) return;
+
+    const found: LoadedAssetRef[] = [];
+    const READ_CHUNK = 500;
+    const unique = new Map<string, [string, string]>();
+    for (const ref of carregadas) {
+      unique.set(`${ref.tenantid}\u0000${ref.primarykey}`, [ref.tenantid, ref.primarykey]);
+    }
+    const keys = Array.from(unique.values());
+
+    for (let i = 0; i < keys.length; i += READ_CHUNK) {
+      const lote = keys.slice(i, i + READ_CHUNK);
+      const rows = (await db.local_assets
+        .where('[tenantid+primarykey]')
+        .anyOf(lote)
+        .toArray()) as unknown as DexieAsset[];
+      rows.forEach((row) => {
+        found.push({
+          tenantid: String(row.tenantid ?? ''),
+          filial: String(row.filial_raw || row.filial || ''),
+          primarykey: String(row.primarykey ?? '')
+        });
+      });
+    }
+
+    const report = reconcileImport(carregadas, found);
+    report.lines.forEach((line) => (report.ok ? logger.info(line) : logger.error(line)));
+
+    try {
+      await db.audit_logs.put({
+        id: `RECON_${Date.now()}_${Math.random().toString(36).slice(2, 9).toUpperCase()}`,
+        usuario: 'CARGA_PLANILHA',
+        acao: 'IMPORT_RECONCILIATION',
+        tabela: 'local_assets',
+        registro_id: String(report.planilha),
+        details: report.lines.join(' · '),
+        delta: JSON.stringify({
+          ok: report.ok,
+          planilha: report.planilha,
+          gravadas: report.gravadas,
+          distinctKeys: report.distinctKeys,
+          duplicateKeys: report.duplicateKeys,
+          missing: report.missing,
+          wrongFilial: report.wrongFilial,
+          perFilial: report.perFilial
+        }),
+        updated_at: new Date().toISOString()
+      });
+    } catch (auditErr) {
+      logger.warn('[CARGA] Falha ao registar a reconciliação em audit_logs:', auditErr);
+    }
+
+    if (!report.ok) throw new ImportReconciliationError(report);
+  }
+
   static async extrairDadosDaPlanilha(file: Blob): Promise<unknown[]> {
     const reader = new FileReader();
     const dataBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
@@ -178,23 +311,55 @@ export class DatabaseLoaderService {
   }
 
   static async injetarDadosEmLotes(dadosBrutos: unknown[], onProgresso?: (porcentagem: number) => void): Promise<number> {
+    // Carga nova pode reintroduzir tenantid não canónico: invalida o marcador.
+    await invalidateTenantCaseMarker();
     let registrosProcessados = 0;
+    // Fase 2 — identidade INTERNA + proveniência da linha (source_row/import_batch).
+    const importBatch = newImportBatchId();
+    const identityCandidate = (row: Record<string, unknown>): AssetIdentityCandidate => ({
+      tenantid: String(getRowValue(row, 'tenantid') || '').trim().toUpperCase(),
+      filial: mirrorFilial(row.filial),
+      sourcePrimarykey: getRowValue(row, 'primarykey'),
+      etiqueta: getRowValue(row, 'etiqueta', 'tag'),
+      tag: getRowValue(row, 'tag'),
+      row
+    });
+    // O arquivo inteiro é pré-contado: uma base repetida deixa de ser identidade.
+    const identities = createAssetIdentityAllocator()
+      .prime((dadosBrutos as Record<string, unknown>[]).map(identityCandidate));
+    // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
+    const carregadas: LoadedAssetRef[] = [];
 
     for (let i = 0; i < dadosBrutos.length; i += this.CHUNK_SIZE) {
       const loteBruto = dadosBrutos.slice(i, i + this.CHUNK_SIZE) as Record<string, unknown>[];
       
-      const loteHigienizado: DexieAsset[] = loteBruto.map((row) => {
-        const pk = row.primarykey ? String(row.primarykey).trim().toUpperCase() : `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+      const loteHigienizado: DexieAsset[] = loteBruto.map((row, rowIndex) => {
         // REGRA DE CONTRATO (planilha): o tenantid NUNCA tem valor fixo/fallback.
         // Ele vem EXCLUSIVAMENTE da coluna 'tenantid' (Índice 0) da planilha.
         const tenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
+        const rawFilial = mirrorFilial(row.filial);
+        // Fase 2 — identidade INTERNA: `primarykey` da planilha quando ela é
+        // única no arquivo; repetida recebe chave derivada (pk + conteúdo) para
+        // a segunda linha NÃO substituir a primeira. `source_primarykey` guarda
+        // o texto literal da célula.
+        const identityInput = identityCandidate(row);
+        const identity = identities.allocate(identityInput);
+        const pk = identity.primarykey;
+        const sourcePrimarykey = sourcePrimarykeyOf(identityInput.sourcePrimarykey);
         // Coluna canônica da planilha: 'endereco' (posição 11 do contrato). O nome 'codigo_endereco'
         // era lido antes e NÃO existe no contrato → gravava endereco: null para todos os ativos,
         // deixando o AddressSelector vazio. Fallbacks aceitos para tolerância de nomes de coluna.
-        const codEnd = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição', 'codigo_endereco'));
-        const tagVal = row.tag || row.etiqueta || pk;
-        const rawFilial = mirrorFilial(row.filial);
-        
+        const codEnd = literalText(getRowValue(row, 'endereco', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição', 'codigo_endereco'));
+        // Texto exato da etiqueta (espaços e caixa preservados). A chave `pk`
+        // continua canónica — é identidade interna, não o dado do cliente.
+        const etiquetaLiteral = literalText(getRowValue(row, 'tag')) || literalText(getRowValue(row, 'etiqueta')) || pk;
+        const statusVal = literalText(getRowValue(row, 'status')) || 'Pendente';
+        // A planilha é a fonte da conferência: o texto `status` («CONFERIDO…»)
+        // e a coluna de auditoria dizem a mesma coisa, e quem lê é a regra única.
+        // Gravar `_conferido: 0` fixo aqui fazia o Gestor de Base carregar a
+        // planilha inteira como pendente.
+        const conferidoNaPlanilha = statusVal.toLowerCase().includes('conferido');
+
         return {
           id: pk,
           primarykey: pk,
@@ -203,28 +368,36 @@ export class DatabaseLoaderService {
           // `filial_raw` guarda o texto exato da planilha para exibição.
           filial: rawFilial.toUpperCase(),
           filial_raw: rawFilial,
-          status: normalizeFieldValue('status', getRowValue(row, 'status')) ?? 'Pendente',
-          etiqueta: String(tagVal),
-          tag: String(tagVal),
+          status: statusVal,
+          etiqueta: etiquetaLiteral,
+          tag: etiquetaLiteral,
           qt: isNaN(Number(row.qt)) ? 1 : Number(row.qt),
-          descricaodoativo: normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${pk}`,
-          serial: normalizeFieldValue('serial', row.serial),
+          descricaodoativo: literalText(getRowValue(row, 'descricaodoativo', 'descricao', 'item')) || `Ativo N-${pk}`,
+          serial: literalText(row.serial),
           dataaqusic: normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic')),
-          cnpj: normalizeFieldValue('cnpj', row.cnpj),
-          nomefornecedor: normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor')),
-          notafiscal: normalizeFieldValue('notafiscal', row.notafiscal),
+          cnpj: literalText(row.cnpj),
+          nomefornecedor: literalText(getRowValue(row, 'nomefornecedor', 'fornecedor')),
+          notafiscal: literalText(row.notafiscal),
           endereco: codEnd || null,
-          registro: normalizeFieldValue('registro', row.registro),
-          subreg: normalizeFieldValue('subreg', row.subreg),
+          registro: literalText(row.registro),
+          subreg: literalText(row.subreg),
           databaixa: normalizeDateISO(getRowValue(row, 'databaixa')),
-          contacontabil: normalizeFieldValue('contacontabil', row.contacontabil),
-          centrodecusto: normalizeFieldValue('centrodecusto', row.centrodecusto),
-          vlraquisic: isNaN(Number(row.vlraquisic)) ? 0 : Number(row.vlraquisic),
+          contacontabil: literalText(row.contacontabil),
+          centrodecusto: literalText(row.centrodecusto),
+          vlraquisic: parseAssetValue(row.vlraquisic).value,
           sn1_recno: normalizeNumeric(row.sn1_recno),
           sn3_recno: normalizeNumeric(row.sn3_recno),
-          _is_synced: 0,
+          // Cópia literal da linha inteira (inclui datas e valores como escritos).
+          _sourceRow: sourceRowLiteral(row),
+          source_primarykey: sourcePrimarykey,
+          source_row: i + rowIndex + 1,
+          import_batch: importBatch,
+          ...marcarAlteracaoLocal(),
           _is_deleted: 0,
-          _conferido: 0,
+          _conferido: isConferido({
+            _conferido: conferidoNaPlanilha,
+            AUDITOR_STATUS_CONFERENCIA: getRowValue(row, 'AUDITOR_STATUS_CONFERENCIA')
+          }) ? 1 : 0,
           _plaquetado: 0,
           _aprovado: 0,
           _isNew: 0,
@@ -237,6 +410,12 @@ export class DatabaseLoaderService {
           gps_lng: null
         };
       });
+
+      loteHigienizado.forEach((asset) => carregadas.push({
+        tenantid: asset.tenantid,
+        filial: asset.filial_raw || asset.filial,
+        primarykey: asset.primarykey
+      }));
 
       // Transação ACID atômica por bloco para mitigar Race Conditions
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
@@ -251,6 +430,8 @@ export class DatabaseLoaderService {
       }
       logger.info(`[SRE_LOADER] Lote injetado. Progresso: ${registrosProcessados}/${dadosBrutos.length}`);
     }
+    await DatabaseLoaderService.verifyLoadedRows(carregadas);
+    await DatabaseLoaderService.reportRecnoAfterLoad();
     return registrosProcessados;
   }
 
@@ -317,6 +498,20 @@ export class DatabaseLoaderService {
 
     let totalInseridos = 0;
     let batchIndex = 0;
+    // Fase 2 — identidade INTERNA + proveniência (source_row/import_batch).
+    const importBatch = newImportBatchId();
+    const identityCandidate = (row: Record<string, unknown>): AssetIdentityCandidate => ({
+      tenantid: String(getRowValue(row, 'tenantid') || '').trim().toUpperCase(),
+      filial: mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId),
+      sourcePrimarykey: getRowValue(row, 'primarykey'),
+      etiqueta: getRowValue(row, 'etiqueta', 'tag'),
+      tag: getRowValue(row, 'tag'),
+      row
+    });
+    const identities = createAssetIdentityAllocator()
+      .prime((rawRows as unknown as Record<string, unknown>[]).map(identityCandidate));
+    // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
+    const carregadas: LoadedAssetRef[] = [];
 
     // FASE 1 (SRE): Escrita silenciosa usando o handle global isolado (sem abrir popup)
     try {
@@ -342,34 +537,38 @@ export class DatabaseLoaderService {
         const assetsToInsert: DexieAsset[] = [];
         const correctionsToLog: { id: string; originalValue: unknown }[] = [];
 
-        for (const row of chunk) {
-          // Normalização de chaves flexíveis para garantir suporte a padrões distintos
-          const tagVal = String(getRowValue(row, 'etiqueta', 'tag') || '')?.trim();
-          const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-
-          const finalId = tagSanitizada;
+        for (let chunkIndex = 0; chunkIndex < chunk.length; chunkIndex++) {
+          const row = chunk[chunkIndex];
           const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
           const finalFilial = finalFilialRaw.toUpperCase();
           const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
-          const itemDesc = normalizeFieldValue(
-            'descricaodoativo',
+          // Fase 2 — identidade INTERNA (mesmo algoritmo em todos os caminhos):
+          // `primarykey` única vira a chave; repetida recebe chave derivada.
+          const identityInput = identityCandidate(row as Record<string, unknown>);
+          const finalId = identities.allocate(identityInput).primarykey;
+          const sourcePrimarykey = sourcePrimarykeyOf(identityInput.sourcePrimarykey);
+          // Dado do cliente: literal. Só a chave (`finalId`) é canónica.
+          const etiquetaLiteral = literalText(getRowValue(row, 'etiqueta', 'tag')) || finalId;
+          const itemDesc = literalText(
             getRowValue(row, 'descricaodoativo', 'descricao', 'item')
-          ) ?? `Ativo N-${finalId}`;
-          const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${tagSanitizada}`);
+          ) || `Ativo N-${finalId}`;
+          const finalRegistro = literalText(getRowValue(row, 'registro')) || `REG-${finalId}`;
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
-          const contaContabil = normalizeFieldValue('contacontabil', getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA');
-          const statusVal = normalizeFieldValue('status', getRowValue(row, 'status') || 'Pendente') ?? 'Pendente';
+          const contaContabil = literalText(getRowValue(row, 'contacontabil', 'conta_contabil')) || 'SEM CONTA';
+          const statusVal = literalText(getRowValue(row, 'status')) || 'Pendente';
+          // A planilha é a fonte da conferência: o texto `status` («CONFERIDO…»)
+          // e a coluna de auditoria dizem a mesma coisa, e quem lê é a regra única.
+          const conferidoNaPlanilha = statusVal.toLowerCase().includes('conferido');
 
-          const serialVal = normalizeFieldValue('serial', getRowValue(row, 'serial', 'serial_number'));
+          const serialVal = literalText(getRowValue(row, 'serial', 'serial_number'));
           const dataaqVal = normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic'));
-          const cnpjVal = normalizeFieldValue('cnpj', getRowValue(row, 'cnpj'));
-          const fornecedorVal = normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor'));
-          const nfVal = normalizeFieldValue('notafiscal', getRowValue(row, 'notafiscal'));
-          const finalEndereco = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
-          const subregVal = normalizeFieldValue('subreg', getRowValue(row, 'subreg'));
+          const cnpjVal = literalText(getRowValue(row, 'cnpj'));
+          const fornecedorVal = literalText(getRowValue(row, 'nomefornecedor', 'fornecedor'));
+          const nfVal = literalText(getRowValue(row, 'notafiscal'));
+          const finalEndereco = literalText(getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
+          const subregVal = literalText(getRowValue(row, 'subreg'));
           const databaixaVal = normalizeDateISO(getRowValue(row, 'databaixa'));
-          const primarykeyVal = String(getRowValue(row, 'primarykey') || '')?.trim();
-          const centrodecustoVal = normalizeFieldValue('centrodecusto', getRowValue(row, 'centrodecusto', 'centro_custo'));
+          const centrodecustoVal = literalText(getRowValue(row, 'centrodecusto', 'centro_custo'));
           const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
           const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
           const sn1RecnoVal = normalizeNumeric(sn1RecnoRaw);
@@ -406,7 +605,7 @@ export class DatabaseLoaderService {
           }
 
           if (precisaLogarErro) {
-            correctionsToLog.push({ id: tagSanitizada, originalValue: valorOriginalRaw });
+            correctionsToLog.push({ id: finalId, originalValue: valorOriginalRaw });
           }
 
           const assetObj: DexieAsset = {
@@ -415,8 +614,8 @@ export class DatabaseLoaderService {
             filial: finalFilial,
             filial_raw: finalFilialRaw,
             status: statusVal,
-            etiqueta: tagSanitizada,
-            tag: tagSanitizada,
+            etiqueta: etiquetaLiteral,
+            tag: etiquetaLiteral,
             qt: Number(finalQt || 1),
             descricaodoativo: itemDesc,
             serial: serialVal || null,
@@ -429,14 +628,22 @@ export class DatabaseLoaderService {
             subreg: subregVal || null,
             databaixa: databaixaVal || null,
             contacontabil: contaContabil || null,
-            primarykey: primarykeyVal || finalId,
+            primarykey: finalId,
             centrodecusto: centrodecustoVal || null,
             vlraquisic: vlrAquisicSanitizado,
             sn1_recno: sn1RecnoVal,
             sn3_recno: sn3RecnoVal,
-            _is_synced: 0,
+            // Cópia literal da linha inteira (inclui datas e valores como escritos).
+            _sourceRow: sourceRowLiteral(row as Record<string, unknown>),
+            source_primarykey: sourcePrimarykey,
+            source_row: i + chunkIndex + 1,
+            import_batch: importBatch,
+            ...marcarAlteracaoLocal(),
             _is_deleted: 0,
-            _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
+            _conferido: isConferido({
+              _conferido: conferidoNaPlanilha,
+              AUDITOR_STATUS_CONFERENCIA: getRowValue(row as Record<string, unknown>, 'AUDITOR_STATUS_CONFERENCIA')
+            }) ? 1 : 0,
             _plaquetado: 0,
             _aprovado: 0,
             _isNew: 0,
@@ -452,6 +659,12 @@ export class DatabaseLoaderService {
 
           assetsToInsert.push(assetObj);
         }
+
+        assetsToInsert.forEach((asset) => carregadas.push({
+          tenantid: asset.tenantid,
+          filial: asset.filial_raw || asset.filial,
+          primarykey: asset.primarykey
+        }));
 
         // Transação ACID atômica do Dexie com Fail-Fast
         try {
@@ -508,6 +721,8 @@ export class DatabaseLoaderService {
       // Isolamento restabelecido sem dependência de sqliteService
     }
 
+    await DatabaseLoaderService.verifyLoadedRows(carregadas);
+    await DatabaseLoaderService.reportRecnoAfterLoad();
     return totalInseridos;
   }
 
@@ -520,6 +735,7 @@ export class DatabaseLoaderService {
     unitId: string,
     onProgress: (processed: number, total: number) => void
   ): Promise<number> {
+    await invalidateTenantCaseMarker();
     // 1. Validação Preventiva de Bateria Crítica (< 5% sem fonte externa)
     let currentBatteryLevel = 1.0;
     let isDeviceCharging = true;
@@ -592,6 +808,18 @@ export class DatabaseLoaderService {
 
     const totalRows = totalPlanilha;
     let totalInserted = 0;
+    // Fase 2 — identidade INTERNA + proveniência (source_row/import_batch).
+    const importBatch = newImportBatchId();
+    const identityCandidate = (row: Record<string, unknown>): AssetIdentityCandidate => ({
+      tenantid: String(getRowValue(row, 'tenantid') || '').trim().toUpperCase(),
+      filial: mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId),
+      sourcePrimarykey: getRowValue(row, 'primarykey'),
+      etiqueta: getRowValue(row, 'etiqueta', 'tag'),
+      tag: getRowValue(row, 'tag'),
+      row
+    });
+    // Uma referência por linha da planilha: é o lado "planilha" da reconciliação.
+    const carregadas: LoadedAssetRef[] = [];
 
     // FASE 1 (SRE): Escrita silenciosa usando o handle global isolado (sem abrir popup)
     try {
@@ -610,34 +838,43 @@ export class DatabaseLoaderService {
 
     try {
       const BATCH_SIZE = 200;
+      const identityRows: Record<string, unknown>[] = rawExcelData;
+      const identities = createAssetIdentityAllocator().prime(identityRows.map(identityCandidate));
       for (let i = 0; i < totalRows; i += BATCH_SIZE) {
         const chunk = rawExcelData.slice(i, Math.min(i + BATCH_SIZE, totalRows));
         const assetsToInsert: DexieAsset[] = [];
         const correctionsToLog: { id: string; originalValue: unknown }[] = [];
 
-        for (const row of chunk) {
-          const tagVal = String(getRowValue(row, 'etiqueta', 'tag') || '')?.trim();
-          const tagSanitizada = tagVal || `ALT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-          const finalId = tagSanitizada;
+        for (let chunkIndex = 0; chunkIndex < chunk.length; chunkIndex++) {
+          const row = chunk[chunkIndex];
           const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
           const finalFilial = finalFilialRaw.toUpperCase();
           const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
-          const itemDesc = normalizeFieldValue('descricaodoativo', getRowValue(row, 'descricaodoativo', 'descricao', 'item')) ?? `Ativo N-${finalId}`;
-          const finalRegistro = normalizeFieldValue('registro', getRowValue(row, 'registro') || `REG-${tagSanitizada}`);
+          // Fase 2 — identidade INTERNA (mesmo algoritmo em todos os caminhos):
+          // `primarykey` única vira a chave; repetida recebe chave derivada.
+          const identityInput = identityCandidate(row as Record<string, unknown>);
+          const finalId = identities.allocate(identityInput).primarykey;
+          const sourcePrimarykey = sourcePrimarykeyOf(identityInput.sourcePrimarykey);
+          // Dado do cliente: literal. Só a chave (`finalId`) é canónica.
+          const etiquetaLiteral = literalText(getRowValue(row, 'etiqueta', 'tag')) || finalId;
+          const itemDesc = literalText(getRowValue(row, 'descricaodoativo', 'descricao', 'item')) || `Ativo N-${finalId}`;
+          const finalRegistro = literalText(getRowValue(row, 'registro')) || `REG-${finalId}`;
           const finalQt = String(getRowValue(row, 'qt') !== undefined ? getRowValue(row, 'qt') : '1')?.trim();
-          const contaContabil = normalizeFieldValue('contacontabil', getRowValue(row, 'contacontabil', 'conta_contabil') || 'SEM CONTA');
-          const statusVal = normalizeFieldValue('status', getRowValue(row, 'status') || 'Pendente') ?? 'Pendente';
+          const contaContabil = literalText(getRowValue(row, 'contacontabil', 'conta_contabil')) || 'SEM CONTA';
+          const statusVal = literalText(getRowValue(row, 'status')) || 'Pendente';
+          // A planilha é a fonte da conferência: o texto `status` («CONFERIDO…»)
+          // e a coluna de auditoria dizem a mesma coisa, e quem lê é a regra única.
+          const conferidoNaPlanilha = statusVal.toLowerCase().includes('conferido');
 
-          const serialVal = normalizeFieldValue('serial', getRowValue(row, 'serial', 'serial_number'));
+          const serialVal = literalText(getRowValue(row, 'serial', 'serial_number'));
           const dataaqVal = normalizeDateISO(getRowValue(row, 'dataaqusic', 'dataaquisic'));
-          const cnpjVal = normalizeFieldValue('cnpj', getRowValue(row, 'cnpj'));
-          const fornecedorVal = normalizeFieldValue('nomefornecedor', getRowValue(row, 'nomefornecedor', 'fornecedor'));
-          const nfVal = normalizeFieldValue('notafiscal', getRowValue(row, 'notafiscal'));
-          const finalEndereco = normalizeFieldValue('endereco', getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
-          const subregVal = normalizeFieldValue('subreg', getRowValue(row, 'subreg'));
+          const cnpjVal = literalText(getRowValue(row, 'cnpj'));
+          const fornecedorVal = literalText(getRowValue(row, 'nomefornecedor', 'fornecedor'));
+          const nfVal = literalText(getRowValue(row, 'notafiscal'));
+          const finalEndereco = literalText(getRowValue(row, 'endereco', 'end', 'localizacao', 'localização', 'localidade', 'physicallocalization', 'loc', 'local', 'sala', 'posicao', 'posição'));
+          const subregVal = literalText(getRowValue(row, 'subreg'));
           const databaixaVal = normalizeDateISO(getRowValue(row, 'databaixa'));
-          const primarykeyVal = String(getRowValue(row, 'primarykey') || '')?.trim();
-          const centrodecustoVal = normalizeFieldValue('centrodecusto', getRowValue(row, 'centrodecusto', 'centro_custo'));
+          const centrodecustoVal = literalText(getRowValue(row, 'centrodecusto', 'centro_custo'));
 
           const sn1RecnoRaw = getRowValue(row, 'sn1_recno');
           const sn3RecnoRaw = getRowValue(row, 'sn3_recno');
@@ -670,7 +907,7 @@ export class DatabaseLoaderService {
           }
 
           if (precisaLogarErro) {
-            correctionsToLog.push({ id: tagSanitizada, originalValue: valorOriginalRaw });
+            correctionsToLog.push({ id: finalId, originalValue: valorOriginalRaw });
           }
 
           const assetObj: DexieAsset = {
@@ -679,8 +916,8 @@ export class DatabaseLoaderService {
             filial: finalFilial,
             filial_raw: finalFilialRaw,
             status: statusVal,
-            etiqueta: tagSanitizada,
-            tag: tagSanitizada,
+            etiqueta: etiquetaLiteral,
+            tag: etiquetaLiteral,
             qt: Number(finalQt || 1),
             descricaodoativo: itemDesc,
             serial: serialVal || null,
@@ -693,14 +930,22 @@ export class DatabaseLoaderService {
             subreg: subregVal || null,
             databaixa: databaixaVal || null,
             contacontabil: contaContabil || null,
-            primarykey: primarykeyVal || finalId,
+            primarykey: finalId,
             centrodecusto: centrodecustoVal || null,
             vlraquisic: vlrAquisicSanitizado,
             sn1_recno: sn1RecnoVal,
             sn3_recno: sn3RecnoVal,
-            _is_synced: 0,
+            // Cópia literal da linha inteira (inclui datas e valores como escritos).
+            _sourceRow: sourceRowLiteral(row as Record<string, unknown>),
+            source_primarykey: sourcePrimarykey,
+            source_row: i + chunkIndex + 1,
+            import_batch: importBatch,
+            ...marcarAlteracaoLocal(),
             _is_deleted: 0,
-            _conferido: statusVal?.toLowerCase()?.includes('conferido') ? 1 : 0,
+            _conferido: isConferido({
+              _conferido: conferidoNaPlanilha,
+              AUDITOR_STATUS_CONFERENCIA: getRowValue(row as Record<string, unknown>, 'AUDITOR_STATUS_CONFERENCIA')
+            }) ? 1 : 0,
             _plaquetado: 0,
             _aprovado: 0,
             _isNew: 0,
@@ -716,6 +961,12 @@ export class DatabaseLoaderService {
 
           assetsToInsert.push(assetObj);
         }
+
+        assetsToInsert.forEach((asset) => carregadas.push({
+          tenantid: asset.tenantid,
+          filial: asset.filial_raw || asset.filial,
+          primarykey: asset.primarykey
+        }));
 
         // DESCARGA NO ARMAZENAMENTO LOCAL (Transação ACID atômica com Fail-Fast)
         try {
@@ -765,6 +1016,8 @@ export class DatabaseLoaderService {
       rawExcelData = null;
     }
 
+    await DatabaseLoaderService.verifyLoadedRows(carregadas);
+    await DatabaseLoaderService.reportRecnoAfterLoad();
     return totalInserted;
   }
 
@@ -799,6 +1052,8 @@ export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
 
     if (fileContent.data) {
       const restoredAssets = JSON.parse(fileContent.data as string);
+      // Só invalida quando há mesmo restauro: este caminho corre em todo boot.
+      await invalidateTenantCaseMarker();
       // Alimenta atomicamente o Dexie.js para restabelecer os 12.636 ativos sem Race Conditions
       await db.transaction('rw', [db.local_assets], async () => {
         await db.local_assets.clear();

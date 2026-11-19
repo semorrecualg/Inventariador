@@ -39,6 +39,7 @@ import UnitConfigurator from './UnitConfigurator';
 import ImpairmentTestModal from './ImpairmentTestModal';
 import AssetUnitizeModal from './AssetUnitizeModal';
 import { getCurrentLocation } from '../utils/gpsUtils';
+import { isValidCoordinate } from '../utils/gpsCore';
 import { Layers, ShieldCheck } from 'lucide-react';
 import { logger } from '../utils/logger';
 
@@ -435,14 +436,15 @@ const AssetControlModule: React.FC<AssetControlModuleProps> = ({ onBack, usernam
       let gpsData = {};
       try {
         const loc = await getCurrentLocation(true);
-        // Guarda Defensiva: hardware pode retornar null/undefined - nunca ler .lng de undefined
-        if (!loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng))) {
-          throw new Error('GPS invalido retornado pelo hardware');
+        // Sem leitura válida e precisa: não grava coordenada inventada.
+        if (!loc || !isValidCoordinate(loc.lat, loc.lng)) {
+          throw new Error('GPS sem leitura válida e precisa');
         }
         gpsData = { latitude: loc.lat, longitude: loc.lng };
         logger.info('>>> [GPS] Localização capturada para o ativo:', gpsData);
       } catch (gpsErr) {
         logger.warn('>>> [GPS] Falha ao capturar localização, salvando sem coordenadas:', gpsErr);
+        alert('Sem sinal de GPS preciso no momento: o ativo será salvo sem localização. Tente novamente em local aberto.');
       }
 
       const assetToSave = {

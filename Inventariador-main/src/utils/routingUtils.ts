@@ -122,3 +122,26 @@ export function resolveModuleEntryScreen(
   if (module === AppModule.ASSET_CONTROL) return AppScreen.ASSET_CONTROL_HOME;
   return String(filial || '').trim() ? AppScreen.MAIN_MENU : AppScreen.UNIT_SELECTION;
 }
+
+/**
+ * HUB ("Auditoria Inteligente", `#/menu`) exige CONTEXTO ATIVO.
+ *
+ * Fase 1 da padronização do acesso (biometria → contrato → SaaS): o hub era a
+ * ÚNICA tela isenta da trava de unidade e, por isso, o destino de qualquer
+ * atalho sem contrato (URL directa `#/menu`, reentrada, pós-troca de senha) —
+ * abria a "Auditoria Inteligente" sem filial escolhida. Sem filial activa não
+ * há unidade a que os dados pertençam: o destino coerente é o CONTRATO.
+ *
+ * `hasPanelIntent` isenta os PAINÉIS DE GOVERNAÇA abertos a partir do contrato
+ * (`MAIN_MENU` com `openPanel`): não leem a unidade e já têm RBAC próprio na
+ * renderização.
+ */
+export function shouldReturnHubToWorkContext(
+  screen: AppScreen,
+  selectedUnit: string | null | undefined,
+  hasPanelIntent = false
+): boolean {
+  if (screen !== AppScreen.MAIN_MENU) return false;
+  if (hasPanelIntent) return false;
+  return !String(selectedUnit || '').trim();
+}

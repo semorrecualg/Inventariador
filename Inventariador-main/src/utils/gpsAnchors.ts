@@ -1,28 +1,62 @@
 import { normalizeKey } from './schema';
-import { isValidCoordinate } from './gpsCore';
+import { isRevokedAnchor } from './revokedAnchors';
 
 /**
- * Guarda Defensiva: só considera âncora real coordenadas finitas, dentro das
- * faixas geográficas e diferentes do par (0,0) — o "null disfarçado" clássico.
+ * Campos mínimos de um registro de âncora (config, espelho local ou rascunho).
+ * `source` ausente = registro legado, anterior à proveniência.
+ */
+export interface AnchorRecordFields {
+  lat?: unknown;
+  lng?: unknown;
+  source?: unknown;
+}
+
+/**
+ * Guarda Defensiva: só considera âncora real coordenadas finitas e não-zero.
  * Usada tanto pelo caminho de estado (`unitConfigs`) quanto pela varredura de
  * armazenamento durável — fonte única de verdade (coberta por testes).
- *
- * A validação geográfica vive em `gpsCore.isValidCoordinate` (faixas + rejeição
- * de `(0,0)`). Além dela, a âncora exige os DOIS componentes diferentes de zero:
- * neste app um componente zerado significa "ausente" — por exemplo, uma chave
- * `gps_lng_<unidade>` faltando no sessionStorage é lida como `0` pelo `Number()`.
- * Aceitar esse zero plantaria uma âncora falsa em cima do meridiano de Greenwich.
  */
 export const hasRealAnchor = (lat: unknown, lng: unknown): boolean =>
-  isValidCoordinate(lat, lng) && Number(lat) !== 0 && Number(lng) !== 0;
+  Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) &&
+  Number(lat) !== 0 && Number(lng) !== 0;
+
+/**
+ * Âncora CONFIGURADA para a unidade — qualquer proveniência.
+ *
+ * `FIXAR ÂNCORA GPS` grava `source: 'manual'` (o pino foi colocado à mão no
+ * mapa, que é o caminho normal no desktop e em campo sem fix), e esse é um ato
+ * administrativo legítimo: a filial fica configurada e o inventário é liberado.
+ * A proveniência separa apenas leitura de sensor (`isRealAnchorRecord`), nunca
+ * a configuração da unidade operacional.
+ */
+export const isConfiguredAnchorRecord = (
+  record: AnchorRecordFields | null | undefined
+): boolean => !!record && hasRealAnchor(record.lat, record.lng);
+
+/** JSON de storage sem derrubar a varredura quando o valor é inválido. */
+const readJson = (
+  storage: Pick<Storage, 'getItem'>,
+  key: string
+): Record<string, unknown> | null => {
+  try {
+    const raw = storage.getItem(key);
+    return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Varre o armazenamento durável do navegador e devolve o conjunto de unidades
- * (chaves normalizadas) que possuem âncora GPS real.
+ * (chaves normalizadas) com âncora contável como leitura de sensor — as mesmas
+ * que liberam unidade e entram em `unitsWithGps`.
  *
  * Chaves lidas:
- *  - localStorage:  `kardek_gps_ancora_<unidade>` (JSON { filial/unit_id, lat, lng })
- *  - sessionStorage: `gps_lat_<unidade>` + `gps_lng_<unidade>`
+ *  - localStorage:  `kardek_gps_ancora_<unidade>` (JSON { filial/unit_id, lat, lng, source })
+ *    — gravado só pelo `FIXAR ÂNCORA GPS`; qualquer proveniência configura a filial.
+ *  - sessionStorage: `gps_lat_<unidade>` + `gps_lng_<unidade>`, aceites apenas
+ *    quando existe `unit_gps_config_<unidade>` (prova de que a âncora foi SALVA).
+ *    Rascunho de clique no mapa não conta.
  *
  * Recebe os storages por parâmetro (interface mínima) para ser testável com
  * mocks sem depender de jsdom. Qualquer falha de storage é silenciosa.
@@ -37,9 +71,10 @@ export const collectGpsAnchorsFromStorage = (
     for (let i = 0; i < local.length; i++) {
       const key = local.key(i);
       if (key && key.startsWith('kardek_gps_ancora_')) {
-        const rec = JSON.parse(local.getItem(key) || 'null') as Record<string, unknown> | null;
+        const rec = readJson(local, key);
         const uId = rec?.filial || rec?.unit_id || rec?._unitid;
-        if (uId && hasRealAnchor(rec?.lat, rec?.lng)) {
+        // Âncora revogada na nuvem não volta pelo cache do aparelho.
+        if (uId && isConfiguredAnchorRecord(rec) && !isRevokedAnchor(uId, rec?.lat, rec?.lng)) {
           anchors.add(normalizeKey(String(uId)));
         }
       }
@@ -51,9 +86,12 @@ export const collectGpsAnchorsFromStorage = (
       const key = session.key(i);
       if (key && key.startsWith('gps_lat_')) {
         const unit = key.slice('gps_lat_'.length);
-        const lat = Number(session.getItem(key));
-        const lng = Number(session.getItem(`gps_lng_${unit}`));
-        if (unit && hasRealAnchor(lat, lng)) {
+        const lat = session.getItem(key);
+        const lng = session.getItem(`gps_lng_${unit}`);
+        // Sem config salva é rascunho de clique no mapa: a âncora não foi fixada
+        // e a unidade continua sem configuração.
+        if (!readJson(session, `unit_gps_config_${unit}`)) continue;
+        if (unit && isConfiguredAnchorRecord({ lat, lng }) && !isRevokedAnchor(unit, lat, lng)) {
           anchors.add(normalizeKey(unit));
         }
       }
@@ -78,4 +116,32 @@ export const mergeUnitConfigIntoList = <T extends { unit_id?: string }>(
   if (idx >= 0) list[idx] = { ...list[idx], ...config };
   else list.push(config);
   return list;
+};
+
+/** Campos que identificam a unidade num registro de configuração. */
+export interface UnitConfigUnitFields {
+  filial?: string;
+  unit_id?: string;
+  _unitid?: string;
+}
+
+/** Nome da unidade de um registro — `filial` é o canônico, os legados vêm depois. */
+export const unitConfigUnitOf = (config: UnitConfigUnitFields | null | undefined): string =>
+  String(config?.filial || config?.unit_id || config?._unitid || '').trim();
+
+/**
+ * Registro de âncora da unidade, comparado pela chave normalizada (`_`, hífen,
+ * acento e caixa não separam a mesma filial).
+ *
+ * O `UnitConfigurator` procurava só `unit_id`: registros gravados/legados só
+ * com `filial` não eram encontrados, o formulário abria vazio e o mapa ficava
+ * no centro do país mesmo com a âncora da filial já configurada.
+ */
+export const findUnitConfigForUnit = <T extends UnitConfigUnitFields>(
+  configs: T[],
+  unit: string | null | undefined
+): T | null => {
+  const key = normalizeKey(unit || '');
+  if (!key) return null;
+  return configs.find(entry => normalizeKey(unitConfigUnitOf(entry)) === key) ?? null;
 };

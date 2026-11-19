@@ -17,6 +17,7 @@
 // ============================================================================
 
 import { db } from '../services/sqliteService';
+import { normalizeKey } from './schema';
 import { localDb } from '../services/localDbService';
 import { readProvisionedTenants } from '../services/tenantProvisioningService';
 
@@ -58,7 +59,10 @@ export async function listContracts(): Promise<ContractSummary[]> {
     const tenantid = normalize(tenantRaw);
     if (TENANT_SENTINELS.has(tenantid)) return;
     if (!contractFiliais.has(tenantid)) contractFiliais.set(tenantid, new Map<string, string>());
-    const filialKey = normalize(filialRaw);
+    // Deduplica a MESMA filial nas várias grafias da base (`010101_CICOPAL_GO`
+    // vs `010101 CICOPAL GO`): a config operacional e os ativos convivem com as
+    // duas, e o catálogo não pode devolver dois cartões da mesma unidade.
+    const filialKey = normalizeKey(filialRaw);
     if (FILIAL_SENTINELS.has(filialKey)) return;
     const filialLabel = String(filialRaw ?? '').trim();
     const filiais = contractFiliais.get(tenantid)!;
@@ -70,6 +74,28 @@ export async function listContracts(): Promise<ContractSummary[]> {
     await db.assets.each((asset) => add(asset.tenantid, asset.filial));
   } catch {
     /* base local indisponível — segue com perfis e licenças */
+  }
+
+  // CONFIGURAÇÃO OPERACIONAL: uma filial com âncora GPS ou campanha gravada
+  // existe no contrato mesmo quando a tabela de ativos ainda não foi baixada.
+  // Sem esta fonte, o seletor mostrava o contrato CICOPAL com «SEM FILIAL NA
+  // BASE» num aparelho que tinha as âncoras e as campanhas das filiais.
+  try {
+    await db.unit_configs.each((config) => {
+      const row = config as unknown as { tenantid?: unknown; filial?: unknown; unit_id?: unknown };
+      add(row.tenantid, row.filial || row.unit_id);
+    });
+  } catch {
+    /* sem tabela/registros de unidades operacionais — segue */
+  }
+
+  try {
+    await db.campaigns.each((campaign) => {
+      const row = campaign as unknown as { tenantid?: unknown; filial?: unknown; unit_id?: unknown; _unitid?: unknown };
+      add(row.tenantid, row.filial || row.unit_id || row._unitid);
+    });
+  } catch {
+    /* sem tabela/registros de campanhas — segue */
   }
 
   try {

@@ -91,6 +91,16 @@ describe('gpsCore — GpsJitterFilter', () => {
   });
 });
 
+describe('gpsCore — reset do filtro', () => {
+  it('após reset, o primeiro fix preciso volta a ser aceito', () => {
+    const f = new GpsJitterFilter();
+    const fix = toGpsFix({ latitude: CURITIBA.lat, longitude: CURITIBA.lng, accuracy: 8 }, 1000);
+    expect(f.accept(fix, 1000)).toBe(true);
+    f.reset();
+    expect(f.accept(fix, 1000)).toBe(true);
+  });
+});
+
 describe('gpsCore — distância', () => {
   it('calcula distância entre pontos', () => {
     const d = distanceMeters(CURITIBA, { lat: CURITIBA.lat + 0.001, lng: CURITIBA.lng });

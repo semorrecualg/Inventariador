@@ -170,17 +170,86 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
      em `app_last_work_context`; a validação cobre autorização por contexto E a regra
      do dono/admin sem units (autorizado para qualquer filial do próprio contrato,
      sem depender da base carregar) + bloqueio de CONTROLE DE ATIVO para auditor.
-  2. **Auto-aplicar pós-login** (`App.tsx` `executePostLoginRouting`): com última
-     escolha válida, o seletor é pulado e o usuário vai direto ao módulo da filial;
-     troca disponível pelo botão **"Trocar filial/contrato"** no header do hub.
+  2. **Pré-seleção no seletor — Fase 1 do acesso padronizado (2026-11-17):**
+     *substitui o auto-aplicar.* Com última escolha válida, `executePostLoginRouting`
+     (`App.tsx`) **não navega**: entrega `resolveWorkContextPreselection(...)` como
+     `initialSelection` ao seletor de contrato, que abre com contrato/filial/módulo
+     apontados e exige a confirmação em **"Acessar o Módulo"**. Toda a entrada
+     segue a mesma esteira: biometria → contrato → SaaS. O hub (`#/menu`) passou a
+     exigir unidade ativa (`shouldReturnHubToWorkContext`) e INVENTARIADOR passou a
+     exigir filial (`canConfirmWorkContext`); a troca continua no botão
+     **"Trocar filial/contrato"** no header do hub.
   3. **Dedup estendido** (`src/utils/syncDedup.ts`): pull do contrato inteiro
      (`tenantid|`) agora cobre qualquer filial dele — reentrada não re-baixa a filial
      escolhida; o `handleWorkContextModuleSelect` pula o sync quando o pull já foi
      feito e a base local tem dados.
-  *Validação: 321/321 testes (6 novos) · TSC limpo · runtime no preview: seleção
-  010201 SNACKS PA/INVENTORY → reload → cai direto no hub (`#/menu`), sem seletor,
-  sem nova carga; botão Trocar → seletor com as 5 filiais.*
+  *Validação original: 321/321 testes (6 novos) · TSC limpo · runtime no preview:
+  seleção 010201 SNACKS PA/INVENTORY → reload → cai direto no hub (`#/menu`), sem
+  seletor, sem nova carga; botão Trocar → seletor com as 5 filiais.*
+  **Atualizado na Fase 1 (2026-11-17):** o reload deixa de cair no hub — abre o
+  contrato com a última escolha pré-selecionada e espera a confirmação.*
 
+- **Biometria obrigatória com fallback explícito — Fase 2 do acesso padronizado
+  (2026-11-17):** a etapa biométrica deixa de ser opcional e deixa de
+  desaparecer. `resolveBiometricStep` (`src/utils/biometricPolicy.ts`) decide,
+  por utilizador e aparelho: (1) perfil `DEMO` → isento; (2) credencial já
+  registada → segue; (3) dispensa já aceite nesta sessão → segue; (4) app
+  nativo com o plugin a responder `available` → cadastro nativo; (5) app nativo
+  sem biometria utilizável → fallback com o motivo do plugin e, se o plugin não
+  responder, fallback do WebView; (6) sem autenticador de plataforma →
+  fallback; (7) caso contrário, cadastro **obrigatório**. O pós-login abre sempre
+  `BiometricRegistration` quando o passo não está resolvido: no modo
+  `required` não há "Pular por enquanto"; no modo `fallback` o motivo é
+  explicado e o utilizador confirma em "Continuar sem biometria neste
+  aparelho", o que grava `BIOMETRIC_FALLBACK` no `audit_logs` (o cadastro
+  concluído grava `BIOMETRIC_REGISTER`). Se o cadastro **obrigatório falhar**
+  (recusa do sensor, tempo esgotado), a tela mantém "Tentar novamente" e oferece
+  a mesma saída explícita, auditada com o motivo `registration-failed` — o modo
+  obrigatório nunca fica sem saída. A dispensa vale só para a sessão e é
+  reposta ao trocar de utilizador. Assim o inventário de campo nunca fica
+  bloqueado por hardware, mas nenhuma dispensa é silenciosa. *Testes:
+  `biometricPolicy` e `biometricRegistrationFallback`; a WebView real só se
+  confirma com APK novo (o instalado é anterior a estas correções).*
+- **Biometria restrita ao app móvel — Fase 4 (2026-11-18):** a etapa biométrica
+  deixou de existir no navegador/desktop. `resolveBiometricStep` só devolve
+  `register`/`fallback` quando `isNativeApp` é verdadeiro (casco Capacitor); no
+  web devolve `proceed` com o motivo `web-session`, independentemente de
+  `isUserVerifyingPlatformAuthenticatorAvailable()` — Touch ID/Windows Hello não
+  transformam o desktop num aparelho de campo, e exigir cadastro ali travava o
+  acesso. O botão «Entrar com Biometria» do formulário também só aparece no app.
+  No **APK** nada muda: obrigatório com biometria disponível, dispensa explícita
+  no hardware sem autenticador. *Testes: `biometricPolicy` (web com/sem
+  autenticador → `proceed`; cadastro só em `isNativeApp + available`).*
+- **Desbloqueio biométrico como primeira etapa — Fase 3 (2026-11-18):** no casco
+  nativo o acesso deixa de começar no formulário. Se o aparelho tem biometria e
+  existe credencial **nativa** do último utilizador autenticado
+  (`gbr_last_login_user`, gravado no login por senha ou pela biometria),
+  `BiometricUnlock` abre com esse utilizador e **dispara o prompt
+  automaticamente**, uma única vez. `canOfferBiometricUnlock`
+  (`src/utils/biometricUnlock.ts`) é quem autoriza a tela: casco nativo + plugin
+  `available` + credencial registada + último utilizador — sem qualquer destes,
+  nada muda. A senha fica sempre em **«Usar senha»** (o formulário abre já com o
+  utilizador preenchido) e a recusa oferece «Tentar novamente». Para um segundo
+  utilizador no mesmo aparelho há **«Entrar com outra conta»**: esquece o último
+  utilizador (`gbr_last_login_user`) e abre o formulário vazio, sem herdar a
+  biometria de quem entrou antes (a credencial registada desse anterior fica
+  intacta). No **web sem
+  autenticador** a tela não existe: o acesso continua a ser utilizador + senha,
+  com o botão biométrico do formulário apenas quando há plataforma e credencial.
+  O **primeiro acesso** mantém a ordem senha → cadastro obrigatório da Fase 2;
+  o desbloqueio biométrico só passa a ser a primeira etapa nos acessos
+  seguintes. *Testes: `biometricUnlock` (elegibilidade e memória do aparelho) e
+  `biometricUnlockScreen` (prompt automático, recusa, repetição e «Usar senha»);
+  o prompt real confirma-se num APK novo.*
+- **Biometria nativa no APK — Fase 2b (2026-11-17):** no casco Capacitor a
+  etapa usa `@aparajita/capacitor-biometric-auth@8.0.2` (linha do Capacitor 6):
+  `checkNativeBiometry()` (`src/services/biometricService.ts`) traduz a resposta
+  em `available` / `unavailable` / `unknown`; o registo pede o prompt do sistema
+  antes de gravar a marca (`method: 'native'`) e o login com biometria passa a
+  funcionar no APK. A marca nativa não autentica no navegador (nem o contrário).
+  Sem plugin a responder, a política mantém o fallback declarado da Fase 2 — o
+  utilizador nunca fica preso. *Testes: `biometricNativeService`; o prompt real
+  só se confirma num APK novo.*
 - **Etapa 5b:** ✅ **IMPLEMENTADA (2026-08-14)** — delta sync com checkpoint de
   `updated_at` por `[tenantid+filial]`:
   1. **`src/utils/syncCheckpoint.ts`** (novo): checkpoint persistido em
@@ -205,6 +274,43 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   checkpoint) em vez de 12.636; checkpoint avançou monotonicamente para
   08-09T21:46:19; merge upsert preservou os 12.636 totais locais; SYNC_PULL
   incremental registrado. 344/344 testes (16 novos) · TSC limpo.*
+
+- **Lista de filiais presa ao escopo (2026-11-13):** a lista guardada em
+  memória é `{ scope, names }`, com `scope = unitListScope(email, tenantid)`
+  (`email|CONTRATO`). O memo das unidades só a usa quando o `scope` bate com o
+  atual; a decisão do efeito (limpar / não fazer nada / buscar) vive em
+  `decideUnitListAction` (testada) e um contador de pedidos descarta respostas
+  atrasadas. Sair e entrar com outro utilizador no mesmo aparelho já
+  não mostra filiais do contrato anterior.
+
+- **Lista de filiais sem base local (2026-11-13):** com o boot a exigir a
+  filial, um aparelho novo (base vazia) abria `UNIT_SELECTION` sem nenhuma
+  unidade para escolher, porque a lista vinha dos dados locais. Agora
+  `fetchUnitNamesFromCloud(tenantid)` consulta **só a coluna `filial`**
+  (paginada, `Range`), normaliza (`normalizeUnitNames`: trim/UPPER, sem
+  sentinelas, dedupe, ordenada) e o App mistura o resultado na lista de
+  unidades enquanto não houver base local. Nenhum ativo é baixado; sem
+  tenantid a consulta não corre (muro SRE).
+
+- **Boot nunca baixa o contrato inteiro (2026-11-13):** com perfil sem filial
+  (`TODAS`/vazio) e sem última escolha válida, `bootFilial` ficava indefinido e
+  `fetchFullInventory` baixava os **12.636** ativos do contrato de uma vez,
+  marcando todos como sincronizados. Agora `resolveBootPullPlan(filial,
+  lastCtx, tenant)` devolve `{ unit }` só quando há filial resolvida; caso
+  contrário devolve `{ requiresUnitSelection: true }` e o Boot Loader **aborta a
+  carga** e abre `UNIT_SELECTION`. A verificação secundária pós-boot (que também
+  chamava `fetchFullInventory` sem unidade) passou a exigir a mesma filial.
+  Um pull do contrato só acontece em ação explícita de administrador
+  (backup/espelhamento no gestor de base).
+
+- **Fix do checkpoint do contrato (2026-11-13):** o pull do Boot Loader de
+  contrato (perfil sem filial e sem última escolha) grava o checkpoint na chave
+  `TENANT|`, enquanto `syncFromCloud` com unidade procurava `TENANT|FILIAL` —
+  não achava e caía em pull **completo**, baixando os 12.636 outra vez. Agora
+  `readCheckpointForDelta(tenant, unidade)` usa o checkpoint exato quando existe
+  e, na falta dele, aceita o do **contrato** como piso (mesma regra de cobertura
+  do dedup: contrato cobre as filiais; filial NUNCA cobre contrato nem outra
+  filial). Sem checkpoint nenhum, o pull continua completo por desenho.
 
 - **Fix do timing do delta no boot (2026-08-14):** o auto-aplicar (Etapa 4)
   disparava o sync ANTES de o boot terminar o `loadInventory` — com

@@ -5,6 +5,8 @@ import * as XLSX from 'xlsx';
 import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 import { normalizeFlag } from '../utils/normalize';
+import { isConferido } from '../utils/conferencia';
+import { rotuloDePara } from '../utils/assetAddress';
 import { readSessionTenantId } from '../utils/tenantUtils';
 import BackButton from './BackButton';
 import { 
@@ -45,7 +47,7 @@ interface StatCardProps {
 /**
  * Individual stat card used in the Quick Stats grid.
  * Extracted to module level with React.memo to prevent remount on every Dashboard render
- * (Vercel Best Practice: rerender-no-inline-components).
+ * (Boas práticas React: rerender-no-inline-components).
  */
 const StatCard = React.memo(function StatCard({
   label,
@@ -101,7 +103,7 @@ const StatCard = React.memo(function StatCard({
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899'];
 
-// Vercel Best Practice: hoist pure utility functions outside component
+// Boas práticas React: hoist pure utility functions outside component
 // (rerender-no-inline-components) — avoids recreating on every render
 const formatCurrency = (val: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
@@ -173,7 +175,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
     }
   }, [assets, selectedUnit]);
 
-  // Vercel Best Practice: stable callback for StatCard hint triggers
+  // Boas práticas React: stable callback for StatCard hint triggers
   // (rerender-memo) — prevents inline arrow from defeating React.memo
   const handleHint = useCallback(
     (label: string, text: string) => setHintOverlay({ label, text }),
@@ -247,7 +249,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
       const statusUpper = String(a.status || a.SITUACAO || '').toUpperCase();
       const isBaixado = statusUpper.includes('BAIXADO');
-      const isConferido = !!a._conferido || String(a.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+      const conferido = isConferido(a);
       const tag = a.TAG_INVENTARIO || TagInventario.PENDENTE;
       const etq = String(a.etiqueta || '').toUpperCase().trim();
       const plaquetaMaster = String(a._plaquetaMaster || '').toUpperCase().trim();
@@ -264,13 +266,13 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
       if (!isBaixado) {
         s.totalAtivos++;
-        if (isConferido) s.conferidoAtivos++;
+        if (conferido) s.conferidoAtivos++;
         
         // Unit Progress
         if (!unitMap[unit]) unitMap[unit] = { total: 0, conferido: 0 };
         unitMap[unit].total++;
-        if (isConferido) unitMap[unit].conferido++;
-      } else if (isConferido) {
+        if (conferido) unitMap[unit].conferido++;
+      } else if (conferido) {
         s.baixadosLocalizados++;
       }
 
@@ -372,11 +374,11 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
       .slice(0, 5);
   }, [auditSource]);
 
-  // Vercel Best Practice: StatCard extracted to module level with React.memo
+  // Boas práticas React: StatCard extracted to module level with React.memo
   // formatCurrency hoisted to module level
   // (rerender-no-inline-components)
 
-  // Vercel Best Practice: memoize callback for stable reference across renders
+  // Boas práticas React: memoize callback for stable reference across renders
   // (rerender-memo)
   const handleExport = useCallback(
     (filterFn: (a: Asset) => boolean, fileName: string) => {
@@ -424,9 +426,16 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
 
         res['AUDITOR_LOCAL_ORIGINAL'] = a.endereco;
         res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.endereco;
-        res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (a.endereco === (a._localMaster || a.endereco) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
-        res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
+        // A exportação é a prova que sai para fora: lê a conferência pelo mesmo
+        // predicado dos ecrãs, senão um item conferido pela coluna de auditoria
+        // sai como PENDENTE/NAO.
+        const conferido = isConferido(a);
+        res['AUDITOR_DE_PARA'] = rotuloDePara(a, conferido);
+        res['AUDITOR_STATUS_CONFERENCIA'] = conferido ? 'SIM' : 'NAO';
         res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
+        // REGISTRO ADOTADO: rótulo rad_<UNIDADE>_<DISPOSITIVO>_<SEQUENCIA> do item
+        // criado por cópia de outra unidade (vazio em tudo o que não é adotado).
+        res['AUDITOR_RAD_RECNO'] = (a.rad_recno as string | undefined) || '';
         res['AUDITOR_DUPLICIDADE'] = (a.TAG_DUPLICIDADE as string | undefined) || 'NAO ANALISADO';
         return res;
       });

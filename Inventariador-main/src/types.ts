@@ -3,7 +3,6 @@ export enum UserRole {
   ADMIN = 'ADMIN',
   MASTER = 'MASTER',
   AUDITOR = 'AUDITOR',
-  AUXILIARY_AUDITOR = 'AUXILIARY_AUDITOR',
   USER = 'USER', // OPERADOR de campo (Trilha C)
   DEMO = 'DEMO',
   MOBILE_SINGLE = 'MOBILE_SINGLE'
@@ -348,9 +347,17 @@ export interface CampaignSnapshot {
   tenantid: string;
 }
 
+/**
+ * Intenção do botão CAMPANHA do cartão da filial: `OPEN` abre direto a
+ * campanha ativa daquela filial; `CREATE` já mostra o cadastro de campanha.
+ */
+export type CampaignOpenIntent = 'CREATE' | 'OPEN';
+
 export interface NavigationParams {
   assets?: Asset[];
   unitName?: string;
+  /** Botão CAMPANHA do cartão da filial: abrir a campanha ativa ou o cadastro. */
+  campaignAction?: CampaignOpenIntent;
   campaign?: InventoryCampaign | null;
   mode?: 'PARTIAL' | 'FINAL';
   responsibleName?: string;
@@ -359,6 +366,12 @@ export interface NavigationParams {
   /** Abre o cadastro de NOVO USUÁRIO direto no formulário (Painel Completo → Acessos). */
   openAddUser?: boolean;
 }
+
+/**
+ * Proveniência da âncora da unidade: `sensor` = leitura do GPS do aparelho;
+ * `manual` = pino posicionado no mapa (clique/arraste/busca) sem leitura real.
+ */
+export type AnchorSource = 'sensor' | 'manual';
 
 export interface UnitConfig {
   id?: string;
@@ -371,6 +384,8 @@ export interface UnitConfig {
   lng: number;
   radius_meters: number;
   is_active: boolean;
+  /** Como a âncora foi obtida — ausente em registros legados (tratados como manual). */
+  source?: AnchorSource;
   /** Flags de política da unidade — sincronizadas em `unit_configs.flags`. */
   hasGps?: boolean;
   requireNf?: boolean;

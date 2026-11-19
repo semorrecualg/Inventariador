@@ -129,15 +129,20 @@ jobs:
           ref: ${{ steps.request.outputs.sha || github.sha }}
           repository: ${{ steps.request.outputs.repo || github.repository }}
 
-      - name: Setup Node.js
+      # Mesma versão do ci.yml: lê o .nvmrc em vez do "22" flutuante.
+      - name: Setup Node.js (.nvmrc → 22.22.2)
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
           cache: 'npm'
           cache-dependency-path: Inventariador-main/package-lock.json
 
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
+
+      # Docs: link/referência quebrada falha a geração do APK — mesmo gate do ci.yml.
+      - name: Docs (links e referências)
+        run: npm run check:docs
 
       # Sem as duas credenciais o build continua "verde", mas o APK nasce em
       # modo INTERNAL (100% offline) — foi o sintoma do selo "MOBILE (LOCAL)".

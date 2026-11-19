@@ -8,6 +8,8 @@ import { QR_FIELD_ORDER } from '../utils/qrUtils';
 import { updateAssetInProtheus } from '../services/protheusService';
 import { localDb } from '../services/localDbService';
 import { canonicalKey } from '../utils/normalize';
+import { isConferido, marcarConferido } from '../utils/conferencia';
+import { mesmoEnderecoAuditado } from '../utils/assetAddress';
 
 import { 
   Edit2, 
@@ -43,9 +45,6 @@ import { reverseGeocode } from '../services/geocodingService';
 import { determineAssetTag, getTagMetadata, normalizeString } from '../services/tagService';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { logger } from '../utils/logger';
-import { getPreciseFix } from '../utils/gpsUtils';
-import { GPS_ACCURACY, distanceMeters } from '../utils/gpsCore';
-import { hasRealAnchor } from '../utils/gpsAnchors';
 
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
@@ -229,61 +228,10 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     );
   };
 
-  useEffect(() => {
-    const calculateDynamicLocation = async () => {
-      try {
-        const filialName = (workingAsset.filial || '').toUpperCase().trim();
-        if (!filialName) return;
-        const configs = await localDb.unitConfigs.toArray();
-        const config = configs.find(c => {
-          const uId = (c._unitid || c.unit_id || '').toUpperCase().trim();
-          return uId === filialName || uId.replace(/_/g, ' ') === filialName.replace(/_/g, ' ');
-        });
-
-        // A posição do ativo é do SENSOR, não da âncora. Antes, este trecho
-        // "inventava" um deslocamento com Math.random() quando não havia sinal —
-        // o que jogava pontos falsos no Mapa de Calor. Agora, sem âncora real e
-        // sem leitura precisa, o ativo simplesmente fica sem coordenada.
-        if (!hasRealAnchor(config?.lat, config?.lng)) {
-          logger.warn('>>> [AssetDetail GPS] Unidade sem âncora real — coordenada do ativo não será inventada.');
-          return;
-        }
-        const anchor = { lat: Number(config?.lat), lng: Number(config?.lng) };
-
-        const fix = await getPreciseFix(GPS_ACCURACY.COLLECT);
-        if (!fix) {
-          logger.info('>>> [AssetDetail GPS] Sem leitura precisa; mantendo a coordenada atual do ativo.');
-          return;
-        }
-
-        // Leitura a quilômetros da âncora é erro de sensor/rede, não auditoria.
-        const dispersion = distanceMeters(anchor, fix);
-        if (dispersion > 5000) {
-          logger.warn(`>>> [AssetDetail GPS] Leitura a ${Math.round(dispersion)}m da âncora — descartada.`);
-          return;
-        }
-
-        setWorkingAsset(prev => ({
-          ...prev,
-          latitude: Number(fix.lat.toFixed(6)),
-          longitude: Number(fix.lng.toFixed(6)),
-          _gps_accuracy: Math.round(fix.accuracy * 10) / 10,
-          _gps_source: 'sensor',
-          _gps_at: new Date(fix.at).toISOString()
-        }));
-      } catch (e) {
-        logger.error('>>> [AssetDetail] Erro ao calcular deslocamento dinâmico:', e);
-      }
-    };
-
-    if (!workingAsset?.id) return;
-    // Debounce: a dep workingAsset?.filial re-executa o effect a cada tecla digitada
-    // no campo filial; agrupa as chamadas em uma única consulta de GPS após pausa.
-    const timer = setTimeout(() => {
-      calculateDynamicLocation();
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [workingAsset?.id, workingAsset?.filial]);
+  // O ativo fica SÓ com o GPS que já tem (leitura do inventário) ou vazio. A
+  // versão anterior gravava aqui a âncora da filial mais um deslocamento
+  // aleatório — e São Paulo como default quando a filial não tinha config —, o
+  // que inventava coordenadas no registo do ativo.
 
 
   const effectiveAssets = dexieAssets.length > 0 ? dexieAssets : assets;
@@ -454,7 +402,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
       onBulkUpdate(assets.map(a => String(a.id)), manualUpdates);
     } else {
-      onUpdate({ ...finalAsset, _conferido: true });
+      onUpdate({ ...finalAsset, ...marcarConferido() });
     }
 
     // Limpa rascunho de memória volátil (Pilar 2 de Conectividade)
@@ -576,7 +524,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     return current === 'ETIQUETAR' || original === 'ETIQUETAR';
   }, [workingAsset.etiqueta, workingAsset._valoresOriginais]);
 
-  const isConferido = !!workingAsset._conferido || String(workingAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+  const conferido = isConferido(workingAsset);
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
 
   const meta = getTagMetadata(visualStatus);
@@ -750,7 +698,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             </div>
           </div>
 
-          {(workingAsset._localMaster && workingAsset._localMaster !== workingAsset.endereco) && (
+          {!mesmoEnderecoAuditado(workingAsset) && (
             <div className="bg-white/10 border border-white/20 rounded-2xl p-4 backdrop-blur-md mb-2">
               <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
                 <span className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Fluxo de Adoção</span>
@@ -792,7 +740,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
       {/* KARDEX BODY */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-[60vh] bg-bg-main">
           {/* SITUAÇÃO DO ATIVO (REGRA DE OURO) */}
-          {(isAdopted || workingAsset._is_divergent_baixa || isConferido) && (
+          {(isAdopted || workingAsset._is_divergent_baixa || conferido) && (
             <div className="bg-white border border-border rounded-2xl p-5 shadow-sm space-y-4 animate-slideIn">
               <div className="flex items-center justify-between mb-1">
                 <h4 className="text-[10px] font-black text-ink-muted uppercase tracking-[0.2em] flex items-center">
@@ -828,7 +776,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
                       </div>
                     )}
 
-                    {(isAdopted || isConferido) && (
+                    {(isAdopted || conferido) && (
                       <div className="flex items-start">
                         <div className="w-8 h-8 rounded-xl bg-blue-500 text-white flex items-center justify-center mr-3 shrink-0 shadow-lg shadow-blue-500/20">
                           <MapPin size={14} />

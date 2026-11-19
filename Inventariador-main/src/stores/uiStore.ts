@@ -7,6 +7,7 @@ import {
   NavigationParams,
   SearchFilters,
 } from '../types';
+import { getInitialDatabaseMode } from '../services/supabaseService';
 
 export interface FileStatus {
   status: string;
@@ -40,7 +41,6 @@ export interface UiStoreState {
   // Feature flags & panels
   isPrivacyCenterOpen: boolean;
   isPaletteOpen: boolean;
-  isAIAssistantOpen: boolean;
   isHelpMenuOpen: boolean;
   isSafeMode: boolean;
   securityThreats: string[];
@@ -101,7 +101,6 @@ export interface UiStoreState {
   setDatabaseMode: (mode: DatabaseMode) => void;
   setIsPrivacyCenterOpen: (open: boolean) => void;
   setIsPaletteOpen: (open: boolean) => void;
-  setIsAIAssistantOpen: (open: boolean) => void;
   setIsHelpMenuOpen: (open: boolean) => void;
   setIsSafeMode: (safe: boolean) => void;
   setSecurityThreats: (threats: string[]) => void;
@@ -190,17 +189,16 @@ function getSavedModule(): AppModule | null {
   return (saved as AppModule) || null;
 }
 
-const savedDbMode = localStorage.getItem('app_database_mode') as DatabaseMode | null;
-
 const initialState: StoreData<UiStoreState> = {
   screen: AppScreen.LOGIN,
   history: [AppScreen.LOGIN],
   screenParams: null,
   modalConfig: { isOpen: false, title: '', message: '', type: 'info' },
-  databaseMode: savedDbMode || DatabaseMode.INTERNAL,
+  // Regra única (services/supabaseService): sem a chave gravada decide pelas
+  // credenciais do build, em vez de assumir INTERNAL.
+  databaseMode: getInitialDatabaseMode(),
   isPrivacyCenterOpen: false,
   isPaletteOpen: false,
-  isAIAssistantOpen: false,
   isHelpMenuOpen: false,
   isSafeMode: true,
   securityThreats: [],
@@ -287,7 +285,6 @@ export const useUiStore = create<UiStoreState>((set) => ({
   },
   setIsPrivacyCenterOpen: (isPrivacyCenterOpen) => set({ isPrivacyCenterOpen }),
   setIsPaletteOpen: (isPaletteOpen) => set({ isPaletteOpen }),
-  setIsAIAssistantOpen: (isAIAssistantOpen) => set({ isAIAssistantOpen }),
   setIsHelpMenuOpen: (isHelpMenuOpen) => set({ isHelpMenuOpen }),
   setIsSafeMode: (isSafeMode) => set({ isSafeMode }),
   setSecurityThreats: (securityThreats) => set({ securityThreats }),

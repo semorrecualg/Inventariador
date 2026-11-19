@@ -32,7 +32,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Node.js (.nvmrc)
+      # Versão exacta do .nvmrc (22.22.2), não a major "22": major flutuante
+      # faz o CI apanhar patches diferentes dos da máquina (e a suíte depende do
+      # localStorage do jsdom — um Node com webstorage ligado expõe um global
+      # que o sombreia e derruba testes). O .nvmrc é a fonte única: não repetir
+      # aqui o número, ou CI e máquina voltam a poder divergir.
+      - name: Node.js (.nvmrc → 22.22.2)
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -45,13 +50,30 @@ jobs:
       - name: Lint (zero warnings)
         run: npm run lint
 
+      # Docs: qualquer link ou referência de ficheiro quebrada falha o job.
+      - name: Docs (links e referências)
+        run: npm run check:docs
+
+      # Governança §9.1: a versão do package.json tem de ter entrada no CHANGELOG.
+      # `--ci` é o modo desenhado para este job: verifica estrutura e versão ↔
+      # CHANGELOG, ignora ambiente/Supabase (o passo "Validar credenciais" trata
+      # disso e falha se faltarem secrets) e trata branch atrás de main como aviso.
+      - name: Governança (versão ↔ CHANGELOG)
+        run: npm run verify:governanca -- --offline --ci
+
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Testes unitários
+      # `PROVA_CARGA_SINTETICA=1` liga a prova da carga da planilha
+      # (`provaCargaPlanilha.test.ts`) dentro da própria suíte: o teste compara,
+      # linha por linha, uma planilha sintética com o que entra na base pelo
+      # caminho real do Gestor de Base. Sem esta variável ele fica `skipped`, e
+      # o ficheiro falha de propósito se o CI o tentar saltar.
+      - name: Testes unitários (com prova da carga)
         run: npm test
         env:
           VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
+          PROVA_CARGA_SINTETICA: '1'
 
       # Sem as duas credenciais o build continua "verde", mas o bundle nasce em
       # modo INTERNAL (100% offline). Falha aqui para não publicar artefato offline.

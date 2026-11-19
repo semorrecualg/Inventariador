@@ -7,7 +7,7 @@
 #### **1. Verificar se o servidor está rodando**
 ```bash
 # No terminal, na pasta do projeto:
-cd /vercel/share/v0-project/Inventariador-main
+cd Inventariador-main
 
 # Verifique se há processos Vite/npm
 ps aux | grep vite
@@ -153,7 +153,7 @@ Se nada acima funcionar, faça um reset completo:
 
 ```bash
 # 1. Ir para o diretório
-cd /vercel/share/v0-project/Inventariador-main
+cd Inventariador-main
 
 # 2. Matar todos os processos relacionados
 pkill -9 -f vite

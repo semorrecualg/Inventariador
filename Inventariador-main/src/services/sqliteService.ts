@@ -1,9 +1,11 @@
 import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
-import { DatabaseStatus } from '../types';
+import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
-import { unitContextKey, splitUnitContextKey } from '../utils/unitContextUtils';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
+import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
+import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
@@ -39,20 +41,50 @@ export interface DexieAsset {
   vlraquisic: number;
   sn1_recno: number | null;
   sn3_recno: number | null;
+  // REGISTRO ADOTADO: rótulo `rad_NNNNNN` do registo criado copiando os dados
+  // de outra unidade. O registo novo fica com `sn1_recno` nulo, sem duplicar a
+  // chave, e o vínculo vive aqui (`rad_` = REGISTRO ADOTADO + sequência).
+  rad_recno?: string | null;
   _is_synced: number; // 0 or 1
   _is_deleted: number; // 0 or 1
-  _conferido: number; // 0 or 1
+  // 0/1 nas linhas do SQLite; as escritas do Dexie gravam o booleano da
+  // decisão (`utils/conferencia.ts`). O tipo admite todas as grafias que a
+  // regra aceita (`MarcaDeConferencia`): linhas antigas guardaram `'1'`/
+  // `'true'` e o JSON importado também.
+  _conferido: MarcaDeConferencia;
   _plaquetado: number; // 0 or 1
   _aprovado: number; // 0 or 1
   _isNew: number; // 0 or 1
   _is_unitized: number; // 0 or 1
   _is_divergent_baixa: number; // 0 or 1
   _history: string | null;
+  /**
+   * Cópia LITERAL da linha da planilha (21 colunas do contrato), do jeito que
+   * está escrita: sem trim, sem mudança de caixa, sem expurgo e sem colapso de
+   * espaços. É o que garante o retorno 1:1 ao ERP, inclusive para datas e
+   * valores que a app guarda também em formato tipado (`dataaqusic`,
+   * `databaixa`, `vlraquisic`).
+   */
+  _sourceRow?: Record<string, string> | null;
+  /**
+   * Fase 2 — a coluna `primarykey` da planilha, exatamente como escrita. É a
+   * ORIGEM do registo; a identidade do ativo é interna (`primarykey`/`id`), para
+   * duas linhas com a mesma chave de origem não se substituírem na carga.
+   */
+  source_primarykey?: string | null;
+  /** Linha da planilha que originou o registo (1 = primeira linha de dados). */
+  source_row?: number | null;
+  /** Carga (`CARGA-…`) que gravou o registo — rastreio de reimportações. */
+  import_batch?: string | null;
   DE_PARA: string | null;
   _photoUrl: string | null;
   gps_lat: number | null;
   gps_lng: number | null;
   currentCampaignId?: string | null;
+  // Conferência que desceu da nuvem (assets.auditor / assets.data_leitura):
+  // sem estes campos a carga da base descartava quem conferiu e quando.
+  _auditor?: string | null;
+  _dataLeitura?: string | null;
   tag_atual?: string;
   status_auditoria?: string;
   descricao?: string;
@@ -94,6 +126,15 @@ export interface DexieUnitConfig {
   allowNewAssets: number;
   allowWriteOffs: number;
   requirePlaqueta: number;
+  /** Contrato da unidade — sem ele a linha vira unidade "SEM CONTRATO". */
+  tenantid?: string;
+  lat?: number;
+  lng?: number;
+  radius_meters?: number;
+  is_active?: number;
+  updated_at?: string;
+  /** Proveniência da âncora: `manual` = pino no mapa, não é leitura de sensor. */
+  source?: AnchorSource | null;
 }
 
 export interface DexieCampaignSnapshot {
@@ -295,6 +336,22 @@ export const runMigrationV5DryRun = (): Promise<V5DryRunReport> =>
 
 export const db = new InventoryDexieDatabase();
 
+/** Marcador da migração única de `tenantid` para UPPER (ver migrateLegacyTenantids). */
+export const TENANT_CASE_MARKER = 'f0_tenant_case_canonical_v1';
+
+/**
+ * Restore/importação podem trazer `tenantid` fora do UPPER: o marcador deixa de
+ * valer e a contagem volta à varredura até a próxima migração. Chamar antes de
+ * escrever os ativos (o pior caso é uma varredura, nunca uma contagem errada).
+ */
+export const invalidateTenantCaseMarker = async (): Promise<void> => {
+  try {
+    await db.SYSTEM_CONTEXT.delete(TENANT_CASE_MARKER);
+  } catch (err) {
+    logger.warn('[SRE] Não foi possível invalidar o marcador de casing; a contagem usa varredura.', err);
+  }
+};
+
 export class SQLitePersistenceException extends Error {
   constructor(message: string) {
     super(`[SQLitePersistenceException] ${message}`);
@@ -425,8 +482,9 @@ export class SqliteService {
   }
 
   public async saveUnitConfigs(configs: Record<string, unknown>[]): Promise<void> {
-    const mapped = configs.map(cfg => ({
+    const mapped: DexieUnitConfig[] = configs.map(cfg => ({
       id: String(cfg.id || cfg.filial || ''),
+      tenantid: String(cfg.tenantid || ''),
       filial: String(cfg.filial || ''),
       nome: String(cfg.nome || cfg.filial || ''),
       hasGps: cfg.hasGps ? 1 : 0,
@@ -440,6 +498,8 @@ export class SqliteService {
       lng: cfg.lng !== undefined && cfg.lng !== null ? Number(cfg.lng) : undefined,
       radius_meters: cfg.radius_meters !== undefined && cfg.radius_meters !== null ? Number(cfg.radius_meters) : undefined,
       is_active: cfg.is_active !== false ? 1 : 0,
+      // Proveniência da âncora (sensor | manual) preservada no espelho físico.
+      source: cfg.source === 'sensor' ? 'sensor' : cfg.source === 'manual' ? 'manual' : undefined,
       updated_at: String(cfg.updated_at || '')
     }));
     await db.unit_configs.bulkPut(mapped);
@@ -487,8 +547,12 @@ export class SqliteService {
         .map(c => unitContextKey(String((c as { tenantid?: string }).tenantid || ''), String(c.filial || c.nome || '')))
         .filter(k => splitUnitContextKey(k).filial !== '');
 
-      // União única de todas as unidades por chave composta
-      const allKeys = Array.from(new Set([...filiaisAssets, ...filiaisConfigs]));
+      // Config sem contrato que duplica uma filial já identificada pelos ativos
+      // não vira unidade própria (era o cartão "SEM CONTRATO" e a contagem dobrada).
+      const allKeys = Array.from(new Set([
+        ...filiaisAssets,
+        ...filterPhantomConfigKeys(filiaisAssets, filiaisConfigs)
+      ]));
 
       const stats = allKeys.map(k => {
         const { tenantid: t, filial: f } = splitUnitContextKey(k);
@@ -496,7 +560,7 @@ export class SqliteService {
           String(a.filial || '').toUpperCase().trim() === f &&
           String(a.tenantid || '').toUpperCase().trim() === t
         );
-        const checkedAssets = filialAssets.filter(a => a._conferido === 1);
+        const checkedAssets = filialAssets.filter(a => isConferido(a));
         // O rótulo espelha a coluna 'filial' da planilha (filial_raw), sem uppercase
         // nem reformatação. A chave (f) segue normalizada — é identidade, não texto.
         const rotulo = filialAssets.find(a => String(a.filial || '').trim() !== '');
@@ -532,7 +596,7 @@ export class SqliteService {
       }
 
       const totalAssets = assets.length;
-      const checkedAssets = assets.filter(a => a._conferido === 1).length;
+      const checkedAssets = assets.filter(a => isConferido(a)).length;
       const pendingAssets = totalAssets - checkedAssets;
       const discrepancyCount = assets.filter(a => a._is_divergent_baixa === 1).length;
 
@@ -744,7 +808,9 @@ export class SqliteService {
               sn3_recno: asset.sn3_recno !== undefined && asset.sn3_recno !== null ? Number(asset.sn3_recno) : null,
               _is_synced: options?.markSynced ? 1 : (Number(asset._is_synced) === 1 ? 1 : 0),
               _is_deleted: asset._is_deleted ? 1 : 0,
-              _conferido: asset._conferido ? 1 : 0,
+              _conferido: isConferido(asset) ? 1 : 0,
+              _auditor: asset._auditor !== undefined && asset._auditor !== null ? String(asset._auditor) : null,
+              _dataLeitura: asset._dataLeitura !== undefined && asset._dataLeitura !== null ? String(asset._dataLeitura) : null,
               _plaquetado: asset._plaquetado ? 1 : 0,
               _aprovado: asset._aprovado ? 1 : 0,
               _isNew: asset._isNew ? 1 : 0,
@@ -997,6 +1063,56 @@ export class SqliteService {
   }
 
   /**
+   * F0: resíduos anteriores à v7 podem ter `tenantid` fora do UPPER canónico e,
+   * como o índice `[tenantid+primarykey]` é sensível a maiúsculas, ficariam
+   * fora da contagem pelo índice. Esta normalização é uma migração explícita:
+   * roda em transação única, uma vez por base (marcador em SYSTEM_CONTEXT), e
+   * NUNCA dentro de `countAssetMirrors`.
+   *
+   * Colisão com a linha canónica: a canónica é preservada intacta e a variante
+   * legada fica onde está (não é apagada nem sobrescreve). Como as duas têm a
+   * mesma `primarykey`, contam como um único ativo.
+   */
+  public async migrateLegacyTenantids(): Promise<{ repaired: number; skipped: number }> {
+    try {
+      if (await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)) return { repaired: 0, skipped: 0 };
+    } catch {
+      return { repaired: 0, skipped: 0 };
+    }
+    let repaired = 0;
+    let skipped = 0;
+    await db.transaction('rw', db.local_assets, db.ativos, db.assets, db.SYSTEM_CONTEXT, async () => {
+      const tables: Array<'local_assets' | 'ativos' | 'assets'> = ['local_assets', 'ativos', 'assets'];
+      for (const table of tables) {
+        const rows = (await db[table].toArray()) as Array<{ tenantid?: unknown; primarykey?: unknown; id?: unknown }>;
+        for (const row of rows) {
+          const raw = String(row.tenantid ?? '');
+          const canonical = raw.trim().toUpperCase();
+          if (canonical === '' || raw === canonical) continue;
+          const primarykey = String(row.primarykey ?? row.id ?? '');
+          const target: [string, string] = [canonical, primarykey];
+          if (await db[table].get(target)) {
+            skipped++;
+            continue;
+          }
+          await db[table].delete([raw, primarykey]);
+          await db[table].put({ ...row, tenantid: canonical } as DexieAsset);
+          repaired++;
+        }
+      }
+      await db.SYSTEM_CONTEXT.put({
+        key: TENANT_CASE_MARKER,
+        value: '1',
+        updated_at: new Date().toISOString()
+      });
+    });
+    if (repaired > 0 || skipped > 0) {
+      logger.warn(`[SRE] tenantid legado: ${repaired} normalizada(s) em transação; ${skipped} ignorada(s) por já existir a linha canónica.`);
+    }
+    return { repaired, skipped };
+  }
+
+  /**
    * Contra-prova por espelho físico: conta `local_assets`, `ativos` e `assets`
    * separadamente e devolve o total canónico (maior espelho) — a MESMA regra de
    * `getAssetCount`/`countAtivosByTenant`. O Gestor de Base contava só
@@ -1004,14 +1120,28 @@ export class SqliteService {
    * escreviam apenas um), anunciava 0 ativos enquanto a Unidade Operacional
    * mostrava milhares. Devolver cada espelho permite explicar a diferença em
    * vez de escondê-la.
+   *
+   * Leitura pura: usa o índice `[tenantid+primarykey]` quando a migração de
+   * casing já correu; até lá — e sem nunca escrever — cai na varredura para não
+   * perder resíduo legado.
    */
   public async countAssetMirrors(
     tenantid?: string | null
   ): Promise<{ local_assets: number; ativos: number; assets: number; total: number }> {
     const t = String(tenantid || '').trim().toUpperCase();
+    // Uma leitura só para as três tabelas; falha no marcador = varredura segura.
+    const canonicalized = await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)
+      .then(Boolean)
+      .catch(() => false);
     const countTable = async (table: 'local_assets' | 'ativos' | 'assets'): Promise<number> => {
       try {
         if (!t) return await db[table].count();
+        if (canonicalized) {
+          return await db[table]
+            .where('[tenantid+primarykey]')
+            .between([t, Dexie.minKey], [t, Dexie.maxKey])
+            .count();
+        }
         const rows = (await db[table].toArray()) as { tenantid?: unknown }[];
         return rows.filter(a => String(a.tenantid || '').trim().toUpperCase() === t).length;
       } catch {
@@ -1218,8 +1348,8 @@ export class SqliteService {
       }
 
       const totalAtivos = assets.length;
-      const conferidoAtivos = assets.filter(a => a._conferido === 1).length;
-      const baixadosLocalizados = assets.filter(a => a._conferido === 1 && a.status === 'B').length;
+      const conferidoAtivos = assets.filter(a => isConferido(a)).length;
+      const baixadosLocalizados = assets.filter(a => isConferido(a) && a.status === 'B').length;
       const totalLido = conferidoAtivos;
       const pendentesAtivos = totalAtivos - conferidoAtivos;
       const avancoPercent = totalAtivos > 0 ? Math.round((conferidoAtivos / totalAtivos) * 100) : 0;
@@ -1307,7 +1437,7 @@ export class SqliteService {
           tenantid: String(asset.tenantid || existing?.tenantid || '').trim().toUpperCase(),
           primarykey: primaryKeyVal,
           id: primaryKeyVal,
-          _is_synced: 0
+          ...marcarAlteracaoLocal()
         } as DexieAsset;
         
         await db.ativos.put(updatedItem);

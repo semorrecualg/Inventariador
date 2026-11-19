@@ -4,11 +4,17 @@ import { Asset, InventoryState, DatabaseStatus, DatabaseMode } from '../types';
 import { syncAssetsToCloudAndMark, syncConfigToCloud } from './supabaseService';
 import { encryption } from './securityService';
 import { localDb, backupDatabaseToPhysicalStorage } from './localDbService';
-import { sqliteService, db, DexieAsset } from './sqliteService';
+import { sqliteService, db, DexieAsset, invalidateTenantCaseMarker } from './sqliteService';
 import { generateChecksum } from './utils';
 import { normalizeAssetContract } from '../utils/schema';
 import { FileSystemStorageService } from './FileSystemStorageService';
 import { logger } from '../utils/logger';
+import { sanitizeAssetKey } from '../utils/assetKey';
+import { readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
+import { marcarAlteracaoLocal } from '../utils/pendencia';
+import { marcarConferido } from '../utils/conferencia';
+import { reportRecnoConflictForAsset } from './recnoGuardService';
+import type { RecnoCandidate } from '../utils/recnoGuard';
 
 // Chaves base para o armazenamento
 const BASE_ASSETS_KEY = 'inventory_assets_v24';
@@ -99,6 +105,8 @@ export const restoreInventory = async (file: File, mode: DatabaseMode): Promise<
         if (!data.assets || !Array.isArray(data.assets)) {
           throw new Error('Formato de backup inválido');
         }
+        // Backup pode ter tenantid em qualquer casing: invalida a migração.
+        await invalidateTenantCaseMarker();
 
         const newState: InventoryState = {
           ...(data.config || {}),
@@ -221,15 +229,16 @@ export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
 
 export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & { primarykey: string }): Promise<void> {
   // Higienização dos indexadores principais conforme diretrizes de governança GBR
-  if (assetData.primarykey) {
-    assetData.primarykey = String(assetData.primarykey).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  }
-  if (assetData.etiqueta) {
-    assetData.etiqueta = String(assetData.etiqueta).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  }
-  if (assetData.tag) {
-    assetData.tag = String(assetData.tag).trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  }
+  // Chave canônica única (utils/assetKey): a mesma regra da carga da planilha,
+  // do pull da nuvem e do envio. Antes esta função expurgava separadores a mais
+  // e criava uma chave diferente da que a carga gravou para o mesmo ativo.
+  if (assetData.primarykey) assetData.primarykey = sanitizeAssetKey(assetData.primarykey);
+  if (assetData.etiqueta) assetData.etiqueta = sanitizeAssetKey(assetData.etiqueta);
+  if (assetData.tag) assetData.tag = sanitizeAssetKey(assetData.tag);
+
+  // Guarda o registo gravado: a verificação de recno corre FORA da transação
+  // (a auditoria vive noutra tabela e não pode entrar neste escopo).
+  let mergedData: DexieAsset | null = null;
 
   // Bloqueia e sequencia as tabelas envolvidas em modo Read-Write
   await db.transaction('rw', [db.local_assets, db.ativos], async () => {
@@ -239,22 +248,30 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
     const existingActive = await db.ativos.get(assetKey);
     const existingLocal = await db.local_assets.get(assetKey);
 
-    const mergedData = {
+    mergedData = {
       ...(existingActive || {}),
       ...(existingLocal || {}),
       ...assetData,
       tenantid: String(assetData.tenantid || existingLocal?.tenantid || existingActive?.tenantid || '').trim().toUpperCase(),
-      _conferido: 1,
-      _is_synced: 0,
+      ...marcarConferido(),
+      ...marcarAlteracaoLocal(),
       updated_at: new Date().toISOString()
-    };
+    } as unknown as DexieAsset;
 
     // Escrita atômica sequencial
     await db.local_assets.put(mergedData as DexieAsset);
     if (existingActive) {
-      await db.ativos.update(assetKey, { _conferido: 1 });
+      await db.ativos.update(assetKey, { ...marcarConferido() });
     }
   });
+
+  // Guardião suave: recno repetido com etiqueta/descrição/valor diferentes vira
+  // registro de auditoria (ASSET_DUP_SUSPECT). Não bloqueia a conferência.
+  try {
+    await reportRecnoConflictForAsset(mergedData as unknown as RecnoCandidate, 'CONFERENCIA');
+  } catch (err: unknown) {
+    logger.warn('[RECNO] Falha ao verificar duplicidade na conferência:', err instanceof Error ? err.message : String(err));
+  }
 
   // Espelhamento físico em background no disco rígido do dispositivo (Anti-Limpeza).
   // Antes esta rotina lia a base INTEIRA (toArray) e regravava o JSON completo a
@@ -391,17 +408,21 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     // 2. Tenta sincronizar com a nuvem (Supabase) - Apenas se estiver em modo SUPABASE
     if (mode.startsWith('SUPABASE')) {
       const assetsToSync = dirtyAssets || [];
-      
+      // O autosave não conhece o perfil: o contrato vem da sessão. Sem ele a
+      // configuração não tem como ser isolada — e o serviço agora ignora o
+      // envio em vez de encerrar a sessão por causa de um save em segundo plano.
+      const tenantForSync = (readSessionTenantId() || readLocalTenantId() || '').trim() || undefined;
+
       if (assetsToSync.length > 0) {
         logger.info(`>>> [Persistence] Sincronizando ${assetsToSync.length} ativos sujos com a nuvem...`);
         // syncAssetsToCloudAndMark: marca _is_synced = 1 nos ids aceites, para a
         // etiqueta "PENDENTE NUVEM" desaparecer sem depender de novo download.
         syncAssetsToCloudAndMark(assetsToSync).catch(err => logger.warn('Cloud sync failed (offline?):', err));
         // Se sincronizou ativos, sincroniza a config também para atualizar o lastUpdated na nuvem
-        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => logger.warn('Config sync failed (offline?):', err));
+        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>, tenantForSync).catch(err => logger.warn('Config sync failed (offline?):', err));
       } else if (forceCloudSync) {
         logger.info('>>> [Persistence] Sincronizando configurações com a nuvem (forced)...');
-        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>).catch(err => logger.warn('Config sync failed (offline?):', err));
+        syncConfigToCloud(config as unknown as Omit<InventoryState, 'assets'>, tenantForSync).catch(err => logger.warn('Config sync failed (offline?):', err));
       }
     }
 

@@ -25,6 +25,7 @@
 
 import type { User } from '../types';
 import { AppModule } from '../types';
+import { isFieldAuditorRole } from './roles';
 
 export interface WorkContext {
   tenantid: string;
@@ -250,8 +251,7 @@ export function isValidLastContext(
   user?: { role?: string; tenantid?: string; units?: string[]; filial?: string } | null
 ): boolean {
   if (!stored) return false;
-  const roleUpper = String(user?.role || '').toUpperCase();
-  if (roleUpper === 'AUDITOR' || roleUpper === 'AUXILIARY_AUDITOR') {
+  if (isFieldAuditorRole(user?.role)) {
     if (stored.module === AppModule.ASSET_CONTROL) return false;
   }
 
@@ -269,6 +269,52 @@ export function isValidLastContext(
     normalizeWorkTenant(c.tenantid) === normalizeWorkTenant(stored.tenantid) &&
     normalizeWorkFilial(c.filial) === normalizeWorkFilial(stored.filial)
   );
+}
+
+/**
+ * O módulo INVENTARIADOR trabalha SEMPRE dentro de uma filial: o seu destino é
+ * o hub operacional da filial (campanha, endereço físico, contagens). Sem filial
+ * escolhida a trilha cairia na Unidade Operacional e, para o auditor (que não
+ * tem `/unit` na trilha), no vaivém `/unit` ↔ `/contexto`. Por isso a confirmação
+ * do contrato exige filial para INVENTARIADOR; CONTROLE DE ATIVO continua livre
+ * (não usa endereço de campo).
+ */
+export function canConfirmWorkContext(
+  module: AppModule | null | undefined,
+  filial: string | null | undefined
+): boolean {
+  if (!module) return false;
+  if (module === AppModule.INVENTORY) return !!String(filial || '').trim();
+  return true;
+}
+
+/** Valores que o seletor de contrato deve abrir já apontados (pré-seleção). */
+export interface WorkContextPreselection {
+  tenantid: string;
+  filial: string;
+  module: AppModule;
+}
+
+/**
+ * ETAPA 4 REVISADA (Fase 1 do acesso padronizado): a última escolha deixa de
+ * SALTAR o contrato. Esta função devolve apenas os valores que o seletor deve
+ * apresentar pré-seleccionados (contrato/filial/módulo); a confirmação continua
+ * a ser um toque explícito em "Acessar o Módulo".
+ *
+ * Devolve `null` quando não há escolha guardada ou quando ela deixou de estar
+ * autorizada (perfil alterado, filial removida, módulo proibido ao papel).
+ */
+export function resolveWorkContextPreselection(
+  stored: LastWorkContext | null,
+  contexts: WorkContext[],
+  user?: { role?: string; tenantid?: string; units?: string[]; filial?: string } | null
+): WorkContextPreselection | null {
+  if (!isValidLastContext(stored, contexts, user) || !stored) return null;
+  return {
+    tenantid: normalizeWorkTenant(stored.tenantid),
+    filial: normalizeWorkFilial(stored.filial),
+    module: stored.module
+  };
 }
 
 /** Persiste o contexto escolhido nas chaves canônicas de sessão/local. */

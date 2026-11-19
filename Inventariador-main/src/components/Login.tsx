@@ -4,12 +4,14 @@ import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint
 import { isAdminEmail, markAppManagedSession, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode } from '../services/supabaseService';
-import { authenticateBiometric, hasBiometricRegistered, isBiometricSupported } from '../services/biometricService';
+import { authenticateBiometric, checkNativeBiometry, hasBiometricRegistered, isBiometricSupported, isNativeAppShell } from '../services/biometricService';
+import { canOfferBiometricUnlock, forgetLastLoginUser, normalizeUnlockUser, readLastLoginUser, rememberLastLoginUser } from '../utils/biometricUnlock';
+import BiometricUnlock from './BiometricUnlock';
 import { User, DatabaseMode, UserRole, AppScreen, ModalConfig } from '../types';
 import { safeStringify } from '../services/utils';
 import { localDb } from '../services/localDbService';
 import { demoService } from '../services/demoService';
-import pkg from '../../package.json';
+import { APP_VERSION, APP_VERSION_LABEL } from '../utils/appVersion';
 import { logger } from '../utils/logger';
 import { readSessionTenantId, readLocalTenantId } from '../utils/tenantUtils';
 
@@ -63,63 +65,159 @@ const Login: React.FC<LoginProps> = ({
   // avoiding 2 wasted re-renders per Dexie auth call.
   const { authenticate: localAuthenticate } = useLocalAuth(false);
 
-  // Vercel Best Practice: derive during render, no useMemo for simple primitives
+  // Boas práticas React: derive during render, no useMemo for simple primitives
   // (rerender-simple-expression-in-memo)
   const normalizedUsername = username.trim().toLowerCase();
 
   // Check for biometrics when username changes
-  // Vercel Best Practice: Lazy state init for derived async state
+  // Boas práticas React: Lazy state init for derived async state
   // (rerender-lazy-state-init, rerender-split-combined-hooks)
   React.useEffect(() => {
     let cancelled = false;
     const checkBio = async () => {
-      if (normalizedUsername.length > 3) {
-        const supported = await isBiometricSupported();
-        if (supported && !cancelled) {
-          const registered = await hasBiometricRegistered(normalizedUsername);
-          if (!cancelled) setHasBio(registered);
-        } else if (!cancelled) {
-          setHasBio(false);
-        }
-      } else if (!cancelled) {
-        setHasBio(false);
+      // Biometria é do APP MÓVEL: no navegador/desktop o botão nem aparece —
+      // nem há cadastro a oferecer, mesmo que o sistema tenha Touch ID/Windows
+      // Hello disponível.
+      if (!isNativeAppShell() || normalizedUsername.length <= 3) {
+        if (!cancelled) setHasBio(false);
+        return;
       }
+      const supported = await isBiometricSupported();
+      if (cancelled) return;
+      if (!supported) {
+        setHasBio(false);
+        return;
+      }
+      const registered = await hasBiometricRegistered(normalizedUsername);
+      if (!cancelled) setHasBio(registered);
     };
     checkBio();
     return () => { cancelled = true; };
   }, [normalizedUsername]);
 
+  // DESBLOQUEIO BIOMÉTRICO (primeira etapa no mobile): o último utilizador
+  // autenticado neste aparelho abre a sessão pela biometria, sem teclado; a
+  // senha fica como alternativa explícita («Usar senha»). Só no casco nativo —
+  // no web sem autenticador o acesso continua a ser utilizador + senha.
+  const [unlockUser, setUnlockUser] = useState<string | null>(null);
+  const [unlockChecking, setUnlockChecking] = useState<boolean>(
+    () => isNativeAppShell() && !!readLastLoginUser()
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const resolveUnlock = async () => {
+      if (!isNativeAppShell()) {
+        if (!cancelled) setUnlockChecking(false);
+        return;
+      }
+      const lastUser = readLastLoginUser();
+      if (!lastUser) {
+        if (!cancelled) setUnlockChecking(false);
+        return;
+      }
+      try {
+        // A política exige capacidade + credencial NATIVA deste utilizador: um
+        // registo feito no navegador não autentica no casco nativo.
+        const facts = await checkNativeBiometry();
+        const registered =
+          facts.status === 'available' && (await hasBiometricRegistered(lastUser));
+        if (!cancelled && canOfferBiometricUnlock({
+          lastUser,
+          isNativeApp: true,
+          biometry: facts.status,
+          registered
+        })) {
+          setUnlockUser(lastUser);
+        }
+      } catch (err) {
+        logger.warn('[Login] Falha ao preparar o desbloqueio biométrico:', err);
+      } finally {
+        if (!cancelled) setUnlockChecking(false);
+      }
+    };
+    resolveUnlock();
+    return () => { cancelled = true; };
+  }, []);
+
+  /** Utilizador local por username OU e-mail, com a tabela física como reforço. */
+  const findLocalUser = async (identifier: string): Promise<User | null> => {
+    const normalized = normalizeUnlockUser(identifier);
+    if (!normalized) return null;
+    const matches = (u: User) =>
+      normalizeUnlockUser(u.email) === normalized || normalizeUnlockUser(u.username) === normalized;
+    const fromProps = users.find(matches);
+    if (fromProps) return fromProps;
+    try {
+      const dbUsers = await localDb.users.toArray();
+      return (dbUsers.find((u) => matches(u as User)) as User | undefined) ?? null;
+    } catch (err) {
+      logger.warn('[Login] Falha ao ler utilizadores locais para o desbloqueio:', err);
+      return null;
+    }
+  };
+
+  /**
+   * Conclui a sessão local de uma entrada já verificada pela biometria e
+   * memoriza o utilizador do aparelho para o próximo desbloqueio.
+   */
+  const completeBiometricLogin = (localUser: User, details: string) => {
+    // Credencial local do app: não existe token do Supabase para validar.
+    markAppManagedSession();
+    sessionStorage.setItem('app_current_user', safeStringify(localUser));
+
+    logAuditEvent({
+      user_email: localUser.email,
+      action: 'LOGIN',
+      details,
+      tenantid: localUser.tenantid
+    });
+
+    rememberLastLoginUser(localUser);
+    onLogin(localUser);
+  };
+
+  /** Desbloqueio biométrico do último utilizador do aparelho. */
+  const handleUnlockBiometric = async (unlockedUser: string) => {
+    setIsLoading(true);
+    try {
+      const localUser = await findLocalUser(unlockedUser);
+      if (localUser) {
+        completeBiometricLogin(localUser, 'Login efetuado via Biometria (Desbloqueio do aparelho)');
+        return;
+      }
+      // Sem perfil local não há sessão: cai para a senha, sem prender a tela.
+      setUnlockUser(null);
+      setUsername(unlockedUser);
+      setError('Usuário biométrico não encontrado no banco local. Entre com a senha.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /** Login por senha concluído: memoriza o utilizador para o próximo desbloqueio. */
+  const finishPasswordLogin = (loggedUser: User) => {
+    rememberLastLoginUser(loggedUser);
+    onLogin(loggedUser);
+  };
+
   const handleBiometricLogin = async () => {
     if (!username) return;
-    
+
     try {
       setIsLoading(true);
-      const success = await authenticateBiometric(username.trim().toLowerCase());
-      
-      if (success) {
-        // No modo INTERNO, buscamos o usuário local
-        const localUser = users.find(u => 
-          u.email.toLowerCase() === username.trim().toLowerCase() || 
-          u.username.toLowerCase() === username.trim().toLowerCase()
-        );
+      const success = await authenticateBiometric(normalizeUnlockUser(username));
 
-        if (localUser) {
-          // Credencial local do app: não existe token do Supabase para validar.
-          markAppManagedSession();
-          sessionStorage.setItem('app_current_user', safeStringify(localUser));
-          
-          // Log de Auditoria
-          logAuditEvent({
-            user_email: localUser.email,
-            action: 'LOGIN',
-            details: 'Login efetuado via Biometria (Local)',
-            tenantid: localUser.tenantid
-          });
+      if (!success) {
+        setError('Biometria não confirmada neste aparelho.');
+        return;
+      }
 
-          onLogin(localUser);
-        } else {
-          setError("Usuário biométrico não encontrado no banco local.");
-        }
+      const localUser = await findLocalUser(username);
+      if (localUser) {
+        completeBiometricLogin(localUser, 'Login efetuado via Biometria (Local)');
+      } else {
+        setError("Usuário biométrico não encontrado no banco local.");
       }
     } catch {
       setError("Falha na autenticação biométrica.");
@@ -181,7 +279,7 @@ const Login: React.FC<LoginProps> = ({
   };
 
   const handleDemoMode = (): void => {
-    logger.info(`[GBR v${pkg.version}] Inicializando Modo Demo`);
+    logger.info(`[GBR ${APP_VERSION_LABEL}] Inicializando Modo Demo`);
     sessionStorage.setItem('gbr_session_mode', 'DEMO');
     handleDemoLogin();
   };
@@ -218,7 +316,7 @@ const Login: React.FC<LoginProps> = ({
     }
   };
 
-  // Vercel Best Practice: derive during render, no redundant bool for simple checks
+  // Boas práticas React: derive during render, no redundant bool for simple checks
   // (rerender-simple-expression-in-memo)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -290,7 +388,7 @@ const Login: React.FC<LoginProps> = ({
         // local (Dexie/Barreira Local) não tem token do Supabase: a sessão é
         // marcada como gerida pelo app para a checagem da nuvem não destruí-la.
         markAppManagedSession();
-        onLogin(dexieUser);
+        finishPasswordLogin(dexieUser);
         setIsLoading(false);
         clearTimeout(loginTimeout);
         return;
@@ -406,7 +504,7 @@ const Login: React.FC<LoginProps> = ({
           // FLUXO ÚNICO: autenticado na Barreira Local, entra direto; contrato,
           // filial e módulo são escolhidos na tela de contrato de trabalho.
           markAppManagedSession();
-          onLogin(loggedUser);
+          finishPasswordLogin(loggedUser);
           clearTimeout(loginTimeout);
           return; // ENCERRA O FLUXO SEM COCORRER CÓDIGOS DO SUPABASE
         } catch (localErr: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -680,7 +778,7 @@ const Login: React.FC<LoginProps> = ({
           tenantid: loggedUser.tenantid
         });
 
-        onLogin(loggedUser);
+        finishPasswordLogin(loggedUser);
       }
     } catch (err: unknown) {
       const error = err as Error;
@@ -705,7 +803,48 @@ const Login: React.FC<LoginProps> = ({
 
   const config = getFieldConfig();
 
-  // Vercel Best Practice: use ternary for JSX conditionals (rendering-conditional-render)
+  // Primeiro passo do acesso no mobile: a verificar credencial + biometria do
+  // aparelho antes de mostrar o formulário (evita o flash da senha).
+  if (unlockChecking) {
+    return (
+      <div className="w-full min-h-screen bg-white flex flex-col items-center justify-center gap-4 px-6">
+        <Loader2 size={28} className="animate-spin text-accent" />
+        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">
+          A verificar a segurança do aparelho...
+        </p>
+      </div>
+    );
+  }
+
+  // Desbloqueio biométrico: último utilizador do aparelho, prompt automático e
+  // «Usar senha» como alternativa. Nada aqui existe no web sem autenticador.
+  if (unlockUser) {
+    const unlockName = unlockUser;
+    return (
+      <BiometricUnlock
+        username={unlockName}
+        authenticate={authenticateBiometric}
+        onUnlocked={() => handleUnlockBiometric(unlockName)}
+        onUsePassword={() => {
+          setUnlockUser(null);
+          setUsername(unlockName);
+          setError(null);
+        }}
+        onUseAnotherAccount={() => {
+          // Segundo utilizador no mesmo aparelho: esquece o último utilizador
+          // para o formulário não herdar o desbloqueio biométrico do anterior.
+          // A credencial registada do anterior fica intacta no aparelho.
+          forgetLastLoginUser();
+          setUnlockUser(null);
+          setUsername('');
+          setPassword('');
+          setError(null);
+        }}
+      />
+    );
+  }
+
+  // Boas práticas React: use ternary for JSX conditionals (rendering-conditional-render)
   // Derived booleans inline — avoids '0' or unexpected falsy rendering
   const hasBioAvailable = hasBio && !isLoading;
 
@@ -915,7 +1054,7 @@ const Login: React.FC<LoginProps> = ({
             AUDITORIA INTELIGENTE
           </p>
           <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest font-semibold">
-            VERSÃO {pkg.version} - GBR NATIVE READY
+            VERSÃO {APP_VERSION} - GBR NATIVE READY
           </p>
         </div>
       </div>

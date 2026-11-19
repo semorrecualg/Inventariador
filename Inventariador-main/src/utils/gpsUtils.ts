@@ -1,34 +1,59 @@
 import { Geolocation } from '@capacitor/geolocation';
 import { logger } from './logger';
-import {
-  GPS_ACCURACY,
-  isPreciseFix,
-  toGpsFix,
-  type GpsFix,
-} from './gpsCore';
+import { canonicalRole } from './roles';
+import { GPS_ACCURACY, GpsJitterFilter, isPreciseFix, isValidCoordinate, toGpsFix } from './gpsCore';
 
 /**
- * Utilitário para captura de geolocalização (GPS).
- *
- * Toda leitura real passa por `gpsCore.toGpsFix` (validação + precisão). Quando
- * o sensor não entrega nada utilizável, a função devolve uma coordenada de
- * CONTINGÊNCIA marcada com `isSynthetic: true` e `accuracy: NaN` — ela serve
- * para destravar a navegação, mas nunca deve ser gravada como posição de ativo
- * nem alimentar o Mapa de Calor.
- *
- * @see docs/GPS_ANCORA_E_MAPA_DE_CALOR.md
+ * Utilitário para captura de geolocalização (GPS)
  */
 
 export interface GeoLocationResult {
   latitude: number;
   longitude: number;
-  /** Precisão em metros; `NaN` quando a coordenada é sintética. */
   accuracy: number;
   isBypassed: boolean;
   source: 'native' | 'admin_bypass';
-  /** `true` = coordenada de contingência, não é leitura do sensor. */
-  isSynthetic?: boolean;
 }
+
+/**
+ * A posição veio do BYPASS ADMINISTRATIVO — a âncora da unidade a fazer de
+ * leitura de aparelho (`admin_bypass`). Serve para a guarda de conformidade
+ * mostrar onde o operador deveria estar; NUNCA é GPS do ativo.
+ */
+export const isAnchorDerivedLocation = (
+  loc: Partial<GpsLocation> | null | undefined
+): boolean =>
+  !!loc && (loc.isBypassed === true || String(loc.source || '') === 'admin_bypass');
+
+/**
+ * A única coordenada que pode ser gravada no ativo é a leitura REAL do aparelho.
+ *
+ * Devolve `null` para bypass administrativo (âncora), para cache de âncora, para
+ * coordenada inválida/zero e para ausência de leitura. Sem fix real o ativo fica
+ * sem GPS — a âncora continua só na configuração da unidade operacional.
+ */
+export const persistableAssetGps = (
+  loc: Partial<GpsLocation> | null | undefined
+): { lat: number; lng: number } | null => {
+  if (!loc || isAnchorDerivedLocation(loc)) return null;
+  const lat = Number(loc.lat);
+  const lng = Number(loc.lng);
+  if (!isValidCoordinate(lat, lng)) return null;
+  return { lat, lng };
+};
+
+/**
+ * Decide se vale TENTAR uma leitura do sensor para o ativo.
+ *
+ * Perfil (admin/master) já não entra na conta: o admin lê o sensor como
+ * qualquer operador — o que o desqualifica é o bypass EXPLÍCITO
+ * (`gbr_gps_bypass`) e a bateria crítica. A posição obtida continua a passar
+ * por `persistableAssetGps`, que recusa qualquer coisa marcada como bypass.
+ */
+export const shouldAttemptAssetGpsCapture = (opts: {
+  bypassed: boolean;
+  battery: number | undefined;
+}): boolean => !opts.bypassed && Number(opts.battery) > 5;
 
 function showFloatingBypassToast(lat: number, lng: number, reason: string) {
   if (typeof document === 'undefined') return;
@@ -96,103 +121,74 @@ function showFloatingBypassToast(lat: number, lng: number, reason: string) {
   }, 4000);
 }
 
+/**
+ * Retorna a posição do aparelho para a guarda de conformidade, ou `null` quando
+ * não há leitura válida e não há âncora da unidade para o bypass administrativo.
+ * Nunca inventa coordenada: a âncora da unidade é a única contingência usada, e
+ * o resultado com `isBypassed`/`source: 'admin_bypass'` NÃO pode ser gravado em
+ * ativo — `persistableAssetGps` recusa-o.
+ */
 export async function getCurrentDeviceLocation(
   userRole: string,
   unitAnchorCoordinates?: { lat: number; lng: number }
-): Promise<GeoLocationResult> {
-  // Coordenadas padrão da unidade como fallback seguro e universal para evitar travamento
-  const defaultAnchor = { lat: -16.7439, lng: -49.2144 };
-  const finalAnchor = {
-    lat: unitAnchorCoordinates?.lat && !isNaN(Number(unitAnchorCoordinates.lat)) ? Number(unitAnchorCoordinates.lat) : defaultAnchor.lat,
-    lng: unitAnchorCoordinates?.lng && !isNaN(Number(unitAnchorCoordinates.lng)) ? Number(unitAnchorCoordinates.lng) : defaultAnchor.lng
-  };
+): Promise<GeoLocationResult | null> {
+  const hasAnchor = isValidCoordinate(unitAnchorCoordinates?.lat, unitAnchorCoordinates?.lng);
+  const finalAnchor = hasAnchor
+    ? { lat: Number(unitAnchorCoordinates?.lat), lng: Number(unitAnchorCoordinates?.lng) }
+    : null;
 
-  const roleUpper = (userRole || '').toUpperCase();
-  const isAdmin = ['ADMIN', 'MASTER', 'GESTOR'].includes(roleUpper);
+  const roleUpper = canonicalRole(userRole);
+  const isAdmin = roleUpper === 'ADMIN' || roleUpper === 'MASTER';
 
-  // 4. Se o usuário possuir perfil administrativo (ADMIN, MASTER, GESTOR), garanta o bypass síncrono definitivo da validação
-  if (isAdmin) {
+  // 4. Se o usuário possuir perfil administrativo (ADMIN, MASTER), garanta o bypass síncrono definitivo da validação
+  if (isAdmin && finalAnchor) {
     logger.info(">>> [SRE GPS Bypass] Perfil administrativo detectado. Aplicando bypass síncrono definitivo.");
     showFloatingBypassToast(finalAnchor.lat, finalAnchor.lng, 'Soberania Admin (Ativa)');
     return {
       latitude: finalAnchor.lat,
       longitude: finalAnchor.lng,
-      accuracy: Number.NaN,
+      accuracy: 1.0,
       isBypassed: true,
-      isSynthetic: true,
       source: 'admin_bypass'
     };
   }
 
   // Se a API navigator.geolocation não existir ou se estivermos em iframe sandbox onde ela pode estar desabilitada
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    logger.warn(">>> [SRE GPS Fallback] API navigator.geolocation inexistente ou desativada no documento. Aplicando fallback automático.");
+    logger.warn(">>> [SRE GPS Fallback] API navigator.geolocation inexistente ou desativada no documento.");
+    if (!finalAnchor) return null;
     showFloatingBypassToast(finalAnchor.lat, finalAnchor.lng, 'API Inexistente (Bypass Fallback)');
     return {
       latitude: finalAnchor.lat,
       longitude: finalAnchor.lng,
-      accuracy: Number.NaN,
+      accuracy: 1.0,
       isBypassed: true,
-      isSynthetic: true,
       source: 'admin_bypass'
     };
   }
 
   try {
-    const fix = await getPreciseFix();
-    if (fix) {
-      return {
-        latitude: fix.lat,
-        longitude: fix.lng,
-        accuracy: fix.accuracy,
-        isBypassed: false,
-        source: 'native',
-      };
-    }
-    throw new Error('Sensor sem leitura precisa disponível');
-  } catch (errorVal: unknown) {
-    const errorMsg = errorVal instanceof Error ? errorVal.message : String(errorVal || '');
-    logger.warn(">>> [SRE GPS Fallback] Falha de permissão ou política de geolocalização capturada:", errorMsg);
-    
-    // Tratamento específico de erro de Permissions Policy, sandbox, denied, ou timeout
-    // Em caso de falha de permissão (como em ambiente web sandbox/iFrame), aplique um FALLBACK AUTOMÁTICO
-    // retornando sucesso de forma simulada para destravar o bootstrap do aplicativo.
-    showFloatingBypassToast(finalAnchor.lat, finalAnchor.lng, `Bypass Sandbox (${errorMsg.substring(0, 30)})`);
-    return {
-      latitude: finalAnchor.lat,
-      longitude: finalAnchor.lng,
-      accuracy: Number.NaN,
-      isBypassed: true,
-      isSynthetic: true,
-      source: 'admin_bypass'
-    };
-  }
-}
+    const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+      // Configura um timeout imperativo interno para a Promise para nunca deixar pendurada
+      const timer = setTimeout(() => {
+        reject(new Error("Timeout síncrono na obtenção do GPS"));
+      }, 6000);
 
-/**
- * Leitura REAL e utilizável do aparelho, ou `null`.
- *
- * Estratégia de bateria e precisão:
- *  1. tenta alta precisão com cache de 10s (rápido no uso de campo);
- *  2. se a leitura vier imprecisa (> `GPS_ACCURACY.COLLECT`), tenta uma vez
- *     com precisão alta e cache zero;
- *  3. desiste devolvendo `null` — quem chama decide o que mostrar.
- *
- * Nunca inventa coordenada: é a porta de entrada para gravar posição de ativo.
- */
-export const getPreciseFix = async (
-  maxAccuracyM: number = GPS_ACCURACY.COLLECT
-): Promise<GpsFix | null> => {
-  if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
-
-  const readOnce = (highAccuracy: boolean, maximumAge: number, timeout: number) =>
-    new Promise<GeolocationPosition>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Timeout na obtenção do GPS')), timeout + 1000);
       try {
         navigator.geolocation.getCurrentPosition(
-          (pos) => { clearTimeout(timer); resolve(pos); },
-          (err) => { clearTimeout(timer); reject(err); },
-          { enableHighAccuracy: highAccuracy, timeout, maximumAge }
+          (pos) => {
+            clearTimeout(timer);
+            resolve(pos);
+          },
+          (err) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+          {
+            enableHighAccuracy: false, // Menos agressivo em termos de segurança
+            timeout: 5000,
+            maximumAge: 60000,
+          }
         );
       } catch (err) {
         clearTimeout(timer);
@@ -200,36 +196,48 @@ export const getPreciseFix = async (
       }
     });
 
-  const attempts: Array<[boolean, number, number]> = [
-    [true, 10_000, 12_000],
-    [true, 0, 20_000],
-  ];
-
-  for (const [highAccuracy, maximumAge, timeout] of attempts) {
-    try {
-      const position = await readOnce(highAccuracy, maximumAge, timeout);
-      const fix = toGpsFix(position?.coords);
-      if (fix && isPreciseFix(fix, maxAccuracyM)) return fix;
-      logger.info(`>>> [GPS] Leitura descartada (precisão ${fix ? Math.round(fix.accuracy) : 'invalida'}m > ${maxAccuracyM}m).`);
-    } catch (err) {
-      logger.warn('>>> [GPS] Tentativa de leitura falhou:', err);
-    }
+    return {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      isBypassed: false,
+      source: 'native',
+    };
+  } catch (errorVal: unknown) {
+    const errorMsg = errorVal instanceof Error ? errorVal.message : String(errorVal || '');
+    logger.warn(">>> [SRE GPS Fallback] Falha de permissão ou política de geolocalização capturada:", errorMsg);
+    
+    // Tratamento específico de erro de Permissions Policy, sandbox, denied, ou timeout
+    // Em caso de falha de permissão (como em ambiente web sandbox/iFrame), aplique um FALLBACK AUTOMÁTICO
+    // retornando sucesso de forma simulada para destravar o bootstrap do aplicativo.
+    if (!finalAnchor) return null;
+    showFloatingBypassToast(finalAnchor.lat, finalAnchor.lng, `Bypass Sandbox (${errorMsg.substring(0, 30)})`);
+    return {
+      latitude: finalAnchor.lat,
+      longitude: finalAnchor.lng,
+      accuracy: 1.0,
+      isBypassed: true,
+      source: 'admin_bypass'
+    };
   }
-
-  return null;
-};
+}
 
 export interface GpsLocation {
   lat: number;
   lng: number;
   accuracy?: number;
   altitude?: number | null;
+  /** Posição vinda do bypass administrativo (âncora), não do sensor. */
+  isBypassed?: boolean;
+  source?: 'native' | 'admin_bypass';
 }
 
 let lastLocation: GpsLocation | null = null;
 let lastTimestamp: number = 0;
 let watchId: string | null = null;
 let isReconnectingGps = false;
+/** Filtro anti-jitter compartilhado pelo rastreamento autônomo (ver gpsCore.ts). */
+const jitterFilter = new GpsJitterFilter();
 
 /**
  * Inicia o rastreamento autônomo em segundo plano
@@ -247,6 +255,8 @@ export const startAutonomousTracking = async () => {
   try {
     watchId = await Geolocation.watchPosition(
       {
+        // Bateria: precisão baixa (rede/Wi-Fi), leitura no máximo a cada 60 s
+        // (maximumAge) e timeout de 15 s. Com o filtro, ruído parado não grava nada.
         enableHighAccuracy: false,
         timeout: 15000,
         maximumAge: 60000
@@ -288,8 +298,8 @@ export const startAutonomousTracking = async () => {
               const savedUserStr = sessionStorage.getItem('app_current_user');
               if (savedUserStr) {
                 const u = JSON.parse(savedUserStr);
-                const r = (u.role || '').toUpperCase();
-                if (r === 'ADMIN' || r === 'MASTER' || r === 'GESTOR' || u.is_admin === true || u.isAdmin === true) {
+                const r = canonicalRole(u.role);
+                if (r === 'ADMIN' || r === 'MASTER' || u.is_admin === true || u.isAdmin === true) {
                   isAdmin = true;
                 }
               }
@@ -298,25 +308,13 @@ export const startAutonomousTracking = async () => {
             }
 
             if (isAdmin) {
-              let anchor = { lat: -16.6869, lng: -49.2648 };
-              try {
-                const cStr = localStorage.getItem('gbr_current_unit_config');
-                if (cStr) {
-                  const cObj = JSON.parse(cStr);
-                  if (cObj.lat && cObj.lng) {
-                    anchor = { lat: Number(cObj.lat), lng: Number(cObj.lng) };
-                  }
-                }
-              } catch (e) {
-                logger.warn("Falha ao ler gbr_current_unit_config:", e);
-              }
-              lastLocation = { lat: anchor.lat, lng: anchor.lng, accuracy: 1.0 };
-              lastTimestamp = Date.now();
-              logger.warn('[Bypass Admin Ativo] Aplicando coordenadas de ancoragem admin síncronas de conformidade por timeout.');
-            } else {
-              // Envia coordenada nula controlada
-              lastLocation = null;
+              // Bypass administrativo NÃO gera coordenada: a âncora da unidade
+              // não é leitura do aparelho e não pode virar GPS de ativo. O cache
+              // fica nulo até haver um fix real do sensor.
+              logger.warn('[Bypass Admin Ativo] Timeout de GPS; sem coordenada até haver leitura real.');
             }
+            // Envia coordenada nula controlada (bypass inclusive).
+            lastLocation = null;
 
             // Aplica um mecanismo de recuo (debounce/backoff) de pelo menos 5000ms antes de reiniciar a escuta do sensor
             if (!isReconnectingGps) {
@@ -330,13 +328,13 @@ export const startAutonomousTracking = async () => {
           return;
         }
         if (position) {
-          lastLocation = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            altitude: position.coords.altitude
-          };
-          lastTimestamp = Date.now();
+          const fix = toGpsFix(position.coords);
+          if (fix && jitterFilter.accept(fix)) {
+            lastLocation = { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, altitude: fix.altitude };
+            lastTimestamp = Date.now();
+          } else {
+            logger.info('Autônomo: leitura descartada pelo filtro anti-jitter/precisão.');
+          }
         }
       }
     ).catch((e: unknown) => {
@@ -359,7 +357,11 @@ export const stopAutonomousTracking = async () => {
   }
 };
 
-export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocation> => {
+/**
+ * Posição atual para gravar em ativo/lote. Retorna `null` quando não há leitura
+ * válida e precisa (ou seja, não há coordenada a gravar). Nunca inventa ponto.
+ */
+export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocation | null> => {
   const now = Date.now();
   
   // Retorna cache se for recente (30 segundos) e não for forçado
@@ -374,17 +376,14 @@ export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocat
       timeout: 10000
     });
 
-    if (coordinates && coordinates.coords) {
-      const newLoc = {
-        lat: coordinates.coords.latitude,
-        lng: coordinates.coords.longitude,
-        accuracy: coordinates.coords.accuracy,
-        altitude: coordinates.coords.altitude
-      };
+    const fix = toGpsFix(coordinates?.coords);
+    if (fix && isPreciseFix(fix, GPS_ACCURACY.COLLECT)) {
+      const newLoc: GpsLocation = { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, altitude: fix.altitude };
       lastLocation = newLoc;
       lastTimestamp = Date.now();
       return newLoc;
     }
+    logger.warn('>>> [GPS] Leitura nativa descartada (imprecisa ou inválida).');
   } catch (err) {
     logger.warn('>>> [GPS] Falha no Geolocation.getCurrentPosition Nativo, tentando Web API...', err);
   }
@@ -394,32 +393,32 @@ export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocat
     try {
       if (typeof navigator === 'undefined' || !navigator.geolocation) {
         logger.info('>>> [GPS] Geolocalização não suportada ou indisponível.');
-        resolve(lastLocation || { lat: -16.7439, lng: -49.2144 });
+        resolve(lastLocation);
         return;
       }
 
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const newLoc = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            altitude: position.coords.altitude
-          };
-          lastLocation = newLoc;
-          lastTimestamp = Date.now();
-          resolve(newLoc);
+          const fix = toGpsFix(position.coords);
+          if (fix && isPreciseFix(fix, GPS_ACCURACY.COLLECT)) {
+            const newLoc: GpsLocation = { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, altitude: fix.altitude };
+            lastLocation = newLoc;
+            lastTimestamp = Date.now();
+            resolve(newLoc);
+          } else {
+            resolve(lastLocation);
+          }
         },
         (err) => {
           // Captura silenciosa de erros de permissão ou política
           logger.warn('>>> [GPS] Fallback Web Geolocation erro (silenciado):', err.message);
-          resolve(lastLocation || { lat: -16.7439, lng: -49.2144 });
+          resolve(lastLocation);
         },
         { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
       );
     } catch (e) {
       logger.warn('>>> [GPS] Geolocation Web API lançou exceção (silenciada):', e);
-      resolve(lastLocation || { lat: -16.7439, lng: -49.2144 });
+      resolve(lastLocation);
     }
   });
 };

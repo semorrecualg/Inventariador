@@ -2,6 +2,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { ShieldCheck, Lock, Eye, Trash2, FileText, X, ChevronRight, Info } from 'lucide-react';
+import { APP_VERSION_LABEL } from '../utils/appVersion';
 
 interface PrivacyCenterProps {
   isOpen: boolean;
@@ -63,7 +64,7 @@ const PrivacyCenter: React.FC<PrivacyCenterProps> = ({ isOpen, onClose }) => {
             <ShieldCheck size={24} />
             <h2 className="text-xl font-black uppercase italic tracking-tighter">Centro de Privacidade</h2>
           </div>
-          <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest">Governança e Transparência GBR v24.50</p>
+          <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest">Governança e Transparência GBR {APP_VERSION_LABEL}</p>
         </div>
 
         {/* Content */}

@@ -15,6 +15,7 @@ import { sqliteService } from '../services/sqliteService';
 import { readVirtualSnapshot } from '../services/localDbService';
 import { Capacitor } from '@capacitor/core';
 import { logger } from '../utils/logger';
+import { getDatabaseMode, isOnlineDatabaseMode } from '../services/supabaseService';
 
 interface ModuleSelectorProps {
   onSelect: (module: AppModule) => void;
@@ -42,8 +43,10 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
     let active = true;
     const runCheck = async () => {
       try {
-        const dbMode = localStorage.getItem('app_database_mode') || 'INTERNAL';
-        const isOnlineSession = dbMode === 'SUPABASE';
+        // Regra única do módulo: INTERNAL/INTERNAL_PLUS = base local;
+        // SUPABASE/SUPABASE_PLUS = com nuvem. Sem a chave gravada decide pelas
+        // credenciais do build (antes caía em INTERNAL e barrava os módulos).
+        const isOnlineSession = isOnlineDatabaseMode(getDatabaseMode());
         // SRE ISOLAMENTO: a checagem é escopada ao tenant do usuário — nunca
         // pela contagem global (que poderia conter dados de outro contrato em
         // cache local, ex.: CICOPAL para um MASTER de CLIENTETESTE).

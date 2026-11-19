@@ -66,6 +66,30 @@ export function saveSyncCheckpoint(key: string, lastUpdatedAt: string): void {
 }
 
 /**
+ * Checkpoint para decidir o DELTA de uma unidade, tolerando o pull do contrato.
+ *
+ * O Boot Loader baixa a base de uma unidade específica ou — quando o perfil não
+ * fixa filial e não há última escolha — o CONTRATO inteiro. Nesse segundo caso o
+ * checkpoint fica na chave `TENANT|` (contrato) e a leitura exata por
+ * `TENANT|FILIAL` não o encontrava: o sync seguinte refazia pull COMPLETO e a
+ * base inteira descia outra vez, mesmo sem nada novo.
+ *
+ * A mesma regra de cobertura do dedup (`wasPullCompleted`) vale aqui: um pull do
+ * contrato cobre todas as filiais dele, então o checkpoint do contrato é um
+ * piso seguro para o delta de qualquer filial. O inverso continua proibido —
+ * checkpoint de uma filial NUNCA serve para outra, nem para o contrato.
+ */
+export function readCheckpointForDelta(
+  tenantid?: string | null,
+  unitId?: string | null,
+): SyncCheckpoint | null {
+  const exato = readSyncCheckpoint(syncCheckpointKey(tenantid, unitId));
+  // Sem unidade, `syncCheckpointKey` JÁ é a chave do contrato — o exato basta.
+  if (exato || !String(unitId || '').trim()) return exato;
+  return readSyncCheckpoint(syncCheckpointKey(tenantid, null));
+}
+
+/**
  * AVANÇA o checkpoint de forma monotônica: só substitui quando o novo valor é
  * MAIOR que o existente. Um delta que traga timestamps menores não retrocede.
  */

@@ -1,4 +1,5 @@
 import type { User } from '../types';
+import { canonicalRole } from '../utils/roles';
 
 /**
  * RBAC SERVICE — Governança de Acesso por Função (GBR KARDEK)
@@ -9,7 +10,7 @@ import type { User } from '../types';
  * Mapeamento de Rotinas RBAC".
  *
  * TRILHA A — ADMINISTRATIVO (ADMIN / MASTER)
- * TRILHA B — AUDITORIA E CONCORDÂNCIA (AUDITOR / AUXILIARY_AUDITOR / ADMIN)
+ * TRILHA B — AUDITORIA E CONCORDÂNCIA (AUDITOR / ADMIN)
  * TRILHA C — OPERAÇÃO DE CAMPO (USER / OPERADOR e demais perfis de campo)
  *
  * Obs.: o arquivo permissionsService.ts continua sendo o que é hoje
@@ -59,7 +60,7 @@ const FULL_PERMISSIONS: ReadonlySet<UserPermission> = new Set<UserPermission>([
   'field_active_search',
 ]);
 
-/** Permissões de auditoria + campo (TRILHA B + C) — AUDITOR / AUXILIARY_AUDITOR. */
+/** Permissões de auditoria + campo (TRILHA B + C) — AUDITOR. */
 const AUDIT_AND_FIELD_PERMISSIONS: ReadonlySet<UserPermission> = new Set<UserPermission>([
   'view_reconciliation',
   'view_impairment',
@@ -85,16 +86,12 @@ const FIELD_PERMISSIONS: ReadonlySet<UserPermission> = new Set<UserPermission>([
 const FULL_ACCESS_ROLES: ReadonlySet<string> = new Set([
   'ADMIN',
   'MASTER',
-  'GESTOR',           // legado: já era tratado como admin em checkIsAdmin
   'DEMO',             // demonstração enxerga tudo (paridade com comportamento atual)
   'MOBILE_SINGLE',    // perfil single-device: já possuía acesso amplo (backup cloud)
 ]);
 
 /** Papéis de auditoria (TRILHA B + C). */
-const AUDITOR_ROLES: ReadonlySet<string> = new Set([
-  'AUDITOR',
-  'AUXILIARY_AUDITOR',
-]);
+const AUDITOR_ROLES: ReadonlySet<string> = new Set(['AUDITOR']);
 
 /** Papéis exclusivamente operacionais de campo (TRILHA C). */
 const OPERATOR_ROLES: ReadonlySet<string> = new Set([
@@ -105,11 +102,9 @@ const OPERATOR_ROLES: ReadonlySet<string> = new Set([
 const ROLE_PERMISSIONS: Record<string, ReadonlySet<UserPermission>> = {
   ADMIN: FULL_PERMISSIONS,
   MASTER: FULL_PERMISSIONS,
-  GESTOR: FULL_PERMISSIONS,
   DEMO: FULL_PERMISSIONS,
   MOBILE_SINGLE: FULL_PERMISSIONS,
   AUDITOR: AUDIT_AND_FIELD_PERMISSIONS,
-  AUXILIARY_AUDITOR: AUDIT_AND_FIELD_PERMISSIONS,
   USER: FIELD_PERMISSIONS,
 };
 
@@ -117,8 +112,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<UserPermission>> = {
 const FALLBACK_PERMISSIONS: ReadonlySet<UserPermission> = FIELD_PERMISSIONS;
 
 /** Normaliza o papel para comparação segura (maiúsculas, sem espaços). */
-const normalizeRole = (role: string | null | undefined): string =>
-  String(role || '').trim().toUpperCase();
+const normalizeRole = (role: string | null | undefined): string => canonicalRole(role);
 
 /** Indica se o usuário é o proprietário global (email VITE_ADMIN_EMAIL). */
 export const isOwnerEmail = (email: string | null | undefined): boolean =>
@@ -176,7 +170,7 @@ export const userHasPermission = (
 
 /**
  * Equivalente moderno das checagens inline de "isAdmin" espalhadas no código:
- * ADMIN/MASTER/GESTOR/DEMO/MOBILE_SINGLE + flags legados + email proprietário.
+ * ADMIN/MASTER/DEMO/MOBILE_SINGLE + flags legados + email proprietário.
  */
 export const isAdminUser = (
   user: Pick<Partial<User>, 'role' | 'email' | 'is_admin' | 'isAdmin'> | null | undefined,

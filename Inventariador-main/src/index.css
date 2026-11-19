@@ -11,8 +11,6 @@
   --color-success: #10B981;
   --color-warning: #F59E0B;
   --color-danger: #EF4444;
-  --color-ai-start: #4F46E5;
-  --color-ai-end: #2563EB;
 
   /* Palette for Phases and Modules */
   --color-phase-welcome: #2563EB;
@@ -128,10 +126,6 @@
     @apply bg-accent text-white rounded-2xl font-bold transition-all active:scale-95 active:opacity-90;
   }
 
-  .ai-gradient {
-    @apply bg-gradient-to-r from-ai-start to-ai-end text-white;
-  }
-
   .glass-effect {
     @apply bg-white/80 backdrop-blur-xl border border-white/20;
   }
@@ -225,4 +219,15 @@
     animation: none;
     transform: none;
   }
+}
+
+/* Selo de versão (AppVersionStamp): canto inferior direito, mas SOBE quando a
+   tela tem uma barra de ação fixa no rodapé (configuradores, seletores,
+   detalhe do ativo). Sem isso o selo ficava por cima do botão "Aplicar". */
+[data-gbr-version-stamp] {
+  bottom: calc(var(--ion-safe-area-bottom, 0px) + 0.375rem);
+}
+
+body:has(.fixed.bottom-0) [data-gbr-version-stamp] {
+  bottom: calc(var(--ion-safe-area-bottom, 0px) + 8.5rem);
 }
