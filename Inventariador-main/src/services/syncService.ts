@@ -11,6 +11,7 @@ import { UPSERT_TIMEOUT_MS, withUpsertTimeout } from './syncQueueGuards';
 import { isConferido } from '../utils/conferencia';
 import { purgarAuditoriaAntiga } from './auditoriaRetencao';
 import { assetGpsColumns } from '../utils/assetGps';
+import { assinaturaDeFalha } from '../utils/syncFalha';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -130,6 +131,10 @@ const SYNC_FAILURE_AUDIT_WINDOW_MS = 10 * 60 * 1000;
  * «PENDENTE NUVEM» do #95: inundada, o diagnóstico seguinte fica mais lento
  * exactamente quando é preciso. A assinatura `primarykey|erro` fica no `delta`
  * e é comparada com o que já foi registado na janela.
+ *
+ * O erro é normalizado antes de assinar (`assinaturaDeFalha`): a mensagem crua
+ * pode trazer id de pedido, UUID, data/hora ou ficheiro:linha da pilha, e cada
+ * variante reabria a janela — a mesma recusa voltava a ser registada.
  */
 const loadRecentSyncAuditSignatures = async (acao: string): Promise<Set<string>> => {
   const cutoffIso = new Date(Date.now() - SYNC_FAILURE_AUDIT_WINDOW_MS).toISOString();
@@ -139,7 +144,15 @@ const loadRecentSyncAuditSignatures = async (acao: string): Promise<Set<string>>
     if (log.acao !== acao) continue;
     try {
       const signature = JSON.parse(String(log.delta || '{}')).signature;
-      if (typeof signature === 'string' && signature) signatures.add(signature);
+      if (typeof signature !== 'string' || !signature) continue;
+      // Linhas gravadas antes da normalização tinham o detalhe cru: normaliza
+      // também do lado da leitura, senão a mesma falha contava como nova.
+      const corte = signature.indexOf('|');
+      signatures.add(
+        corte === -1
+          ? signature
+          : assinaturaDeFalha(signature.slice(0, corte), signature.slice(corte + 1))
+      );
     } catch {
       // Linha antiga sem delta legível não conta como falha já registada.
     }
@@ -154,7 +167,7 @@ const auditSyncRecordFailure = async (
   details: string,
   jaAuditadas: Set<string>,
 ): Promise<void> => {
-  const signature = `${primaryKey}|${details}`;
+  const signature = assinaturaDeFalha(primaryKey, details);
   if (jaAuditadas.has(signature)) return;
   await sqliteService.logAuditEvent(
     userId,
