@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
+import * as XLSX from 'xlsx';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db } from '../services/sqliteService';
 import type { DexieAsset } from '../services/sqliteService';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
+import { processAndInjectSpreadsheetData } from '../screens/DatabaseManagerScreen';
 
 /**
  * REGRA DA CARGA: os dados entram na base exatamente como estão na planilha.
@@ -174,5 +176,98 @@ describe('carga da planilha — identidade interna e proveniência', () => {
     expect(rows).toHaveLength(2);
     expect(new Set(rows.map((row) => row.primarykey)).size).toBe(2);
     expect(rows.map((row) => row.source_primarykey)).toEqual([null, null]);
+  });
+});
+
+/**
+ * CONFERÊNCIA NA CARGA DO ARQUIVO.
+ *
+ * A planilha diz que o ativo já está conferido por duas vias: o texto `status`
+ * («CONFERIDO…») e a coluna de auditoria `AUDITOR_STATUS_CONFERENCIA = SIM`.
+ * Os dois caminhos de ficheiro do `DatabaseLoaderService` (blocos duplicados)
+ * liam `_conferido` à mão e gravavam 0 por cima do que o arquivo trazia — o
+ * ativo entrava pendente. Aqui a planilha passa de facto pelo parser e pela
+ * transação, e a flag gravada é a do predicado único `isConferido`.
+ */
+const CONTRATO_CARGA = [
+  'tenantid', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo', 'serial',
+  'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 'endereco', 'registro',
+  'subreg', 'databaixa', 'contacontabil', 'primarykey', 'centrodecusto',
+  'vlraquisic', 'sn1_recno', 'sn3_recno'
+];
+
+/** Contrato de 21 colunas + a coluna de auditoria que o arquivo do cliente traz. */
+const COLUNA_AUDITORIA = 'AUDITOR_STATUS_CONFERENCIA';
+
+const linhaConferencia = (
+  n: number,
+  status: string,
+  auditor: string
+): Array<string | number> => [
+  'CICOPAL', 'UNIT1', status, `ETQ-${n}`, 1, `ATIVO ${n}`, `SN-${n}`,
+  '', '', '', '', '', `REG-${n}`, '', '', '', `PK-${n}`, '', 0, 0, 0,
+  auditor
+];
+
+function planilhaDeConferencia(): File {
+  const linhas = [
+    [...CONTRATO_CARGA, COLUNA_AUDITORIA],
+    linhaConferencia(1, 'CONFERIDO', ''),
+    linhaConferencia(2, 'Pendente', 'SIM'),
+    linhaConferencia(3, 'Pendente', '')
+  ];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(linhas), 'CICOPAL');
+  const bytes = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+  return new File([bytes], 'conferencia.xlsx', {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+}
+
+describe('carga da planilha — a conferência entra pelo predicado único', () => {
+  const limpar = async (): Promise<void> => {
+    await db.local_assets.clear();
+    await db.ativos.clear();
+    await db.assets.clear();
+    await db.audit_logs.clear();
+  };
+
+  beforeEach(limpar);
+
+  it('grava _conferido 1 com status CONFERIDO e com a coluna SIM, e 0 em Pendente', async () => {
+    const arquivo = planilhaDeConferencia();
+
+    const caminhos: Array<[string, (file: File) => Promise<unknown>]> = [
+      ['processExcelFile', (file) => new DatabaseLoaderService().processExcelFile(file, 'CICOPAL', 'UNIT1', () => {})],
+      ['importExcelBulkData', (file) => new DatabaseLoaderService().importExcelBulkData(file, 'CICOPAL', 'UNIT1', () => {})]
+    ];
+
+    for (const [nome, carregar] of caminhos) {
+      await limpar();
+      await carregar(arquivo);
+
+      const linhas = (await db.local_assets.toArray()) as unknown as DexieAsset[];
+      expect(linhas, `${nome}: planilha 3 · base ${linhas.length}`).toHaveLength(3);
+
+      const porEtiqueta = new Map(linhas.map((linha) => [linha.etiqueta, linha]));
+      expect(porEtiqueta.get('ETQ-1')?._conferido, `${nome}: status CONFERIDO`).toBe(1);
+      expect(porEtiqueta.get('ETQ-2')?._conferido, `${nome}: AUDITOR_STATUS_CONFERENCIA = SIM`).toBe(1);
+      expect(porEtiqueta.get('ETQ-3')?._conferido, `${nome}: Pendente`).toBe(0);
+    }
+  });
+
+  it('o Gestor de Base carrega a planilha sem apagar a conferência que ela traz', async () => {
+    // Caminho real do ecrã: `processAndInjectSpreadsheetData` valida o contrato,
+    // converte o ficheiro em linhas e injeta em lotes.
+    const dados = await processAndInjectSpreadsheetData(planilhaDeConferencia(), () => {});
+
+    const linhas = (await db.local_assets.toArray()) as unknown as DexieAsset[];
+    expect(dados, `planilha 3 · base ${linhas.length}`).toHaveLength(3);
+    expect(linhas, `planilha 3 · base ${linhas.length}`).toHaveLength(3);
+
+    const porEtiqueta = new Map(linhas.map((linha) => [linha.etiqueta, linha]));
+    expect(porEtiqueta.get('ETQ-1')?._conferido, 'Gestor de Base: status CONFERIDO').toBe(1);
+    expect(porEtiqueta.get('ETQ-2')?._conferido, 'Gestor de Base: AUDITOR_STATUS_CONFERENCIA = SIM').toBe(1);
+    expect(porEtiqueta.get('ETQ-3')?._conferido, 'Gestor de Base: Pendente').toBe(0);
   });
 });

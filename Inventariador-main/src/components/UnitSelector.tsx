@@ -30,6 +30,7 @@ import { isAdminEmail } from '../utils/authUtils';
 import { isUnitInScope, UnitScopeUser } from '../utils/unitScope';
 import { createUnitCounter } from '../utils/unitAssetStats';
 import { db } from '../services/sqliteService';
+import { isConferido } from '../utils/conferencia';
 import { logger } from '../utils/logger';
 import type { DexieAsset } from '../services/sqliteService';
 
@@ -193,7 +194,7 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           matched += 1;
           if (asset._is_deleted !== 0) return;
           const rawFilial = (asset as { filial_raw?: string }).filial_raw || asset.filial;
-          counter.count(rawFilial, asset._conferido);
+          counter.count(rawFilial, asset);
         };
 
         await db.local_assets.each(keepRow);
@@ -211,7 +212,9 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
               tenantid: String(resolveTenantId(r) || 'GBR_DEFAULT'),
               filial: String(r.filial || r._unitid || 'FILIAL_DEFAULT'),
               status: String(r.status || 'Pendente'),
-              _conferido: Number(r._conferido ?? 0),
+              _conferido: isConferido(r) ? 1 : 0,
+              // Snapshot virtual: a coluna de auditoria conta pela mesma regra.
+              AUDITOR_STATUS_CONFERENCIA: r.AUDITOR_STATUS_CONFERENCIA,
               _is_deleted: Number(r._is_deleted ?? 0)
             });
           });

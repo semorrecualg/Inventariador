@@ -27,7 +27,7 @@ import { queueAssetBackupMirror } from '../services/persistenceService';
 import { sqliteService } from '../services/sqliteService';
 import { MemoryGuardService } from '../services/MemoryGuardService';
 import { normalizeKey } from '../utils/schema';
-import { isConferido } from '../utils/conferencia';
+import { isConferido, marcarConferido } from '../utils/conferencia';
 import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
@@ -684,13 +684,13 @@ const Inventory: React.FC<InventoryProps> = ({
         // Avaliada sobre o estado ANTERIOR (com o `_localMaster` antigo) para detectar
         // a movimentação em tempo real e marcar RE-ADOTADO corretamente.
         const auditTag = resolvePersistedTag(
-          { ...foundAsset, _conferido: true },
+          { ...foundAsset, ...marcarConferido() },
           auditLocation,
           currentUnit
         );
 
         await localDb.assets.update(id, {
-          _conferido: true,
+          ...marcarConferido(),
           ...(isBaixado ? {} : { status: 'CONFERIDO' }),
           TAG_INVENTARIO: auditTag,
           _localMaster: auditLocation,
@@ -713,7 +713,7 @@ const Inventory: React.FC<InventoryProps> = ({
         // Se tiver o callback onUpdateAsset da prop, notificamos o React para atualizar o state global do app
         const cleanAsset = cleanAndCapitalizeAsset({
           ...foundAsset,
-          _conferido: true,
+          ...marcarConferido(),
           ...(isBaixado ? {} : { status: 'CONFERIDO' }),
           TAG_INVENTARIO: auditTag,
           ...marcarAlteracaoLocal(),
@@ -1270,14 +1270,14 @@ const Inventory: React.FC<InventoryProps> = ({
     // TAG de auditoria calculada e PERSISTIDA na conferência (Regras de Ouro).
     const auditLocation = selectedLocation || asset.endereco || '';
     const preservedTag = resolvePersistedTag(
-      { ...asset, _conferido: true },
+      { ...asset, ...marcarConferido() },
       auditLocation,
       selectedUnit
     );
 
     await handleUpdateAssetWithBackup({
       ...asset,
-      _conferido: true,
+      ...marcarConferido(),
       TAG_INVENTARIO: preservedTag,
       _localMaster: auditLocation
     });
@@ -1466,7 +1466,7 @@ const Inventory: React.FC<InventoryProps> = ({
         ...manualAsset,
         id: generateUUID(),
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
-        _conferido: true,
+        ...marcarConferido(),
         _isNew: true,
         // Item criado no aparelho: tem de subir, então nasce pendente.
         ...marcarAlteracaoLocal(),
@@ -1767,7 +1767,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
                         const auditLoc = selectedLocation || scannedAsset.endereco || '';
                         const auditTag = resolvePersistedTag(
-                          { ...scannedAsset, _conferido: true },
+                          { ...scannedAsset, ...marcarConferido() },
                           auditLoc,
                           selectedUnit
                         );
@@ -1776,7 +1776,7 @@ const Inventory: React.FC<InventoryProps> = ({
                           ...(assetCompKey !== "" && assetCompKey !== currentCompKey
                             ? { filial: selectedUnit || scannedAsset.filial }
                             : {}),
-                          _conferido: true,
+                          ...marcarConferido(),
                           ...(String(scannedAsset.status || '').toUpperCase().includes('BAIXA') || scannedAsset.databaixa
                             ? {}
                             : { status: 'CONFERIDO' }),
@@ -1814,7 +1814,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
                         const auditLoc = selectedLocation || scannedAsset.endereco || '';
                         const auditTag = resolvePersistedTag(
-                          { ...scannedAsset, _conferido: true },
+                          { ...scannedAsset, ...marcarConferido() },
                           auditLoc,
                           selectedUnit
                         );
@@ -1823,7 +1823,7 @@ const Inventory: React.FC<InventoryProps> = ({
                           ...(assetCompKey !== "" && assetCompKey !== currentCompKey
                             ? { filial: selectedUnit || scannedAsset.filial }
                             : {}),
-                          _conferido: true,
+                          ...marcarConferido(),
                           ...(String(scannedAsset.status || '').toUpperCase().includes('BAIXA') || scannedAsset.databaixa
                             ? {}
                             : { status: 'CONFERIDO' }),
@@ -2684,7 +2684,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     
                     const auditLoc = selectedLocation || scannedAsset.endereco || '';
                     const auditTag = resolvePersistedTag(
-                      { ...scannedAsset, _conferido: true },
+                      { ...scannedAsset, ...marcarConferido() },
                       auditLoc,
                       selectedUnit
                     );
@@ -2693,7 +2693,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       ...(assetCompKey !== "" && assetCompKey !== currentCompKey
                         ? { filial: selectedUnit || scannedAsset.filial }
                         : {}),
-                      _conferido: true,
+                      ...marcarConferido(),
                       TAG_INVENTARIO: auditTag,
                       _localMaster: auditLoc
                     };

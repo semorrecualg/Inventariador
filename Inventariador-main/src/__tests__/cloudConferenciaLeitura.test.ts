@@ -12,6 +12,7 @@
 // `status`, por isso o número do laudo ficava abaixo do real.
 // ============================================================================
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import { alternarConferencia } from '../utils/conferencia';
 import type * as SupabaseService from '../services/supabaseService';
 
 vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
@@ -143,6 +144,29 @@ describe('getAssetByTag — a linha da nuvem chega convertida para o app', () =>
 
     expect(chamadas).toBe(2);
     expect(asset?._conferido).toBe(true);
+  });
+
+  it('um ativo desmarcado no aparelho não volta conferido pelo status legado', async () => {
+    // O que o ecrã de conciliação deixa no ativo ao desmarcar.
+    const decisao = alternarConferencia({ _conferido: 1, status: 'CONFERIDO' });
+    // O que o envio grava na nuvem a partir desse ativo.
+    const row = {
+      id: 'X4',
+      tenantid: 'CICOPAL',
+      filial: '010101 CICOPAL GO',
+      status: decisao.status,
+      conferido: decisao._conferido,
+      auditor: 'ana@gbr.com',
+      data_leitura: '2026-11-19T10:00:00.000Z',
+    };
+    vi.spyOn(client, 'from').mockImplementation(() => ({
+      select: () => tagChain(async () => ({ data: row, error: null })),
+    }) as never);
+
+    const asset = await mod.getAssetByTag('004233');
+
+    // Antes o status CONFERIDO sobrevivia ao desmarcar e o pull reacendia a flag.
+    expect(asset?._conferido).toBe(false);
   });
 });
 

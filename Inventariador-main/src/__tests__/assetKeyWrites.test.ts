@@ -6,6 +6,7 @@ import type { DexieAsset } from '../services/sqliteService';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
 import { isFallbackAssetKey } from '../utils/assetKey';
+import { isConferido } from '../utils/conferencia';
 
 /**
  * Regressão das cópias: o mesmo ativo saía com `ABC-1`, `abc-1` e `ABC1`
@@ -80,7 +81,10 @@ describe('assetKey · caminhos de escrita gravam a mesma chave', () => {
     const stored = (await db.local_assets.toArray()) as unknown as DexieAsset[];
     expect(stored).toHaveLength(3); // nenhuma linha extra
     const conferido = stored.find((row) => row.primarykey === 'ABC-1001');
-    expect(conferido?._conferido).toBe(1);
+    // A conferência grava a flag booleana com a data da leitura; o que conta é
+    // o predicado (lê 1, true e a coluna de auditoria).
+    expect(isConferido(conferido ?? {})).toBe(true);
+    expect(conferido?._dataLeitura).toEqual(expect.any(String));
   });
 
   it('duas conferências do mesmo ativo continuam a ser um registo só', async () => {

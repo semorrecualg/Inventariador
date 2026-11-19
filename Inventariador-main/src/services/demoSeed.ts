@@ -79,7 +79,9 @@ export const getDemoSeedAssets = (): Asset[] => {
       sn1_recno: 1000 + i,
       sn3_recno: 5000 + i,
       DE_PARA: '',
-      AUDITOR_STATUS_CONFERENCIA: isChecked ? 'CONFERIDO_BOM' : 'PENDENTE',
+      // Mesmo contrato que o app grava (`'SIM'`/`'NAO'`): é este valor que a
+      // regra única reconhece, não um rótulo próprio do seed.
+      AUDITOR_STATUS_CONFERENCIA: isChecked ? 'SIM' : 'NAO',
       _origemTransacao: '1',
       _parent_id: '',
       _is_synced: false,

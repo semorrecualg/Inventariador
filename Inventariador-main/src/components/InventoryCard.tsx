@@ -5,7 +5,7 @@ import { Asset } from '../types';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { showRecoveryToast } from '../services/NavigationGuardService';
-import { isConferido } from '../utils/conferencia';
+import { isConferido, marcarConferido } from '../utils/conferencia';
 import { 
   ArrowLeft, 
   MapPin, 
@@ -311,7 +311,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       const updatedItem: DexieAsset & Record<string, unknown> = {
         ...ativoDetalhado,
         status: novoStatusLocal || ativoDetalhado.status,
-        _conferido: 1, // Marcar como conferido
+        ...marcarConferido(), // Marcar como conferido
         _history: JSON.stringify([
           ...(JSON.parse(ativoDetalhado._history || '[]')),
           {
@@ -324,8 +324,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         ]),
         // Se pertencer à conta 131105001, manter _is_synced = 0 de forma perpétua localmente
         _is_synced: isEliminacaoFiscal ? 0 : 0, // Por padrão local, marcamos como pendente de sincronização (0)
-        _auditor: userEmail,
-        _dataLeitura: new Date().toISOString()
+        _auditor: userEmail
       };
 
       // 3. Salvar no IndexedDB usando Dexie
@@ -356,7 +355,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         details: `Conferência do ativo ${ativoDetalhado.etiqueta}. Status: ${novoStatusLocal}. Conta: ${ativoDetalhado.contacontabil}. Obs: ${novaObservacao}`,
         delta: JSON.stringify({
           antes: { status: ativoDetalhado.status, _conferido: ativoDetalhado._conferido },
-          depois: { status: novoStatusLocal, _conferido: 1, _is_synced: updatedItem._is_synced }
+          depois: { status: novoStatusLocal, ...marcarConferido(), _is_synced: updatedItem._is_synced }
         }),
         updated_at: new Date().toISOString()
       });
@@ -429,7 +428,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
           // SUCESSO OPERACIONAL (Verde): mesma filial
           await saveCollectedAssetAtomic({
             ...asset,
-            _conferido: 1,
+            ...marcarConferido(),
             ...marcarAlteracaoLocal(),
             status: 'CONFERIDO'
           });
@@ -486,7 +485,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       const updatedAsset: DexieAsset = {
         ...pendingAssetToTransfer,
         filial: unidadeSelecionada,
-        _conferido: 1,
+        ...marcarConferido(),
         ...marcarAlteracaoLocal(),
         status: 'CONFERIDO_TRANSFERIDO',
         _history: JSON.stringify([
@@ -541,11 +540,10 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         descricaodoativo: surplusDescription.trim() || 'SOBRA FÍSICA - EXCEDENTE DE CAMPO',
         serial: surplusSerial.trim() || 'SEM SERIAL',
         status: 'SOBRA_FISICA',
-        _conferido: 1,
+        ...marcarConferido(),
         ...marcarAlteracaoLocal(),
         observacao: surplusObservation.trim(),
         _auditor: userEmail,
-        _dataLeitura: new Date().toISOString(),
         _history: JSON.stringify([{
           data: new Date().toISOString(),
           auditor: userEmail,

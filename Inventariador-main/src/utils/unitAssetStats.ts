@@ -1,4 +1,5 @@
 import { normalizeKey } from './schema';
+import { isConferido, type CamposDeConferencia } from './conferencia';
 
 /**
  * Contagem de ativos por Unidade Operacional em UMA passagem.
@@ -21,16 +22,13 @@ export interface UnitAssetCount {
 
 export interface UnitCounter {
   /** Conta um ativo na unidade da sua filial. */
-  count: (filialRaw: unknown, conferido: unknown) => void;
+  count: (filialRaw: unknown, asset: CamposDeConferencia) => void;
   /** Registra um rótulo conhecido (props/GPS) sem contar ativo nenhum. */
   addLabel: (filialRaw: unknown) => void;
   entries: () => UnitAssetCount[];
 }
 
 const toLabel = (raw: unknown): string => (raw === null || raw === undefined ? '' : String(raw));
-
-const isChecked = (conferido: unknown): boolean =>
-  conferido === 1 || conferido === '1' || conferido === true;
 
 export function createUnitCounter(): UnitCounter {
   const counts = new Map<string, UnitAssetCount>();
@@ -47,11 +45,11 @@ export function createUnitCounter(): UnitCounter {
   };
 
   return {
-    count(filialRaw, conferido) {
+    count(filialRaw, asset) {
       const entry = ensure(toLabel(filialRaw));
       if (!entry) return;
       entry.total += 1;
-      if (isChecked(conferido)) entry.checked += 1;
+      if (isConferido(asset)) entry.checked += 1;
     },
     addLabel(filialRaw) {
       ensure(toLabel(filialRaw));

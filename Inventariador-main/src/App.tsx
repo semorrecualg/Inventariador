@@ -9,14 +9,14 @@ import { startSecurityMonitor, checkRuntimeIntegrity } from './services/security
 import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
-import { effectiveAssetAddress } from './utils/assetAddress';
+import { effectiveAssetAddress, rotuloDePara } from './utils/assetAddress';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { marcarAlteracaoLocal, preservarPendenciaLocal } from './utils/pendencia';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
-import { isConferido } from './utils/conferencia';
+import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
@@ -632,7 +632,7 @@ useEffect(() => {
                     // Chave composta [tenantid+primarykey] (v6).
                     await db.ativos.update(
                       [String(asset.tenantid || '').trim().toUpperCase(), String(asset.primarykey || '')],
-                      { _conferido: 1, ...marcarAlteracaoLocal() }
+                      { ...marcarConferido(asset._dataLeitura || undefined), ...marcarAlteracaoLocal() }
                     );
                   }
                 }
@@ -2827,7 +2827,7 @@ useEffect(() => {
                   const cloudAsset = mergedAssets[index];
                   
                   // Detecção de Conflito: Se o item na nuvem também foi alterado (versão diferente ou conferido por outro)
-                  const isConflict = cloudAsset._conferido && 
+                  const isConflict = isConferido(cloudAsset) && 
                                    cloudAsset._auditor && 
                                    cloudAsset._auditor !== (user?.email || 'unknown') &&
                                    cloudAsset._dataLeitura !== localDirty._dataLeitura;
@@ -3264,13 +3264,15 @@ useEffect(() => {
 
               if (needsUpdate) {
                 hasChanges = true;
-                return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
+                return { ...a, ...marcarConferido(yesterdayStr) };
               }
               
-              // Se já é conferido mas _conferido está falso, atualiza para true para consistência interna
-              if (!a._conferido) {
+              // Conferido pela regra mas com a marca local fora da grafia
+              // canônica (veio só da coluna de auditoria, ou em texto legado):
+              // normaliza para `true`, mantendo a data de leitura que já tinha.
+              if (!marcaLocalConferida(a)) {
                 hasChanges = true;
-                return { ...a, _conferido: true };
+                return { ...a, ...marcarConferido(a._dataLeitura) };
               }
             }
             return a;
@@ -3332,10 +3334,12 @@ useEffect(() => {
                     }
                   }
                   if (needsUpdate) {
-                    return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
+                    return { ...a, ...marcarConferido(yesterdayStr) };
                   }
-                  if (!a._conferido) {
-                    return { ...a, _conferido: true };
+                  // Mesma normalização do arranque: só reescreve quando a
+                  // marca local ainda não está na grafia canônica.
+                  if (!marcaLocalConferida(a)) {
+                    return { ...a, ...marcarConferido(a._dataLeitura) };
                   }
                 }
                 return a;
@@ -5232,7 +5236,7 @@ useEffect(() => {
     const updates = { ...updatedAsset } as Asset;
     // Se vier com _conferido explicitamente definido, respeitamos (para permitir desmarcar no bumerangue)
     if (updates._conferido === undefined) {
-      updates._conferido = true;
+      Object.assign(updates, marcarConferido(updates._dataLeitura));
     }
     if (!updates._dataLeitura) {
       updates._dataLeitura = new Date().toISOString();
@@ -5548,10 +5552,10 @@ useEffect(() => {
 
     // Commit local + estado visual imediatamente; GPS e nuvem não bloqueiam o
     // toque. A captura de posição (até 3 s) corre depois e completa o registro.
-    const committed = await commitAssetUpdate(assetWithHistory, { deferCloud: Boolean(updatedAsset._conferido) });
+    const committed = await commitAssetUpdate(assetWithHistory, { deferCloud: isConferido(updatedAsset) });
     dirtyAssetsRef.current.add(String(assetWithHistory.id));
 
-    if (updatedAsset._conferido) {
+    if (isConferido(updatedAsset)) {
       void enrichAssetWithGps(committed, Boolean(updatedAsset._is_synced));
     }
   }, [inventory.assets, commitAssetUpdate, user, enrichAssetWithGps, inventory.currentCampaignId]);
@@ -5605,11 +5609,10 @@ useEffect(() => {
     const updatedParent: Asset = {
       ...parentAsset,
       _is_unitized: true,
-      _conferido: true,
+      ...marcarConferido(timestamp),
       // Unitarizar altera o pai neste aparelho: pendente de nuvem como qualquer
       // outra conferência (o pai sai do giro e sobe unitarizado).
       ...marcarAlteracaoLocal(timestamp),
-      _dataLeitura: timestamp,
       _auditor: auditor,
       TAG_INVENTARIO: TagInventario.CONFERIDO,
       _history: [
@@ -5634,6 +5637,9 @@ useEffect(() => {
         _parent_id: parentAsset.id,
         _isNew: true,
         _conferido: false,
+        // A unidade criada não nasce conferida: herdar o `status` CONFERIDO do
+        // pai fazia o envio gravá-la conferida na nuvem (o status é marcador).
+        status: statusAoDesmarcar(parentAsset.status),
         etiqueta: 'ETIQUETAR',
         qt: 1,
         _plaquetaMaster: 'ETIQUETAR',
@@ -5903,8 +5909,7 @@ useEffect(() => {
               ? inventoryLocation.toUpperCase().trim() 
               : (updates.endereco || "").toString().toUpperCase().trim());
 
-        updates._conferido = true;
-        updates._dataLeitura = new Date().toISOString();
+        Object.assign(updates, marcarConferido());
         updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
         
         const wasLabelingCandidate = 
@@ -6072,8 +6077,12 @@ useEffect(() => {
 
       res['AUDITOR_LOCAL_ORIGINAL'] = a.endereco;
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.endereco;
-      res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (normalizeKey(String(a.endereco)) === normalizeKey(String(a._localMaster || a.endereco)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
-      res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
+      // A exportação é a prova que sai para fora: lê a conferência pelo mesmo
+      // predicado dos ecrãs, senão um item conferido pela coluna de auditoria
+      // sai como PENDENTE/NAO.
+      const conferido = isConferido(a);
+      res['AUDITOR_DE_PARA'] = rotuloDePara(a, conferido);
+      res['AUDITOR_STATUS_CONFERENCIA'] = conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
       // REGISTRO ADOTADO: rótulo rad_<UNIDADE>_<DISPOSITIVO>_<SEQUENCIA> do item
       // criado por cópia de outra unidade (vazio em tudo o que não é adotado).

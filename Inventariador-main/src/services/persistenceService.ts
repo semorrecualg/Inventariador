@@ -12,6 +12,7 @@ import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
+import { marcarConferido } from '../utils/conferencia';
 import { reportRecnoConflictForAsset } from './recnoGuardService';
 import type { RecnoCandidate } from '../utils/recnoGuard';
 
@@ -252,7 +253,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
       ...(existingLocal || {}),
       ...assetData,
       tenantid: String(assetData.tenantid || existingLocal?.tenantid || existingActive?.tenantid || '').trim().toUpperCase(),
-      _conferido: 1,
+      ...marcarConferido(),
       ...marcarAlteracaoLocal(),
       updated_at: new Date().toISOString()
     } as unknown as DexieAsset;
@@ -260,7 +261,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
     // Escrita atômica sequencial
     await db.local_assets.put(mergedData as DexieAsset);
     if (existingActive) {
-      await db.ativos.update(assetKey, { _conferido: 1 });
+      await db.ativos.update(assetKey, { ...marcarConferido() });
     }
   });
 

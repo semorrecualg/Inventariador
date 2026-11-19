@@ -90,6 +90,11 @@ chaves de origem repetidas e linhas sem chave) só para provar o caminho técnic
 PROVA_CARGA_SINTETICA=1 npm run prova:carga
 ```
 
+No CI esta forma sintética corre sempre, dentro de `npm test`: o passo "Testes
+unitários (com prova da carga)" do `ci.yml` define `PROVA_CARGA_SINTETICA=1`. Se
+alguém a remover do workflow, o ficheiro do teste falha em vez de voltar a ficar
+`saltado`. Na máquina continua opt-in, para não pesar cada execução da suíte.
+
 ## 6. Abrir a campanha depois da carga
 
 Primeiro o inventário, depois a campanha — nesta ordem. A campanha exige filial

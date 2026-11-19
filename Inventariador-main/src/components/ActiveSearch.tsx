@@ -14,6 +14,7 @@ import {
 import * as XLSX from 'xlsx';
 import { effectiveAssetAddress } from '../utils/assetAddress';
 import { normalizeKey } from '../utils/schema';
+import { isConferido } from '../utils/conferencia';
 
 interface ActiveSearchProps {
   assets: Asset[];
@@ -36,7 +37,7 @@ const ActiveSearch: React.FC<ActiveSearchProps> = ({ assets, onBack, onSelectAss
 
   // Filtra apenas os itens não conferidos
   const missingAssets = useMemo(() => {
-    return assets.filter(a => !a._conferido);
+    return assets.filter(a => !isConferido(a));
   }, [assets]);
 
   // Agrupa por ENDEREÇO EFETIVO — MESMA regra do inventário (`assetAddressKey`)
