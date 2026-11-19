@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o pull e o expurgo não apagam a prova da falha de envio
+
+- **Descer a base já não apaga o carimbo:** o merge do pull remontava a linha
+  local com a versão da nuvem e só preservava `_is_synced`/`_lastUpdated`,
+  deixando cair `_syncFailAt`/`_syncFailReason` — o selo vermelho desaparecia a
+  cada pull e o registo recusado voltava a parecer apenas «na fila».
+  `preservarPendenciaLocal` passa a receber o registo local inteiro e a manter
+  o carimbo (e a data do toque) quando eles existem, sem inventar nenhum.
+- **O expurgo de 7 dias deixa de apagar as recusas do envio:** as linhas
+  `SYNC_RECORD_FAIL`/`SYNC_RECORD_EXCEPTION` são a causa registada de um ativo
+  que não sobe e passam a sobreviver ao *disk saturation guard*
+  (`src/services/auditoriaRetencao.ts`); o resto da trilha continua a ser
+  expurgado aos 7 dias.
+
 ### Adicionado — a falha de envio fica visível ao lado do ativo
 
 - **O aparelho distingue «na fila» de «recusado»:** uma recusa da nuvem só

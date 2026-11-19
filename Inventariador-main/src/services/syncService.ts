@@ -9,6 +9,7 @@ import { resolveTenantId } from '../utils/tenantUtils';
 import { matchUnitKeys } from '../utils/schema';
 import { UPSERT_TIMEOUT_MS, withUpsertTimeout } from './syncQueueGuards';
 import { isConferido } from '../utils/conferencia';
+import { purgarAuditoriaAntiga } from './auditoriaRetencao';
 import { assetGpsColumns } from '../utils/assetGps';
 
 /**
@@ -783,15 +784,15 @@ const _syncService = {
         logger.info(`>>> [Sync ACID Engine] ${syncedPrimaryKeys.length} registro(s) marcados como sincronizados no aparelho.`);
       }
 
-      // 4. EXPURGAMENTO DE LOGS (DISK SATURATION GUARD): Limpar histórico antigo via Dexie API para evitar entupimento de disco
+      // 4. EXPURGAMENTO DE LOGS (DISK SATURATION GUARD): Limpar histórico antigo via Dexie API para evitar entupimento de disco.
+      //    As recusas de envio ficam: são a prova de por que o ativo não subiu
+      //    (`services/auditoriaRetencao.ts`).
       try {
         logger.info(">>> [Disk Saturation Guard] Executando expurgo de logs antigos via Dexie...");
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const isoString = sevenDaysAgo.toISOString();
-        
-        await db.audit_logs.where('updated_at').below(isoString).delete();
-        logger.info(">>> [Disk Saturation Guard] Expurgo concluído com sucesso via Dexie.");
+        const expurgo = await purgarAuditoriaAntiga();
+        logger.info(
+          `>>> [Disk Saturation Guard] Expurgo concluído: ${expurgo.apagadas} linha(s) anteriores a ${expurgo.limite}; falhas de envio preservadas.`
+        );
       } catch (logErr) {
         logger.warn(">>> [Disk Saturation Guard] Erro silencioso ao expurgar logs:", logErr);
       }

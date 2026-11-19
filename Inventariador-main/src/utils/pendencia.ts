@@ -19,6 +19,24 @@ export const marcarAlteracaoLocal = (
   _lastUpdated: quando instanceof Date ? quando.toISOString() : quando,
 });
 
+/** Campos locais que o pull tem de manter quando remonta a linha da nuvem. */
+export type CamposDePendencia = {
+  _lastUpdated?: unknown;
+  _syncFailAt?: unknown;
+  _syncFailReason?: unknown;
+};
+
+export type PendenciaPreservada = {
+  _is_synced: 0;
+  _lastUpdated?: string;
+  _syncFailAt?: string;
+  _syncFailReason?: string;
+};
+
+/** Só texto com conteúdo conta: campos vazios ou de outro tipo não são dados. */
+const textoUtil = (valor: unknown): string | undefined =>
+  typeof valor === 'string' && valor.trim() ? valor : undefined;
+
 /**
  * MANTÉM A PENDÊNCIA QUE JÁ EXISTIA (não é um toque novo)
  * ============================================================================
@@ -26,10 +44,27 @@ export const marcarAlteracaoLocal = (
  * não pode inventar-lhe uma data. Os pendentes anteriores a `_lastUpdated` não
  * têm data nenhuma; carimbar «agora» a cada pull reiniciava a idade mostrada no
  * selo, e um registo de há três horas aparecia sempre como «agora».
+ *
+ * O carimbo da falha de envio (`_syncFailAt`/`_syncFailReason`) é local e não
+ * vem na linha da nuvem: sem o preservar aqui, cada descarga da base apagava o
+ * selo vermelho do cartão e o registo recusado voltava a parecer apenas «na
+ * fila» até à tentativa seguinte falhar outra vez. Um motivo sem data de falha
+ * não é copiado — o selo não o saberia mostrar.
  */
 export const preservarPendenciaLocal = (
-  quando?: string | null
-): { _is_synced: 0; _lastUpdated?: string } => ({
-  _is_synced: 0,
-  ...(quando ? { _lastUpdated: quando } : {}),
-});
+  local?: CamposDePendencia | null
+): PendenciaPreservada => {
+  const pendencia: PendenciaPreservada = { _is_synced: 0 };
+
+  const ultimaAlteracao = textoUtil(local?._lastUpdated);
+  if (ultimaAlteracao) pendencia._lastUpdated = ultimaAlteracao;
+
+  const falhaEm = textoUtil(local?._syncFailAt);
+  if (falhaEm) {
+    pendencia._syncFailAt = falhaEm;
+    const motivo = textoUtil(local?._syncFailReason);
+    if (motivo) pendencia._syncFailReason = motivo;
+  }
+
+  return pendencia;
+};
