@@ -50,6 +50,50 @@ export const resumirMotivoFalha = (motivo: string): string => {
 };
 
 /**
+ * ASSINATURA ESTÁVEL DE UMA RECUSA
+ * ============================================================================
+ * A trilha deduplica as recusas de envio por `primarykey|detalhe` dentro de uma
+ * janela de 10 min (`syncService.auditSyncRecordFailure`). Se o detalhe trouxer
+ * texto que muda entre tentativas — id de pedido, UUID, data/hora, ficheiro e
+ * linha da pilha —, a MESMA recusa volta a ser registada em cada ciclo e a
+ * janela perde o efeito: `audit_logs` enche-se outra vez com a mesma causa.
+ *
+ * A assinatura guarda o que identifica a causa (código de erro e mensagem) e
+ * troca o resto por marcadores fixos. Duas mensagens do mesmo erro com ids
+ * diferentes dão a mesma assinatura; dois erros diferentes continuam distintos.
+ */
+export const SYNC_FAILURE_SIGNATURE_MAX = 160;
+
+/** Fragmentos que mudam entre tentativas do mesmo erro. */
+const MARCADORES_DE_FALHA: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '<uuid>'],
+  [/\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?)?Z?\b/g, '<data>'],
+  [/\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b/g, '<hora>'],
+  [/\b[\w./-]+\.(?:tsx?|jsx?|mjs|cjs):\d+(?::\d+)?/g, '<origem>'],
+  [/\b0x[0-9a-f]+\b/gi, '<hex>'],
+  [/\b\d{6,}\b/g, '<numero>'],
+  [/\b\d+(?:[.,]\d+)?\s?(?:ms|s)\b/g, '<duracao>']
+];
+
+/** Texto estável do detalhe: sem pilha, sem ids, sem carimbos de tempo. */
+export const normalizarDetalheFalha = (details: string): string => {
+  // Só a primeira linha: uma pilha (`at fn (ficheiro:12:3)`) muda sempre.
+  const primeiraLinha = String(details ?? '')
+    .split(/\r?\n/, 1)[0]
+    // eslint-disable-next-line no-control-regex -- ANSI de logs coloridos
+    .replace(/\u001b\[[0-9;]*[mK]/g, ' ');
+
+  let texto = primeiraLinha;
+  for (const [padrao, marcador] of MARCADORES_DE_FALHA) texto = texto.replace(padrao, marcador);
+
+  return texto.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, SYNC_FAILURE_SIGNATURE_MAX);
+};
+
+/** Chave de deduplicação de uma recusa: `primarykey|detalhe estável`. */
+export const assinaturaDeFalha = (primaryKey: string, details: string): string =>
+  `${String(primaryKey ?? '').trim()}|${normalizarDetalheFalha(details)}`;
+
+/**
  * Carimbo a gravar — ou `null` quando não vale a pena reescrever o registo.
  *
  * Não reescreve quando a última tentativa foi há menos de

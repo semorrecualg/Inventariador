@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a mesma recusa não volta à trilha por causa do texto volátil
+
+- **A assinatura da falha é estável:** a deduplicação de
+  `SYNC_RECORD_FAIL`/`SYNC_RECORD_EXCEPTION` comparava `primarykey|detalhe` com
+  o detalhe cru. Como a mensagem pode trazer id de pedido, UUID, data/hora ou
+  `ficheiro:linha` da pilha, cada tentativa gerava uma assinatura nova e a mesma
+  recusa era registada outra vez em cada ciclo de 60 s. `assinaturaDeFalha`
+  (`src/utils/syncFalha.ts`) passa a guardar só a causa: código de erro e
+  mensagem, com o resto trocado por marcadores fixos. Linhas antigas são
+  normalizadas também na leitura, por isso continuam a contar na janela.
+
 ### Corrigido — o pull e o expurgo não apagam a prova da falha de envio
 
 - **Descer a base já não apaga o carimbo:** o merge do pull remontava a linha

@@ -89,6 +89,26 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
     expect(await failureLogs()).toHaveLength(1);
   });
 
+  it('a mesma recusa com texto volátil (id, data, pilha) não volta a ser registada', async () => {
+    const recusa = (pedido: string, quando: string) => ({
+      error: {
+        code: '42501',
+        message: `new row violates row-level security policy (pedido ${pedido} em ${quando}, syncService.ts:751:13)`
+      }
+    });
+
+    await db.local_assets.put(asset() as never);
+    upsert.mockResolvedValue(recusa('7c9e6679-7425-40de-944b-e07fc1f90ae7', '2026-11-19T18:53:08.123Z'));
+    await processDataSyncQueue();
+    expect(await failureLogs()).toHaveLength(1);
+
+    // Mesmo erro: mudam só o id do pedido, o instante e a linha da pilha.
+    upsert.mockResolvedValue(recusa('0d1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d', '2026-11-19T19:41:52.877Z'));
+    await processDataSyncQueue();
+
+    expect(await failureLogs()).toHaveLength(1);
+  });
+
   it('um lote recusado grava uma linha por ativo, não uma por ciclo', async () => {
     await db.local_assets.bulkPut([
       asset({ primarykey: 'PK-A', id: 'PK-A' }) as never,
