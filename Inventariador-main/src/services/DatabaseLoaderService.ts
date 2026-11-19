@@ -353,6 +353,12 @@ export class DatabaseLoaderService {
         // Texto exato da etiqueta (espaços e caixa preservados). A chave `pk`
         // continua canónica — é identidade interna, não o dado do cliente.
         const etiquetaLiteral = literalText(getRowValue(row, 'tag')) || literalText(getRowValue(row, 'etiqueta')) || pk;
+        const statusVal = literalText(getRowValue(row, 'status')) || 'Pendente';
+        // A planilha é a fonte da conferência: o texto `status` («CONFERIDO…»)
+        // e a coluna de auditoria dizem a mesma coisa, e quem lê é a regra única.
+        // Gravar `_conferido: 0` fixo aqui fazia o Gestor de Base carregar a
+        // planilha inteira como pendente.
+        const conferidoNaPlanilha = statusVal.toLowerCase().includes('conferido');
 
         return {
           id: pk,
@@ -362,7 +368,7 @@ export class DatabaseLoaderService {
           // `filial_raw` guarda o texto exato da planilha para exibição.
           filial: rawFilial.toUpperCase(),
           filial_raw: rawFilial,
-          status: literalText(getRowValue(row, 'status')) || 'Pendente',
+          status: statusVal,
           etiqueta: etiquetaLiteral,
           tag: etiquetaLiteral,
           qt: isNaN(Number(row.qt)) ? 1 : Number(row.qt),
@@ -388,7 +394,10 @@ export class DatabaseLoaderService {
           import_batch: importBatch,
           ...marcarAlteracaoLocal(),
           _is_deleted: 0,
-          _conferido: 0,
+          _conferido: isConferido({
+            _conferido: conferidoNaPlanilha,
+            AUDITOR_STATUS_CONFERENCIA: getRowValue(row, 'AUDITOR_STATUS_CONFERENCIA')
+          }) ? 1 : 0,
           _plaquetado: 0,
           _aprovado: 0,
           _isNew: 0,

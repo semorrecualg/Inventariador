@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { db } from '../services/sqliteService';
 import type { DexieAsset } from '../services/sqliteService';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
+import { processAndInjectSpreadsheetData } from '../screens/DatabaseManagerScreen';
 
 /**
  * REGRA DA CARGA: os dados entram na base exatamente como estão na planilha.
@@ -253,5 +254,20 @@ describe('carga da planilha — a conferência entra pelo predicado único', () 
       expect(porEtiqueta.get('ETQ-2')?._conferido, `${nome}: AUDITOR_STATUS_CONFERENCIA = SIM`).toBe(1);
       expect(porEtiqueta.get('ETQ-3')?._conferido, `${nome}: Pendente`).toBe(0);
     }
+  });
+
+  it('o Gestor de Base carrega a planilha sem apagar a conferência que ela traz', async () => {
+    // Caminho real do ecrã: `processAndInjectSpreadsheetData` valida o contrato,
+    // converte o ficheiro em linhas e injeta em lotes.
+    const dados = await processAndInjectSpreadsheetData(planilhaDeConferencia(), () => {});
+
+    const linhas = (await db.local_assets.toArray()) as unknown as DexieAsset[];
+    expect(dados, `planilha 3 · base ${linhas.length}`).toHaveLength(3);
+    expect(linhas, `planilha 3 · base ${linhas.length}`).toHaveLength(3);
+
+    const porEtiqueta = new Map(linhas.map((linha) => [linha.etiqueta, linha]));
+    expect(porEtiqueta.get('ETQ-1')?._conferido, 'Gestor de Base: status CONFERIDO').toBe(1);
+    expect(porEtiqueta.get('ETQ-2')?._conferido, 'Gestor de Base: AUDITOR_STATUS_CONFERENCIA = SIM').toBe(1);
+    expect(porEtiqueta.get('ETQ-3')?._conferido, 'Gestor de Base: Pendente').toBe(0);
   });
 });
