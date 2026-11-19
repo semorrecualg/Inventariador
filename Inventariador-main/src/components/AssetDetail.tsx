@@ -7,9 +7,11 @@ import { formatDateBR, formatCurrency } from '../utils/formatUtils';
 import { QR_FIELD_ORDER } from '../utils/qrUtils';
 import { updateAssetInProtheus } from '../services/protheusService';
 import { localDb } from '../services/localDbService';
+import { db } from '../services/sqliteService';
 import { canonicalKey } from '../utils/normalize';
 import { isConferido, marcarConferido } from '../utils/conferencia';
 import { mesmoEnderecoAuditado } from '../utils/assetAddress';
+import { syncFailureInfo } from '../utils/syncFalha';
 
 import { 
   Edit2, 
@@ -33,12 +35,13 @@ import {
   ArrowDown,
   Image as ImageIcon,
   Trash2,
-  History
+  History,
+  RefreshCw
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { deleteAssetPhoto } from '../services/supabaseService';
 import { compressImage } from '../utils/imageUtils';
-import { addToSyncQueue } from '../services/syncService';
+import { addToSyncQueue, processDataSyncQueue } from '../services/syncService';
 import { saveLocalPhoto, deleteLocalPhoto, getLocalPhoto } from '../services/photoService';
 
 import { reverseGeocode } from '../services/geocodingService';
@@ -128,6 +131,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   const [protheusSyncResult, setProtheusSyncResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [isRetryingSync, setIsRetryingSync] = useState(false);
   const [isImpairmentModalOpen, setIsImpairmentModalOpen] = useState(false);
   const [isUnitizeModalOpen, setIsUnitizeModalOpen] = useState(false);
   const [unitizeCount, setUnitizeCount] = useState(2);
@@ -524,6 +528,41 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
     return current === 'ETIQUETAR' || original === 'ETIQUETAR';
   }, [workingAsset.etiqueta, workingAsset._valoresOriginais]);
 
+  // A recusa da nuvem já aparece no cartão e no botão global; na ficha o
+  // operador via só «PENDENTE NUVEM» — sem motivo nem idade, e sem forma de
+  // tentar outra vez sem sair do ativo (ver utils/syncFalha).
+  const falhaEnvio = syncFailureInfo(workingAsset);
+
+  const handleRetrySync = async () => {
+    if (isRetryingSync) return;
+    setIsRetryingSync(true);
+    try {
+      // O mesmo caminho da sincronização global e do ciclo de fundo: um envio
+      // próprio só para esta ficha duplicava regras de payload e de carimbo.
+      await processDataSyncQueue();
+      // Relê o registo local para o selo reflectir o resultado real do envio.
+      // Lê a tabela viva (`ativos`), onde `markAssetsSynced`/`markAssetsFailed`
+      // gravam `_is_synced` e o carimbo — não a cópia já convertida para o ecrã.
+      const chave = String(workingAsset.primarykey || workingAsset.id || '');
+      const atual = chave
+        ? await db.ativos.where('primarykey').equals(chave).first()
+        : undefined;
+      if (atual) {
+        setWorkingAsset(prev => ({
+          ...prev,
+          // Na tabela Dexie estes campos admitem `null`; no `Asset` são `undefined`.
+          _syncFailAt: atual._syncFailAt ?? undefined,
+          _syncFailReason: atual._syncFailReason ?? undefined,
+          _is_synced: atual._is_synced ?? 0
+        }));
+      }
+    } catch (err) {
+      logger.warn('>>> [AssetDetail] Falha ao tentar reenviar o ativo:', err);
+    } finally {
+      setIsRetryingSync(false);
+    }
+  };
+
   const conferido = isConferido(workingAsset);
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
 
@@ -739,6 +778,37 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
       {/* KARDEX BODY */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pb-[60vh] bg-bg-main">
+          {/* FALHA DE ENVIO: motivo, idade e reenvio sem sair da ficha */}
+          {falhaEnvio && (
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-4 shadow-sm space-y-3 animate-slideIn">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle size={18} className="text-red-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-black text-red-700 uppercase tracking-[0.16em]">Falha de envio</p>
+                  <p className="text-xs font-bold text-red-900 leading-snug break-words mt-1">{falhaEnvio.motivo}</p>
+                  {falhaEnvio.idade && (
+                    <p className="text-[9px] font-bold text-red-500 uppercase tracking-widest mt-1">
+                      Última tentativa · {falhaEnvio.idade}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <p className="text-[10px] font-semibold text-red-700/80 leading-snug">
+                A nuvem recusou este registo. O ativo continua guardado no aparelho e pode ser reenviado.
+              </p>
+              <button
+                onClick={handleRetrySync}
+                disabled={isRetryingSync}
+                className="w-full py-3 rounded-xl bg-red-600 text-white text-[10px] font-black uppercase tracking-[0.18em] flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all disabled:opacity-60 disabled:active:scale-100"
+              >
+                {isRetryingSync ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                <span>{isRetryingSync ? 'A enviar...' : 'Tentar agora'}</span>
+              </button>
+            </div>
+          )}
+
           {/* SITUAÇÃO DO ATIVO (REGRA DE OURO) */}
           {(isAdopted || workingAsset._is_divergent_baixa || conferido) && (
             <div className="bg-white border border-border rounded-2xl p-5 shadow-sm space-y-4 animate-slideIn">
