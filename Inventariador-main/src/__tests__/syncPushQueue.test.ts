@@ -375,3 +375,63 @@ describe('descarte de pendentes — registro em audit_logs', () => {
     expect(await discardLogs()).toHaveLength(0);
   });
 });
+
+// ----------------------------------------------------------------------------
+// A fila do ciclo de fundo constrói o payload à mão (não passa pelo
+// `syncAssetsToCloud`), por isso a regra da coordenada tem de valer também
+// aqui: um `gps_lat: null` no `ON CONFLICT DO UPDATE` apagaria na nuvem o ponto
+// que outro aparelho já tinha gravado.
+// ----------------------------------------------------------------------------
+describe('processDataSyncQueue — a coordenada só sobe com leitura local', () => {
+  beforeEach(async () => {
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    await db.local_assets.clear();
+    await db.audit_logs.clear();
+    localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));
+    localStorage.removeItem('filial');
+    localStorage.removeItem('app_selected_unit');
+    sessionStorage.setItem('filial', '010101 CICOPAL GO');
+    sessionStorage.setItem('tenantid', 'CICOPAL');
+  });
+
+  /** O payload da única escrita feita pelo ciclo. */
+  const payloadDoCiclo = async (registro: Record<string, unknown>) => {
+    await db.local_assets.put(registro as never);
+    const result = await processDataSyncQueue();
+    expect(result.processedCount).toBe(1);
+    expect(upsert).toHaveBeenCalledTimes(1);
+    return upsert.mock.calls[0][0] as Record<string, unknown>;
+  };
+
+  it('converte latitude/longitude da conferência em gps_lat/gps_lng', async () => {
+    const payload = await payloadDoCiclo(asset({ latitude: -15.7942, longitude: -47.8825 }));
+
+    expect(payload.gps_lat).toBeCloseTo(-15.7942);
+    expect(payload.gps_lng).toBeCloseTo(-47.8825);
+  });
+
+  it('sem leitura local OMITE as colunas e não apaga a coordenada da nuvem', async () => {
+    const payload = await payloadDoCiclo(asset());
+
+    expect(Object.prototype.hasOwnProperty.call(payload, 'gps_lat')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(payload, 'gps_lng')).toBe(false);
+  });
+
+  it('não trata o par (0,0) nem a ausência como coordenada', async () => {
+    const zero = await payloadDoCiclo(asset({ latitude: 0, longitude: 0 }));
+    expect(Object.prototype.hasOwnProperty.call(zero, 'gps_lat')).toBe(false);
+
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    const nulo = await payloadDoCiclo(asset({ latitude: null, longitude: null, gps_lat: null, gps_lng: null }));
+    expect(Object.prototype.hasOwnProperty.call(nulo, 'gps_lng')).toBe(false);
+  });
+
+  it('mantém a leitura que já estava na grafia da nuvem', async () => {
+    const payload = await payloadDoCiclo(asset({ gps_lat: -16.68, gps_lng: -49.25 }));
+
+    expect(payload.gps_lat).toBeCloseTo(-16.68);
+    expect(payload.gps_lng).toBeCloseTo(-49.25);
+  });
+});
