@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`prev._conferido ?? next._conferido`), a contagem por localidade e a
   importação de JSON — passam pela regra (`isConferido`), e a marca pela
   grafia canônica (`marcaLocalConferida`).
+- **Merge das três tabelas decidido e escrito:** quando `ativos`, `assets` e
+  `local_assets` discordam, a conferência continua monotónica (basta uma cópia
+  conferir), mas a prova — `_auditor`, `_dataLeitura` e a coluna de auditoria —
+  passa a vir da **cópia que conferiu**, e não da de maior precedência.
+  `docs/DECISAO_MERGE_CONFERIDO.md` compara as opções (monotónico, precedência
+  da cópia viva, recência), recomenda esta e mostra o efeito em cada ecrã; a
+  desmarcação continua a ganhar porque escreve as três tabelas na mesma
+  transacção.
 - **Desmarcar apaga todas as provas de conferência:** o `status` textual com
   «CONFERIDO» é marcador lido pelo envio e pelo pull da nuvem, por isso
   desmarcar só a flag deixava o item voltar conferido na sincronização

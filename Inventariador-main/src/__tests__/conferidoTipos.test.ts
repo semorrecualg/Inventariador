@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db } from '../services/sqliteService';
 import type { DexieAsset } from '../services/sqliteService';
-import { localDb } from '../services/localDbService';
+import { localDb, mergeCopiasDeAtivo } from '../services/localDbService';
 import type { Asset } from '../types';
 import {
   isConferido,
@@ -227,6 +227,84 @@ describe('getLocationsWithStats — a mesma chave em duas tabelas conta uma vez'
     await db.local_assets.put(linhaDaTabela({ _conferido: 'true' }));
 
     expect(await ruaUm()).toEqual({ total: 1, checked: 1, ocorrencias: 1 });
+  });
+
+  it('desmarcar pelo caminho do ecrã (três tabelas) volta a 0 de 1', async () => {
+    // É esta transacção que sustenta a decisão: a desmarcação escreve as três
+    // cópias, por isso o OR do merge vê três zeros e não uma cópia atrasada.
+    await db.ativos.put(
+      linhaDaTabela({ _conferido: '1', _dataLeitura: '2026-11-19T10:00:00.000Z' })
+    );
+    await db.assets.put(linhaDaTabela({ _conferido: true }));
+    await db.local_assets.put(linhaDaTabela({ _conferido: 1 }));
+    expect((await ruaUm()).checked).toBe(1);
+
+    await localDb.assets.update('PK-1', {
+      tenantid: TENANT,
+      _conferido: false,
+      _dataLeitura: undefined,
+      status: 'PENDENTE'
+    });
+
+    expect(await ruaUm()).toEqual({ total: 1, checked: 0, ocorrencias: 1 });
+  });
+});
+
+describe('mergeCopiasDeAtivo — a decisão de docs/DECISAO_MERGE_CONFERIDO.md', () => {
+  const conferida = {
+    _conferido: 1,
+    _dataLeitura: '2026-11-19T10:00:00.000Z',
+    _auditor: 'ana@contrato'
+  };
+
+  it('a conferência de uma cópia não se perde quando a outra está atrasada', () => {
+    const unida = mergeCopiasDeAtivo({ _conferido: 0 }, { ...conferida });
+
+    expect(unida._conferido).toBe(1);
+  });
+
+  it('a prova (data e autor) vem da cópia que conferiu', () => {
+    const unida = mergeCopiasDeAtivo({ _conferido: '0', _dataLeitura: undefined }, { ...conferida });
+
+    expect(unida._dataLeitura).toBe(conferida._dataLeitura);
+    expect(unida._auditor).toBe(conferida._auditor);
+  });
+
+  it('sem conferência em nenhuma cópia, a marca e a prova ficam vazias', () => {
+    const unida = mergeCopiasDeAtivo(
+      { _conferido: '0', _dataLeitura: '2026-01-01T00:00:00.000Z' },
+      { _conferido: false }
+    );
+
+    expect(unida._conferido).toBe(0);
+    expect(unida._dataLeitura).toBeUndefined();
+    expect(unida._auditor).toBeUndefined();
+  });
+
+  it('com as duas conferidas, a prova é a da cópia de maior precedência', () => {
+    const unida = mergeCopiasDeAtivo({ ...conferida, _auditor: 'bia@contrato' }, { ...conferida });
+
+    expect(unida._auditor).toBe('bia@contrato');
+  });
+
+  it('a coluna de auditoria sozinha confere e traz a prova de onde veio', () => {
+    const unida = mergeCopiasDeAtivo(
+      { _conferido: 0 },
+      {
+        _conferido: 0,
+        AUDITOR_STATUS_CONFERENCIA: 'SIM',
+        _dataLeitura: '2026-11-18T08:00:00.000Z'
+      }
+    );
+
+    expect(unida._conferido).toBe(1);
+    expect(unida._dataLeitura).toBe('2026-11-18T08:00:00.000Z');
+  });
+
+  it('a baixa continua a vir da cópia viva (precedência de `_is_deleted`)', () => {
+    const unida = mergeCopiasDeAtivo({ _is_deleted: 0 }, { _is_deleted: 1 });
+
+    expect(unida._is_deleted).toBe(0);
   });
 });
 

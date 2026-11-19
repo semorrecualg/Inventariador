@@ -186,6 +186,66 @@ function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
   return asset as unknown as Asset;
 }
 
+/**
+ * Uma linha das três tabelas de ativos, para a união de cópias.
+ * (Só os campos que a contagem por localidade lê.)
+ */
+export type CopiaDeAtivo = {
+  tenantid?: unknown;
+  filial?: unknown;
+  primarykey?: unknown;
+  id?: unknown;
+  endereco?: unknown;
+  codigo_endereco?: unknown;
+  _is_deleted?: unknown;
+  _conferido?: MarcaDeConferencia;
+  _auditor?: unknown;
+  _dataLeitura?: unknown;
+  AUDITOR_STATUS_CONFERENCIA?: unknown;
+  _localMaster?: unknown;
+  LOCALIZACAO?: unknown;
+  CENTRO_CUSTO?: unknown;
+  status?: unknown;
+};
+
+/**
+ * Duas cópias do MESMO ativo em tabelas diferentes → uma linha só.
+ *
+ * A decisão está escrita em `docs/DECISAO_MERGE_CONFERIDO.md`:
+ *  · `_conferido`: **monotónico** — conferido se QUALQUER cópia conferir, pela
+ *    regra única. As cópias só divergem quando uma está atrasada (pull,
+ *    restore, base antiga); nesse caso a conferência de campo não pode ser
+ *    apagada pela leitura. A desmarcação legítima escreve as três tabelas na
+ *    mesma transacção, por isso continua a chegar aqui como três zeros.
+ *  · `_auditor`/`_dataLeitura`/`AUDITOR_STATUS_CONFERENCIA`: vêm da cópia que
+ *    CONFERIU, não da cópia de maior precedência — senão a linha unida dizia
+ *    «conferido» com a data vazia de quem não conferiu.
+ *  · endereço: da cópia que o tiver.
+ *  · `_is_deleted`: o da cópia de MAIOR precedência (`ativos` → `assets` →
+ *    `local_assets`) — uma baixa feita no aparelho esconde o ativo, e uma
+ *    reposição feita em `ativos` volta a mostrá-lo, mesmo que a canónica ainda
+ *    esteja atrasada. Só quando a cópia viva não declara o campo é que se desce
+ *    para a seguinte.
+ */
+export const mergeCopiasDeAtivo = (prev: CopiaDeAtivo, next: CopiaDeAtivo): CopiaDeAtivo => {
+  const conferido = isConferido(prev) || isConferido(next);
+  const prova = isConferido(prev) ? prev : isConferido(next) ? next : null;
+
+  return {
+    ...prev,
+    _localMaster: prev._localMaster || next._localMaster,
+    endereco: prev.endereco || next.endereco,
+    LOCALIZACAO: prev.LOCALIZACAO || next.LOCALIZACAO,
+    CENTRO_CUSTO: prev.CENTRO_CUSTO || next.CENTRO_CUSTO,
+    _conferido: conferido ? 1 : 0,
+    _auditor: prova ? prova._auditor : undefined,
+    _dataLeitura: prova ? prova._dataLeitura : undefined,
+    AUDITOR_STATUS_CONFERENCIA: prova ? prova.AUDITOR_STATUS_CONFERENCIA : undefined,
+    // `prev` é sempre a cópia de maior precedência (ordem de `workTables`).
+    _is_deleted: prev._is_deleted ?? next._is_deleted
+  };
+};
+
 export const localDb = {
   assets: {
     add: async (asset: Asset, userId?: string) => {
@@ -462,20 +522,6 @@ export const localDb = {
       // pela chave do ativo (`[tenantid+primarykey]`), para o mesmo ativo
       // espelhado nas três tabelas contar UMA vez nas estatísticas.
       const unitMatch = normalizeUnitMatchKey(unitId);
-      /** Tabela lida como estrutura: só `tenantid`/`filial` e os campos usados. */
-      type UnitRow = {
-        tenantid?: unknown;
-        filial?: unknown;
-        primarykey?: unknown;
-        id?: unknown;
-        endereco?: unknown;
-        codigo_endereco?: unknown;
-        _is_deleted?: unknown;
-        _conferido?: MarcaDeConferencia;
-        _localMaster?: unknown;
-        LOCALIZACAO?: unknown;
-        CENTRO_CUSTO?: unknown;
-      };
       /**
        * Endereço EFETIVO do ativo — a MESMA regra do inventário
        * (`assetAddressKey`, Inventory.tsx): o local auditado (`_localMaster`)
@@ -483,20 +529,20 @@ export const localDb = {
        * `CENTRO_CUSTO`) também identificam a localidade. Ler só `endereco`
        * deixava a tela vazia com os ativos presentes em outras colunas.
        */
-      const addressOf = (row: UnitRow): string => pickAssetAddress(row);
+      const addressOf = (row: CopiaDeAtivo): string => pickAssetAddress(row);
       type UnitTable = {
         where: (index: string) => {
           equals: (key: unknown) => { toArray: () => Promise<unknown[]> };
           between: (lower: unknown, upper: unknown) => { toArray: () => Promise<unknown[]> };
         };
       };
-      const exactRowsOf = async (table: UnitTable): Promise<UnitRow[]> =>
-        (await table.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray()) as UnitRow[];
-      const doContrato = async (table: UnitTable): Promise<UnitRow[]> => {
+      const exactRowsOf = async (table: UnitTable): Promise<CopiaDeAtivo[]> =>
+        (await table.where('[tenantid+filial]').equals([tenant, uIdUpper]).toArray()) as CopiaDeAtivo[];
+      const doContrato = async (table: UnitTable): Promise<CopiaDeAtivo[]> => {
         const rows = (await table
           .where('[tenantid+filial]')
           .between([tenant, ''], [tenant, '\uffff'])
-          .toArray()) as UnitRow[];
+          .toArray()) as CopiaDeAtivo[];
         if (!unitMatch) return [];
         return rows.filter(r => normalizeUnitMatchKey(r.filial) === unitMatch);
       };
@@ -510,29 +556,6 @@ export const localDb = {
         db.assets as unknown as UnitTable,
         db.local_assets as unknown as UnitTable
       ];
-      /**
-       * Duas cópias do MESMO ativo (mesma `primarykey`) em tabelas diferentes.
-       *  · endereço: da cópia que o tiver;
-       *  · `_conferido`: o estado mais avançado (1 se qualquer cópia conferiu);
-       *  · `_is_deleted`: o da cópia de MAIOR precedência (`ativos` → `assets`
-       *    → `local_assets`) — uma baixa feita no aparelho esconde o ativo, e
-       *    uma reposição feita em `ativos` volta a mostrá-lo, mesmo que a
-       *    canónica ainda esteja atrasada. Só quando a cópia viva não declara o
-       *    campo é que se desce para a seguinte.
-       */
-      const mergeAssetCopies = (prev: UnitRow, next: UnitRow): UnitRow => ({
-        ...prev,
-        _localMaster: prev._localMaster || next._localMaster,
-        endereco: prev.endereco || next.endereco,
-        LOCALIZACAO: prev.LOCALIZACAO || next.LOCALIZACAO,
-        CENTRO_CUSTO: prev.CENTRO_CUSTO || next.CENTRO_CUSTO,
-        // Estado mais avançado pela regra única; sem conferência em nenhuma
-        // cópia a marca fica 0 (antes caía para o valor cru da linha, que podia
-        // ser texto e voltava a entrar na tabela como se fosse conferido).
-        _conferido: isConferido(prev) || isConferido(next) ? 1 : 0,
-        // `prev` é sempre a cópia de maior precedência (ordem de `workTables`).
-        _is_deleted: prev._is_deleted ?? next._is_deleted
-      });
       const addressRows = async (): Promise<DexieAddress[]> => {
         const table = db.addresses as unknown as UnitTable;
         const exatos = await exactRowsOf(table);
@@ -546,9 +569,9 @@ export const localDb = {
        * não tem o índice exato. A união é deduplicada pela chave do ativo;
        * linhas sem chave são mantidas individualmente.
        */
-      const assetRows = async (): Promise<UnitRow[]> => {
-        const byKey = new Map<string, UnitRow>();
-        const anonymous: UnitRow[] = [];
+      const assetRows = async (): Promise<CopiaDeAtivo[]> => {
+        const byKey = new Map<string, CopiaDeAtivo>();
+        const anonymous: CopiaDeAtivo[] = [];
         for (const table of workTables) {
           let rows = await exactRowsOf(table);
           if (rows.length === 0 && unitMatch) rows = await doContrato(table);
@@ -560,7 +583,7 @@ export const localDb = {
             }
             const key = `${String(row.tenantid || tenant).trim().toUpperCase()}::${id.toUpperCase()}`;
             const prev = byKey.get(key);
-            byKey.set(key, prev ? mergeAssetCopies(prev, row) : row);
+            byKey.set(key, prev ? mergeCopiasDeAtivo(prev, row) : row);
           });
         }
         return [...byKey.values(), ...anonymous];
