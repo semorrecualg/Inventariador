@@ -1325,6 +1325,9 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
       // O fallback só corre para um lote que falhou: 8 linhas em voo em vez de
       // 500 idas sequenciais (o caminho normal nunca paga este custo).
       const ROW_PARALLEL = 8;
+      // Recusas por linha deste lote: o carimbo é escrito uma vez no fim, para
+      // não abrir uma transacção Dexie por cada reenvio individual.
+      const falhasDesteLote: Array<{ primarykey: string; motivo: string }> = [];
       for (let r = 0; r < rows.length; r += ROW_PARALLEL) {
         const rowSlice = rows.slice(r, r + ROW_PARALLEL);
         await Promise.all(rowSlice.map(async (row, i) => {
@@ -1339,9 +1342,19 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
               successfullySyncedIds.push(localKey);
               return;
             }
-            failedRows.push(`${row.primarykey ?? localKey}: ${describeSupabaseError(rowErr)}`);
+            const motivo = describeSupabaseError(rowErr);
+            failedRows.push(`${row.primarykey ?? localKey}: ${motivo}`);
+            // A recusa fica no próprio ativo (selo vermelho do cartão).
+            falhasDesteLote.push({ primarykey: String(row.primarykey ?? localKey), motivo });
           }
         }));
+      }
+      if (falhasDesteLote.length > 0) {
+        try {
+          await sqliteService.markAssetsFailed(falhasDesteLote);
+        } catch (stampErr) {
+          logger.warn('>>> [Supabase] Falha ao carimbar as recusas no registo local:', stampErr);
+        }
       }
       logger.error(
         `>>> [Supabase] Lote ${lote} falhou; ${rows.length} linha(s) reenviadas em isolamento. Causa: ${describeSupabaseError(err)}`,

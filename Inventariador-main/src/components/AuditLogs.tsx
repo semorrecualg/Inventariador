@@ -24,6 +24,7 @@ import { User, DatabaseMode } from '../types';
 import { fetchAuditLogs, fetchAssetLogs } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { logger } from '../utils/logger';
+import { getActionColor, isAssetLog } from '../utils/auditActions';
 
 interface AuditLogsProps {
   user: User | null;
@@ -44,18 +45,6 @@ interface AuditLogDB {
   tenantid?: string;
   origin?: string;
 }
-
-/** Ações que a trilha de ATIVOS mostra. */
-const ASSET_LOG_ACTIONS = new Set([
-  'CREATE', 'INSERT', 'UPDATE', 'DELETE', 'IMPAIRMENT', 'UNITARIZAÇÃO',
-  'ACQUISITION', 'TRANSFER', 'SALE', 'WRITE_OFF', 'RECONCILIAÇÃO'
-]);
-
-const isAssetLog = (log: AuditLogDB): boolean => {
-  const table = String(log.table_name || '').toLowerCase();
-  if (table === 'assets' || table === 'ativos') return true;
-  return ASSET_LOG_ACTIONS.has(String(log.action || '').toUpperCase());
-};
 
 /**
  * Identidade do evento para unir as duas fontes. O MESMO evento tem ids
@@ -252,30 +241,6 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
     link.setAttribute('href', url);
     link.setAttribute('download', `AUDITORIA_${logType}_${new Date().getTime()}.csv`);
     link.click();
-  };
-
-  const getActionColor = (action: string) => {
-    switch (action) {
-      case 'DELETE':
-      case 'WRITE_OFF':
-      case 'SALE':
-        return 'bg-red-100 text-red-700 border-red-200';
-      case 'INSERT':
-      case 'CREATE':
-      case 'ACQUISITION':
-        return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-      case 'UPDATE':
-      case 'BULK_UPDATE':
-      case 'RECONCILIAÇÃO':
-        return 'bg-blue-100 text-blue-700 border-blue-200';
-      case 'LOGIN':
-        return 'bg-purple-100 text-purple-700 border-purple-200';
-      case 'IMPAIRMENT':
-      case 'UNITARIZAÇÃO':
-        return 'bg-amber-100 text-amber-700 border-amber-200';
-      default:
-        return 'bg-slate-100 text-slate-700 border-slate-200';
-    }
   };
 
   return (

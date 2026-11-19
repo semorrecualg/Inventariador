@@ -76,4 +76,24 @@ describe('AssetListItem — selo de pendência', () => {
     expect(texto).toContain('base por espelhar');
     expect(texto).not.toContain('há ');
   });
+
+  // Recusado pela nuvem ≠ à espera na fila: o cartão tem de dizer qual é.
+  it('mostra a falha de envio com o motivo, em vez do âmbar de por enviar', () => {
+    const ha1h = new Date(Date.now() - 3600 * 1000).toISOString();
+    const texto = cartao({ _syncFailAt: ha1h, _syncFailReason: 'RLS negou o upsert' });
+
+    expect(texto).toContain('Falha de envio');
+    expect(texto).toContain('RLS negou o upsert');
+    expect(texto).toContain('há 1 h');
+    expect(texto).not.toContain('conferência por enviar');
+    expect(texto).not.toContain('Pendente Nuvem');
+  });
+
+  it('não mostra falha num registo que já está igual à nuvem', () => {
+    const ha1h = new Date(Date.now() - 3600 * 1000).toISOString();
+    const texto = cartao({ _is_synced: 1, _syncFailAt: ha1h, _syncFailReason: 'RLS negou o upsert' });
+
+    expect(texto).toContain('Sincronizado');
+    expect(texto).not.toContain('Falha de envio');
+  });
 });
