@@ -63,6 +63,10 @@ export interface Asset {
   _version?: number;
   _auditor?: string;
   _dataLeitura?: string;
+  // Carimbo da última recusa da nuvem (ver `utils/syncFalha`). Apagado quando o
+  // envio é aceite — é isso que apaga o aviso vermelho do cartão.
+  _syncFailAt?: string;
+  _syncFailReason?: string;
   _isNew?: boolean;
   _is_divergent_baixa?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -93,6 +93,9 @@ export interface DexieAsset {
   // sem estes campos a carga da base descartava quem conferiu e quando.
   _auditor?: string | null;
   _dataLeitura?: string | null;
+  /** Última recusa da nuvem neste registo (ver `utils/syncFalha`). */
+  _syncFailAt?: string | null;
+  _syncFailReason?: string | null;
   tag_atual?: string;
   status_auditoria?: string;
   descricao?: string;

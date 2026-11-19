@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — a falha de envio fica visível ao lado do ativo
+
+- **O aparelho distingue «na fila» de «recusado»:** uma recusa da nuvem só
+  existia em `audit_logs` (`SYNC_RECORD_FAIL` / `SYNC_RECORD_EXCEPTION`), longe
+  do cartão. A fila passa a carimbar o próprio registo local
+  (`_syncFailAt`/`_syncFailReason`, `src/utils/syncFalha.ts`), no máximo uma vez
+  por janela de 10 min com o mesmo motivo, e o carimbo é apagado quando o envio
+  é aceite.
+- **Selo vermelho no cartão:** o ativo com recusa mostra «Falha de envio ·
+  {motivo} · há X» em vez do âmbar «conferência por enviar», sem esconder que
+  continua pendente.
+- **Botão global em vermelho:** o contador de sincronização mostra quantos
+  pendentes têm falha («N falhas de envio») e mantém o toque para forçar o envio.
+- **A falha aparece na aba «Ativos» da Auditoria:** as duas ações passam a ser
+  classificadas como de ativo e pintadas de vermelho, junto da conferência que
+  explica.
+
 ### Corrigido — o GPS da conferência chega à ficha, ao mapa e à nuvem
 
 - **Uma ponte para o par de coordenadas:** a conferência grava `latitude`/

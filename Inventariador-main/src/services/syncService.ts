@@ -10,6 +10,7 @@ import { matchUnitKeys } from '../utils/schema';
 import { UPSERT_TIMEOUT_MS, withUpsertTimeout } from './syncQueueGuards';
 import { isConferido } from '../utils/conferencia';
 import { assetGpsColumns } from '../utils/assetGps';
+import { carimbarFalhaEnvio } from '../utils/syncFalha';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -20,11 +21,27 @@ import { assetGpsColumns } from '../utils/assetGps';
  * continuava `_is_synced = 0` e a etiqueta PENDENTE NUVEM ficava para sempre.
  * Em 2026-11-12 isso deixou 15 de 45 ativos na nuvem e 45 pendentes no aparelho.
  */
+/** O envio foi aceite: a recusa anterior deixa de existir. */
+const limparCarimboFalha = (rec: unknown): void => {
+  const registo = rec as Record<string, unknown>;
+  delete registo._syncFailAt;
+  delete registo._syncFailReason;
+};
+
 const markRecordSynced = async (primaryKey: string): Promise<void> => {
   await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
-    await db.local_assets.where('primarykey').equals(primaryKey).modify({ _is_synced: 1 });
-    await db.ativos.where('primarykey').equals(primaryKey).modify({ _is_synced: 1 });
-    await db.assets.where('primarykey').equals(primaryKey).modify({ _is_synced: 1 });
+    await db.local_assets.where('primarykey').equals(primaryKey).modify((rec) => {
+      (rec as unknown as Record<string, unknown>)._is_synced = 1;
+      limparCarimboFalha(rec);
+    });
+    await db.ativos.where('primarykey').equals(primaryKey).modify((rec) => {
+      (rec as unknown as Record<string, unknown>)._is_synced = 1;
+      limparCarimboFalha(rec);
+    });
+    await db.assets.where('primarykey').equals(primaryKey).modify((rec) => {
+      (rec as unknown as Record<string, unknown>)._is_synced = 1;
+      limparCarimboFalha(rec);
+    });
   });
 };
 
@@ -164,6 +181,37 @@ const auditSyncRecordFailure = async (
     JSON.stringify({ signature })
   );
   jaAuditadas.add(signature);
+};
+
+/**
+ * CARIMBO DA RECUSA NO PRÓPRIO REGISTO
+ * ============================================================================
+ * A recusa já ia para `audit_logs`, mas o cartão só lia `_is_synced`: «na fila»
+ * e «recusado pela nuvem» ficavam iguais para o operador. Aqui a mesma recusa
+ * fica no registo local (`_syncFailAt`/`_syncFailReason`), que é o que o selo
+ * vermelho do cartão e o contador do botão global lêem.
+ *
+ * O carimbo é reescrito no máximo uma vez por `SYNC_FAILURE_STAMP_WINDOW_MS`
+ * com o mesmo motivo (o ciclo de fundo roda a cada 60 s) e apagado no sucesso.
+ * Usa o registo que já está em memória no laço — não faz uma leitura extra.
+ */
+const marcarFalhaNoRegisto = async (
+  primaryKey: string,
+  motivo: string,
+  emMemoria?: Record<string, unknown>,
+): Promise<void> => {
+  const carimbo = carimbarFalhaEnvio(emMemoria, motivo);
+  if (!carimbo) return;
+
+  try {
+    await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
+      await db.local_assets.where('primarykey').equals(primaryKey).modify(carimbo);
+      await db.ativos.where('primarykey').equals(primaryKey).modify(carimbo);
+      await db.assets.where('primarykey').equals(primaryKey).modify(carimbo);
+    });
+  } catch (err) {
+    logger.warn('>>> [Sync Alert] Falha ao carimbar a recusa no registo local:', err);
+  }
 };
 
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
@@ -719,6 +767,7 @@ const _syncService = {
             const detailsStr = `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`;
             
             logger.warn(`>>> [Sync Isolator] Erro Supabase detectado silenciosamente para chave ${pKey}:`, detailsStr);
+            await marcarFalhaNoRegisto(String(pKey), detailsStr, record as unknown as Record<string, unknown>);
 
             try {
               failureSignatures ??= await loadRecentSyncAuditSignatures(SYNC_RECORD_FAIL_AUDIT);
@@ -733,6 +782,7 @@ const _syncService = {
           logger.warn(`>>> [Sync Isolator] Exceção capturada silenciosamente para chave ${pKey}:`, errMsg);
 
           const exceptionDetails = `Exceção ao sincronizar registro: ${errMsg}`;
+          await marcarFalhaNoRegisto(String(pKey), exceptionDetails, record as unknown as Record<string, unknown>);
           try {
             exceptionSignatures ??= await loadRecentSyncAuditSignatures(SYNC_RECORD_EXCEPTION_AUDIT);
             await auditSyncRecordFailure(

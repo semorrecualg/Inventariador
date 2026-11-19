@@ -68,4 +68,28 @@ describe('SyncBadge — contador de pendentes', () => {
 
     await waitFor(() => expect(screen.getByText('Sincronizado')).toBeTruthy());
   });
+
+  // Na fila e recusado pela nuvem são estados diferentes — o botão pinta de
+  // vermelho e diz quantos pendentes têm falha de envio.
+  it('pinta o botão de vermelho e conta as falhas de envio', async () => {
+    await db.local_assets.bulkPut([
+      linha({ id: 'PK-1', primarykey: 'PK-1', _syncFailAt: '2026-11-19T10:00:00.000Z', _syncFailReason: 'RLS' }) as never,
+      linha({ id: 'PK-2', primarykey: 'PK-2' }) as never
+    ]);
+
+    render(<SyncBadge />);
+
+    const rotulo = await screen.findByText('1 falha de envio');
+    expect(rotulo.closest('button')?.className).toContain('text-red-400');
+    expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('sem falhas carimbadas o botão continua âmbar', async () => {
+    await db.local_assets.put(linha() as never);
+
+    render(<SyncBadge />);
+
+    const rotulo = await screen.findByText('1 pendentes');
+    expect(rotulo.closest('button')?.className).toContain('text-amber-400');
+  });
 });
