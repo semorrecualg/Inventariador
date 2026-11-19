@@ -7,7 +7,7 @@ import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { matchUnitKeys } from '../utils/schema';
-import { UPSERT_TIMEOUT_MS, withUpsertTimeout } from './syncQueueGuards';
+import { UPSERT_TIMEOUT_MS, withUpsertTimeout, isSyncTimeoutError } from './syncQueueGuards';
 import { isConferido } from '../utils/conferencia';
 import { purgarAuditoriaAntiga } from './auditoriaRetencao';
 import { assetGpsColumns } from '../utils/assetGps';
@@ -792,6 +792,39 @@ const _syncService = {
         } catch (err: unknown) {
           failedPrimaryKeys.push(String(pKey));
           const errMsg = err instanceof Error ? err.message : String(err);
+
+          // TIMEOUT ≠ RECUSA. O servidor pode só não ter respondido em 15 s
+          // (4G a mudar de célula, ecrã bloqueado, lock de linha). Carimbar
+          // aqui `_syncFailAt` pintava o cartão de «Falha de envio» e o
+          // operador lia «Tempo esgotado» 14 min depois como recusa de dados
+          // (ecrãs de 2026-11-19). O registo fica «Pendente Nuvem» — que é o
+          // que ele é — e a tentativa fica na trilha, sem selo vermelho.
+          if (isSyncTimeoutError(err)) {
+            logger.warn(
+              `>>> [Sync Isolator] Servidor não respondeu para ${pKey} (${errMsg}) — nova tentativa automática, sem carimbo de recusa.`
+            );
+            // Sem a mensagem do erro dentro do motivo: ela muda com o limite e
+            // o motivo do selo é curto; o que o operador precisa de saber é
+            // que houve nova tentativa e que o registo não foi recusado.
+            const timeoutDetails = `Servidor não respondeu ao envio em ${Math.round(UPSERT_TIMEOUT_MS / 1000)} s — nova tentativa automática`;
+            try {
+              exceptionSignatures ??= await loadRecentSyncAuditSignatures(SYNC_RECORD_EXCEPTION_AUDIT);
+              await auditSyncRecordFailure(
+                user.id,
+                SYNC_RECORD_EXCEPTION_AUDIT,
+                String(pKey),
+                timeoutDetails,
+                exceptionSignatures
+              );
+            } catch (auditErr) {
+              logger.warn('>>> [Sync Audit] Falha ao registrar o timeout do registo:', auditErr);
+            }
+            // Não insiste nos restantes registos: 200 ativos × 15 s seriam 50
+            // minutos de ciclo preso com o servidor mudo. O ciclo de 60 s
+            // volta a tentar e o botão manual continua disponível.
+            break;
+          }
+
           logger.warn(`>>> [Sync Isolator] Exceção capturada silenciosamente para chave ${pKey}:`, errMsg);
 
           const exceptionDetails = `Exceção ao sincronizar registro: ${errMsg}`;

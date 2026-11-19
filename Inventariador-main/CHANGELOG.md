@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o timeout deixa de ser carimbado como recusa definitiva
+
+- **Timeout ≠ recusa:** quando o pedido não responde em 15 s, a fila carimbava
+  `_syncFailAt` como se a nuvem tivesse recusado o registo — o cartão ficava
+  vermelho («Falha de envio») e o operador lia «Tempo esgotado» 14 min depois
+  como recusa de dados. `isSyncTimeoutError` (`src/services/syncQueueGuards.ts`)
+  separa os dois desfechos: no timeout o registo continua «Pendente Nuvem», a
+  trilha guarda `SYNC_RECORD_EXCEPTION` com o motivo «Servidor não respondeu ao
+  envio em 15 s — nova tentativa automática» e o ciclo seguinte volta a tentar.
+- **O ciclo não insiste com o servidor mudo:** depois de um timeout o laço dos
+  registos pára (200 ativos × 15 s seriam 50 minutos presos) e o botão manual
+  continua disponível.
+
 ### Corrigido — a fila actualiza a linha existente em vez de falhar com `duplicate key`
 
 - **Alvo de conflito na fila:** `processDataSyncQueue` fazia

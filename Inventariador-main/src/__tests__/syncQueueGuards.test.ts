@@ -13,6 +13,7 @@ import {
   SYNC_CYCLE_STUCK_MS,
   SyncRequestTimeoutError,
   isSyncLockStuck,
+  isSyncTimeoutError,
   withUpsertTimeout
 } from '../services/syncQueueGuards';
 
@@ -46,6 +47,22 @@ describe('withUpsertTimeout — nenhum pedido fica pendurado', () => {
     vi.useFakeTimers();
     await withUpsertTimeout(Promise.resolve({ error: null }), UPSERT_TIMEOUT_MS);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('isSyncTimeoutError — timeout não é recusa', () => {
+  it('reconhece o erro do guarda', () => {
+    expect(isSyncTimeoutError(new SyncRequestTimeoutError(UPSERT_TIMEOUT_MS))).toBe(true);
+  });
+
+  it('reconhece pelo nome um erro que perdeu a cadeia do instanceof', () => {
+    expect(isSyncTimeoutError({ name: 'SyncRequestTimeoutError', message: 'Tempo esgotado' })).toBe(true);
+  });
+
+  it('não confunde um erro da nuvem com um timeout', () => {
+    expect(isSyncTimeoutError(new Error('permission denied'))).toBe(false);
+    expect(isSyncTimeoutError(null)).toBe(false);
+    expect(isSyncTimeoutError('Tempo esgotado')).toBe(false);
   });
 });
 
