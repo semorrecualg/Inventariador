@@ -64,10 +64,16 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Testes unitários
+      # `PROVA_CARGA_SINTETICA=1` liga a prova da carga da planilha
+      # (`provaCargaPlanilha.test.ts`) dentro da própria suíte: o teste compara,
+      # linha por linha, uma planilha sintética com o que entra na base pelo
+      # caminho real do Gestor de Base. Sem esta variável ele fica `skipped`, e
+      # o ficheiro falha de propósito se o CI o tentar saltar.
+      - name: Testes unitários (com prova da carga)
         run: npm test
         env:
           VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
+          PROVA_CARGA_SINTETICA: '1'
 
       # Sem as duas credenciais o build continua "verde", mas o bundle nasce em
       # modo INTERNAL (100% offline). Falha aqui para não publicar artefato offline.

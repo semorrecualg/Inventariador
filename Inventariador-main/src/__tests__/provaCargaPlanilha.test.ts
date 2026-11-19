@@ -2,10 +2,14 @@
 // ============================================================================
 // provaCargaPlanilha.test.ts — PROVA DA CARGA (Fase 3): planilha N · base N.
 //
-// Este ficheiro NÃO corre na suíte normal (fica `skipped` sem variáveis). É a
-// prova pedida: lê uma planilha real, executa exatamente o caminho do Gestor de
-// Base (`extrairDadosDaPlanilha` + `injetarDadosEmLotes`) e compara, linha por
+// É a prova pedida: lê uma planilha real, executa exatamente o caminho do Gestor
+// de Base (`extrairDadosDaPlanilha` + `injetarDadosEmLotes`) e compara, linha por
 // linha, o que o arquivo trazia com o que ficou na base.
+//
+// Corre sempre no CI: o passo "Testes unitários" do `.github/workflows/ci.yml`
+// liga `PROVA_CARGA_SINTETICA=1`, e a planilha sintética abaixo tem a forma do
+// arquivo do cliente (duas filiais, chaves repetidas, linhas sem chave).
+// Na máquina continua opt-in, para não penalizar cada `npm test`:
 //
 //   CARGA_PLANILHA=/caminho/CICOPAL.xlsx npm run prova:carga
 //   PROVA_CARGA_SINTETICA=1 npm run prova:carga     # fumo, sem ficheiro real
@@ -27,6 +31,15 @@ import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 const CAMINHO = process.env.CARGA_PLANILHA;
 const SINTETICA = process.env.PROVA_CARGA_SINTETICA === '1';
 const ATIVA = Boolean(CAMINHO) || SINTETICA;
+
+// No CI a prova é obrigatória. Se `PROVA_CARGA_SINTETICA` desaparecer do
+// workflow, o `skipIf` voltaria a saltar o teste e o CI ficaria verde sem
+// provar nada — por isso aqui a falta da variável é falha, não silêncio.
+if (process.env.CI === 'true' && !ATIVA) {
+  throw new Error(
+    'prova da carga: no CI tem de correr — defina PROVA_CARGA_SINTETICA=1 ou CARGA_PLANILHA'
+  );
+}
 
 /** Contrato fixo da planilha (21 colunas, nesta ordem). */
 const CABECALHO = [
@@ -94,7 +107,7 @@ function lerPlanilha(): ArrayBuffer {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
 }
 
-describe.skipIf(!ATIVA)('prova da carga — planilha N · base N', () => {
+describe.skipIf(!ATIVA)('prova da carga — planilha N · base N (CI: sintética)', () => {
   it('reimporta o arquivo e confere cada linha na base', async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
