@@ -3,7 +3,7 @@ import { Virtuoso } from 'react-virtuoso';
 import { Asset, TagInventario } from '../types';
 import { logger } from '../utils/logger';
 import { normalizeFlag } from '../utils/normalize';
-import { isConferido } from '../utils/conferencia';
+import { alternarConferencia, isConferido } from '../utils/conferencia';
 import { 
   Search, 
   Filter, 
@@ -422,13 +422,14 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
     
     // O que se inverte é o estado pela regra única: um ativo conferido só pela
     // coluna de auditoria também tem de desmarcar (antes o `!_conferido` dava
-    // `true` e o toque não fazia nada).
+    // `true` e o toque não fazia nada). Desmarcar apaga todas as provas de
+    // conferência — flag, `status` e coluna de auditoria —, senão o envio e o
+    // pull da nuvem voltavam a marcar o item.
     const conferido = isConferido(asset);
     onUpdateAsset({
       ...asset,
-      _conferido: !conferido,
-      TAG_INVENTARIO: !conferido ? TagInventario.CONFERIDO : TagInventario.PENDENTE,
-      _dataLeitura: !conferido ? new Date().toISOString() : undefined
+      ...alternarConferencia(asset),
+      TAG_INVENTARIO: conferido ? TagInventario.PENDENTE : TagInventario.CONFERIDO
     });
   }, [onUpdateAsset]);
 

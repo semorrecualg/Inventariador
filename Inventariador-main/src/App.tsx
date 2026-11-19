@@ -16,7 +16,7 @@ import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './uti
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { marcarAlteracaoLocal, preservarPendenciaLocal } from './utils/pendencia';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
-import { isConferido } from './utils/conferencia';
+import { isConferido, statusAoDesmarcar } from './utils/conferencia';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
@@ -5634,6 +5634,9 @@ useEffect(() => {
         _parent_id: parentAsset.id,
         _isNew: true,
         _conferido: false,
+        // A unidade criada não nasce conferida: herdar o `status` CONFERIDO do
+        // pai fazia o envio gravá-la conferida na nuvem (o status é marcador).
+        status: statusAoDesmarcar(parentAsset.status),
         etiqueta: 'ETIQUETAR',
         qt: 1,
         _plaquetaMaster: 'ETIQUETAR',
