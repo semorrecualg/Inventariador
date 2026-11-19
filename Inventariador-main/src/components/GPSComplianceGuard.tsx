@@ -114,14 +114,33 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
     // celular "salta" centenas de metros. O filtro descarta ruído antes de
     // recalcular o perímetro — evita a tela piscando entre "liberado" e "fora
     // do perímetro" e reduz recálculos/re-render (menos bateria).
-    const jitterFilter = new GpsJitterFilter({ maxAccuracyM: GPS_ACCURACY.COLLECT });
+    // O perímetro tolera leitura mais grosseira do que o carimbo da posição do
+    // ativo: aqui o que interessa é saber se o aparelho está dentro do raio, não
+    // gravar coordenada. Por isso o teto é `DISCARD` (rede/célula) e não
+    // `COLLECT` (50 m, que é o do mapa de calor).
+    const jitterFilter = new GpsJitterFilter({ maxAccuracyM: GPS_ACCURACY.DISCARD });
     let outOfRangeStreak = 0;
 
     const checkLocation = (lat: number, lng: number, accuracyM: number = Number.NaN) => {
       const candidate: GpsFix = { lat, lng, accuracy: accuracyM, source: 'sensor', at: Date.now() };
-      // Leitura inválida, imprecisa, repetida ou salto impossível: ignora.
-      if (!jitterFilter.accept(candidate)) return;
-      const fix = jitterFilter.lastAccepted as GpsFix;
+      // Leitura repetida (parado) ou salto impossível: nada mudou, não recalcula.
+      // Mas antes da primeira leitura aceita a guarda ainda não decidiu nada: aí
+      // uma leitura grosseira porém plausível mede o perímetro na mesma. Sem isto
+      // o sinal fraco de campo prendia a tela em "Verificando perímetro" em vez
+      // de liberar/bloquear como antes.
+      let fix: GpsFix;
+      if (jitterFilter.accept(candidate)) {
+        fix = jitterFilter.lastAccepted as GpsFix;
+      } else {
+        const aindaSemDecisao = !jitterFilter.lastAccepted;
+        const grosseiraMasUtil =
+          isValidCoordinate(lat, lng) &&
+          Number.isFinite(accuracyM) &&
+          accuracyM > 0 &&
+          accuracyM <= GPS_ACCURACY.DISCARD;
+        if (!aindaSemDecisao || !grosseiraMasUtil) return;
+        fix = candidate;
+      }
 
       // Cálculo espacial desacoplado de forma assíncrona da thread principal de UI
       setTimeout(() => {
