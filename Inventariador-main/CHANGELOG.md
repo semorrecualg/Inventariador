@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pull (`mapCloudAssetRow`) e pela gravação local
   (`bulkInsertAssetsOfflineFirst`, que descartava `latitude` ao remontar a
   linha). O ponto da conferência passa a aparecer na ficha e no mapa de calor.
+- **O envio não apaga a coordenada da nuvem:** o payload só leva `gps_lat`/
+  `gps_lng` quando o ativo tem leitura válida no aparelho. Sem leitura as
+  colunas ficam fora do `upsert` (e não a `null`), por isso um ativo conferido
+  sem GPS — ou com a leitura descartada — preserva o ponto que já está gravado
+  no Supabase.
 - **A captura já não perde leitura utilizável:** a conferência cortava a
   leitura aos 3 s e só aceitava até 50 m. Passa a aceitar até ao limite de
   descarte (150 m) e a esperar os limites do sensor (10 s nativo, 5 s web).

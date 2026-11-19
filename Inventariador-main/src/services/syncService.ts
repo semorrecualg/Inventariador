@@ -9,7 +9,7 @@ import { resolveTenantId } from '../utils/tenantUtils';
 import { matchUnitKeys } from '../utils/schema';
 import { UPSERT_TIMEOUT_MS, withUpsertTimeout } from './syncQueueGuards';
 import { isConferido } from '../utils/conferencia';
-import { assetGpsPair } from '../utils/assetGps';
+import { assetGpsColumns } from '../utils/assetGps';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -664,11 +664,9 @@ const _syncService = {
             DE_PARA: record.DE_PARA !== undefined && record.DE_PARA !== null ? String(record.DE_PARA).trim() : null,
             // PONTE GPS: a conferência grava `latitude`/`longitude`; a nuvem só
             // tem `gps_lat`/`gps_lng`. Ler só a coluna legada subia o ativo sem
-            // a coordenada que o operador acabou de capturar.
-            ...(() => {
-              const gps = assetGpsPair(record);
-              return { gps_lat: gps ? gps.lat : null, gps_lng: gps ? gps.lng : null };
-            })(),
+            // a coordenada que o operador acabou de capturar. Sem leitura local
+            // as colunas ficam fora do payload e não apagam a da nuvem.
+            ...assetGpsColumns(record),
             currentCampaignId: record.currentCampaignId !== undefined && record.currentCampaignId !== null ? String(record.currentCampaignId).trim() : null,
             // CONFERÊNCIA (quem e quando): sem estas três colunas o ativo subia,
             // mas a nuvem nunca sabia que ele tinha sido conferido no aparelho.

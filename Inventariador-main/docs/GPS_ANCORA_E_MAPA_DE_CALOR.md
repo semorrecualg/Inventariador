@@ -158,6 +158,11 @@ na tabela `assets`. A ponte é usada no envio (`syncAssetsToCloud`), no ciclo de
 fundo (`processDataSyncQueue`), no pull (`mapCloudAssetRow`) e na gravação
 local (`bulkInsertAssetsOfflineFirst`), que antes descartava `latitude`.
 
+No sentido do envio, as colunas `gps_lat`/`gps_lng` **só entram no payload
+quando o ativo tem leitura válida** (`assetGpsColumns` devolve `{}` sem leitura).
+Um `gps_lat: null` num `ON CONFLICT DO UPDATE` apagaria o ponto que já está na
+nuvem; a coluna ausente deixa o valor existente intacto.
+
 **Não alterado nesta entrega.** O código novo não exige colunas novas: lat/lng continuam em `latitude`/`longitude` e `gps_lat`/`gps_lng`. A proposta da seção 5 (precisão, origem e data no servidor) é uma decisão de migração e fica para depois da aprovação do usuário.
 
 ---

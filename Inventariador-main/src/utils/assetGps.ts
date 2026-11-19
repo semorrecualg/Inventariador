@@ -51,3 +51,16 @@ export const assetGpsPair = (asset: unknown): AssetGpsPair | null => {
 
   return null;
 };
+
+/**
+ * Colunas `gps_lat`/`gps_lng` para o upsert da nuvem.
+ *
+ * Sem leitura válida devolve `{}` — e não `{ gps_lat: null, gps_lng: null }`.
+ * No `ON CONFLICT DO UPDATE` a coluna ausente do payload fica como está, por
+ * isso um ativo conferido sem GPS (ou com a leitura descartada) não pode
+ * apagar a coordenada que outro aparelho já gravou na nuvem.
+ */
+export const assetGpsColumns = (asset: unknown): { gps_lat?: number; gps_lng?: number } => {
+  const gps = assetGpsPair(asset);
+  return gps ? { gps_lat: gps.lat, gps_lng: gps.lng } : {};
+};

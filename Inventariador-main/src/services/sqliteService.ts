@@ -789,6 +789,7 @@ export class SqliteService {
             if (!primaryKeyVal) {
               throw new Error("[FATAL_IMPORT_CRASH] Chave primária vazia detectada no lote.");
             }
+            const gps = assetGpsPair(asset);
 
             const mapped: DexieAsset = {
               id: primaryKeyVal,
@@ -831,15 +832,10 @@ export class SqliteService {
               // PONTE GPS: a linha que desce da nuvem traz `gps_lat`/`gps_lng` e
               // a conferência grava `latitude`/`longitude`. As duas grafias são
               // gravadas para que ficha, mapa e envio leiam o mesmo ponto.
-              ...(() => {
-                const gps = assetGpsPair(asset);
-                return {
-                  gps_lat: gps ? gps.lat : null,
-                  gps_lng: gps ? gps.lng : null,
-                  latitude: gps ? gps.lat : null,
-                  longitude: gps ? gps.lng : null
-                };
-              })(),
+              gps_lat: gps?.lat ?? null,
+              gps_lng: gps?.lng ?? null,
+              latitude: gps?.lat ?? null,
+              longitude: gps?.lng ?? null,
               currentCampaignId: asset.currentCampaignId !== undefined && asset.currentCampaignId !== null ? String(asset.currentCampaignId) : null
             };
 

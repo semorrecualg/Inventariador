@@ -12,7 +12,7 @@ import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../util
 import { hasRealAnchor } from '../utils/gpsAnchors';
 import { isRevokedAnchor } from '../utils/revokedAnchors';
 import { isConferido } from '../utils/conferencia';
-import { assetGpsPair } from '../utils/assetGps';
+import { assetGpsPair, assetGpsColumns } from '../utils/assetGps';
 import { resolveCanonicalUnitAnchor } from '../utils/unitAnchorPriority';
 import { buildUnitConfigRowPayload } from '../utils/unitConfigPayload';
 import { buildUnitFlags, mergeUnitFlags } from '../utils/unitConfigFlags';
@@ -1224,11 +1224,9 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         })(),
         // PONTE GPS: a conferência grava `latitude`/`longitude` e a nuvem só tem
         // `gps_lat`/`gps_lng`. Sem esta conversão o ponto ficava no aparelho e a
-        // linha subia sem coordenada.
-        ...(() => {
-          const gps = assetGpsPair(cleanAsset);
-          return { gps_lat: gps ? gps.lat : null, gps_lng: gps ? gps.lng : null };
-        })(),
+        // linha subia sem coordenada. Sem leitura local as colunas ficam FORA
+        // do payload: um ativo sem GPS não apaga o ponto que já está na nuvem.
+        ...assetGpsColumns(cleanAsset),
         // CONFERÊNCIA (quem e quando): viaja no schema quando as colunas existem
         // (scripts/assets-conferencia.sql). Se ainda não existirem, o sendBatch
         // remove a coluna e reenvia o lote — nunca derruba a sincronização.

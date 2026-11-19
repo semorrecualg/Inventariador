@@ -361,15 +361,12 @@ export const stopAutonomousTracking = async () => {
  * Posição atual para gravar em ativo/lote. Retorna `null` quando não há leitura
  * válida e utilizável (ou seja, não há coordenada a gravar). Nunca inventa ponto.
  *
- * O limite por omissão é `GPS_ACCURACY.DISCARD` (150 m), não `COLLECT` (50 m):
+ * O limite aceito é `GPS_ACCURACY.DISCARD` (150 m), não `COLLECT` (50 m):
  * uma leitura de 60–150 m ainda situa o ativo no mapa de calor, e descartá-la
  * deixava a conferência sem GPS num aparelho cujo sensor nunca chega aos 50 m.
  * Acima de 150 m é ruído de célula e continua a ser recusado.
  */
-export const getCurrentLocation = async (
-  forceRefresh = false,
-  maxAccuracyM: number = GPS_ACCURACY.DISCARD
-): Promise<GpsLocation | null> => {
+export const getCurrentLocation = async (forceRefresh = false): Promise<GpsLocation | null> => {
   const now = Date.now();
   
   // Retorna cache se for recente (30 segundos) e não for forçado
@@ -385,7 +382,7 @@ export const getCurrentLocation = async (
     });
 
     const fix = toGpsFix(coordinates?.coords);
-    if (fix && isPreciseFix(fix, maxAccuracyM)) {
+    if (fix && isPreciseFix(fix, GPS_ACCURACY.DISCARD)) {
       const newLoc: GpsLocation = { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, altitude: fix.altitude };
       lastLocation = newLoc;
       lastTimestamp = Date.now();
@@ -408,7 +405,7 @@ export const getCurrentLocation = async (
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const fix = toGpsFix(position.coords);
-          if (fix && isPreciseFix(fix, maxAccuracyM)) {
+          if (fix && isPreciseFix(fix, GPS_ACCURACY.DISCARD)) {
             const newLoc: GpsLocation = { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, altitude: fix.altitude };
             lastLocation = newLoc;
             lastTimestamp = Date.now();

@@ -57,8 +57,19 @@ const isAssetLog = (log: AuditLogDB): boolean => {
   return ASSET_LOG_ACTIONS.has(String(log.action || '').toUpperCase());
 };
 
+/**
+ * Identidade do evento para unir as duas fontes. O MESMO evento tem ids
+ * diferentes no aparelho e na nuvem (o Dexie gera um, o Postgres outro), por
+ * isso a chave é o conteúdo — comparar `id` nunca fundia nada.
+ */
 const logKey = (log: AuditLogDB): string =>
-  log.id || `${log.timestamp}|${log.action}|${log.user_email}|${log.record_id || ''}`;
+  [
+    String(log.timestamp || '').slice(0, 19),
+    String(log.action || '').toUpperCase(),
+    log.user_email || '',
+    log.record_id || '',
+    log.details || ''
+  ].join('|');
 
 /**
  * Une a trilha da nuvem com a do aparelho. As duas fontes descrevem o mesmo
