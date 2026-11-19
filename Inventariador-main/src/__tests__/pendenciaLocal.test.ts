@@ -42,7 +42,7 @@ describe('marcarAlteracaoLocal', () => {
   it('preservar a pendência não reinicia a idade quando não há data', () => {
     expect(preservarPendenciaLocal(undefined)).toEqual({ _is_synced: 0 });
     expect(preservarPendenciaLocal(null)).toEqual({ _is_synced: 0 });
-    expect(preservarPendenciaLocal('2026-11-18T10:00:00.000Z')).toEqual({
+    expect(preservarPendenciaLocal({ _lastUpdated: '2026-11-18T10:00:00.000Z' })).toEqual({
       _is_synced: 0,
       _lastUpdated: '2026-11-18T10:00:00.000Z',
     });

@@ -11,12 +11,25 @@
  * renderizar a trilha inteira.
  */
 
+/**
+ * Recusas do envio do ativo — a causa de um pendente que não sai do aparelho.
+ * São prova de auditoria: o expurgo de 7 dias não as apaga (ver
+ * `services/auditoriaRetencao.ts`).
+ */
+export const ACOES_DE_FALHA_DE_ENVIO: ReadonlySet<string> = new Set([
+  'SYNC_RECORD_FAIL',
+  'SYNC_RECORD_EXCEPTION'
+]);
+
+/** A ação é uma recusa de envio registada? (aceita caixa indiferente) */
+export const ehFalhaDeEnvio = (acao: unknown): boolean =>
+  ACOES_DE_FALHA_DE_ENVIO.has(String(acao || '').toUpperCase());
+
 /** Ações que a trilha de ATIVOS mostra. */
 const ASSET_LOG_ACTIONS = new Set([
   'CREATE', 'INSERT', 'UPDATE', 'DELETE', 'IMPAIRMENT', 'UNITARIZAÇÃO',
   'ACQUISITION', 'TRANSFER', 'SALE', 'WRITE_OFF', 'RECONCILIAÇÃO',
-  // Recusas do envio do ativo — a causa de um pendente que não sai do aparelho.
-  'SYNC_RECORD_FAIL', 'SYNC_RECORD_EXCEPTION'
+  ...ACOES_DE_FALHA_DE_ENVIO
 ]);
 
 export interface ActionLogLike {

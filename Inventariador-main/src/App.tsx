@@ -2808,11 +2808,13 @@ useEffect(() => {
           const mergedAssets = cloudAssets.map(cloudAsset => {
             const local = localById.get(String(cloudAsset.id));
             // O pull não apaga a pendência local — nem a data do toque que a
-            // originou, que é o que o selo mostra como idade. Pendentes anteriores
-            // a `_lastUpdated` ficam sem data (o selo omite a idade) em vez de
-            // receberem «agora» a cada descarga, que reiniciava a contagem.
+            // originou, que é o que o selo mostra como idade, nem o carimbo da
+            // falha de envio, que é o que o cartão mostra como motivo. Pendentes
+            // anteriores a `_lastUpdated` ficam sem data (o selo omite a idade)
+            // em vez de receberem «agora» a cada descarga, que reiniciava a
+            // contagem; o carimbo só sobrevive quando já existia.
             return local && Number(local._is_synced) === 0
-              ? { ...cloudAsset, ...preservarPendenciaLocal(local._lastUpdated) }
+              ? { ...cloudAsset, ...preservarPendenciaLocal(local) }
               : cloudAsset;
           });
           const dirtyIds = Array.from(dirtyAssetsRef.current);
