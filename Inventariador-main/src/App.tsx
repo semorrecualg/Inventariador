@@ -6073,8 +6073,12 @@ useEffect(() => {
 
       res['AUDITOR_LOCAL_ORIGINAL'] = a.endereco;
       res['AUDITOR_LOCAL_AUDITADO'] = a._localMaster || a.endereco;
-      res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (a._conferido ? (normalizeKey(String(a.endereco)) === normalizeKey(String(a._localMaster || a.endereco)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
-      res['AUDITOR_STATUS_CONFERENCIA'] = a._conferido ? 'SIM' : 'NAO';
+      // A exportação é a prova que sai para fora: lê a conferência pelo mesmo
+      // predicado dos ecrãs, senão um item conferido pela coluna de auditoria
+      // sai como PENDENTE/NAO.
+      const conferido = isConferido(a);
+      res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (conferido ? (normalizeKey(String(a.endereco)) === normalizeKey(String(a._localMaster || a.endereco)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
+      res['AUDITOR_STATUS_CONFERENCIA'] = conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
       // REGISTRO ADOTADO: rótulo rad_<UNIDADE>_<DISPOSITIVO>_<SEQUENCIA> do item
       // criado por cópia de outra unidade (vazio em tudo o que não é adotado).
