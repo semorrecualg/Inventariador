@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a fila actualiza a linha existente em vez de falhar com `duplicate key`
+
+- **Alvo de conflito na fila:** `processDataSyncQueue` fazia
+  `upsert(payload)` sem `onConflict`. A fila não envia `id`, o PostgREST usava a
+  chave primária `(tenantid, id)` e o `INSERT` caía sempre no índice único
+  `(tenantid, primarykey)` — um ativo que já existia na nuvem ficava em `23505
+  duplicate key` em cada ciclo e nunca recebia a conferência. O upsert passa a
+  declarar `onConflict: 'tenantid, primarykey'`, o que actualiza a linha
+  existente sem tocar no `id`; o alvo acompanha também a repetição que retira
+  uma coluna inexistente (PGRST204).
+- **`42P10` accionável:** quando a nuvem não tem o índice único em
+  `(tenantid, primarykey)`, o motivo mostra primeiro a acção a tomar («falta o
+  índice único…», ver `docs/supabase_bootstrap.sql`) em vez de repetir o pedido
+  sem explicação.
+
 ### Corrigido — a mesma recusa não volta à trilha por causa do texto volátil
 
 - **A assinatura da falha é estável:** a deduplicação de
