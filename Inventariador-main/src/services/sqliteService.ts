@@ -4,6 +4,7 @@ import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
+import { carimbarFalhaEnvio } from '../utils/syncFalha';
 import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
 import { assetGpsPair } from '../utils/assetGps';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
@@ -1297,11 +1298,68 @@ export class SqliteService {
   public async markAssetsSynced(primarykeys: string[]): Promise<void> {
     const keys = Array.from(new Set(primarykeys.map(k => String(k || '').trim()).filter(Boolean)));
     if (keys.length === 0) return;
+    /** Enviado e aceite: a pendência E o carimbo de recusa desaparecem juntos. */
+    const marcar = (rec: unknown): void => {
+      const registo = rec as Record<string, unknown>;
+      registo._is_synced = 1;
+      delete registo._syncFailAt;
+      delete registo._syncFailReason;
+    };
     await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
-      await db.ativos.where('primarykey').anyOf(keys).modify({ _is_synced: 1 });
-      await db.assets.where('primarykey').anyOf(keys).modify({ _is_synced: 1 });
-      await db.local_assets.where('primarykey').anyOf(keys).modify({ _is_synced: 1 });
+      await db.ativos.where('primarykey').anyOf(keys).modify(marcar);
+      await db.assets.where('primarykey').anyOf(keys).modify(marcar);
+      await db.local_assets.where('primarykey').anyOf(keys).modify(marcar);
     });
+  }
+
+  /**
+   * CARIMBO DA RECUSA NO PRÓPRIO REGISTO — escrita única dos dois caminhos
+   * ============================================================================
+   * A recusa da nuvem passou a ficar no ativo (`_syncFailAt`/`_syncFailReason`)
+   * para o cartão e o botão global distinguirem «na fila» de «recusado» (ver
+   * `utils/syncFalha`). A escrita vive aqui, ao lado de `markAssetsSynced`, para
+   * o envio em massa (`syncAssetsToCloud`) e o ciclo de fundo
+   * (`processDataSyncQueue`) carimbarem da mesma maneira.
+   *
+   * `registo` evita a leitura quando o chamador já tem a linha em memória (o
+   * ciclo de fundo). A janela de reescrita é decidida em `carimbarFalhaEnvio`.
+   * Devolve quantos registos foram carimbados (0 quando todos estão dentro da
+   * janela com o mesmo motivo).
+   */
+  public async markAssetsFailed(
+    falhas: Array<{ primarykey: string; motivo: string; registo?: Record<string, unknown> }>
+  ): Promise<number> {
+    const entradas = falhas
+      .map(f => ({
+        primarykey: String(f.primarykey || '').trim(),
+        motivo: String(f.motivo || ''),
+        registo: f.registo
+      }))
+      .filter(f => f.primarykey);
+    if (entradas.length === 0) return 0;
+
+    const semRegisto = Array.from(new Set(entradas.filter(e => !e.registo).map(e => e.primarykey)));
+    const lidos = semRegisto.length > 0
+      ? await db.local_assets.where('primarykey').anyOf(semRegisto).toArray()
+      : [];
+    const porChave = new Map<string, Record<string, unknown>>();
+    lidos.forEach(r => porChave.set(String(r.primarykey), r as unknown as Record<string, unknown>));
+
+    const carimbos = new Map<string, { _syncFailAt: string; _syncFailReason: string }>();
+    for (const entrada of entradas) {
+      const carimbo = carimbarFalhaEnvio(entrada.registo ?? porChave.get(entrada.primarykey), entrada.motivo);
+      if (carimbo) carimbos.set(entrada.primarykey, carimbo);
+    }
+    if (carimbos.size === 0) return 0;
+
+    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      for (const [primarykey, carimbo] of carimbos) {
+        await db.ativos.where('primarykey').equals(primarykey).modify(carimbo);
+        await db.assets.where('primarykey').equals(primarykey).modify(carimbo);
+        await db.local_assets.where('primarykey').equals(primarykey).modify(carimbo);
+      }
+    });
+    return carimbos.size;
   }
 
   /**

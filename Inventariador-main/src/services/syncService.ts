@@ -10,7 +10,6 @@ import { matchUnitKeys } from '../utils/schema';
 import { UPSERT_TIMEOUT_MS, withUpsertTimeout } from './syncQueueGuards';
 import { isConferido } from '../utils/conferencia';
 import { assetGpsColumns } from '../utils/assetGps';
-import { carimbarFalhaEnvio } from '../utils/syncFalha';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -21,28 +20,12 @@ import { carimbarFalhaEnvio } from '../utils/syncFalha';
  * continuava `_is_synced = 0` e a etiqueta PENDENTE NUVEM ficava para sempre.
  * Em 2026-11-12 isso deixou 15 de 45 ativos na nuvem e 45 pendentes no aparelho.
  */
-/** O envio foi aceite: a recusa anterior deixa de existir. */
-const limparCarimboFalha = (rec: unknown): void => {
-  const registo = rec as Record<string, unknown>;
-  delete registo._syncFailAt;
-  delete registo._syncFailReason;
-};
-
+/**
+ * Marca um registo como sincronizado — a escrita é a mesma do envio em massa
+ * (`sqliteService.markAssetsSynced`), que também apaga o carimbo de recusa.
+ */
 const markRecordSynced = async (primaryKey: string): Promise<void> => {
-  await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
-    await db.local_assets.where('primarykey').equals(primaryKey).modify((rec) => {
-      (rec as unknown as Record<string, unknown>)._is_synced = 1;
-      limparCarimboFalha(rec);
-    });
-    await db.ativos.where('primarykey').equals(primaryKey).modify((rec) => {
-      (rec as unknown as Record<string, unknown>)._is_synced = 1;
-      limparCarimboFalha(rec);
-    });
-    await db.assets.where('primarykey').equals(primaryKey).modify((rec) => {
-      (rec as unknown as Record<string, unknown>)._is_synced = 1;
-      limparCarimboFalha(rec);
-    });
-  });
+  await sqliteService.markAssetsSynced([primaryKey]);
 };
 
 export interface UserSessionData {
@@ -200,15 +183,8 @@ const marcarFalhaNoRegisto = async (
   motivo: string,
   emMemoria?: Record<string, unknown>,
 ): Promise<void> => {
-  const carimbo = carimbarFalhaEnvio(emMemoria, motivo);
-  if (!carimbo) return;
-
   try {
-    await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
-      await db.local_assets.where('primarykey').equals(primaryKey).modify(carimbo);
-      await db.ativos.where('primarykey').equals(primaryKey).modify(carimbo);
-      await db.assets.where('primarykey').equals(primaryKey).modify(carimbo);
-    });
+    await sqliteService.markAssetsFailed([{ primarykey: primaryKey, motivo, registo: emMemoria }]);
   } catch (err) {
     logger.warn('>>> [Sync Alert] Falha ao carimbar a recusa no registo local:', err);
   }

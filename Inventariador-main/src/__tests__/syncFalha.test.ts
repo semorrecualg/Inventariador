@@ -85,6 +85,17 @@ describe('syncFailureInfo', () => {
     expect(info).toEqual({ motivo: 'RLS negou o upsert', idade: 'há 2 h' });
   });
 
+  it('carimbo antigo num registo já igual à nuvem não mostra aviso', () => {
+    // O ativo pode subir por outro caminho (`syncAssetsToCloudAndMark`, pull com
+    // `markSynced`) sem passar pela limpeza do carimbo: o selo vermelho seria falso.
+    const info = syncFailureInfo(
+      { _is_synced: 1, _syncFailAt: iso(AGORA - 3600 * 1000), _syncFailReason: 'RLS' },
+      AGORA
+    );
+
+    expect(info).toBeNull();
+  });
+
   it('carimbo sem motivo legível não inventa texto', () => {
     const info = syncFailureInfo({ _syncFailAt: iso(AGORA - 5 * 60 * 1000) }, AGORA);
 

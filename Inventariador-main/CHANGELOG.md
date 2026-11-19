@@ -11,10 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **O aparelho distingue «na fila» de «recusado»:** uma recusa da nuvem só
   existia em `audit_logs` (`SYNC_RECORD_FAIL` / `SYNC_RECORD_EXCEPTION`), longe
-  do cartão. A fila passa a carimbar o próprio registo local
-  (`_syncFailAt`/`_syncFailReason`, `src/utils/syncFalha.ts`), no máximo uma vez
-  por janela de 10 min com o mesmo motivo, e o carimbo é apagado quando o envio
-  é aceite.
+  do cartão. Os dois caminhos de envio — o ciclo de fundo
+  (`processDataSyncQueue`) e o envio em massa (`syncAssetsToCloud`, usado pelo
+  autosave, pelo push delta de boot e pelo Gestor) — passam a carimbar o próprio
+  registo local (`_syncFailAt`/`_syncFailReason`, `src/utils/syncFalha.ts`), no
+  máximo uma vez por janela de 10 min com o mesmo motivo. O carimbo é apagado
+  quando o envio é aceite, pelos dois caminhos (`markAssetsSynced`).
 - **Selo vermelho no cartão:** o ativo com recusa mostra «Falha de envio ·
   {motivo} · há X» em vez do âmbar «conferência por enviar», sem esconder que
   continua pendente.

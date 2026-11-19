@@ -74,12 +74,17 @@ export const carimbarFalhaEnvio = (
 /**
  * Motivo e idade para o selo do cartão. Sem carimbo não há aviso — um registo
  * só na fila continua a ser «Pendente Nuvem» sem falha nenhuma a declarar.
+ *
+ * `_is_synced = 1` manda calar o aviso mesmo que o carimbo tenha ficado para
+ * trás: o ativo subiu por outro caminho (`syncAssetsToCloudAndMark`, pull com
+ * `markSynced`) e um selo vermelho num registo igual à nuvem seria falso.
  */
 export const syncFailureInfo = (
-  asset: { _syncFailAt?: unknown; _syncFailReason?: unknown } | null | undefined,
+  asset: { _syncFailAt?: unknown; _syncFailReason?: unknown; _is_synced?: unknown } | null | undefined,
   now: number = Date.now()
 ): SyncFailureInfo | null => {
   if (!asset?._syncFailAt) return null;
+  if (Number(asset._is_synced) === 1) return null;
 
   const motivo = String(asset._syncFailReason ?? '').trim();
   return {

@@ -30,7 +30,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
   };
 });
 
-import { db } from '../services/sqliteService';
+import { db, sqliteService } from '../services/sqliteService';
 import { processDataSyncQueue } from '../services/syncService';
 import { SYNC_FAILURE_STAMP_WINDOW_MS } from '../utils/syncFalha';
 
@@ -126,6 +126,20 @@ describe('processDataSyncQueue — carimbo da recusa no registo local', () => {
     const local = await registoLocal();
     expect(String(local?._syncFailAt)).not.toBe(primeiroCarimbo);
     expect(String(local?._syncFailReason)).toContain('timeout');
+  });
+
+  it('a marcação de sincronizado de outro caminho também apaga o carimbo', async () => {
+    upsert.mockResolvedValue({ error: RLS });
+    await db.local_assets.put(asset() as never);
+    await processDataSyncQueue();
+    expect((await registoLocal())?._syncFailAt).toBeTruthy();
+
+    // `syncAssetsToCloudAndMark` marca por `sqliteService.markAssetsSynced`.
+    await sqliteService.markAssetsSynced(['01010100000005000001']);
+
+    const local = await registoLocal();
+    expect(local?._syncFailAt).toBeUndefined();
+    expect(Number(local?._is_synced)).toBe(1);
   });
 
   it('apaga o carimbo quando o envio é aceite', async () => {
