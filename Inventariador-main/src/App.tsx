@@ -9,7 +9,7 @@ import { startSecurityMonitor, checkRuntimeIntegrity } from './services/security
 import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
-import { effectiveAssetAddress } from './utils/assetAddress';
+import { effectiveAssetAddress, rotuloDePara } from './utils/assetAddress';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
@@ -6081,7 +6081,7 @@ useEffect(() => {
       // predicado dos ecrãs, senão um item conferido pela coluna de auditoria
       // sai como PENDENTE/NAO.
       const conferido = isConferido(a);
-      res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (conferido ? (normalizeKey(String(a.endereco)) === normalizeKey(String(a._localMaster || a.endereco)) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
+      res['AUDITOR_DE_PARA'] = rotuloDePara(a, conferido);
       res['AUDITOR_STATUS_CONFERENCIA'] = conferido ? 'SIM' : 'NAO';
       res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
       // REGISTRO ADOTADO: rótulo rad_<UNIDADE>_<DISPOSITIVO>_<SEQUENCIA> do item

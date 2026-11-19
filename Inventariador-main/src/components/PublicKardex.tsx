@@ -11,6 +11,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { APP_VERSION_LABEL } from '../utils/appVersion';
+import { mesmoEnderecoAuditado } from '../utils/assetAddress';
 
 interface PublicKardexProps {
   asset: Asset;
@@ -123,7 +124,7 @@ const PublicKardex: React.FC<PublicKardexProps> = ({ asset, onClose, selectedUni
             </div>
           )}
 
-          {asset._localMaster && asset._localMaster !== asset.endereco && (
+          {!mesmoEnderecoAuditado(asset) && (
             <div className="flex items-start space-x-4">
               <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-400 shrink-0 border border-indigo-100">
                 <MapPin size={18} />

@@ -41,8 +41,8 @@ describe('exportação — a conferência vem do predicado único', () => {
       expect(bloco, `${rel} volta a ler a flag crua`).not.toContain('_conferido');
       expect(bloco, `${rel}: AUDITOR_STATUS_CONFERENCIA fora do predicado`)
         .toMatch(/AUDITOR_STATUS_CONFERENCIA'\]\s*=\s*conferido\s*\?\s*'SIM'\s*:\s*'NAO'/);
-      expect(bloco, `${rel}: AUDITOR_DE_PARA fora do predicado`)
-        .toMatch(/AUDITOR_DE_PARA'\]\s*=\s*[^;\n]*conferido\s*\?/);
+      expect(bloco, `${rel}: AUDITOR_DE_PARA fora do rótulo único`)
+        .toMatch(/AUDITOR_DE_PARA'\]\s*=\s*rotuloDePara\(a,\s*conferido\)/);
     }
   });
 

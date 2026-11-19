@@ -9,6 +9,7 @@ import { updateAssetInProtheus } from '../services/protheusService';
 import { localDb } from '../services/localDbService';
 import { canonicalKey } from '../utils/normalize';
 import { isConferido, marcarConferido } from '../utils/conferencia';
+import { mesmoEnderecoAuditado } from '../utils/assetAddress';
 
 import { 
   Edit2, 
@@ -697,7 +698,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             </div>
           </div>
 
-          {(workingAsset._localMaster && workingAsset._localMaster !== workingAsset.endereco) && (
+          {!mesmoEnderecoAuditado(workingAsset) && (
             <div className="bg-white/10 border border-white/20 rounded-2xl p-4 backdrop-blur-md mb-2">
               <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
                 <span className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Fluxo de Adoção</span>

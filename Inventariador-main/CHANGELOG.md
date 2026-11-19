@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A exportação devolve o estado pela regra:** o de-para e a coluna de
   auditoria do Excel/CSV saíam de `_conferido === 1`, e um ativo conferido pela
   coluna de auditoria era exportado como «NAO».
+- **O de-para do endereço é uma regra só:** a exportação do App comparava
+  `endereco` com o local auditado por `normalizeKey` e a do painel (`GBR_AUDIT`)
+  por `===` — o mesmo ativo saía «COM ALTERAÇÃO» num ficheiro e «SEM ALTERAÇÃO»
+  no outro. O bloco «Fluxo de Adoção» do cartão e do Kardex também abria com
+  `_localMaster !== endereco` cru, mostrando uma adoção que só existia na
+  caixa das letras. As quatro pontas passam a chamar `mesmoEnderecoAuditado` e
+  `rotuloDePara` (`src/utils/assetAddress.ts`), com a mesma tolerância de
+  localidade do resto do app.
 - **A nuvem lê o predicado:** `buildPayload` e `conferidoDaNuvem` deixaram de
   repetir a derivação à mão; a coluna remota `conferido` é aceita em qualquer
   das grafias (`true`, `1`, `'1'`, `'true'`) e o conflito do pull e o

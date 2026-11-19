@@ -6,6 +6,7 @@ import { db } from '../services/sqliteService';
 import { logger } from '../utils/logger';
 import { normalizeFlag } from '../utils/normalize';
 import { isConferido } from '../utils/conferencia';
+import { rotuloDePara } from '../utils/assetAddress';
 import { readSessionTenantId } from '../utils/tenantUtils';
 import BackButton from './BackButton';
 import { 
@@ -429,7 +430,7 @@ const Dashboard: React.FC<DashboardProps> = ({ assets, onBack, user, currentCamp
         // predicado dos ecrãs, senão um item conferido pela coluna de auditoria
         // sai como PENDENTE/NAO.
         const conferido = isConferido(a);
-        res['AUDITOR_DE_PARA'] = (a.DE_PARA as string | undefined) || (conferido ? (a.endereco === (a._localMaster || a.endereco) ? 'SEM ALTERAÇÃO' : 'COM ALTERAÇÃO') : 'PENDENTE');
+        res['AUDITOR_DE_PARA'] = rotuloDePara(a, conferido);
         res['AUDITOR_STATUS_CONFERENCIA'] = conferido ? 'SIM' : 'NAO';
         res['AUDITOR_TAG_REGRA_OURO'] = (a.TAG_INVENTARIO as string | undefined) || 'PENDENTE';
         // REGISTRO ADOTADO: rótulo rad_<UNIDADE>_<DISPOSITIVO>_<SEQUENCIA> do item
