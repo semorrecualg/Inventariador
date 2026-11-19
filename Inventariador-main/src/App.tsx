@@ -16,7 +16,7 @@ import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './uti
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { marcarAlteracaoLocal, preservarPendenciaLocal } from './utils/pendencia';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
-import { isConferido, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
+import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
@@ -3267,8 +3267,10 @@ useEffect(() => {
                 return { ...a, ...marcarConferido(yesterdayStr) };
               }
               
-              // Se já é conferido mas _conferido está falso, atualiza para true para consistência interna
-              if (!a._conferido) {
+              // Conferido pela regra mas com a marca local fora da grafia
+              // canônica (veio só da coluna de auditoria, ou em texto legado):
+              // normaliza para `true`, mantendo a data de leitura que já tinha.
+              if (!marcaLocalConferida(a)) {
                 hasChanges = true;
                 return { ...a, ...marcarConferido(a._dataLeitura) };
               }
@@ -3334,7 +3336,9 @@ useEffect(() => {
                   if (needsUpdate) {
                     return { ...a, ...marcarConferido(yesterdayStr) };
                   }
-                  if (!a._conferido) {
+                  // Mesma normalização do arranque: só reescreve quando a
+                  // marca local ainda não está na grafia canônica.
+                  if (!marcaLocalConferida(a)) {
                     return { ...a, ...marcarConferido(a._dataLeitura) };
                   }
                 }

@@ -26,7 +26,23 @@ import { normalizeFlag } from './normalize';
  * outros sem —, e foi isso que deixou o desmarcar de um ecrã não resistir ao
  * envio do outro.
  */
+/**
+ * Grafias que a marca local de conferência pode ter.
+ *
+ * Não é uma grafia por gosto: são as que existem nos registos. O App e o Dexie
+ * gravam booleano (`true`/`false`); a carga da planilha, o espelho SQLite e o
+ * envio gravam `1`/`0`; o JSON importado e as linhas antigas trazem o texto
+ * `'true'`/`'1'`/`'0'`. `null` cobre o registo que tem a chave sem valor.
+ *
+ * `normalizeFlag` é quem as unifica, e `isConferido` é quem decide. As
+ * estruturas concretas (`Asset`, `DexieAsset`, `DedupRow`) usam este tipo para
+ * o compilador não deixar voltar a tratá-las como se fossem só booleanas.
+ */
+export type MarcaDeConferencia = boolean | number | string | null;
+
 export type CamposDeConferencia = {
+  // `unknown` de propósito: é a fronteira (Dexie, nuvem, planilha, JSON). Nas
+  // estruturas já normalizadas o tipo é `MarcaDeConferencia`.
   _conferido?: unknown;
   AUDITOR_STATUS_CONFERENCIA?: unknown;
   status?: unknown;
@@ -35,6 +51,18 @@ export type CamposDeConferencia = {
 export const isConferido = (asset: CamposDeConferencia): boolean =>
   normalizeFlag(asset._conferido) ||
   String(asset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM';
+
+/**
+ * A marca LOCAL já está na grafia canônica?
+ *
+ * Diferente de `isConferido`: aqui só conta a flag (`_conferido`), não a coluna
+ * de auditoria nem o `status`. É o que o arranque pergunta antes de reescrever
+ * o registo — um ativo conferido só pela coluna de auditoria precisa da escrita;
+ * um que já tem `true`, `1` ou `'1'` não precisa. Ler `!asset._conferido` à mão
+ * reescrevia (e regravava a leitura) em todos os registos com `'1'`.
+ */
+export const marcaLocalConferida = (asset: CamposDeConferencia): boolean =>
+  normalizeFlag(asset._conferido);
 
 /**
  * O `status` textual também é marcador de conferência: a planilha/ERP traz

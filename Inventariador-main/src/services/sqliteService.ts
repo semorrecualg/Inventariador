@@ -4,7 +4,7 @@ import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
-import { isConferido } from '../utils/conferencia';
+import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
@@ -48,9 +48,10 @@ export interface DexieAsset {
   _is_synced: number; // 0 or 1
   _is_deleted: number; // 0 or 1
   // 0/1 nas linhas do SQLite; as escritas do Dexie gravam o booleano da
-  // decisão (`utils/conferencia.ts`) e `isConferido`/`normalizeFlag` leem as
-  // duas formas.
-  _conferido: number | boolean;
+  // decisão (`utils/conferencia.ts`). O tipo admite todas as grafias que a
+  // regra aceita (`MarcaDeConferencia`): linhas antigas guardaram `'1'`/
+  // `'true'` e o JSON importado também.
+  _conferido: MarcaDeConferencia;
   _plaquetado: number; // 0 or 1
   _aprovado: number; // 0 or 1
   _isNew: number; // 0 or 1

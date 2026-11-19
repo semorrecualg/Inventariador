@@ -22,8 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   desmarcar de um não resistia ao envio do outro. `marcarConferido` e
   `desmarcarConferido` são agora o par único (com `alternarConferencia` no
   toque), gravado pelo cartão do inventário, pelo detalhe do ativo, pela
-  conciliação, pela etiquetagem, pela persistência e pelo espelho local; o
-  tipo local `_conferido` passa a aceitar `number | boolean`.
+  conciliação, pela etiquetagem, pela persistência e pelo espelho local.
+- **O tipo acompanha as grafias:** `_conferido` (`MarcaDeConferencia`, em
+  `src/utils/conferencia.ts`) admite booleano, `1`/`0` e o texto legado
+  (`'true'`, `'1'`, `'0'`), que é o que existe no Dexie, no espelho SQLite e no
+  JSON importado. A fronteira do banco normaliza nos dois sentidos: escrever
+  `'true'` grava 1 e ler `'1'` entrega `true` à UI (antes o texto voltava como
+  pendente). As leituras cruas que sobravam — a normalização do arranque
+  (`!a._conferido`), o merge das três tabelas em `localDbService`
+  (`prev._conferido ?? next._conferido`), a contagem por localidade e a
+  importação de JSON — passam pela regra (`isConferido`), e a marca pela
+  grafia canônica (`marcaLocalConferida`).
 - **Desmarcar apaga todas as provas de conferência:** o `status` textual com
   «CONFERIDO» é marcador lido pelo envio e pelo pull da nuvem, por isso
   desmarcar só a flag deixava o item voltar conferido na sincronização

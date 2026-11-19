@@ -1,6 +1,7 @@
 
 import { localDb } from './localDbService';
 import { Asset, TagInventario } from '../types';
+import { isConferido } from '../utils/conferencia';
 
 /**
  * Repositório de Ativos (Padrão Room/DAO para Web)
@@ -116,7 +117,7 @@ export const assetRepository = {
     const assets: Asset[] = data.map(item => ({
       ...item,
       id: item.id || crypto.randomUUID(),
-      _conferido: !!item._conferido,
+      _conferido: isConferido(item),
       _localMaster: item._localMaster || item.endereco || ''
     }));
     await localDb.assets.bulkPut(assets);
@@ -149,7 +150,7 @@ export const assetRepository = {
   async getStatsByLocation(location: string) {
     const assets = await this.listByLocation(location);
     const total = assets.length;
-    const checked = assets.filter(a => a._conferido).length;
+    const checked = assets.filter(a => isConferido(a)).length;
     return { total, checked, pending: total - checked };
   }
 };

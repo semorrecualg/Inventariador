@@ -1,6 +1,6 @@
 import { normalizeKey } from './schema';
 import { hasUsableTag } from './etiquetaGroup';
-import { isConferido } from './conferencia';
+import { isConferido, type MarcaDeConferencia } from './conferencia';
 
 /**
  * Identidade de um ativo para efeitos de limpeza de cópias:
@@ -18,7 +18,8 @@ export interface DedupRow {
   etiqueta?: string;
   /** Quando a linha desceu da nuvem, traz `updated_at`; nem sempre existe. */
   updated_at?: string;
-  _conferido?: number;
+  /** Todas as grafias que a regra aceita (booleano, 0/1 e o texto legado). */
+  _conferido?: MarcaDeConferencia;
   /** Coluna de auditoria, quando a linha desceu da planilha/nuvem. */
   AUDITOR_STATUS_CONFERENCIA?: unknown;
   _is_synced?: number;

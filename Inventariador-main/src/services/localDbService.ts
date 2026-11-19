@@ -2,7 +2,8 @@ import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sq
 import { isAdminEmail } from '../utils/authUtils';
 import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
 import { pickAssetAddress } from '../utils/assetAddress';
-import { isConferido } from '../utils/conferencia';
+import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
+import { normalizeFlag } from '../utils/normalize';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
@@ -123,17 +124,10 @@ function toDexieAsset(asset: Asset): DexieAsset {
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
   ];
   boolKeys.forEach(k => {
-    if (k in obj) {
-      if (typeof obj[k] === 'boolean') {
-        obj[k] = obj[k] ? 1 : 0;
-      } else if (obj[k] === undefined || obj[k] === null) {
-        obj[k] = 0;
-      } else {
-        obj[k] = Number(obj[k]) ? 1 : 0;
-      }
-    } else {
-      obj[k] = 0;
-    }
+    // `normalizeFlag` e não verdade/`Number()`: o texto legado `'true'`/`'1'`
+    // chega aqui pelo JSON importado e pelas linhas antigas, e era gravado
+    // como 0 (`Number('true')` → NaN).
+    obj[k] = normalizeFlag(obj[k]) ? 1 : 0;
   });
 
   if (asset.currentCampaignId === undefined) {
@@ -156,11 +150,9 @@ function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
   ];
   boolKeys.forEach(k => {
-    if (k in asset) {
-      asset[k] = asset[k] === 1 || asset[k] === true;
-    } else {
-      asset[k] = false;
-    }
+    // A leitura passa pela mesma normalização da escrita: uma linha com `'1'`
+    // ou `'true'` tem de chegar à UI como conferida, não como `false`.
+    asset[k] = normalizeFlag(asset[k]);
   });
 
   ['DE_PARA', '_history'].forEach(key => {
@@ -459,7 +451,7 @@ export const localDb = {
         endereco?: unknown;
         codigo_endereco?: unknown;
         _is_deleted?: unknown;
-        _conferido?: unknown;
+        _conferido?: MarcaDeConferencia;
         _localMaster?: unknown;
         LOCALIZACAO?: unknown;
         CENTRO_CUSTO?: unknown;
@@ -514,10 +506,10 @@ export const localDb = {
         endereco: prev.endereco || next.endereco,
         LOCALIZACAO: prev.LOCALIZACAO || next.LOCALIZACAO,
         CENTRO_CUSTO: prev.CENTRO_CUSTO || next.CENTRO_CUSTO,
-        _conferido:
-          isConferido(prev) || isConferido(next)
-            ? 1
-            : (prev._conferido ?? next._conferido),
+        // Estado mais avançado pela regra única; sem conferência em nenhuma
+        // cópia a marca fica 0 (antes caía para o valor cru da linha, que podia
+        // ser texto e voltava a entrar na tabela como se fosse conferido).
+        _conferido: isConferido(prev) || isConferido(next) ? 1 : 0,
         // `prev` é sempre a cópia de maior precedência (ordem de `workTables`).
         _is_deleted: prev._is_deleted ?? next._is_deleted
       });
