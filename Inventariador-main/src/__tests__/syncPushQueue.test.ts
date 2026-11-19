@@ -33,6 +33,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
 
 import { db } from '../services/sqliteService';
 import { ASSETS_CONFLICT_TARGET, processDataSyncQueue } from '../services/syncService';
+import { SyncRequestTimeoutError, UPSERT_TIMEOUT_MS } from '../services/syncQueueGuards';
 
 const asset = (over: Record<string, unknown> = {}) =>
   ({
@@ -96,6 +97,53 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     // A etiqueta PENDENTE NUVEM só desaparece com a marcação local.
     const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
     expect(Number(local?._is_synced)).toBe(1);
+  });
+
+  // TIMEOUT ≠ RECUSA: o servidor pode só não ter respondido em 15 s. Carimbar
+  // `_syncFailAt` pintava o cartão de «Falha de envio» e o operador lia o
+  // atraso como recusa de dados (ecrãs de 2026-11-19).
+  it('um timeout não carimba falha no registo e explica que haverá nova tentativa', async () => {
+    await db.local_assets.put(asset() as never);
+    upsert.mockRejectedValue(new SyncRequestTimeoutError(UPSERT_TIMEOUT_MS));
+
+    await processDataSyncQueue();
+
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    expect(local?._syncFailAt).toBeUndefined();
+    expect(Number(local?._is_synced)).toBe(0);
+
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_RECORD_EXCEPTION').toArray();
+    expect(logs).toHaveLength(1);
+    expect(String(logs[0].delta)).toContain('nova tentativa automática');
+  });
+
+  it('um timeout pára o ciclo em vez de insistir em cada registo durante 15 s', async () => {
+    await db.local_assets.bulkPut([
+      asset({ primarykey: 'PK-A', id: 'PK-A' }) as never,
+      asset({ primarykey: 'PK-B', id: 'PK-B' }) as never
+    ]);
+    upsert.mockRejectedValue(new SyncRequestTimeoutError(UPSERT_TIMEOUT_MS));
+
+    await processDataSyncQueue();
+
+    // O segundo ativo não chega a ser tentado: o servidor está mudo.
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(await db.local_assets.where('_is_synced').equals(0).count()).toBe(2);
+  });
+
+  it('um timeout seguido de sucesso deixa o ativo sincronizado e sem selo vermelho', async () => {
+    await db.local_assets.put(asset() as never);
+    upsert.mockRejectedValue(new SyncRequestTimeoutError(UPSERT_TIMEOUT_MS));
+    await processDataSyncQueue();
+
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBeGreaterThan(0);
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    expect(Number(local?._is_synced)).toBe(1);
+    expect(local?._syncFailAt).toBeUndefined();
   });
 
   it('mantém o alvo de conflito na repetição que retira uma coluna inexistente', async () => {
