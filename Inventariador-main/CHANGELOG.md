@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o GPS da conferência chega à ficha, ao mapa e à nuvem
+
+- **Uma ponte para o par de coordenadas:** a conferência grava `latitude`/
+  `longitude`, mas a nuvem guarda o mesmo ponto em `gps_lat`/`gps_lng` e o
+  envio não convertia — o ativo subia sem coordenada. `src/utils/assetGps.ts`
+  faz a conversão nos dois sentidos e é usada pelo envio
+  (`syncAssetsToCloud`), pelo ciclo de fundo (`processDataSyncQueue`), pelo
+  pull (`mapCloudAssetRow`) e pela gravação local
+  (`bulkInsertAssetsOfflineFirst`, que descartava `latitude` ao remontar a
+  linha). O ponto da conferência passa a aparecer na ficha e no mapa de calor.
+- **O envio não apaga a coordenada da nuvem:** o payload só leva `gps_lat`/
+  `gps_lng` quando o ativo tem leitura válida no aparelho. Sem leitura as
+  colunas ficam fora do `upsert` (e não a `null`), por isso um ativo conferido
+  sem GPS — ou com a leitura descartada — preserva o ponto que já está gravado
+  no Supabase.
+- **A captura já não perde leitura utilizável:** a conferência cortava a
+  leitura aos 3 s e só aceitava até 50 m. Passa a aceitar até ao limite de
+  descarte (150 m) e a esperar os limites do sensor (10 s nativo, 5 s web).
+- **A Trilha de Auditoria já não abre vazia:** no modo SUPABASE o ecrã lia
+  apenas `asset_logs`/`audit_logs` da nuvem, onde a conferência feita no
+  aparelho nunca é escrita. Passa a mostrar também a trilha local (Dexie),
+  unida à da nuvem e sem duplicar o mesmo evento.
+
 ### Corrigido — «CONFERIDO» passa a ter uma regra e uma escrita só
 
 - **Uma definição da regra:** os contadores (unidade, painel, conciliação), a

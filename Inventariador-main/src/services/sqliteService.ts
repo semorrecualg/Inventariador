@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
+import { assetGpsPair } from '../utils/assetGps';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
@@ -80,6 +81,13 @@ export interface DexieAsset {
   _photoUrl: string | null;
   gps_lat: number | null;
   gps_lng: number | null;
+  /**
+   * Grafia canônica do app para o ponto do ativo; a nuvem guarda o mesmo par em
+   * `gps_lat`/`gps_lng`. Sem estes campos a carga da base descartava a
+   * coordenada e a ficha/mapa de calor abriam vazios.
+   */
+  latitude?: number | null;
+  longitude?: number | null;
   currentCampaignId?: string | null;
   // Conferência que desceu da nuvem (assets.auditor / assets.data_leitura):
   // sem estes campos a carga da base descartava quem conferiu e quando.
@@ -642,11 +650,12 @@ export class SqliteService {
         const key = `${a.filial || ''}|${a.endereco || ''}`;
         if (!seen.has(key)) {
           seen.add(key);
+          const gps = assetGpsPair(a);
           results.push({
             endereco: a.endereco || '',
             filial: a.filial || '',
-            lat: a.gps_lat !== null && a.gps_lat !== undefined ? Number(a.gps_lat) : undefined,
-            lng: a.gps_lng !== null && a.gps_lng !== undefined ? Number(a.gps_lng) : undefined
+            lat: gps?.lat,
+            lng: gps?.lng
           });
         }
       }
@@ -780,6 +789,7 @@ export class SqliteService {
             if (!primaryKeyVal) {
               throw new Error("[FATAL_IMPORT_CRASH] Chave primária vazia detectada no lote.");
             }
+            const gps = assetGpsPair(asset);
 
             const mapped: DexieAsset = {
               id: primaryKeyVal,
@@ -819,8 +829,13 @@ export class SqliteService {
               _history: asset._history !== undefined && asset._history !== null ? String(asset._history) : null,
               DE_PARA: asset.DE_PARA !== undefined && asset.DE_PARA !== null ? String(asset.DE_PARA) : null,
               _photoUrl: asset._photoUrl !== undefined && asset._photoUrl !== null ? String(asset._photoUrl) : null,
-              gps_lat: asset.gps_lat !== undefined && asset.gps_lat !== null ? Number(asset.gps_lat) : null,
-              gps_lng: asset.gps_lng !== undefined && asset.gps_lng !== null ? Number(asset.gps_lng) : null,
+              // PONTE GPS: a linha que desce da nuvem traz `gps_lat`/`gps_lng` e
+              // a conferência grava `latitude`/`longitude`. As duas grafias são
+              // gravadas para que ficha, mapa e envio leiam o mesmo ponto.
+              gps_lat: gps?.lat ?? null,
+              gps_lng: gps?.lng ?? null,
+              latitude: gps?.lat ?? null,
+              longitude: gps?.lng ?? null,
               currentCampaignId: asset.currentCampaignId !== undefined && asset.currentCampaignId !== null ? String(asset.currentCampaignId) : null
             };
 
