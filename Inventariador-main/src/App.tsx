@@ -2827,7 +2827,7 @@ useEffect(() => {
                   const cloudAsset = mergedAssets[index];
                   
                   // Detecção de Conflito: Se o item na nuvem também foi alterado (versão diferente ou conferido por outro)
-                  const isConflict = cloudAsset._conferido && 
+                  const isConflict = isConferido(cloudAsset) && 
                                    cloudAsset._auditor && 
                                    cloudAsset._auditor !== (user?.email || 'unknown') &&
                                    cloudAsset._dataLeitura !== localDirty._dataLeitura;
@@ -5548,10 +5548,10 @@ useEffect(() => {
 
     // Commit local + estado visual imediatamente; GPS e nuvem não bloqueiam o
     // toque. A captura de posição (até 3 s) corre depois e completa o registro.
-    const committed = await commitAssetUpdate(assetWithHistory, { deferCloud: Boolean(updatedAsset._conferido) });
+    const committed = await commitAssetUpdate(assetWithHistory, { deferCloud: isConferido(updatedAsset) });
     dirtyAssetsRef.current.add(String(assetWithHistory.id));
 
-    if (updatedAsset._conferido) {
+    if (isConferido(updatedAsset)) {
       void enrichAssetWithGps(committed, Boolean(updatedAsset._is_synced));
     }
   }, [inventory.assets, commitAssetUpdate, user, enrichAssetWithGps, inventory.currentCampaignId]);

@@ -35,6 +35,35 @@ describe('mapCloudAssetRow — conferência que desce da nuvem', () => {
     expect(asset._dataLeitura).toBeUndefined();
   });
 
+  it.each([
+    ['texto "true"', 'true'],
+    ['número 1', 1],
+    ['texto "1"', '1']
+  ])('a coluna `conferido` na forma %s também desce conferida', (_rotulo, conferido) => {
+    const asset = mapCloudAssetRow({
+      id: 'X4',
+      tenantid: 'CICOPAL',
+      filial: '010101 CICOPAL GO',
+      status: 'PENDENTE',
+      conferido,
+    });
+
+    expect(asset._conferido).toBe(true);
+  });
+
+  it('a coluna de auditoria sozinha desce conferida', () => {
+    const asset = mapCloudAssetRow({
+      id: 'X5',
+      tenantid: 'CICOPAL',
+      filial: '010101 CICOPAL GO',
+      status: 'PENDENTE',
+      conferido: false,
+      AUDITOR_STATUS_CONFERENCIA: 'SIM',
+    });
+
+    expect(asset._conferido).toBe(true);
+  });
+
   it('ativo não conferido continua pendente, mesmo com status de carga', () => {
     const asset = mapCloudAssetRow({
       id: 'X3',

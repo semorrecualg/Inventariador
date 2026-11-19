@@ -1224,12 +1224,11 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         // CONFERÊNCIA (quem e quando): viaja no schema quando as colunas existem
         // (scripts/assets-conferencia.sql). Se ainda não existirem, o sendBatch
         // remove a coluna e reenvia o lote — nunca derruba a sincronização.
-        conferido: Boolean(
-          cleanAsset._conferido === true ||
-          Number(cleanAsset._conferido) === 1 ||
-          String(cleanAsset.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM' ||
-          String(cleanAsset.status || '').toUpperCase().includes('CONFERIDO')
-        ),
+        // A decisão é a do predicado único; só o `status` textual com CONFERIDO
+        // (marcador legado) é que continua a valer aqui além dele.
+        conferido:
+          isConferido(cleanAsset) ||
+          String(cleanAsset.status || '').toUpperCase().includes('CONFERIDO'),
         auditor: (cleanAsset._auditor !== undefined && cleanAsset._auditor !== null
           ? String(cleanAsset._auditor).trim()
           : '') || null,
@@ -2261,17 +2260,15 @@ export const fetchFullInventory = async (
  *
  * A coluna `conferido` (scripts/assets-conferencia.sql) manda; `status` com
  * CONFERIDO é o marcador legado e continua a valer quando o script ainda não
- * correu. Nenhuma leitura da nuvem repete esta derivação.
+ * correu. A flag e a coluna de auditoria leem-se pelo predicado — o mesmo dos
+ * ecrãs —, para o `conferido` da nuvem (`true`, 1, '1', 'true') não valer menos
+ * lá do que no aparelho. Nenhuma leitura da nuvem repete esta derivação.
  */
-const conferidoDaNuvem = (row: Record<string, unknown>): boolean => {
-  const rawConferido = row.conferido;
-  return (
-    rawConferido === true ||
-    String(rawConferido).toLowerCase() === 'true' ||
-    String(row.status || '').toUpperCase().includes('CONFERIDO') ||
-    String(row.AUDITOR_STATUS_CONFERENCIA || '').toUpperCase() === 'SIM'
-  );
-};
+const conferidoDaNuvem = (row: Record<string, unknown>): boolean =>
+  isConferido({
+    _conferido: row.conferido,
+    AUDITOR_STATUS_CONFERENCIA: row.AUDITOR_STATUS_CONFERENCIA
+  }) || String(row.status || '').toUpperCase().includes('CONFERIDO');
 
 /**
  * Os campos de conferência de uma linha da nuvem, no vocabulário do app.
