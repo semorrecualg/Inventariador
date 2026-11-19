@@ -5,14 +5,7 @@ import { UnitConfig } from '../types';
 import { isAdminEmail } from '../utils/authUtils';
 import { canonicalRole } from '../utils/roles';
 import { getCurrentDeviceLocation } from '../utils/gpsUtils';
-import {
-  GpsJitterFilter,
-  GPS_ACCURACY,
-  distanceMeters,
-  isValidCoordinate,
-  type GpsFix,
-} from '../utils/gpsCore';
-import { hasRealAnchor } from '../utils/gpsAnchors';
+import { DecisorDePerimetro } from '../utils/gpsPerimeter';
 import { logger } from '../utils/logger';
 import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
 import Marquee from './Marquee';
@@ -110,79 +103,46 @@ const GPSComplianceGuard: React.FC<GPSComplianceGuardProps> = ({
       return;
     }
 
-    // ANTI-JITTER (gpsCore): o sensor oscila alguns metros parado e a rede
-    // celular "salta" centenas de metros. O filtro descarta ruído antes de
-    // recalcular o perímetro — evita a tela piscando entre "liberado" e "fora
-    // do perímetro" e reduz recálculos/re-render (menos bateria).
-    // O perímetro tolera leitura mais grosseira do que o carimbo da posição do
-    // ativo: aqui o que interessa é saber se o aparelho está dentro do raio, não
-    // gravar coordenada. Por isso o teto é `DISCARD` (rede/célula) e não
-    // `COLLECT` (50 m, que é o do mapa de calor).
-    const jitterFilter = new GpsJitterFilter({ maxAccuracyM: GPS_ACCURACY.DISCARD });
-    let outOfRangeStreak = 0;
+    // Perímetro: a decisão (anti-jitter, leitura grosseira na primeira leitura e
+    // histerese) vive em `gpsPerimeter`, puro e coberto por testes. A guarda só
+    // traduz a decisão em estado de UI — sem cálculo espacial próprio aqui.
+    const decisor = new DecisorDePerimetro({
+      raioM: Number(unitConfig.radius_meters || 500),
+    });
 
     const checkLocation = (lat: number, lng: number, accuracyM: number = Number.NaN) => {
-      const candidate: GpsFix = { lat, lng, accuracy: accuracyM, source: 'sensor', at: Date.now() };
-      // Leitura repetida (parado) ou salto impossível: nada mudou, não recalcula.
-      // Mas antes da primeira leitura aceita a guarda ainda não decidiu nada: aí
-      // uma leitura grosseira porém plausível mede o perímetro na mesma. Sem isto
-      // o sinal fraco de campo prendia a tela em "Verificando perímetro" em vez
-      // de liberar/bloquear como antes.
-      let fix: GpsFix;
-      if (jitterFilter.accept(candidate)) {
-        fix = jitterFilter.lastAccepted as GpsFix;
-      } else {
-        const aindaSemDecisao = !jitterFilter.lastAccepted;
-        const grosseiraMasUtil =
-          isValidCoordinate(lat, lng) &&
-          Number.isFinite(accuracyM) &&
-          accuracyM > 0 &&
-          accuracyM <= GPS_ACCURACY.DISCARD;
-        if (!aindaSemDecisao || !grosseiraMasUtil) return;
-        fix = candidate;
-      }
-
       // Cálculo espacial desacoplado de forma assíncrona da thread principal de UI
       setTimeout(() => {
         if (!isActive) return;
         try {
-          if (!isValidCoordinate(fix.lat, fix.lng)) {
-            throw new Error("Coordenadas do dispositivo inválidas ou nulas.");
-          }
-
-          if (!hasRealAnchor(unitConfig?.lat, unitConfig?.lng)) {
-            throw new Error("Coordenadas de ancoragem inválidas ou ausentes.");
-          }
-
-          // Cálculo único de perímetro (mesmo critério da âncora e do mapa).
-          const distanceM = distanceMeters(
-            { lat: fix.lat, lng: fix.lng },
-            { lat: Number(unitConfig.lat), lng: Number(unitConfig.lng) }
+          const resultado = decisor.avaliar(
+            { lat, lng, accuracy: accuracyM },
+            { lat: unitConfig?.lat, lng: unitConfig?.lng }
           );
-          setCurrentDistance(distanceM);
-          setUserLocation({ lat: fix.lat, lng: fix.lng });
 
-          const allowedRadius = Number(unitConfig.radius_meters || 500);
+          // Leitura repetida (parado) ou salto impossível: nada mudou.
+          if (resultado.decisao === 'ignorar') return;
 
-          // HISTERESE: 5% de tolerância na borda e duas leituras seguidas fora
-          // para bloquear. Uma leitura ruim isolada não tranca o auditor.
-          if (distanceM <= allowedRadius * 1.05) {
-            outOfRangeStreak = 0;
+          setCurrentDistance(resultado.distanciaM);
+          setUserLocation({ lat: resultado.lat, lng: resultado.lng });
+
+          if (resultado.decisao === 'dentro') {
+            setStatus('granted');
+            onGpsStatusChangeRef.current?.(true);
+            return;
+          }
+
+          if (isAdminUser) {
+            setStatus('bypassed');
+            onGpsStatusChangeRef.current?.(true);
+          } else if (resultado.decisao === 'fora-confirmando') {
+            // HISTERESE: uma leitura ruim isolada não tranca o auditor.
+            logger.warn(`[Geofencing] Leitura fora do perímetro (${Math.round(resultado.distanciaM)}m). Confirmando antes de bloquear.`);
             setStatus('granted');
             onGpsStatusChangeRef.current?.(true);
           } else {
-            outOfRangeStreak += 1;
-            if (isAdminUser) {
-              setStatus('bypassed');
-              onGpsStatusChangeRef.current?.(true);
-            } else if (outOfRangeStreak < 2) {
-              logger.warn(`[Geofencing] Leitura fora do perímetro (${Math.round(distanceM)}m). Confirmando antes de bloquear.`);
-              setStatus('granted');
-              onGpsStatusChangeRef.current?.(true);
-            } else {
-              setStatus('out-of-range');
-              onGpsStatusChangeRef.current?.(false);
-            }
+            setStatus('out-of-range');
+            onGpsStatusChangeRef.current?.(false);
           }
         } catch (err) {
           logger.error('[Geofencing] Erro ao calcular perímetro em thread desacoplada:', err);
