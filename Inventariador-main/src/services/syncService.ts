@@ -114,6 +114,18 @@ const auditDiscardedPending = async (
   }
 };
 
+/**
+ * Alvo do upsert da fila: a chave de origem, escopada ao contrato.
+ *
+ * A fila não envia `id`, e o `upsert` sem `onConflict` usa a chave primária da
+ * tabela `(tenantid, id)` — o `INSERT` caía sempre no índice único
+ * `(tenantid, primarykey)` e um ativo já existente na nuvem ficava em `23505
+ * duplicate key` para sempre (ecrãs ATIVOS/CONFERIDOS de 2026-11-19). Com o
+ * alvo certo o Postgres actualiza a linha existente, sem tocar no `id`.
+ * Fonte única: o teste da fila compara com esta constante.
+ */
+export const ASSETS_CONFLICT_TARGET = 'tenantid, primarykey';
+
 const SYNC_RECORD_FAIL_AUDIT = 'SYNC_RECORD_FAIL';
 const SYNC_RECORD_EXCEPTION_AUDIT = 'SYNC_RECORD_EXCEPTION';
 /** Janela em que a mesma falha (primarykey + erro) não volta a ser registada. */
@@ -725,12 +737,15 @@ const _syncService = {
 
           // O envio repete sem a coluna que a nuvem ainda não tem (PGRST204), em
           // vez de rejeitar o ativo inteiro por causa de `conferido`/`auditor`/
-          // `data_leitura` (scripts/assets-conferencia.sql).
+          // `data_leitura` (scripts/assets-conferencia.sql). O alvo de conflito
+          // acompanha todas as tentativas: sem ele o upsert vira INSERT.
           let supabaseErr: { message?: string; status?: string | number; code?: string | number } | null = null;
           for (let attempt = 0; attempt < 4; attempt += 1) {
             // Sem limite de tempo, um pedido pendurado congelava o ciclo
             // inteiro para sempre (o laço nunca voltava e a trava ficava presa).
-            const pedido = supabase.from('assets').upsert(payload);
+            const pedido = supabase.from('assets').upsert(payload, {
+              onConflict: ASSETS_CONFLICT_TARGET
+            });
             const { error } = await withUpsertTimeout<Awaited<typeof pedido>>(
               pedido,
               UPSERT_TIMEOUT_MS
@@ -754,7 +769,15 @@ const _syncService = {
             failedPrimaryKeys.push(String(pKey));
             const errObj = supabaseErr as { status?: string | number; code?: string | number; message?: string };
             const statusStr = errObj.status || errObj.code || 'SYNC_FAIL';
-            const detailsStr = `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`;
+            const baseDetails = `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`;
+            // 42P10: a nuvem não tem índice único em (tenantid, primarykey) e o
+            // ON CONFLICT não encontra alvo. Repetir o ciclo não resolve — o
+            // operador precisa de criar o índice (docs/supabase_bootstrap.sql).
+            // A acção vem primeiro: o motivo do selo é cortado aos 90 caracteres
+            // e é essa frase que o operador precisa de ler.
+            const detailsStr = String(errObj.code) === '42P10'
+              ? `Erro Supabase: [42P10] falta o índice único (tenantid, primarykey) na nuvem — ${supabaseErr.message || 'ON CONFLICT sem alvo'}`
+              : baseDetails;
             
             logger.warn(`>>> [Sync Isolator] Erro Supabase detectado silenciosamente para chave ${pKey}:`, detailsStr);
             await marcarFalhaNoRegisto(String(pKey), detailsStr, record as unknown as Record<string, unknown>);

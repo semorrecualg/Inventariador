@@ -32,7 +32,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
 });
 
 import { db } from '../services/sqliteService';
-import { processDataSyncQueue } from '../services/syncService';
+import { ASSETS_CONFLICT_TARGET, processDataSyncQueue } from '../services/syncService';
 
 const asset = (over: Record<string, unknown> = {}) =>
   ({
@@ -88,9 +88,55 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
       data_leitura: '2026-11-12T13:00:00.000Z'
     });
 
+    // O upsert tem de declarar a chave de origem: sem alvo de conflito o
+    // PostgREST usa (tenantid, id), a fila não envia `id` e o INSERT colide com
+    // o índice único (tenantid, primarykey) — o 23505 eterno dos ecrãs.
+    expect(upsert.mock.calls[0][1]).toEqual({ onConflict: ASSETS_CONFLICT_TARGET });
+
     // A etiqueta PENDENTE NUVEM só desaparece com a marcação local.
     const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
     expect(Number(local?._is_synced)).toBe(1);
+  });
+
+  it('mantém o alvo de conflito na repetição que retira uma coluna inexistente', async () => {
+    await db.local_assets.put(asset() as never);
+
+    upsert.mockResolvedValueOnce({
+      error: {
+        code: 'PGRST204',
+        message: "Could not find the 'conferido' column of 'assets' in the schema cache"
+      }
+    });
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBeGreaterThan(0);
+    expect(upsert).toHaveBeenCalledTimes(2);
+    for (const call of upsert.mock.calls) {
+      expect(call[1]).toEqual({ onConflict: ASSETS_CONFLICT_TARGET });
+    }
+    const segundo = upsert.mock.calls[1][0] as Record<string, unknown>;
+    expect(segundo).not.toHaveProperty('conferido');
+  });
+
+  it('42P10 diz que falta o índice, sem repetir o pedido', async () => {
+    await db.local_assets.put(asset() as never);
+
+    upsert.mockResolvedValue({
+      error: {
+        code: '42P10',
+        message: 'there is no unique or exclusion constraint matching the ON CONFLICT specification'
+      }
+    });
+
+    await processDataSyncQueue();
+
+    // Repetir não resolve: o índice tem de existir na nuvem.
+    expect(upsert).toHaveBeenCalledTimes(1);
+
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    expect(Number(local?._is_synced)).toBe(0);
+    expect(String(local?._syncFailReason)).toContain('índice único (tenantid, primarykey)');
   });
 
   // O Android esvazia o `sessionStorage` quando mata a WebView em segundo
