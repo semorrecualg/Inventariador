@@ -124,10 +124,24 @@ function toDexieAsset(asset: Asset): DexieAsset {
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
   ];
   boolKeys.forEach(k => {
-    // `normalizeFlag` e não verdade/`Number()`: o texto legado `'true'`/`'1'`
-    // chega aqui pelo JSON importado e pelas linhas antigas, e era gravado
-    // como 0 (`Number('true')` → NaN).
-    obj[k] = normalizeFlag(obj[k]) ? 1 : 0;
+    // `_conferido` é a única flag com grafias de texto: o JSON importado e as
+    // linhas antigas trazem `'true'`/`'1'`, e `Number('true')` gravava 0. As
+    // restantes mantêm a conversão de sempre.
+    if (k === '_conferido') {
+      obj[k] = normalizeFlag(obj[k]) ? 1 : 0;
+      return;
+    }
+    if (k in obj) {
+      if (typeof obj[k] === 'boolean') {
+        obj[k] = obj[k] ? 1 : 0;
+      } else if (obj[k] === undefined || obj[k] === null) {
+        obj[k] = 0;
+      } else {
+        obj[k] = Number(obj[k]) ? 1 : 0;
+      }
+    } else {
+      obj[k] = 0;
+    }
   });
 
   if (asset.currentCampaignId === undefined) {
@@ -150,9 +164,15 @@ function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
     '_aprovado', '_isNew', '_is_unitized', '_is_divergent_baixa'
   ];
   boolKeys.forEach(k => {
-    // A leitura passa pela mesma normalização da escrita: uma linha com `'1'`
-    // ou `'true'` tem de chegar à UI como conferida, não como `false`.
-    asset[k] = normalizeFlag(asset[k]);
+    // Mesma exceção do lado da escrita: só `_conferido` tem grafias de texto,
+    // e uma linha com `'1'`/`'true'` tem de chegar à UI como conferida.
+    if (k === '_conferido') {
+      asset[k] = normalizeFlag(asset[k]);
+    } else if (k in asset) {
+      asset[k] = asset[k] === 1 || asset[k] === true;
+    } else {
+      asset[k] = false;
+    }
   });
 
   ['DE_PARA', '_history'].forEach(key => {

@@ -15,7 +15,7 @@
 //      decisão é `isConferido`, a normalização é `marcaLocalConferida`.
 // ============================================================================
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -113,6 +113,120 @@ describe('fronteira do banco — as grafias sobrevivem à ida e volta', () => {
     expect(porChave.get('PK-2')).toBe(true);
     expect(porChave.get('PK-3')).toBe(false);
     expect(porChave.get('PK-4')).toBe(false);
+  });
+});
+
+describe('getLocationsWithStats — a mesma chave em duas tabelas conta uma vez', () => {
+  const TENANT = 'CONTRATO-A';
+  const UNIT = '010101 CONTRATO GO';
+
+  /** Linha completa de uma das três tabelas de ativos (chave composta). */
+  const linhaDaTabela = (over: Record<string, unknown>): DexieAsset =>
+    ({
+      id: 'PK-1',
+      primarykey: 'PK-1',
+      tenantid: TENANT,
+      filial: UNIT,
+      status: 'EM USO',
+      etiqueta: 'ABC-123',
+      qt: 1,
+      descricaodoativo: 'ATIVO MESCLADO',
+      serial: null,
+      dataaqusic: null,
+      cnpj: null,
+      nomefornecedor: null,
+      notafiscal: null,
+      endereco: 'RUA UM',
+      registro: null,
+      subreg: null,
+      databaixa: null,
+      contacontabil: null,
+      centrodecusto: null,
+      vlraquisic: 0,
+      sn1_recno: null,
+      sn3_recno: null,
+      _is_synced: 0,
+      _is_deleted: 0,
+      _conferido: 0,
+      _plaquetado: 0,
+      _aprovado: 0,
+      _isNew: 0,
+      _is_unitized: 0,
+      _is_divergent_baixa: 0,
+      _history: null,
+      DE_PARA: null,
+      _photoUrl: null,
+      gps_lat: null,
+      gps_lng: null,
+      ...over
+    }) as unknown as DexieAsset;
+
+  /** Estatística da localidade «RUA UM» tal como o ecrã a recebe. */
+  const ruaUm = async () => {
+    const locais = await localDb.assets.getLocationsWithStats(UNIT);
+    const alvo = locais.filter(local => local.displayName.trim().toUpperCase() === 'RUA UM');
+    return { total: alvo[0]?.total ?? 0, checked: alvo[0]?.checked ?? 0, ocorrencias: alvo.length };
+  };
+
+  beforeEach(async () => {
+    // `getLocationsWithStats` resolve o contrato pela sessão.
+    const store = new Map<string, string>();
+    const storage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => { store.set(k, v); },
+      removeItem: (k: string) => { store.delete(k); },
+      clear: () => store.clear()
+    };
+    vi.stubGlobal('sessionStorage', storage);
+    vi.stubGlobal('localStorage', storage);
+    store.set('app_current_user', JSON.stringify({ tenantid: TENANT }));
+
+    await db.ativos.clear();
+    await db.assets.clear();
+    await db.local_assets.clear();
+  });
+
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await db.ativos.clear();
+    await db.assets.clear();
+    await db.local_assets.clear();
+  });
+
+  it('grafias diferentes da mesma conferência contam 1 de 1, não 2', async () => {
+    await db.ativos.put(linhaDaTabela({ _conferido: '1' }));
+    await db.assets.put(linhaDaTabela({ _conferido: true }));
+
+    expect(await ruaUm()).toEqual({ total: 1, checked: 1, ocorrencias: 1 });
+  });
+
+  it('conferido só na cópia de `assets` também conta (e uma vez só)', async () => {
+    await db.ativos.put(linhaDaTabela({ _conferido: 0 }));
+    await db.assets.put(linhaDaTabela({ _conferido: 'true' }));
+
+    expect(await ruaUm()).toEqual({ total: 1, checked: 1, ocorrencias: 1 });
+  });
+
+  it('pendente em todas as cópias continua 0 de 1', async () => {
+    await db.ativos.put(linhaDaTabela({ _conferido: '0' }));
+    await db.assets.put(linhaDaTabela({ _conferido: false }));
+
+    expect(await ruaUm()).toEqual({ total: 1, checked: 0, ocorrencias: 1 });
+  });
+
+  it('conferido só pela coluna de auditoria conta pela regra', async () => {
+    await db.ativos.put(linhaDaTabela({ _conferido: 0, AUDITOR_STATUS_CONFERENCIA: 'SIM' }));
+    await db.assets.put(linhaDaTabela({ _conferido: '0' }));
+
+    expect(await ruaUm()).toEqual({ total: 1, checked: 1, ocorrencias: 1 });
+  });
+
+  it('a terceira cópia (baseline) não inflaciona o total', async () => {
+    await db.ativos.put(linhaDaTabela({ _conferido: '1' }));
+    await db.assets.put(linhaDaTabela({ _conferido: 1 }));
+    await db.local_assets.put(linhaDaTabela({ _conferido: 'true' }));
+
+    expect(await ruaUm()).toEqual({ total: 1, checked: 1, ocorrencias: 1 });
   });
 });
 
