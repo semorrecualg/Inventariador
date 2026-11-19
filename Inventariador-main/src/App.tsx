@@ -16,7 +16,7 @@ import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './uti
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { marcarAlteracaoLocal, preservarPendenciaLocal } from './utils/pendencia';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
-import { isConferido, statusAoDesmarcar } from './utils/conferencia';
+import { isConferido, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
@@ -632,7 +632,7 @@ useEffect(() => {
                     // Chave composta [tenantid+primarykey] (v6).
                     await db.ativos.update(
                       [String(asset.tenantid || '').trim().toUpperCase(), String(asset.primarykey || '')],
-                      { _conferido: 1, ...marcarAlteracaoLocal() }
+                      { ...marcarConferido(asset._dataLeitura || undefined), ...marcarAlteracaoLocal() }
                     );
                   }
                 }
@@ -3264,13 +3264,13 @@ useEffect(() => {
 
               if (needsUpdate) {
                 hasChanges = true;
-                return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
+                return { ...a, ...marcarConferido(yesterdayStr) };
               }
               
               // Se já é conferido mas _conferido está falso, atualiza para true para consistência interna
               if (!a._conferido) {
                 hasChanges = true;
-                return { ...a, _conferido: true };
+                return { ...a, ...marcarConferido(a._dataLeitura) };
               }
             }
             return a;
@@ -3332,10 +3332,10 @@ useEffect(() => {
                     }
                   }
                   if (needsUpdate) {
-                    return { ...a, _dataLeitura: yesterdayStr, _conferido: true };
+                    return { ...a, ...marcarConferido(yesterdayStr) };
                   }
                   if (!a._conferido) {
-                    return { ...a, _conferido: true };
+                    return { ...a, ...marcarConferido(a._dataLeitura) };
                   }
                 }
                 return a;
@@ -5232,7 +5232,7 @@ useEffect(() => {
     const updates = { ...updatedAsset } as Asset;
     // Se vier com _conferido explicitamente definido, respeitamos (para permitir desmarcar no bumerangue)
     if (updates._conferido === undefined) {
-      updates._conferido = true;
+      Object.assign(updates, marcarConferido(updates._dataLeitura));
     }
     if (!updates._dataLeitura) {
       updates._dataLeitura = new Date().toISOString();
@@ -5605,11 +5605,10 @@ useEffect(() => {
     const updatedParent: Asset = {
       ...parentAsset,
       _is_unitized: true,
-      _conferido: true,
+      ...marcarConferido(timestamp),
       // Unitarizar altera o pai neste aparelho: pendente de nuvem como qualquer
       // outra conferência (o pai sai do giro e sobe unitarizado).
       ...marcarAlteracaoLocal(timestamp),
-      _dataLeitura: timestamp,
       _auditor: auditor,
       TAG_INVENTARIO: TagInventario.CONFERIDO,
       _history: [
@@ -5906,8 +5905,7 @@ useEffect(() => {
               ? inventoryLocation.toUpperCase().trim() 
               : (updates.endereco || "").toString().toUpperCase().trim());
 
-        updates._conferido = true;
-        updates._dataLeitura = new Date().toISOString();
+        Object.assign(updates, marcarConferido());
         updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
         
         const wasLabelingCandidate = 

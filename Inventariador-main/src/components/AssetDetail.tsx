@@ -8,7 +8,7 @@ import { QR_FIELD_ORDER } from '../utils/qrUtils';
 import { updateAssetInProtheus } from '../services/protheusService';
 import { localDb } from '../services/localDbService';
 import { canonicalKey } from '../utils/normalize';
-import { isConferido } from '../utils/conferencia';
+import { isConferido, marcarConferido } from '../utils/conferencia';
 
 import { 
   Edit2, 
@@ -401,7 +401,7 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
 
       onBulkUpdate(assets.map(a => String(a.id)), manualUpdates);
     } else {
-      onUpdate({ ...finalAsset, _conferido: true });
+      onUpdate({ ...finalAsset, ...marcarConferido() });
     }
 
     // Limpa rascunho de memória volátil (Pilar 2 de Conectividade)

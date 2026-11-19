@@ -47,7 +47,10 @@ export interface DexieAsset {
   rad_recno?: string | null;
   _is_synced: number; // 0 or 1
   _is_deleted: number; // 0 or 1
-  _conferido: number; // 0 or 1
+  // 0/1 nas linhas do SQLite; as escritas do Dexie gravam o booleano da
+  // decisão (`utils/conferencia.ts`) e `isConferido`/`normalizeFlag` leem as
+  // duas formas.
+  _conferido: number | boolean;
   _plaquetado: number; // 0 or 1
   _aprovado: number; // 0 or 1
   _isNew: number; // 0 or 1

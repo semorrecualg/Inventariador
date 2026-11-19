@@ -3,7 +3,7 @@ import { Virtuoso } from 'react-virtuoso';
 import { Asset, TagInventario } from '../types';
 import { logger } from '../utils/logger';
 import { normalizeFlag } from '../utils/normalize';
-import { alternarConferencia, isConferido } from '../utils/conferencia';
+import { alternarConferencia, isConferido, marcarConferido } from '../utils/conferencia';
 import { 
   Search, 
   Filter, 
@@ -327,9 +327,8 @@ const AccountReconciliation: React.FC<AccountReconciliationProps> = ({
       const chunkIds = allIdsArray.slice(i, i + TAMANHO_LOTE_SRE);
       
       await onBulkUpdateAssets(chunkIds, {
-        _conferido: true,
-        TAG_INVENTARIO: TagInventario.CONFERIDO,
-        _dataLeitura: new Date().toISOString()
+        ...marcarConferido(),
+        TAG_INVENTARIO: TagInventario.CONFERIDO
       });
       
       logger.info(`[SRE AUDIT] Bloco de conciliação de ${i} até ${i + chunkIds.length} despachado.`);

@@ -6,7 +6,7 @@ import { extractEtiquetaFromQrData } from '../utils/qrUtils';
 import { formatEtiqueta, formatMonthYearBR } from '../utils/formatUtils';
 import { Virtuoso } from 'react-virtuoso';
 import { localDb } from '../services/localDbService';
-import { isConferido } from '../utils/conferencia';
+import { isConferido, marcarConferido } from '../utils/conferencia';
 
 import { 
   Check,
@@ -269,7 +269,7 @@ const Labeling: React.FC<LabelingProps> = ({ assets: initialAssets, selectedUnit
                         e.stopPropagation(); 
                         onUpdateAsset({
                           ...asset,
-                          _conferido: true,
+                          ...marcarConferido(),
                           TAG_INVENTARIO: TagInventario.ETIQUETADO,
                           _plaquetado: true
                         });

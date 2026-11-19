@@ -19,6 +19,12 @@ import { normalizeFlag } from './normalize';
  * linha já existente (importação, carga da planilha): comparar `_conferido`
  * com `1` à mão deixava de fora as escritas legadas (`'1'`, `true`) e a coluna
  * de auditoria.
+ *
+ * E a ESCRITA da decisão também é uma só: `marcarConferido` e
+ * `desmarcarConferido` são o par que qualquer ecrã grava. Antes cada sítio
+ * montava o patch à mão — uns `1`, outros `true`, uns com a data da leitura,
+ * outros sem —, e foi isso que deixou o desmarcar de um ecrã não resistir ao
+ * envio do outro.
  */
 export type CamposDeConferencia = {
   _conferido?: unknown;
@@ -51,25 +57,36 @@ export type PatchDeConferencia = {
 };
 
 /**
- * A decisão de (des)marcar um ativo — a mesma em qualquer ecrã.
+ * Marcar: a flag e o carimbo da leitura, num patch só.
  *
- * Desmarcar tem de apagar TODAS as provas de conferência que o ativo carrega,
- * senão `isConferido` (e o envio da nuvem) continuam a dizer que ele está
- * conferido: a flag vai a 0, o `status` perde o marcador e a coluna de
- * auditoria passa a NAO. Marcar devolve só a flag e a data da leitura.
+ * O `status` textual não é reescrito (ao contrário do desmarcar): um item
+ * conferido continua a poder chamar-se «CONFERIDO» no ERP, e quem precisa de
+ * mudar a etiqueta fá-lo explicitamente no mesmo objeto. O momento é
+ * parâmetro para os caminhos que já trazem a data (normalização no arranque,
+ * restauro de espelho) não inventarem uma leitura nova.
  */
+export const marcarConferido = (agora?: string): PatchDeConferencia => ({
+  _conferido: true,
+  _dataLeitura: agora ?? new Date().toISOString()
+});
+
+/**
+ * Desmarcar: apaga TODAS as provas de conferência que o ativo carrega.
+ *
+ * Se alguma ficar de pé — a flag, o marcador no `status` ou a coluna de
+ * auditoria —, `isConferido` e o envio da nuvem continuam a dizer que ele está
+ * conferido e o item regressa conferido ao aparelho.
+ */
+export const desmarcarConferido = (asset: CamposDeConferencia): PatchDeConferencia => ({
+  _conferido: false,
+  _dataLeitura: undefined,
+  status: statusAoDesmarcar(asset.status),
+  AUDITOR_STATUS_CONFERENCIA: 'NAO'
+});
+
+/** A decisão de (des)marcar um ativo — a mesma em qualquer ecrã. */
 export const alternarConferencia = (
   asset: CamposDeConferencia,
-  agora: string = new Date().toISOString()
-): PatchDeConferencia => {
-  if (!isConferido(asset)) {
-    return { _conferido: true, _dataLeitura: agora };
-  }
-
-  return {
-    _conferido: false,
-    _dataLeitura: undefined,
-    status: statusAoDesmarcar(asset.status),
-    AUDITOR_STATUS_CONFERENCIA: 'NAO'
-  };
-};
+  agora?: string
+): PatchDeConferencia =>
+  isConferido(asset) ? desmarcarConferido(asset) : marcarConferido(agora);
