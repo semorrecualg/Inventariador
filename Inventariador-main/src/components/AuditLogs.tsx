@@ -24,7 +24,8 @@ import { User, DatabaseMode } from '../types';
 import { fetchAuditLogs, fetchAssetLogs } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { logger } from '../utils/logger';
-import { getActionColor, isAssetLog } from '../utils/auditActions';
+import { ehFalhaDeEnvio, getActionColor, isAssetLog } from '../utils/auditActions';
+import { falhasDeEnvio, falhasDeEnvioCsv, falhasDeEnvioJson } from '../utils/falhasDeEnvio';
 
 interface AuditLogsProps {
   user: User | null;
@@ -125,6 +126,9 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [logType, setLogType] = useState<'SYSTEM' | 'ASSET'>('ASSET');
+  // «Só falhas de envio»: isola as recusas que prendem um ativo em «Pendente
+  // Nuvem» no meio de toda a conferência do dia.
+  const [onlyFailures, setOnlyFailures] = useState(false);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [showFilters, setShowFilters] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -182,6 +186,10 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
         (log.action?.toLowerCase().includes(searchTerm.toLowerCase()));
       
       const matchesAction = filterAction === 'ALL' || log.action === filterAction;
+
+      // «Só falhas» é um filtro POR CIMA do resto: a busca, a ação e as datas
+      // continuam a valer, para o operador poder cruzar («as falhas de ontem»).
+      const matchesFailure = !onlyFailures || ehFalhaDeEnvio(log.action);
       
       let matchesDate = true;
       if (dateRange.start) {
@@ -194,9 +202,9 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
         matchesDate = matchesDate && new Date(log.timestamp) <= endDate;
       }
       
-      return matchesSearch && matchesAction && matchesDate;
+      return matchesSearch && matchesAction && matchesDate && matchesFailure;
     });
-  }, [logs, searchTerm, filterAction, dateRange]);
+  }, [logs, searchTerm, filterAction, dateRange, onlyFailures]);
 
   const actions = useMemo(() => {
     const baseActions = logType === 'SYSTEM' 
@@ -241,6 +249,31 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
     link.setAttribute('href', url);
     link.setAttribute('download', `AUDITORIA_${logType}_${new Date().getTime()}.csv`);
     link.click();
+  };
+
+  const descarregarFicheiro = (conteudo: string, nome: string, tipo: string) => {
+    const blob = new Blob([conteudo], { type: tipo });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', nome);
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /**
+   * Exporta SÓ as recusas do envio, nas três colunas que se levam para fora:
+   * `primarykey`, motivo e data. O formato acompanha o que a lista está a
+   * mostrar (busca, datas e ação continuam a mandar) — o que se vê é o que sai.
+   */
+  const exportarFalhas = (formato: 'csv' | 'json') => {
+    const linhas = falhasDeEnvio(filteredLogs);
+    const conteudo = formato === 'csv' ? falhasDeEnvioCsv(linhas) : falhasDeEnvioJson(linhas);
+    descarregarFicheiro(
+      conteudo,
+      `FALHAS_ENVIO_${new Date().getTime()}.${formato}`,
+      formato === 'csv' ? 'text/csv;charset=utf-8;' : 'application/json;charset=utf-8;'
+    );
   };
 
   return (
@@ -343,18 +376,34 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
           {/* Log Type Toggle */}
           <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 w-full sm:w-72">
             <button
-              onClick={() => { setLogType('ASSET'); setFilterAction('ALL'); }}
+              onClick={() => { setLogType('ASSET'); setFilterAction('ALL'); setOnlyFailures(false); }}
               className={`flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${logType === 'ASSET' ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
             >
               Ativos
             </button>
             <button
-              onClick={() => { setLogType('SYSTEM'); setFilterAction('ALL'); }}
+              onClick={() => { setLogType('SYSTEM'); setFilterAction('ALL'); setOnlyFailures(false); }}
               className={`flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${logType === 'SYSTEM' ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
             >
               Sistema
             </button>
           </div>
+
+          {logType === 'ASSET' && (
+            <button
+              onClick={() => setOnlyFailures((ligado) => !ligado)}
+              aria-pressed={onlyFailures}
+              title="Mostrar só as recusas de envio (SYNC_RECORD_FAIL / SYNC_RECORD_EXCEPTION)"
+              className={`flex items-center justify-center gap-2 px-4 py-2 rounded-xl border-2 text-[10px] font-black uppercase tracking-widest transition-all shrink-0 ${
+                onlyFailures
+                  ? 'bg-red-600 text-white border-red-600 shadow-lg shadow-red-900/20'
+                  : 'bg-white text-slate-400 border-slate-100 hover:border-red-200 hover:text-red-600'
+              }`}
+            >
+              <AlertTriangle className="w-4 h-4" />
+              Só falhas
+            </button>
+          )}
 
           <div className="relative flex-1">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
@@ -368,6 +417,28 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
           </div>
         </div>
         
+        {onlyFailures && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-widest text-red-600">
+              {falhasDeEnvio(filteredLogs).length} falha(s) de envio
+            </span>
+            <button
+              onClick={() => exportarFalhas('csv')}
+              title="Exportar as falhas de envio em CSV (primarykey, motivo, data)"
+              className="px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-[10px] font-black uppercase tracking-widest transition-all"
+            >
+              CSV
+            </button>
+            <button
+              onClick={() => exportarFalhas('json')}
+              title="Exportar as falhas de envio em JSON (primarykey, motivo, data)"
+              className="px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-[10px] font-black uppercase tracking-widest transition-all"
+            >
+              JSON
+            </button>
+          </div>
+        )}
+
         <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
           {actions.map(action => (
             <button
