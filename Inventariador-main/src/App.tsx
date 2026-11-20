@@ -84,6 +84,7 @@ import {
 } from './utils/syncCheckpoint';
 import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato, unitNamesCacheKey, readUnitNamesCache, writeUnitNamesCache } from './utils/unitContextUtils';
 import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
+import { clearPersistedSession, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -346,6 +347,10 @@ export function InitializeBootPipeline(): void {
     // 1. Só fantasmas são purgados. Uma sessão local (credencial do app) tem de
     // sobreviver ao F5: era esta remoção incondicional que devolvia o dono ao
     // login em cada recarregamento.
+    // Fechar o separador apaga o `sessionStorage`; a cópia com prazo em
+    // `localStorage` repõe o perfil antes de qualquer decisão de arranque.
+    restorePersistedSession();
+
     let manterSessao = false;
     try {
       const guardado = sessionStorage.getItem('app_current_user');
@@ -451,8 +456,14 @@ const App: React.FC = () => {
 
   const [user, setUser] = useState<User | null>(() => {
     try {
-      const saved = sessionStorage.getItem('app_current_user');
-      if (!saved) return null;
+      let saved = sessionStorage.getItem('app_current_user');
+      if (!saved || saved === 'null') {
+        // Separador novo: repõe a cópia com prazo ANTES de desistir do login,
+        // para a primeira renderização já ter sessão.
+        restorePersistedSession();
+        saved = sessionStorage.getItem('app_current_user');
+      }
+      if (!saved || saved === 'null') return null;
       const parsed = JSON.parse(saved);
       if (parsed && parsed.email) {
         // Normalizar admin conforme ADMIN_EMAIL (configurado via VITE_ADMIN_EMAIL)
@@ -573,13 +584,31 @@ const App: React.FC = () => {
   const isSessionCurrentlyValid = isInternalMode || databaseMode === DatabaseMode.INTERNAL || databaseMode === DatabaseMode.INTERNAL_PLUS || isSessionValid || isProfileLocal || appManagedSession || (user && user.role === ('DEMO' as unknown as UserRole));
   const isUserAuthenticated = !!user && isSessionCurrentlyValid;
 
+  // Cópia com prazo para o próximo arranque: gravada assim que há utilizador
+  // (não no save debounced, que pode nunca correr numa sessão só de leitura).
+  useEffect(() => {
+    if (user) writePersistedSession(user);
+  }, [user]);
+
   const [bootstrapError, setBootstrapError] = useState<Error | null>(null);
 
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [history, setHistoryVal] = useState<AppScreen[]>([AppScreen.LOGIN]);
+  const [history, setHistoryVal] = useState<AppScreen[]>(() => {
+    // Sessão reposta do arranque anterior abre já no CONTRATO DE TRABALHO —
+    // um separador novo não pode começar no ecrã de entrada.
+    try {
+      const guardado = sessionStorage.getItem('app_current_user');
+      if (guardado && guardado !== 'null' && isLocalSessionProfile(JSON.parse(guardado))) {
+        return [AppScreen.WORK_CONTEXT_SELECTION];
+      }
+    } catch {
+      /* segue o fluxo normal de login */
+    }
+    return [AppScreen.LOGIN];
+  });
 
-  const [screen, setScreenState] = useState<AppScreen>(AppScreen.LOGIN);
+  const [screen, setScreenState] = useState<AppScreen>(() => history[history.length - 1] || AppScreen.LOGIN);
 
   // Boot/routing invariant: quando o screen dirigido por estado é LOGIN, garante
   // que a URL aponte para /login. Com o hash vazio (#/) no carregamento inicial,
@@ -4519,6 +4548,7 @@ useEffect(() => {
           }
           logger.warn(`[Auth Fail-Safe] Usuário logado sem tenantid ou filial associado: ${session.user.email}`);
           setIsSessionValid(false);
+          clearPersistedSession();
           setUser(null);
           sessionStorage.removeItem('app_current_user');
           sessionStorage.clear();
@@ -7261,6 +7291,7 @@ useEffect(() => {
                   await supabase.auth.signOut();
                 }
                 sessionStorage.removeItem('app_current_user');
+                clearPersistedSession();
                 clearTenantContext();
                 setUser(null);
                 setHistory([AppScreen.LOGIN]);
@@ -7978,6 +8009,7 @@ useEffect(() => {
                   }).catch(() => {});
                   await supabase.auth.signOut();
                 }
+                clearPersistedSession();
                 setUser(null);
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');
@@ -8006,6 +8038,7 @@ useEffect(() => {
                   }).catch(() => {});
                   await supabase.auth.signOut();
                 }
+                clearPersistedSession();
                 setUser(null);
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');
@@ -8090,6 +8123,7 @@ useEffect(() => {
                   });
                   await supabase.auth.signOut();
                 }
+                clearPersistedSession();
                 setUser(null);
                 setCurrentModule(null);
                 localStorage.removeItem('app_current_module');

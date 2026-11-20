@@ -235,6 +235,34 @@ describe('Login — fluxo único (autentica e entra; filial é escolhida em /con
     expect(screen.queryByText(/sem tenantid vinculado/i)).toBeNull();
   });
 
+  it('perfil sem contrato é bloqueado e não deixa sessão guardada para o próximo arranque', async () => {
+    const { PERSISTED_SESSION_KEY, writePersistedSession } = await import('../utils/sessionPersistence');
+    writePersistedSession(
+      { email: 'semcontrato@example.com', role: 'ADMIN', tenantid: '', filial: 'TODAS' } as unknown as User
+    );
+    expect(localStorage.getItem(PERSISTED_SESSION_KEY)).not.toBeNull();
+
+    ensureUserProfileMock.mockResolvedValue({
+      email: 'semcontrato@example.com',
+      username: 'semcontrato',
+      role: 'AUDITOR',
+      is_admin: false,
+      isAdmin: false,
+      tenantid: '',
+      filial: '',
+      units: [],
+    });
+    signInAs('semcontrato@example.com');
+
+    renderLogin();
+    await submitCredentials('semcontrato@example.com');
+
+    // O login sai pelo `supabase.auth.signOut()` do caminho de perfil inválido:
+    // a cópia persistida tem de desaparecer para não reentrar sozinha.
+    await waitFor(() => expect(localStorage.getItem(PERSISTED_SESSION_KEY)).toBeNull());
+    expect(onLogin).not.toHaveBeenCalled();
+  });
+
   it('dono global na base Dexie sem tenantid entra (nenhum contrato herdado de sessão antiga)', async () => {
     const { localDb } = await import('../services/localDbService');
     await localDb.users.clear();
