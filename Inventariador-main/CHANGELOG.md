@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o índice da chave de origem tem de servir de alvo ao `ON CONFLICT`
+
+- **Uma base criada pelo bootstrap recusava o upsert da fila:** o
+  `docs/supabase_bootstrap.sql` criava `assets_tenant_primarykey_key` como
+  índice único **parcial** (`… WHERE primarykey IS NOT NULL`). O PostgREST não
+  envia o predicado, o PostgreSQL não consegue inferir o índice para o
+  `ON CONFLICT (tenantid, primarykey)` e a escrita vira `INSERT`, que colide no
+  próprio índice — `23505` em vez de actualização, e o cartão do ativo preso em
+  «FALHA DE ENVIO» a cada ciclo de sincronização. O predicado era redundante:
+  num índice único, NULLs são distintos por omissão. O índice passa a ser total
+  no bootstrap e há `scripts/fix-assets-conflict-index.sql` para alinhar bases
+  antigas; `src/__tests__/assetsConflictIndex.test.ts` fixa as colunas do índice
+  iguais a `ASSETS_CONFLICT_TARGET` e proíbe o predicado de voltar.
+
 ### Corrigido — a auditoria de ativos deixava de abortar as escritas
 
 - **`log_asset_changes()` lia a coluna legada:** a função, criada na base fora

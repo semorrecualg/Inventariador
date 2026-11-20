@@ -141,8 +141,15 @@ CREATE TRIGGER assets_bloquear_ressurreicao
 -- o upsert por 'id', permitia que uma carga SOBRESCREVESSE ativos de outro
 -- contrato. Ambos os problemas são resolvidos escopando por (tenantid, ...).
 DROP INDEX IF EXISTS public.assets_primarykey_key;
+-- SEM `WHERE primarykey IS NOT NULL`: um índice único PARCIAL não serve de
+-- alvo para o `upsert(…, { onConflict: 'tenantid, primarykey' })` da fila
+-- (`syncService.processDataSyncQueue`) — o PostgREST não envia o predicado, o
+-- ON CONFLICT não encontra o índice e a escrita vira INSERT, que colide no
+-- próprio índice (23505) em vez de actualizar a linha. O predicado era
+-- redundante: num índice único, NULLs são distintos por omissão.
+-- Contrato guardado por `src/__tests__/assetsConflictIndex.test.ts`.
 CREATE UNIQUE INDEX IF NOT EXISTS assets_tenant_primarykey_key
-  ON public.assets (tenantid, primarykey) WHERE primarykey IS NOT NULL;
+  ON public.assets (tenantid, primarykey);
 
 -- PK COMPOSTA (tenantid, id): a MESMA chave de origem pode existir em
 -- contratos diferentes SEM sobrescrever — é o alvo de conflito do upsert do

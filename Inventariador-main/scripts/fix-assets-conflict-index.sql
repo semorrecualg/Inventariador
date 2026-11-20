@@ -1,0 +1,52 @@
+-- ============================================================================
+-- GBR KARDEK — FIX: alvo de `ON CONFLICT` da fila em bases antigas
+-- ============================================================================
+-- PROBLEMA: `assets_tenant_primarykey_key` foi criado em algumas bases como
+-- índice único PARCIAL:
+--
+--   CREATE UNIQUE INDEX assets_tenant_primarykey_key
+--     ON public.assets (tenantid, primarykey) WHERE primarykey IS NOT NULL;
+--
+-- Um índice parcial não serve de alvo para o upsert da fila
+-- (`syncService.processDataSyncQueue` → `upsert(payload, { onConflict:
+-- 'tenantid, primarykey' })`): o PostgREST não tem como enviar o predicado, o
+-- ON CONFLICT não encontra o índice e a escrita vira INSERT — que colide no
+-- próprio índice e devolve `23505 duplicate key value violates unique
+-- constraint "assets_tenant_primarykey_key"` em vez de actualizar a linha.
+-- No aparelho isso aparece como «FALHA DE ENVIO» no cartão do ativo, repetida
+-- a cada ciclo de sincronização.
+--
+-- O predicado era redundante: num índice único, NULLs são distintos por
+-- omissão (só `NULLS NOT DISTINCT` mudaria a regra), por isso várias linhas com
+-- `primarykey` NULL continuam a poder coexistir sem ele.
+--
+-- Janela de escrita durante a recriação: o índice é refeito com o mesmo nome e
+-- as mesmas colunas, num único comando — o DROP+CREATE corre em transacção
+-- implícita, por isso o intervalo sem índice é o da própria instrução.
+--
+-- Idempotente: pode ser executado mais de uma vez (e numa base que já tem o
+-- índice total apenas o recria igual).
+--
+-- Verificação depois de aplicar:
+--   -- 1) tem de sair SEM "WHERE"
+--   select indexdef from pg_indexes
+--    where schemaname = 'public' and tablename = 'assets'
+--      and indexname = 'assets_tenant_primarykey_key';
+--
+--   -- 2) o upsert da fila tem de actualizar, não colidir (reverte no fim)
+--   begin;
+--     insert into public.assets (tenantid, id, primarykey, filial, etiqueta, status)
+--     values ('CICOPAL', gen_random_uuid(), 'TESTE-ONCONFLICT-1',
+--             '010101 CICOPAL GO', 'TESTE', 'ATIVO');
+--     insert into public.assets (tenantid, id, primarykey, filial, etiqueta, status)
+--     values ('CICOPAL', gen_random_uuid(), 'TESTE-ONCONFLICT-1',
+--             '010101 CICOPAL GO', 'TESTE', 'ATIVO')
+--     on conflict (tenantid, primarykey) do update set etiqueta = excluded.etiqueta;
+--   rollback;
+--   -- esperado: "UPDATE 1" na segunda instrução (nem 42P10 nem 23505)
+-- ============================================================================
+
+DROP INDEX IF EXISTS public.assets_tenant_primarykey_key;
+
+CREATE UNIQUE INDEX assets_tenant_primarykey_key
+  ON public.assets (tenantid, primarykey);
