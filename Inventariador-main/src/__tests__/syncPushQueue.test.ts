@@ -15,6 +15,9 @@ vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
 
 const upsert = vi.fn();
+// Guarda «exclusão vence a subida»: por omissão a nuvem não tem nada apagado.
+// `vi.hoisted` porque o factory de `vi.mock` é içado acima destes `const`.
+const { fetchCloudDeletedKeys } = vi.hoisted(() => ({ fetchCloudDeletedKeys: vi.fn() }));
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: vi.fn(() => true) }
@@ -27,12 +30,14 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
     supabase: {
       from: () => ({ upsert: (...args: unknown[]) => upsert(...args) })
     },
+    fetchCloudDeletedKeys,
     registerCampaignSyncQueueDelegate: vi.fn()
   };
 });
 
 import { db } from '../services/sqliteService';
-import { processDataSyncQueue } from '../services/syncService';
+import { ASSETS_CONFLICT_TARGET, processDataSyncQueue } from '../services/syncService';
+import { SyncRequestTimeoutError, UPSERT_TIMEOUT_MS } from '../services/syncQueueGuards';
 
 const asset = (over: Record<string, unknown> = {}) =>
   ({
@@ -59,6 +64,8 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
   beforeEach(async () => {
     upsert.mockReset();
     upsert.mockResolvedValue({ error: null });
+    fetchCloudDeletedKeys.mockReset();
+    fetchCloudDeletedKeys.mockResolvedValue(new Set<string>());
     await db.local_assets.clear();
     await db.ativos.clear();
     await db.assets.clear();
@@ -88,9 +95,185 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
       data_leitura: '2026-11-12T13:00:00.000Z'
     });
 
+    // O upsert tem de declarar a chave de origem: sem alvo de conflito o
+    // PostgREST usa (tenantid, id), a fila não envia `id` e o INSERT colide com
+    // o índice único (tenantid, primarykey) — o 23505 eterno dos ecrãs.
+    expect(upsert.mock.calls[0][1]).toEqual({ onConflict: ASSETS_CONFLICT_TARGET });
+
     // A etiqueta PENDENTE NUVEM só desaparece com a marcação local.
     const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
     expect(Number(local?._is_synced)).toBe(1);
+  });
+
+  // EXCLUSÃO VENCE A SUBIDA: a cópia local está ativa, mas a nuvem diz
+  // «apagado». Reenviá-la reactivava o ativo em todos os aparelhos.
+  it('não reenvia o registo apagado na nuvem e regista a decisão na trilha', async () => {
+    await db.local_assets.put(asset() as never);
+    fetchCloudDeletedKeys.mockResolvedValue(
+      new Set(['CICOPAL|01010100000005000001'])
+    );
+
+    const result = await processDataSyncQueue();
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(result.processedCount).toBe(0);
+
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    // A exclusão é aplicada já ao registo local: sai da fila e das listas.
+    expect(Number(local?._is_deleted)).toBe(1);
+    expect(Number(local?._is_synced)).toBe(1);
+
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_DELETE_WINS').toArray();
+    expect(logs).toHaveLength(1);
+    expect(String(logs[0].details)).toContain('prevalece');
+  });
+
+  // O registo apagado deixava de estar pendente: sem isto a fila voltava a
+  // tentá-lo — e a gravar a decisão — a cada ciclo de 60 s.
+  it('o ciclo seguinte já não toca no registo apagado na nuvem', async () => {
+    await db.local_assets.put(asset() as never);
+    fetchCloudDeletedKeys.mockResolvedValue(new Set(['CICOPAL|01010100000005000001']));
+
+    await processDataSyncQueue();
+    await processDataSyncQueue();
+
+    expect(upsert).not.toHaveBeenCalled();
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_DELETE_WINS').toArray();
+    expect(logs).toHaveLength(1);
+    expect(await db.local_assets.where('_is_synced').equals(0).count()).toBe(0);
+  });
+
+  // Defesa em profundidade: uma gravação de estado atrasada pode repor a cópia
+  // como pendente. A trilha não pode ganhar uma linha por ciclo por causa disso.
+  it('registo reposto como pendente não repete a trilha dentro da janela de 10 min', async () => {
+    await db.local_assets.put(asset() as never);
+    fetchCloudDeletedKeys.mockResolvedValue(new Set(['CICOPAL|01010100000005000001']));
+    await processDataSyncQueue();
+
+    await db.local_assets
+      .where('primarykey')
+      .equals('01010100000005000001')
+      .modify({ _is_deleted: 0, _is_synced: 0 });
+    await processDataSyncQueue();
+
+    expect(upsert).not.toHaveBeenCalled();
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_DELETE_WINS').toArray();
+    expect(logs).toHaveLength(1);
+  });
+
+  // EXCLUSÃO: o registo apagado no aparelho tem de subir com a flag. Sem ela a
+  // nuvem mantinha a linha viva e o ativo voltava a aparecer em todos os
+  // aparelhos (e neste, ao reiniciar).
+  it('leva is_deleted no payload do ativo apagado', async () => {
+    await db.local_assets.put(asset({ _is_deleted: 1 }) as never);
+
+    await processDataSyncQueue();
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.is_deleted).toBe(true);
+  });
+
+  // O CARIMBO DA NUVEM É DO SERVIDOR: se a fila enviasse `updated_at`, um
+  // relógio adiantado no aparelho empurrava o checkpoint do pull delta para o
+  // futuro e os outros aparelhos saltavam alterações até esse instante. Quem
+  // escreve o carimbo é o trigger `assets_touch_updated_at`
+  // (scripts/assets-updated-at-trigger.sql); o cliente só lê.
+  it('não envia updated_at — o carimbo da nuvem é do servidor', async () => {
+    await db.local_assets.put(asset({ updated_at: '2026-11-12T13:00:00.000Z' }) as never);
+
+    await processDataSyncQueue();
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('updated_at');
+    expect(payload.conferido).toBe(true);
+  });
+
+  // TIMEOUT ≠ RECUSA: o servidor pode só não ter respondido em 15 s. Carimbar
+  // `_syncFailAt` pintava o cartão de «Falha de envio» e o operador lia o
+  // atraso como recusa de dados (ecrãs de 2026-11-19).
+  it('um timeout não carimba falha no registo e explica que haverá nova tentativa', async () => {
+    await db.local_assets.put(asset() as never);
+    upsert.mockRejectedValue(new SyncRequestTimeoutError(UPSERT_TIMEOUT_MS));
+
+    await processDataSyncQueue();
+
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    expect(local?._syncFailAt).toBeUndefined();
+    expect(Number(local?._is_synced)).toBe(0);
+
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_RECORD_EXCEPTION').toArray();
+    expect(logs).toHaveLength(1);
+    expect(String(logs[0].delta)).toContain('nova tentativa automática');
+  });
+
+  it('um timeout pára o ciclo em vez de insistir em cada registo durante 15 s', async () => {
+    await db.local_assets.bulkPut([
+      asset({ primarykey: 'PK-A', id: 'PK-A' }) as never,
+      asset({ primarykey: 'PK-B', id: 'PK-B' }) as never
+    ]);
+    upsert.mockRejectedValue(new SyncRequestTimeoutError(UPSERT_TIMEOUT_MS));
+
+    await processDataSyncQueue();
+
+    // O segundo ativo não chega a ser tentado: o servidor está mudo.
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(await db.local_assets.where('_is_synced').equals(0).count()).toBe(2);
+  });
+
+  it('um timeout seguido de sucesso deixa o ativo sincronizado e sem selo vermelho', async () => {
+    await db.local_assets.put(asset() as never);
+    upsert.mockRejectedValue(new SyncRequestTimeoutError(UPSERT_TIMEOUT_MS));
+    await processDataSyncQueue();
+
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBeGreaterThan(0);
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    expect(Number(local?._is_synced)).toBe(1);
+    expect(local?._syncFailAt).toBeUndefined();
+  });
+
+  it('mantém o alvo de conflito na repetição que retira uma coluna inexistente', async () => {
+    await db.local_assets.put(asset() as never);
+
+    upsert.mockResolvedValueOnce({
+      error: {
+        code: 'PGRST204',
+        message: "Could not find the 'conferido' column of 'assets' in the schema cache"
+      }
+    });
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBeGreaterThan(0);
+    expect(upsert).toHaveBeenCalledTimes(2);
+    for (const call of upsert.mock.calls) {
+      expect(call[1]).toEqual({ onConflict: ASSETS_CONFLICT_TARGET });
+    }
+    const segundo = upsert.mock.calls[1][0] as Record<string, unknown>;
+    expect(segundo).not.toHaveProperty('conferido');
+  });
+
+  it('42P10 diz que falta o índice, sem repetir o pedido', async () => {
+    await db.local_assets.put(asset() as never);
+
+    upsert.mockResolvedValue({
+      error: {
+        code: '42P10',
+        message: 'there is no unique or exclusion constraint matching the ON CONFLICT specification'
+      }
+    });
+
+    await processDataSyncQueue();
+
+    // Repetir não resolve: o índice tem de existir na nuvem.
+    expect(upsert).toHaveBeenCalledTimes(1);
+
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    expect(Number(local?._is_synced)).toBe(0);
+    expect(String(local?._syncFailReason)).toContain('índice único (tenantid, primarykey)');
   });
 
   // O Android esvazia o `sessionStorage` quando mata a WebView em segundo
@@ -373,5 +556,65 @@ describe('descarte de pendentes — registro em audit_logs', () => {
     await processDataSyncQueue();
 
     expect(await discardLogs()).toHaveLength(0);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// A fila do ciclo de fundo constrói o payload à mão (não passa pelo
+// `syncAssetsToCloud`), por isso a regra da coordenada tem de valer também
+// aqui: um `gps_lat: null` no `ON CONFLICT DO UPDATE` apagaria na nuvem o ponto
+// que outro aparelho já tinha gravado.
+// ----------------------------------------------------------------------------
+describe('processDataSyncQueue — a coordenada só sobe com leitura local', () => {
+  beforeEach(async () => {
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    await db.local_assets.clear();
+    await db.audit_logs.clear();
+    localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));
+    localStorage.removeItem('filial');
+    localStorage.removeItem('app_selected_unit');
+    sessionStorage.setItem('filial', '010101 CICOPAL GO');
+    sessionStorage.setItem('tenantid', 'CICOPAL');
+  });
+
+  /** O payload da única escrita feita pelo ciclo. */
+  const payloadDoCiclo = async (registro: Record<string, unknown>) => {
+    await db.local_assets.put(registro as never);
+    const result = await processDataSyncQueue();
+    expect(result.processedCount).toBe(1);
+    expect(upsert).toHaveBeenCalledTimes(1);
+    return upsert.mock.calls[0][0] as Record<string, unknown>;
+  };
+
+  it('converte latitude/longitude da conferência em gps_lat/gps_lng', async () => {
+    const payload = await payloadDoCiclo(asset({ latitude: -15.7942, longitude: -47.8825 }));
+
+    expect(payload.gps_lat).toBeCloseTo(-15.7942);
+    expect(payload.gps_lng).toBeCloseTo(-47.8825);
+  });
+
+  it('sem leitura local OMITE as colunas e não apaga a coordenada da nuvem', async () => {
+    const payload = await payloadDoCiclo(asset());
+
+    expect(Object.prototype.hasOwnProperty.call(payload, 'gps_lat')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(payload, 'gps_lng')).toBe(false);
+  });
+
+  it('não trata o par (0,0) nem a ausência como coordenada', async () => {
+    const zero = await payloadDoCiclo(asset({ latitude: 0, longitude: 0 }));
+    expect(Object.prototype.hasOwnProperty.call(zero, 'gps_lat')).toBe(false);
+
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    const nulo = await payloadDoCiclo(asset({ latitude: null, longitude: null, gps_lat: null, gps_lng: null }));
+    expect(Object.prototype.hasOwnProperty.call(nulo, 'gps_lng')).toBe(false);
+  });
+
+  it('mantém a leitura que já estava na grafia da nuvem', async () => {
+    const payload = await payloadDoCiclo(asset({ gps_lat: -16.68, gps_lng: -49.25 }));
+
+    expect(payload.gps_lat).toBeCloseTo(-16.68);
+    expect(payload.gps_lng).toBeCloseTo(-49.25);
   });
 });

@@ -38,6 +38,17 @@ describe('hasRealAnchor', () => {
     expect(hasRealAnchor(NaN, NaN)).toBe(false);
     expect(hasRealAnchor('abc', '-49.1')).toBe(false);
   });
+  it('rejeita coordenadas fora das faixas geográficas', () => {
+    // Regressão: "finito e não-zero" aceitava lat 500 / lng 999 como âncora real.
+    expect(hasRealAnchor(500, 999)).toBe(false);
+    expect(hasRealAnchor(-16.7, 999)).toBe(false);
+    expect(hasRealAnchor(91, -49.1)).toBe(false);
+    expect(hasRealAnchor(-16.7, 181)).toBe(false);
+  });
+  it('aceita coordenada nos limites válidos', () => {
+    expect(hasRealAnchor(89.9, 179.9)).toBe(true);
+    expect(hasRealAnchor(-89.9, -179.9)).toBe(true);
+  });
 });
 
 describe('isConfiguredAnchorRecord', () => {
@@ -50,6 +61,10 @@ describe('isConfiguredAnchorRecord', () => {
     expect(isConfiguredAnchorRecord({ lat: 0, lng: 0, source: 'manual' })).toBe(false);
     expect(isConfiguredAnchorRecord(null)).toBe(false);
     expect(isConfiguredAnchorRecord(undefined)).toBe(false);
+  });
+  it('rejeita âncora fora das faixas (lat 500 / lng 999)', () => {
+    expect(isConfiguredAnchorRecord({ lat: 500, lng: 999, source: 'manual' })).toBe(false);
+    expect(isConfiguredAnchorRecord({ lat: -16.7, lng: 999, source: 'sensor' })).toBe(false);
   });
 });
 
@@ -89,6 +104,25 @@ describe('collectGpsAnchorsFromStorage', () => {
     expect(anchors.has('ZERO')).toBe(false);
     expect(anchors.has('NULL')).toBe(false);
     expect(anchors.has('OK')).toBe(true);
+  });
+
+  it('ignora âncoras fora das faixas geográficas', () => {
+    const local = makeStorage({
+      'kardek_gps_ancora_ABSURDA': JSON.stringify({ filial: 'ABSURDA', lat: 500, lng: 999, source: 'manual' }),
+      'kardek_gps_ancora_OK': JSON.stringify({ filial: 'OK', lat: -15.7, lng: -47.9, source: 'manual' })
+    });
+    const anchors = collectGpsAnchorsFromStorage(local, makeStorage());
+    expect(anchors.has('ABSURDA')).toBe(false);
+    expect(anchors.has('OK')).toBe(true);
+  });
+
+  it('ignora par de sessão fora das faixas', () => {
+    const session = makeStorage({
+      'gps_lat_010301 FEIRA BOA BA': '500',
+      'gps_lng_010301 FEIRA BOA BA': '999',
+      'unit_gps_config_010301 FEIRA BOA BA': JSON.stringify({ source: 'sensor' })
+    });
+    expect(collectGpsAnchorsFromStorage(makeStorage(), session).has('010301 FEIRA BOA BA')).toBe(false);
   });
 
   it('conta âncora PERSISTIDA com pino manual (FIXAR ÂNCORA GPS)', () => {

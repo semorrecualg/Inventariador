@@ -22,6 +22,20 @@ export class SyncRequestTimeoutError extends Error {
 }
 
 /**
+ * O pedido não respondeu a tempo — que é diferente de a nuvem ter recusado.
+ *
+ * A fila trata os dois desfechos de forma diferente: uma recusa carimba o
+ * registo de vermelho (acção do operador), um timeout só fica na trilha e volta
+ * no ciclo seguinte. O `name` também é aceite porque um erro serializado entre
+ * módulos (ou reconstruído por um stub) perde a cadeia do `instanceof`.
+ */
+export const isSyncTimeoutError = (err: unknown): boolean =>
+  err instanceof SyncRequestTimeoutError ||
+  (typeof err === 'object' &&
+    err !== null &&
+    (err as { name?: unknown }).name === 'SyncRequestTimeoutError');
+
+/**
  * Corre `promise` com limite de tempo. Sem isto um `fetch` pendurado (troca
  * 4G→5G, tela bloqueada) congela a fila inteira para sempre.
  */

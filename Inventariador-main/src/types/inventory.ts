@@ -63,6 +63,10 @@ export interface Asset {
   _version?: number;
   _auditor?: string;
   _dataLeitura?: string;
+  // Carimbo da última recusa da nuvem (ver `utils/syncFalha`). Apagado quando o
+  // envio é aceite — é isso que apaga o aviso vermelho do cartão.
+  _syncFailAt?: string;
+  _syncFailReason?: string;
   _isNew?: boolean;
   _is_divergent_baixa?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -82,6 +86,18 @@ export interface Asset {
   _gps_at?: string | null;
   _localMaster?: string;
   _origemTransacao?: string;
+  // Proveniência do ponto do Mapa de Calor (docs/GPS_ANCORA_E_MAPA_DE_CALOR.md).
+  // `synthetic` é coordenada de contingência (âncora/admin/sandbox) e NUNCA
+  // entra no mapa; `_gps_accuracy` acima de `GPS_ACCURACY.DISCARD` (150 m) é
+  // ruído de rede e também não entra. Sem `_gps_source` (registo legado) o
+  // ponto pode entrar se for válido e sem precisão declarada.
+  latitude?: number | null;
+  longitude?: number | null;
+  _gps_accuracy?: number | null;
+  _gps_source?: 'sensor' | 'synthetic' | string | null;
+  _gps_at?: string | null;
+  _altitude_metros?: number | null;
+  _id_andar?: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   _valoresOriginais?: Record<string, any>;
   

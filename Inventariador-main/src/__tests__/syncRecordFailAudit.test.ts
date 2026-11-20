@@ -16,6 +16,9 @@ vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
 
 const upsert = vi.fn();
+// Guarda «exclusão vence a subida»: mockada para não ir à rede (nada apagado).
+const { fetchCloudDeletedKeys } = vi.hoisted(() => ({ fetchCloudDeletedKeys: vi.fn() }));
+fetchCloudDeletedKeys.mockResolvedValue(new Set<string>());
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: vi.fn(() => true) }
@@ -28,12 +31,14 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
     supabase: {
       from: () => ({ upsert: (...args: unknown[]) => upsert(...args) })
     },
+    fetchCloudDeletedKeys,
     registerCampaignSyncQueueDelegate: vi.fn()
   };
 });
 
 import { db } from '../services/sqliteService';
 import { processDataSyncQueue } from '../services/syncService';
+import { inicioDoDiaDaFalha } from '../utils/syncFalha';
 
 const RLS_ERROR = { code: '42501', message: 'new row violates row-level security policy' };
 
@@ -89,6 +94,26 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
     expect(await failureLogs()).toHaveLength(1);
   });
 
+  it('a mesma recusa com texto volátil (id, data, pilha) não volta a ser registada', async () => {
+    const recusa = (pedido: string, quando: string) => ({
+      error: {
+        code: '42501',
+        message: `new row violates row-level security policy (pedido ${pedido} em ${quando}, syncService.ts:751:13)`
+      }
+    });
+
+    await db.local_assets.put(asset() as never);
+    upsert.mockResolvedValue(recusa('7c9e6679-7425-40de-944b-e07fc1f90ae7', '2026-11-19T18:53:08.123Z'));
+    await processDataSyncQueue();
+    expect(await failureLogs()).toHaveLength(1);
+
+    // Mesmo erro: mudam só o id do pedido, o instante e a linha da pilha.
+    upsert.mockResolvedValue(recusa('0d1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d', '2026-11-19T19:41:52.877Z'));
+    await processDataSyncQueue();
+
+    expect(await failureLogs()).toHaveLength(1);
+  });
+
   it('um lote recusado grava uma linha por ativo, não uma por ciclo', async () => {
     await db.local_assets.bulkPut([
       asset({ primarykey: 'PK-A', id: 'PK-A' }) as never,
@@ -102,16 +127,24 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
     expect(await failureLogs()).toHaveLength(2);
   });
 
-  it('volta a registar a mesma falha depois da janela de 10 min', async () => {
+  it('não volta a registar a mesma falha no mesmo dia — e volta no dia seguinte', async () => {
     await db.local_assets.put(asset() as never);
 
     await processDataSyncQueue();
     const [log] = await failureLogs();
     expect(log).toBeTruthy();
 
-    // Recua a linha para fora da janela: a próxima recusa volta a ser auditada.
+    // A janela das falhas preservadas é o DIA (item 14): no mesmo dia, mesmo que
+    // a linha tenha horas, a recusa é a mesma e não ganha outra linha.
     await db.audit_logs.update(String(log.id), {
       updated_at: new Date(Date.now() - 11 * 60 * 1000).toISOString()
+    });
+    await processDataSyncQueue();
+    expect(await failureLogs()).toHaveLength(1);
+
+    // Ontem: a falha continua e o dia é novo — uma linha por dia, não zero.
+    await db.audit_logs.update(String(log.id), {
+      updated_at: new Date(Date.parse(inicioDoDiaDaFalha()) - 1).toISOString()
     });
     await processDataSyncQueue();
     expect(await failureLogs()).toHaveLength(2);
@@ -151,7 +184,7 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
     expect(await exceptionLogs()).toHaveLength(2);
   });
 
-  it('volta a registar a excepção depois da janela de 10 min', async () => {
+  it('a excepção segue o mesmo teto: uma linha por dia', async () => {
     await db.local_assets.put(asset() as never);
     upsert.mockRejectedValue(new Error('rede caiu no envio'));
     await processDataSyncQueue();
@@ -162,6 +195,12 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
       updated_at: new Date(Date.now() - 11 * 60 * 1000).toISOString()
     });
 
+    await processDataSyncQueue();
+    expect(await exceptionLogs()).toHaveLength(1);
+
+    await db.audit_logs.update(String(log.id), {
+      updated_at: new Date(Date.parse(inicioDoDiaDaFalha()) - 1).toISOString()
+    });
     await processDataSyncQueue();
     expect(await exceptionLogs()).toHaveLength(2);
   });

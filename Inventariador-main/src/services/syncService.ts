@@ -1,14 +1,18 @@
 import { Capacitor } from '@capacitor/core';
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
-import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode } from './supabaseService';
+import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys } from './supabaseService';
 import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { matchUnitKeys } from '../utils/schema';
-import { UPSERT_TIMEOUT_MS, withUpsertTimeout } from './syncQueueGuards';
+import { UPSERT_TIMEOUT_MS, withUpsertTimeout, isSyncTimeoutError } from './syncQueueGuards';
 import { isConferido } from '../utils/conferencia';
+import { purgarAuditoriaAntiga } from './auditoriaRetencao';
+import { assetGpsColumns } from '../utils/assetGps';
+import { assinaturaDeFalha, inicioDoDiaDaFalha } from '../utils/syncFalha';
+import { normalizeFlag } from '../utils/normalize';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -19,12 +23,12 @@ import { isConferido } from '../utils/conferencia';
  * continuava `_is_synced = 0` e a etiqueta PENDENTE NUVEM ficava para sempre.
  * Em 2026-11-12 isso deixou 15 de 45 ativos na nuvem e 45 pendentes no aparelho.
  */
+/**
+ * Marca um registo como sincronizado — a escrita é a mesma do envio em massa
+ * (`sqliteService.markAssetsSynced`), que também apaga o carimbo de recusa.
+ */
 const markRecordSynced = async (primaryKey: string): Promise<void> => {
-  await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
-    await db.local_assets.where('primarykey').equals(primaryKey).modify({ _is_synced: 1 });
-    await db.ativos.where('primarykey').equals(primaryKey).modify({ _is_synced: 1 });
-    await db.assets.where('primarykey').equals(primaryKey).modify({ _is_synced: 1 });
-  });
+  await sqliteService.markAssetsSynced([primaryKey]);
 };
 
 export interface UserSessionData {
@@ -111,10 +115,27 @@ const auditDiscardedPending = async (
   }
 };
 
+/**
+ * Alvo do upsert da fila: a chave de origem, escopada ao contrato.
+ *
+ * A fila não envia `id`, e o `upsert` sem `onConflict` usa a chave primária da
+ * tabela `(tenantid, id)` — o `INSERT` caía sempre no índice único
+ * `(tenantid, primarykey)` e um ativo já existente na nuvem ficava em `23505
+ * duplicate key` para sempre (ecrãs ATIVOS/CONFERIDOS de 2026-11-19). Com o
+ * alvo certo o Postgres actualiza a linha existente, sem tocar no `id`.
+ * Fonte única: o teste da fila compara com esta constante.
+ */
+export const ASSETS_CONFLICT_TARGET = 'tenantid, primarykey';
+
 const SYNC_RECORD_FAIL_AUDIT = 'SYNC_RECORD_FAIL';
 const SYNC_RECORD_EXCEPTION_AUDIT = 'SYNC_RECORD_EXCEPTION';
 /** Janela em que a mesma falha (primarykey + erro) não volta a ser registada. */
 const SYNC_FAILURE_AUDIT_WINDOW_MS = 10 * 60 * 1000;
+/**
+ * As recusas de envio são PRESERVADAS pelo expurgo, por isso a janela delas é o
+ * dia e não os 10 min das outras ações: a mesma assinatura escreve no máximo uma
+ * linha por dia (`inicioDoDiaDaFalha`), em vez de 144 num ativo preso.
+ */
 
 /**
  * Uma linha de auditoria por registo falhado, por janela — e não a cada ciclo.
@@ -128,21 +149,63 @@ const SYNC_FAILURE_AUDIT_WINDOW_MS = 10 * 60 * 1000;
  * «PENDENTE NUVEM» do #95: inundada, o diagnóstico seguinte fica mais lento
  * exactamente quando é preciso. A assinatura `primarykey|erro` fica no `delta`
  * e é comparada com o que já foi registado na janela.
+ *
+ * O erro é normalizado antes de assinar (`assinaturaDeFalha`): a mensagem crua
+ * pode trazer id de pedido, UUID, data/hora ou ficheiro:linha da pilha, e cada
+ * variante reabria a janela — a mesma recusa voltava a ser registada.
  */
-const loadRecentSyncAuditSignatures = async (acao: string): Promise<Set<string>> => {
-  const cutoffIso = new Date(Date.now() - SYNC_FAILURE_AUDIT_WINDOW_MS).toISOString();
+const loadRecentSyncAuditSignatures = async (
+  acao: string,
+  agora: number = Date.now()
+): Promise<Set<string>> => {
+  // Dia (UTC) corrente: a linha de hoje é a que impede a repetição de hoje.
+  const cutoffIso = inicioDoDiaDaFalha(agora);
   const recentes = await db.audit_logs.where('updated_at').above(cutoffIso).toArray();
   const signatures = new Set<string>();
   for (const log of recentes) {
     if (log.acao !== acao) continue;
     try {
       const signature = JSON.parse(String(log.delta || '{}')).signature;
-      if (typeof signature === 'string' && signature) signatures.add(signature);
+      if (typeof signature !== 'string' || !signature) continue;
+      // Linhas gravadas antes da normalização tinham o detalhe cru: normaliza
+      // também do lado da leitura, senão a mesma falha contava como nova.
+      const corte = signature.indexOf('|');
+      signatures.add(
+        corte === -1
+          ? signature
+          : assinaturaDeFalha(signature.slice(0, corte), signature.slice(corte + 1))
+      );
     } catch {
       // Linha antiga sem delta legível não conta como falha já registada.
     }
   }
   return signatures;
+};
+
+/**
+ * A exclusão que venceu a subida — uma linha de trilha por registo e por janela.
+ *
+ * Mesmo com o registo já aplicado (`markAssetsDeleted`), uma gravação de estado
+ * atrasada pode voltar a pô-lo pendente. A janela de 10 min garante que, nesse
+ * caso, a trilha não ganha uma linha `SYNC_DELETE_WINS` a cada ciclo de 60 s.
+ */
+const auditDeleteWins = async (
+  userId: string,
+  primaryKey: string,
+  details: string
+): Promise<void> => {
+  try {
+    const cutoffIso = new Date(Date.now() - SYNC_FAILURE_AUDIT_WINDOW_MS).toISOString();
+    const recentes = await db.audit_logs
+      .where('updated_at')
+      .above(cutoffIso)
+      .filter((log) => log.acao === 'SYNC_DELETE_WINS' && String(log.registro_id || '') === primaryKey)
+      .toArray();
+    if (recentes.length > 0) return;
+    await sqliteService.logAuditEvent(userId, 'SYNC_DELETE_WINS', 'local_assets', primaryKey, details);
+  } catch (err) {
+    logger.warn('>>> [Sync] Falha ao registar a exclusão que prevaleceu na trilha:', err);
+  }
 };
 
 const auditSyncRecordFailure = async (
@@ -151,8 +214,9 @@ const auditSyncRecordFailure = async (
   primaryKey: string,
   details: string,
   jaAuditadas: Set<string>,
+  agora: number = Date.now(),
 ): Promise<void> => {
-  const signature = `${primaryKey}|${details}`;
+  const signature = assinaturaDeFalha(primaryKey, details);
   if (jaAuditadas.has(signature)) return;
   await sqliteService.logAuditEvent(
     userId,
@@ -160,9 +224,55 @@ const auditSyncRecordFailure = async (
     'local_assets',
     primaryKey,
     details,
-    JSON.stringify({ signature })
+    JSON.stringify({ signature }),
+    new Date(agora).toISOString()
   );
   jaAuditadas.add(signature);
+};
+
+/**
+ * A TRILHA DE RECUSAS, PARA O CICLO E PARA OS TESTES
+ * ============================================================================
+ * As assinaturas já registadas HOJE (a janela é o dia — ver `inicioDoDiaDaFalha`)
+ * e o registo de uma recusa passam a ter nome próprio e exportado: é o mesmo
+ * caminho que o ciclo usa, sem duplicar a regra no teste.
+ */
+export const assinaturasDeFalhaDeHoje = (
+  acao: string,
+  agora: number = Date.now()
+): Promise<Set<string>> => loadRecentSyncAuditSignatures(acao, agora);
+
+export const registarRecusaNaTrilha = (
+  userId: string,
+  acao: string,
+  primaryKey: string,
+  details: string,
+  jaAuditadas: Set<string>,
+  agora: number = Date.now()
+): Promise<void> => auditSyncRecordFailure(userId, acao, primaryKey, details, jaAuditadas, agora);
+
+/**
+ * CARIMBO DA RECUSA NO PRÓPRIO REGISTO
+ * ============================================================================
+ * A recusa já ia para `audit_logs`, mas o cartão só lia `_is_synced`: «na fila»
+ * e «recusado pela nuvem» ficavam iguais para o operador. Aqui a mesma recusa
+ * fica no registo local (`_syncFailAt`/`_syncFailReason`), que é o que o selo
+ * vermelho do cartão e o contador do botão global lêem.
+ *
+ * O carimbo é reescrito no máximo uma vez por `SYNC_FAILURE_STAMP_WINDOW_MS`
+ * com o mesmo motivo (o ciclo de fundo roda a cada 60 s) e apagado no sucesso.
+ * Usa o registo que já está em memória no laço — não faz uma leitura extra.
+ */
+const marcarFalhaNoRegisto = async (
+  primaryKey: string,
+  motivo: string,
+  emMemoria?: Record<string, unknown>,
+): Promise<void> => {
+  try {
+    await sqliteService.markAssetsFailed([{ primarykey: primaryKey, motivo, registo: emMemoria }]);
+  } catch (err) {
+    logger.warn('>>> [Sync Alert] Falha ao carimbar a recusa no registo local:', err);
+  }
 };
 
 const PHOTO_QUEUE_STORE = 'gbr_photo_sync_queue';
@@ -513,11 +623,11 @@ export const photoSyncManager = {
           // Atualização nas tabelas oficiais via Dexie (IndexedDB) sem usar SQL puro.
           // Chave composta [tenantid+primarykey] (v6): flags são aplicadas por
           // primarykey via índice (todas as linhas da chave, qualquer contrato).
+          // O sucesso passa pelo ponto único (`markAssetsSynced`): além de
+          // `_is_synced = 1` e do `_photoUrl`, apaga o carimbo de recusa — um
+          // registo igual à nuvem não pode ficar com selo vermelho agarrado.
           const assetKey = String(item.assetId).trim();
-          const photoChanges = { _photoUrl: publicUrl, _is_synced: 1 };
-          await db.ativos.where('primarykey').equals(assetKey).modify(photoChanges);
-          await db.local_assets.where('primarykey').equals(assetKey).modify(photoChanges);
-          await db.assets.where('primarykey').equals(assetKey).modify(photoChanges);
+          await sqliteService.markAssetsSynced([assetKey], { _photoUrl: publicUrl });
 
           await photoQueueStore.removeItem(key);
           uploadCount++;
@@ -598,6 +708,15 @@ const _syncService = {
         return { success: true, processedCount: 0, failedCount: 0 };
       }
 
+      // EXCLUSÃO VENCE A SUBIDA: o upsert não lê o estado remoto, por isso um
+      // aparelho offline reenviava a cópia ativa de um ativo apagado noutro
+      // lado e reactivava-o em todos. A nuvem é consultada UMA vez por ciclo
+      // (nunca por registo) e os apagados ficam fora do envio.
+      const apagadasNaNuvem = await fetchCloudDeletedKeys(
+        [tenantidClean],
+        records.map(record => String(record.primarykey || record.id || ''))
+      );
+
       const syncedPrimaryKeys: string[] = [];
       const failedPrimaryKeys: string[] = [];
       // Assinaturas das recusas já auditadas na janela. Carregadas no primeiro
@@ -616,6 +735,28 @@ const _syncService = {
         const pKey = sanitizeAssetKey(record.primarykey || record.id);
         if (isStringInvalid(pKey)) {
           failedPrimaryKeys.push(String(pKey));
+          continue;
+        }
+
+        if (apagadasNaNuvem.has(`${tenantidClean.trim().toUpperCase()}|${String(pKey).trim()}`)) {
+          // O registo está apagado na nuvem: nada sobe daqui. NÃO se marca como
+          // sincronizado — a cópia local ainda está desactualizada e o pull
+          // seguinte aplica a exclusão (`mesclarComExclusao`). A trilha diz o
+          // que aconteceu, para o «Pendente Nuvem» não ficar sem explicação.
+          logger.warn(`>>> [Sync] Ativo ${pKey} apagado na nuvem: a exclusão prevalece e nada foi enviado.`);
+          // Aplica já a exclusão ao registo local: sem isto ele continuava
+          // pendente e a fila voltava a tentá-lo (e a regravar a decisão) a
+          // cada ciclo de 60 s até um pull chegar.
+          try {
+            await sqliteService.markAssetsDeleted([String(pKey)]);
+          } catch (markErr) {
+            logger.warn('>>> [Sync] Falha ao aplicar a exclusão da nuvem ao registo local:', markErr);
+          }
+          await auditDeleteWins(
+            user.email || 'system',
+            String(pKey),
+            'Exclusão na nuvem prevalece sobre a cópia local pendente: nada foi enviado e o registo local fica apagado (restauro explícito para voltar).'
+          );
           continue;
         }
 
@@ -661,8 +802,11 @@ const _syncService = {
             // PGRST204 reenvia sem ela — o ativo não se perde.
             rad_recno: record.rad_recno !== undefined && record.rad_recno !== null ? String(record.rad_recno).trim() : null,
             DE_PARA: record.DE_PARA !== undefined && record.DE_PARA !== null ? String(record.DE_PARA).trim() : null,
-            gps_lat: record.gps_lat !== undefined && record.gps_lat !== null ? Number(record.gps_lat) : null,
-            gps_lng: record.gps_lng !== undefined && record.gps_lng !== null ? Number(record.gps_lng) : null,
+            // PONTE GPS: a conferência grava `latitude`/`longitude`; a nuvem só
+            // tem `gps_lat`/`gps_lng`. Ler só a coluna legada subia o ativo sem
+            // a coordenada que o operador acabou de capturar. Sem leitura local
+            // as colunas ficam fora do payload e não apagam a da nuvem.
+            ...assetGpsColumns(record),
             currentCampaignId: record.currentCampaignId !== undefined && record.currentCampaignId !== null ? String(record.currentCampaignId).trim() : null,
             // CONFERÊNCIA (quem e quando): sem estas três colunas o ativo subia,
             // mas a nuvem nunca sabia que ele tinha sido conferido no aparelho.
@@ -678,17 +822,24 @@ const _syncService = {
               isConferido(record) ||
               String(record.status || '').toUpperCase().includes('CONFERIDO'),
             auditor: record._auditor !== undefined && record._auditor !== null ? String(record._auditor).trim() || null : null,
-            data_leitura: record._dataLeitura !== undefined && record._dataLeitura !== null ? String(record._dataLeitura) : null
+            data_leitura: record._dataLeitura !== undefined && record._dataLeitura !== null ? String(record._dataLeitura) : null,
+            // EXCLUSÃO: o registo apagado neste aparelho sobe com a flag. Sem
+            // ela a nuvem mantinha a linha viva e o ativo voltava a aparecer em
+            // todos os aparelhos (e neste, ao reiniciar).
+            is_deleted: normalizeFlag(record._is_deleted)
           };
 
           // O envio repete sem a coluna que a nuvem ainda não tem (PGRST204), em
           // vez de rejeitar o ativo inteiro por causa de `conferido`/`auditor`/
-          // `data_leitura` (scripts/assets-conferencia.sql).
+          // `data_leitura` (scripts/assets-conferencia.sql). O alvo de conflito
+          // acompanha todas as tentativas: sem ele o upsert vira INSERT.
           let supabaseErr: { message?: string; status?: string | number; code?: string | number } | null = null;
           for (let attempt = 0; attempt < 4; attempt += 1) {
             // Sem limite de tempo, um pedido pendurado congelava o ciclo
             // inteiro para sempre (o laço nunca voltava e a trava ficava presa).
-            const pedido = supabase.from('assets').upsert(payload);
+            const pedido = supabase.from('assets').upsert(payload, {
+              onConflict: ASSETS_CONFLICT_TARGET
+            });
             const { error } = await withUpsertTimeout<Awaited<typeof pedido>>(
               pedido,
               UPSERT_TIMEOUT_MS
@@ -712,9 +863,18 @@ const _syncService = {
             failedPrimaryKeys.push(String(pKey));
             const errObj = supabaseErr as { status?: string | number; code?: string | number; message?: string };
             const statusStr = errObj.status || errObj.code || 'SYNC_FAIL';
-            const detailsStr = `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`;
+            const baseDetails = `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`;
+            // 42P10: a nuvem não tem índice único em (tenantid, primarykey) e o
+            // ON CONFLICT não encontra alvo. Repetir o ciclo não resolve — o
+            // operador precisa de criar o índice (docs/supabase_bootstrap.sql).
+            // A acção vem primeiro: o motivo do selo é cortado aos 90 caracteres
+            // e é essa frase que o operador precisa de ler.
+            const detailsStr = String(errObj.code) === '42P10'
+              ? `Erro Supabase: [42P10] falta o índice único (tenantid, primarykey) na nuvem — ${supabaseErr.message || 'ON CONFLICT sem alvo'}`
+              : baseDetails;
             
             logger.warn(`>>> [Sync Isolator] Erro Supabase detectado silenciosamente para chave ${pKey}:`, detailsStr);
+            await marcarFalhaNoRegisto(String(pKey), detailsStr, record as unknown as Record<string, unknown>);
 
             try {
               failureSignatures ??= await loadRecentSyncAuditSignatures(SYNC_RECORD_FAIL_AUDIT);
@@ -726,9 +886,43 @@ const _syncService = {
         } catch (err: unknown) {
           failedPrimaryKeys.push(String(pKey));
           const errMsg = err instanceof Error ? err.message : String(err);
+
+          // TIMEOUT ≠ RECUSA. O servidor pode só não ter respondido em 15 s
+          // (4G a mudar de célula, ecrã bloqueado, lock de linha). Carimbar
+          // aqui `_syncFailAt` pintava o cartão de «Falha de envio» e o
+          // operador lia «Tempo esgotado» 14 min depois como recusa de dados
+          // (ecrãs de 2026-11-19). O registo fica «Pendente Nuvem» — que é o
+          // que ele é — e a tentativa fica na trilha, sem selo vermelho.
+          if (isSyncTimeoutError(err)) {
+            logger.warn(
+              `>>> [Sync Isolator] Servidor não respondeu para ${pKey} (${errMsg}) — nova tentativa automática, sem carimbo de recusa.`
+            );
+            // Sem a mensagem do erro dentro do motivo: ela muda com o limite e
+            // o motivo do selo é curto; o que o operador precisa de saber é
+            // que houve nova tentativa e que o registo não foi recusado.
+            const timeoutDetails = `Servidor não respondeu ao envio em ${Math.round(UPSERT_TIMEOUT_MS / 1000)} s — nova tentativa automática`;
+            try {
+              exceptionSignatures ??= await loadRecentSyncAuditSignatures(SYNC_RECORD_EXCEPTION_AUDIT);
+              await auditSyncRecordFailure(
+                user.id,
+                SYNC_RECORD_EXCEPTION_AUDIT,
+                String(pKey),
+                timeoutDetails,
+                exceptionSignatures
+              );
+            } catch (auditErr) {
+              logger.warn('>>> [Sync Audit] Falha ao registrar o timeout do registo:', auditErr);
+            }
+            // Não insiste nos restantes registos: 200 ativos × 15 s seriam 50
+            // minutos de ciclo preso com o servidor mudo. O ciclo de 60 s
+            // volta a tentar e o botão manual continua disponível.
+            break;
+          }
+
           logger.warn(`>>> [Sync Isolator] Exceção capturada silenciosamente para chave ${pKey}:`, errMsg);
 
           const exceptionDetails = `Exceção ao sincronizar registro: ${errMsg}`;
+          await marcarFalhaNoRegisto(String(pKey), exceptionDetails, record as unknown as Record<string, unknown>);
           try {
             exceptionSignatures ??= await loadRecentSyncAuditSignatures(SYNC_RECORD_EXCEPTION_AUDIT);
             await auditSyncRecordFailure(
@@ -753,15 +947,15 @@ const _syncService = {
         logger.info(`>>> [Sync ACID Engine] ${syncedPrimaryKeys.length} registro(s) marcados como sincronizados no aparelho.`);
       }
 
-      // 4. EXPURGAMENTO DE LOGS (DISK SATURATION GUARD): Limpar histórico antigo via Dexie API para evitar entupimento de disco
+      // 4. EXPURGAMENTO DE LOGS (DISK SATURATION GUARD): Limpar histórico antigo via Dexie API para evitar entupimento de disco.
+      //    As recusas de envio ficam: são a prova de por que o ativo não subiu
+      //    (`services/auditoriaRetencao.ts`).
       try {
         logger.info(">>> [Disk Saturation Guard] Executando expurgo de logs antigos via Dexie...");
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const isoString = sevenDaysAgo.toISOString();
-        
-        await db.audit_logs.where('updated_at').below(isoString).delete();
-        logger.info(">>> [Disk Saturation Guard] Expurgo concluído com sucesso via Dexie.");
+        const expurgo = await purgarAuditoriaAntiga();
+        logger.info(
+          `>>> [Disk Saturation Guard] Expurgo concluído: ${expurgo.apagadas} linha(s) anteriores a ${expurgo.limite}; falhas de envio preservadas.`
+        );
       } catch (logErr) {
         logger.warn(">>> [Disk Saturation Guard] Erro silencioso ao expurgar logs:", logErr);
       }

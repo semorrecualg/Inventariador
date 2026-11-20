@@ -7,6 +7,527 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] — 2026-11-20
+
+### Alterado — o pull grava a base uma vez, não três
+
+- **Três passagens para o mesmo pull:** o download gravava as 12.636 linhas nos
+  três espelhos, e o `saveInventory` que vinha a seguir reescrevia a base inteira
+  (`bulkInsertAssets`) e ainda o espelho do `localDb` — três passagens completas
+  para corrigir as poucas linhas em que a decisão local vence a da nuvem. O
+  delta, que é o pull do dia a dia, tinha o mesmo custo: algumas dezenas de
+  linhas novas reescreviam a base inteira.
+- **Ganho ESTRUTURAL (a única alegação deste item):** por pull completo, as
+  linhas escritas nos espelhos passam de **37.908** (3 × 12.636) para **12.656**
+  (uma passagem do download + o subconjunto com decisão local). O delta passa de
+  37.908 para o número de linhas com decisão local — no teste, **2 de 200**.
+- **Sem alegação de tempo:** não há medição de tempo no aparelho. O harness de
+  testes usa `fake-indexeddb`, que mede a semântica do código e não o custo do
+  IndexedDB real (lá, actualizar uma linha existente é muito mais caro do que
+  inserir uma nova), pelo que nenhum número de milissegundos deste trabalho
+  sustenta ganho de tempo. Só medições no APK, comparando o mesmo pull antes e
+  depois, poderiam sustentá-lo.
+- **O quê:** o pull passa `skipSqlAssetsInsert` ao `saveInventory` (grava
+  configuração e cache, não os ativos) e persiste à parte, numa única transação
+  (`sqliteService.persistAssetsBatch`), só as linhas cuja decisão local foi
+  reposta — GPS mais recente (`preservarGpsMaisRecente`), pendência preservada e
+  edição por enviar. O merge do delta passou a ser uma regra própria
+  (`utils/mergeDeltaPull`), que devolve o estado e a lista `decisaoLocal`. O
+  mapeamento nuvem→espelhos vive num método só (`mapAssetToDexie`), usado pelo
+  lote e pelo subconjunto, para os dois não divergirem; o subconjunto respeita o
+  `_is_synced` de cada linha.
+- **Prova:** `src/__tests__/pullEmLotes.test.ts` (7 casos) fixa o subconjunto
+  (GPS nas duas grafias e proveniência nos três espelhos, `_is_synced` das
+  pendentes preservado, linhas fora do subconjunto intactas, guarda entre
+  contratos, um único mapeamento) e `src/__tests__/deltaPullDecisaoLocal.test.ts`
+  (7 casos) fixa o caminho do delta: 200 linhas na base, delta de 2 linhas com
+  decisão local (GPS do aparelho e edição por enviar) → exactamente 2 voltam ao
+  disco, as outras 198 ficam como o download as gravou, a base continua com 200
+  e a pendência continua pendente.
+
+
+### Alterado — as falhas de envio têm teto: uma linha por dia
+
+- **A trilha preservada crescia sem limite:** as recusas de envio
+  (`SYNC_RECORD_FAIL`/`SYNC_RECORD_EXCEPTION`) ficaram fora do expurgo de 7 dias
+  — são a prova de por que um ativo não subiu —, mas a janela de deduplicação era
+  de 10 min: um ativo preso com o mesmo erro escrevia 144 linhas por dia, para
+  sempre, na trilha que existe para diagnosticar exactamente isso.
+- **A janela passa a ser o DIA (UTC):** `inicioDoDiaDaFalha` define o corte e a
+  mesma assinatura (`primarykey|erro estável`) escreve no máximo uma linha por
+  dia. O dia seguinte ganha a sua — a falha continua visível enquanto durar.
+- **O histórico já gravado é colapsado:** `idsDeFalhasRepetidas` deixa a linha
+  mais recente de cada (ação + registo + dia + assinatura) e o expurgo apaga as
+  restantes; o resultado do expurgo passa a reportar `consolidadas`. Linhas de
+  falha sem assinatura legível não são tocadas (não há como provar que são a
+  mesma). O resto da trilha continua a expirar aos 7 dias.
+- **Assinatura mais estável:** ids de pedido («req 42», «pedido #7») passam a
+  marcador `<pedido>` — a regra dos números de 6+ dígitos não os apanhava e cada
+  ciclo reabria a janela.
+- **Prova:** `src/__tests__/tetoLinhasFalha.test.ts` (9 casos) — 100 ciclos
+  espalhados pelas 24 h do mesmo dia → 1 linha (com a janela de 10 min: 100),
+  dia seguinte → 2, erros diferentes no mesmo dia → linhas diferentes, expurgo a
+  colapsar 30 linhas do mesmo dia em 1 e a preservar dias distintos, e a regra
+  pura (`inicioDoDiaDaFalha`, `chaveDeFalhaNoDia`, `idsDeFalhasRepetidas`). Os
+  testes de `syncRecordFailAudit` passam a fixar o contrato do dia (11 min
+  depois ainda é a mesma linha; ontem permite a de hoje).
+
+### Corrigido — os últimos ecrãs que decidiam a conferência sozinhos
+
+- **A ficha PDF não mostrava a conferência:** imprimia `_conferidoEm`/
+  `_conferidoPor`, campos que não existem no registo — TODOS os cartões saíam
+  «DATA AUDITORIA: PENDENTE» e «AUDITOR: NÃO IDENTIFICADO», mesmo os conferidos
+  no campo. Passa a usar `auditoriaDoAtivo` (`isConferido` + `_dataLeitura` +
+  `_auditor`), com a data legível no formato que o documento já usava.
+- **A ficha de impressão dava conformidade por omissão:** sem a coluna de
+  auditoria dizia «Conferência física realizada sem ressalvas» também para itens
+  por conferir; agora só o diz quando `isConferido` confirma, e os restantes
+  ficam «Aguardando conferência física».
+- **A coluna de auditoria deixou de ser sobrescrita pela etiqueta:** o fluxo de
+  aplicar localização gravava `AUDITOR_STATUS_CONFERENCIA = TAG_INVENTARIO`
+  («ETIQUETAR», «ADOTADO»…), apagando a prova `'SIM'` de quem já tinha
+  conferido o ativo; agora grava `'SIM'`/`'NAO'` pela regra única.
+- **Prova:** `src/__tests__/touchpointsConferido.test.ts` (8 casos) cobre a
+  leitura única (`auditoriaDoAtivo`) e o contrato dos ficheiros — nenhum volta a
+  ler `_conferidoEm`/`_conferidoPor`, a dar conformidade por omissão, a
+  sobrescrever a coluna com a etiqueta ou a decidir pela marca crua
+  (`!x._conferido`, `_conferido === 1`, `Number(_conferido)`,
+  `AUDITOR_STATUS_CONFERENCIA === 'SIM'`) fora de `utils/conferencia.ts`.
+  Com as duas regressões repostas, 2 casos falham.
+- **Justificados (escritas, não decisões):** `_conferido: false` ao desmembrar
+  (`App.tsx`, filho nasce por conferir), `assetRepository.updateStatus` e os
+  seeds de `sqliteService`/`stressTestService` (recebem o booleano já decidido),
+  `dedupAssets`/`UnitSelector` (gravam `isConferido`), `syncService` e
+  `supabaseService` (leem pela regra), `localDbService.mergeCopiasDeAtivo`
+  (merge monotónico por `isConferido`) e os filtros de chaves de `AuditLogs` e
+  `constants/schema`.
+
+### Alterado — as grafias antigas de «conferido» ficam numa só
+
+- **A marca continuava gravada como veio:** `isConferido` já aceitava tudo —
+  `true`/`false` (Dexie e app), `1`/`0` (carga e espelho SQLite), `'true'`/`'1'`
+  (JSON importado) e a coluna de auditoria `AUDITOR_STATUS_CONFERENCIA = 'SIM'`
+  —, mas cada gravado guardava a sua grafia. Como a decisão por tempo do pull só
+  compara datas quando elas existem, a conferência antiga sem data nunca podia
+  valer contra a nuvem.
+- **Migração única e idempotente:** `utils/conferencia.normalizarMarcaConferencia`
+  decide o patch (é regra, não varredura) e
+  `sqliteService.migrateLegacyConferencia()` aplica-o aos três espelhos numa só
+  transação, uma vez por base (marcador `f0_conferido_canonical_v1` em
+  `SYSTEM_CONTEXT`), no arranque logo a seguir à migração de casing. A marca
+  passa a `1` (número) e a data da leitura é preenchida a partir de
+  `_dataLeitura` ou, na falta dela, de `_lastUpdated`.
+- **Não inventa datas nem desmarca ninguém:** a conferência sem data fica só com
+  a flag normalizada — uma data fabricada («agora») faria a decisão local ganhar
+  o merge por fabrico. Registos sem prova de conferência ficam como estão.
+- **Relatório:** o arranque registra quantos registos (por `primarykey`) e
+  quantas linhas dos espelhos foram convertidos.
+- **Prova:** `src/__tests__/migracaoConferido.test.ts` (9 casos) — as quatro
+  grafias e a coluna de auditoria na mesma base, data preservada/derivada/sem
+  invenção, desmarcado intacto nos três espelhos, segunda passagem com
+  `jaCorrida: true` e o mesmo estado, e o contrato de que o boot chama a
+  passagem. Com a regra a deixar passar todos os registos, 5 casos falham.
+
+### Corrigido — nenhum ponto falso no mapa de calor
+
+- **O mapa aceitava mais do que leitura de campo:** o filtro era só
+  `isValidCoordinate` (que já barra `(0,0)` e coordenadas fora de faixa), mas
+  deixava entrar coordenadas de contingência (`_gps_source = 'synthetic'`:
+  âncora/admin/sandbox) e ruído de rede com precisão acima de 150 m
+  (`GPS_ACCURACY.DISCARD`). E lia apenas `latitude`/`longitude`: um ativo com o
+  ponto só na grafia da nuvem (`gps_lat`/`gps_lng`) desaparecia do mapa.
+- **Uma regra para todo o ecrã:** `utils/assetGps.mapPointOf`/`hasMapCoords`
+  (coordenada válida + proveniência ≠ `synthetic` + precisão ≤ 150 m) passam a
+  servir os pontos, o grid, a área/perímetro, o centro inicial e o contador —
+  sempre pela ponte das duas grafias.
+- **A proveniência passou a ser gravada:** a conferência escrevia a coordenada
+  sem `_gps_accuracy`/`_gps_source`/`_gps_at` e o mapeamento do lote deixava
+  cair esses campos. O sensor declara agora `_gps_source = 'sensor'` com a
+  precisão e o instante da leitura, e o lote preserva os três — sem isso a regra
+  do mapa não tinha o que consultar (e o item 9 fica com a data do GPS exata).
+- **Prova:** `src/__tests__/mapaSemPontoFalso.test.ts` (10 casos): sem GPS,
+  `(0,0)`, fora de faixa, sintético (e `' Synthetic '`), precisão 151/200/150,
+  legado sem proveniência, `gps_lat`/`gps_lng`, prioridade de `latitude`, a
+  proveniência a sobreviver ao lote e o contrato de que o ecrã não tem segunda
+  regra.
+- **Limite:** registo legado sem `_gps_source` continua a entrar no mapa se o
+  par for válido (não há como provar a origem retroativamente).
+
+### Corrigido — o pull não regride a coordenada lida no aparelho
+
+- **O ponto voltava atrás:** o merge do pull remontava a linha do ativo a partir
+  da nuvem e a coordenada descia com ela. Um aparelho que já tinha lido o GPS no
+  campo recebia de volta o ponto antigo que a nuvem ainda guardava (envio
+  anterior, outro aparelho) e o mapa de calor voltava ao lugar errado sem
+  ninguém tocar no ativo. O delta tinha o mesmo comportamento.
+- **Decidido por tempo, nas duas grafias:** `utils/assetGps.preservarGpsMaisRecente`
+  repõe `latitude`/`longitude` e `gps_lat`/`gps_lng` quando a leitura local é
+  mais recente — pela data do próprio GPS (`_gps_at`) e, na falta dela, pela
+  leitura/toque (`_dataLeitura`, `_lastUpdated`) contra a da nuvem (`updated_at`
+  incluído). A nuvem mais recente continua a ganhar e, sem data de nenhum dos
+  lados, fica a linha da nuvem. A nuvem sem ponto não apaga a leitura local.
+- **Prova:** `src/__tests__/pullGpsMaisRecente.test.ts` (9 casos): local mais
+  nova vence, nuvem mais nova vence, nuvem sem ponto, local sem ponto válido,
+  ausência de datas, prioridade do `_gps_at` e o `updated_at` da nuvem — mais o
+  contrato de que o merge completo e o delta usam a mesma regra.
+- **Limite:** a decisão é do registo, não de um ponto por campo — se a nuvem
+  tiver uma leitura de GPS legítima mais antiga e o aparelho uma mais nova, fica a
+  do aparelho (que sobe no envio seguinte).
+
+### Corrigido — o carimbo da falha sai sempre que o registo fica sincronizado
+
+- **Três escritas de sucesso, uma só limpeza:** `markAssetsSynced` (envio em
+  massa e fila de fundo) apagava `_syncFailAt`/`_syncFailReason`; a fila de
+  **fotos** marcava `_is_synced = 1` com um `.modify` próprio e deixava o
+  carimbo agarrado, e o **estado visual** do App copiava o carimbo para a linha
+  «sincronizada». A limpeza passa a ser uma regra só
+  (`utils/syncFalha.marcarSincronizadoLocal`), e a foto usa o mesmo ponto
+  (`markAssetsSynced` com `_photoUrl`).
+- **A recusa atrasada já não carimba um registo igual à nuvem:** a tentativa que
+  falhou podia chegar depois de outro caminho (envio em massa, fila, foto,
+  pull) já ter marcado o ativo como sincronizado — ficava `_is_synced = 1` com
+  selo vermelho, e a recusa antiga reaparecia no toque seguinte. `markAssetsFailed`
+  passa a ignorar registos já sincronizados; a falha legítima de um pendente
+  continua a ser carimbada.
+- **Prova:** `src/__tests__/carimboLimpoNoSucesso.test.ts` (7 casos) cobre o
+  patch puro, a fila/envio em massa, a foto, o pull com `markSynced`, a corrida
+  nas duas ordens (falha→sucesso e sucesso→falha atrasada) e a contra-prova de
+  que uma recusa real não é silenciada.
+- **Limite:** bases antigas podem ainda guardar carimbos legados em linhas já
+  sincronizadas; o selo continua a escondê-los (`syncFailureInfo`) e a próxima
+  escrita de sucesso limpa-os.
+
+### Corrigido — o carimbo da falha morre com o registo na limpeza local
+
+- **O selo contava ativos que já não existiam:** a «Limpeza Total» de uma unidade
+  (`MainMenu`/`DataManagementPanel`) e a limpeza em massa filtravam o cache do
+  localforage e o estado React, mas deixavam as linhas da unidade nos três
+  espelhos Dexie (`local_assets`/`ativos`/`assets`) — com o `_syncFailAt`
+  agarrado a elas. O contador do selo somava falhas órfãs e a fila de fundo
+  voltava a tentar enviá-las a cada ciclo.
+- **A cópia de contingência ressuscitava o ativo:** o rascunho
+  `gbr_backup_<tenant>_<filial>` em `localStorage` guarda o ativo inteiro
+  (carimbo incluído) e o «Recovery Boot» do Inventory relê-o no arranque. Os
+  dois caminhos de limpeza passam a descartar o rascunho e a escrita coalescida
+  dos ativos removidos; a limpeza total descarta todos os `gbr_backup_*`.
+- **Remoção por unidade, numa transação:** `sqliteService.deleteLocalAssetsByUnits`
+  apaga dos três espelhos as linhas das unidades limpas. O carimbo sai com a
+  linha e nada mais é tocado: os ativos das outras unidades mantêm
+  `_syncFailAt`, `_syncFailReason` e a pendência («morre com o registo, nunca
+  antes»).
+- **Prova:** `src/__tests__/carimboNoReset.test.ts` (5 casos), um por caminho —
+  limpeza total, limpeza de uma unidade, limpeza em massa, «Desvincular e
+  Reiniciar» (`hardResetDatabase`) e higienização do Gestor de Base — e em cada
+  um o ativo mantido fica com o carimbo intacto.
+- **Limite:** a limpeza continua a ser por unidade e sem escopo por `tenantid`
+  (a mesma regra que o localforage e o estado já aplicam).
+
+### Adicionado — filtro e exportação das falhas de envio na Auditoria
+
+- **A causa de um «Pendente Nuvem» deixa de se procurar à mão:** a aba «Ativos»
+  da Trilha de Auditoria ganha o botão **Só falhas**, que isola as recusas de
+  envio (`SYNC_RECORD_FAIL`/`SYNC_RECORD_EXCEPTION`) pela mesma regra
+  (`ehFalhaDeEnvio`) dos selos e da retenção de 7 dias. O filtro aplica-se por
+  cima da busca, da ação e das datas — dá para cruzar «as falhas de ontem».
+- **Levar a lista para fora:** com o filtro ligado, dois botões exportam as
+  falhas em **CSV** e **JSON**, com as três colunas que interessam:
+  `primarykey` (a chave de origem, ou `record_id` na trilha antiga), `motivo`
+  (o detalhe da recusa) e `data`. O ficheiro acompanha o que está no ecrã e um
+  motivo com aspas não parte o CSV.
+- **Prova:** `src/__tests__/auditoriaFiltroFalhas.test.ts` (11 casos) cobre o
+  filtro (uma falha, uma conferência), o cabeçalho e as linhas do CSV, o escape
+  de aspas, os campos em falta, as duas ações de recusa e o JSON — mais o
+  contrato do ecrã (sem uma segunda regra de falha dentro do componente).
+
+### Corrigido — o pull não desfaz a conferência feita no aparelho
+
+- **A marca voltava a «por conferir»:** o merge do pull remontava a linha da
+  nuvem e deixava cair a decisão de conferência da cópia local. Bastava a linha
+  da nuvem chegar com `_conferido = 0` (ou sem `data_leitura`) para o item
+  conferido no campo voltar a «por conferir» no ciclo seguinte, sem que o
+  operador tivesse tocado nele outra vez.
+- **Decidida por tempo, nunca por omissão:** `preservarPendenciaLocal` passa a
+  receber também a linha da nuvem e, quando a decisão local é mais recente que a
+  dela, repõe os campos da decisão (`_conferido`, `_auditor`, `_dataLeitura`,
+  `AUDITOR_STATUS_CONFERENCIA` e o `status` textual). A comparação é
+  `_dataLeitura` com `_dataLeitura` — e o toque (`_lastUpdated`) quando a
+  decisão foi desmarcar, que não tem data de leitura própria. Uma conferência
+  da nuvem posterior ao toque continua a ganhar, e sem data de nenhum dos lados
+  a linha da nuvem fica.
+- **Prova:** `src/__tests__/pullPreservaConferencia.test.ts` (9 casos) cobre o
+  desmarcar que não regressa, a marca com autor e data, a nuvem posterior, a
+  igualdade de conferência com leitura mais recente e a ausência de datas.
+- **Limite:** um aparelho com edição pendente e uma conferência alheia mais
+  antiga continua a fazer valer a sua decisão; o conflito por campo (item 24b da
+  agenda) é o que resolve dois auditores no mesmo ativo.
+
+### Alterado — Dados e Auditoria passam a viver no Painel Completo
+
+- **Um único hub de governança:** a tool grid da Unidade Operacional fica com
+  **AJUSTES · PAINEL**; os botões DADOS e AUDITORIA saíram dela. O **Painel
+  Completo** (`isAdminMenuOpen`) passa a abrir os painéis **Gestão e Manutenção**
+  (`isDataMenuOpen`, ADMIN) e **Auditoria e Concordância** (`isAuditMenuOpen`,
+  TRILHA B) como camadas sobre o próprio hub — o «Voltar» de cada um devolve ao
+  Painel Completo, sem passar pelo menu.
+- **Acesso ao auditor preservado:** o botão PAINEL aparece para ADMIN **e** AUDITOR,
+  para que a TRILHA B continue a chegar à trilha de auditoria; os itens
+  administrativos do hub ficam ocultos para quem não é administrador.
+- **Contrato fixado por teste:** `src/__tests__/painelCompletoHub.test.tsx` monta a
+  grelha (ADMIN e AUDITOR) e prova que só existem AJUSTES e PAINEL, e que o Painel
+  Completo abre Gestão e Manutenção e Auditoria (com o «Voltar» a devolver ao hub).
+- **Resíduos removidos:** `NavigationParams.openPanel` e o estado do App ficam
+  restritos a `'PREFERENCES' | 'ADMIN'`, e saem do efeito do `MainMenu` os ramos
+  inalcançáveis de `initialOpenPanel` para `'DATA'` e `'AUDIT'`. O caminho
+  `initialDataMenuOpen` (admin com base vazia → Gestão e Manutenção) mantém-se.
+
+### Corrigido — uma só linha de auditoria por alteração em `public.assets`
+
+- **Duas linhas por `UPDATE`:** dois triggers na mesma tabela chamavam duas
+  funções de auditoria (`log_asset_changes` e `trg_audit_asset_changes`), e cada
+  alteração entrava duas vezes em `public.asset_logs` — a Auditoria mostrava
+  pares idênticos e qualquer contagem pela trilha valia o dobro.
+- **Um só escritor no servidor:** `scripts/assets-auditoria-unica.sql` remove os
+  triggers que chamam `log_asset_changes` (por função, porque o nome do trigger
+  varia por base) e deixa a função como pass-through (`RETURN OLD` no `DELETE`).
+  Fica apenas `trg_audit_asset_changes`, que cobre CREATE/UPDATE/DELETE, usa o
+  e-mail do JWT e grava `timestamp`. A trilha de campo escrita pelo app
+  (`auditService.logAssetChange`) não é tocada.
+- **Sem risco de ficar sem trilha:** se houver duplicados para remover e a função
+  canónica não existir, o script aborta em vez de apagar o segundo escritor.
+  Idempotente, com bloco de verificação por `BEGIN … ROLLBACK` no cabeçalho.
+- **Prova:** `src/__tests__/assetsAuditoriaUnica.test.ts` fixa o contrato (um só
+  escritor, remoção por função, trava antes do `DROP`, pass-through sem
+  `asset_logs`) e garante que o bootstrap não reintroduz o segundo trigger.
+
+### Corrigido — o índice da chave de origem tem de servir de alvo ao `ON CONFLICT`
+
+- **Uma base criada pelo bootstrap recusava o upsert da fila:** o
+  `docs/supabase_bootstrap.sql` criava `assets_tenant_primarykey_key` como
+  índice único **parcial** (`… WHERE primarykey IS NOT NULL`). O PostgREST não
+  envia o predicado, o PostgreSQL não consegue inferir o índice para o
+  `ON CONFLICT (tenantid, primarykey)` e a escrita vira `INSERT`, que colide no
+  próprio índice — `23505` em vez de actualização, e o cartão do ativo preso em
+  «FALHA DE ENVIO» a cada ciclo de sincronização. O predicado era redundante:
+  num índice único, NULLs são distintos por omissão. O índice passa a ser total
+  no bootstrap e há `scripts/fix-assets-conflict-index.sql` para alinhar bases
+  antigas; `src/__tests__/assetsConflictIndex.test.ts` fixa as colunas do índice
+  iguais a `ASSETS_CONFLICT_TARGET` e proíbe o predicado de voltar.
+
+### Corrigido — a auditoria de ativos deixava de abortar as escritas
+
+- **`log_asset_changes()` lia a coluna legada:** a função, criada na base fora
+  do repositório, gravava `NEW._auditor` em `asset_logs.user_email`. Nas linhas
+  com `_auditor` nulo o `INSERT` recebia NULL e — como `user_email` é
+  `NOT NULL` — a transacção inteira abortava com `23502`. Toda a `UPDATE`
+  desses ativos falhava na nuvem, incluindo o restauro pelo app, que passava na
+  trava `assets_bloquear_ressurreicao` e estourava a seguir na auditoria.
+  O e-mail passa a vir de `coalesce(auditor, _auditor, JWT, 'system@gbr.com.br')`,
+  lido por `to_jsonb(NEW)` para não depender de a coluna existir em todas as
+  bases. Script: `scripts/fix-asset-log-auditor-legado.sql`; contrato guardado
+  por `src/__tests__/assetLogAuditorLegado.test.ts`.
+
+## [2.8.1] — 2026-11-20
+
+### Adicionado — trava no servidor contra a ressurreição de ativos apagados
+
+- **A exclusão deixa de depender do cliente:** a guarda do #128 só existe no
+  APK que a tem. Um APK antigo — ou uma cópia local que nunca recebeu a
+  exclusão — envia `is_deleted = false` sobre a linha apagada e o ativo volta
+  para todos. O trigger `assets_bloquear_ressurreicao` (`BEFORE UPDATE` em
+  `public.assets`) recusa essa escrita com P0001, excepto quando a mesma
+  escrita traz um `restored_at` novo.
+- **A marca de restauro é explícita:** `restored_at` (coluna nova) só é enviada
+  pelo caminho de restauro (`syncAssetsToCloud(..., { allowUndelete: true })`,
+  usado por `restoreAsset`). Update normal de um ativo apagado passa (a flag
+  fica `true`); restauro passa (traz a marca).
+- **Blocos SQL:** `scripts/assets-restauro-trigger.sql` para a base actual e
+  `docs/supabase_bootstrap.sql` para as bases novas, ambos idempotentes.
+
+### Corrigido — a exclusão que vence a subida passa a ser aplicada ao registo local
+
+- **O registo ficava pendente para sempre:** quando a guarda de envio
+  encontrava a linha já apagada na nuvem, nada era enviado mas o registo local
+  continuava `_is_synced = 0`. A fila voltava a tentá-lo — e a gravar
+  `SYNC_DELETE_WINS` na trilha — a cada ciclo de 60 s, até um pull chegar.
+  `markAssetsDeleted` aplica a exclusão no próprio ciclo (`_is_deleted = 1`,
+  `_is_synced = 1`, sem carimbo de falha): o registo sai da fila e das listas,
+  e o envio em massa faz o mesmo com as linhas que descarta.
+- **A trilha tem janela:** `SYNC_DELETE_WINS` é registada uma vez por registo e
+  por janela de 10 min. Mesmo que uma gravação de estado atrasada reponha a
+  cópia como pendente, a trilha não ganha uma linha por ciclo.
+
+### Corrigido — a subida deixa de reativar um ativo apagado na nuvem
+
+- **O upsert não lia o estado remoto:** um aparelho que ficou offline com a
+  cópia ativa de um ativo apagado noutro lado reenviava-a e reactivava a linha
+  em todos os aparelhos — a exclusão nunca era definitiva. O envio passa a
+  perguntar à nuvem antes de escrever (`fetchCloudDeletedKeys`, uma consulta por
+  lote) e deixa de fora as chaves apagadas, tanto no espelhamento
+  (`syncAssetsToCloud`) como na fila de fundo (`processDataSyncQueue`).
+- **O restauro é a única excepção:** `syncAssetsToCloud(..., { allowUndelete:
+  true })`, usado só por `restoreAsset` — é a operação que pode dizer «vivo»
+  sobre uma linha apagada.
+- **Sem ciclo de pendência:** com a linha apagada, o pull deixa de preservar a
+  pendência local (`devePreservarPendencia`). Antes o registo voltava a
+  «Pendente Nuvem» e o envio tentava subi-lo em todos os ciclos.
+- **Sem a coluna na nuvem a guarda fica inerte:** se a consulta falhar (schema
+  antigo), o envio segue como antes — nunca um bloqueio.
+
+### Corrigido — a exclusão da nuvem vence a edição pendente (o ativo deixa de ressuscitar)
+
+- **A cópia local desfazia a exclusão:** o merge do pull reaplica a cópia local
+  por cima da linha da nuvem para não perder alterações por subir. Um aparelho
+  que ficou com `_is_deleted = 0` (offline durante a exclusão, `delete` que
+  falhou antes, base antiga) desfazia a exclusão em todos os aparelhos no ciclo
+  seguinte, sem ninguém tocar no ativo. A exclusão não é um campo do registo: é
+  o registo inteiro — quando a nuvem diz «apagado», a cópia local perde por
+  inteiro, a pendência é largada (não há o que enviar de um registo apagado) e
+  a trilha regista `SYNC_DELETE_WINS`. Com a linha viva na nuvem, a edição
+  local continua a ganhar como antes (regra em `src/utils/pendencia.ts` →
+  `mesclarComExclusao`).
+
+### Adicionado — a exclusão de um ativo chega à nuvem e desaparece nos outros aparelhos
+
+- **O soft delete não saía do aparelho:** `_is_deleted` vive só no registo
+  local, a tabela `assets` não tinha onde o guardar e o payload não o enviava.
+  A linha da nuvem ficava intacta, o pull seguinte devolvia-a ativa e o ativo
+  «ressuscitava» no outro telemóvel — e, ao reiniciar, no próprio aparelho que o
+  apagou. A coluna `is_deleted` passa a viajar no envio em massa
+  (`buildPayload`) e na fila (`processDataSyncQueue`), e o pull traduz-a de
+  volta para `_is_deleted` (`mapCloudAssetRow`). Bloco SQL em
+  `scripts/assets-exclusao.sql` para a base actual e em
+  `docs/supabase_bootstrap.sql` para as bases novas.
+- **A linha continua na nuvem, marcada:** nada é apagado com `delete`, para o
+  restauro e a auditoria continuarem possíveis. O restauro sobe
+  `is_deleted = false`.
+- **A exclusão grava-se no disco antes de falar com a nuvem:** antes só o modo
+  interno escrevia o registo apagado (o modo Supabase só o enviava), e o
+  `saveInventory` seguinte não apaga linhas — a exclusão perdia-se ao reiniciar
+  e o envio seguinte ressuscitava o ativo.
+
+### Corrigido — o `updated_at` de `assets` passa a mudar em cada actualização
+
+- **A conferência de um aparelho não chegava aos outros:** o pull delta baixa
+  `updated_at > checkpoint`, mas a coluna só tinha `DEFAULT now()` — valia no
+  `INSERT` e nunca mais. O upsert da fila e o espelhamento actualizavam a linha
+  (`conferido`, `auditor`, `data_leitura`) sem tocar no carimbo, e a alteração
+  ficava invisível a todos os aparelhos até um pull completo. Um trigger
+  `BEFORE UPDATE` (`assets_touch_updated_at`) passa a escrever
+  `NEW.updated_at = now()` no servidor — bloco em
+  `scripts/assets-updated-at-trigger.sql` para a base actual e em
+  `docs/supabase_bootstrap.sql` para as bases novas.
+- **O cliente não escreve o carimbo:** a fila continua a não enviar
+  `updated_at` de propósito. Com o relógio do aparelho adiantado, um carimbo do
+  cliente empurrava o checkpoint do pull para o futuro e os restantes aparelhos
+  saltavam alterações até esse instante. O carimbo é do servidor; o app só lê.
+- **Linhas sem carimbo:** o backfill (`updated_at = COALESCE(created_at,
+  now())`) tira do limbo as linhas antigas, que nunca apareciam no delta.
+
+### Corrigido — o `23505` do espelhamento deixa de contar como sincronizado em silêncio
+
+- **A chave existe com outro `id`:** no isolamento por ativo de
+  `syncAssetsToCloud`, um `23505` em `(tenantid, primarykey)` era contado como
+  sucesso e o payload era deitado fora — o aparelho ficava «sincronizado» e a
+  nuvem por actualizar, com a conferência perdida sem aviso. O envio passa a
+  repetir o upsert com `onConflict: 'tenantid, primarykey'`, que actualiza a
+  linha certa (mantendo a adaptação de `id`/colunas do `sendBatch`). Só se a
+  repetição também falhar é que o ativo é dado como recusado, com motivo.
+
+### Corrigido — o timeout deixa de ser carimbado como recusa definitiva
+
+- **Timeout ≠ recusa:** quando o pedido não responde em 15 s, a fila carimbava
+  `_syncFailAt` como se a nuvem tivesse recusado o registo — o cartão ficava
+  vermelho («Falha de envio») e o operador lia «Tempo esgotado» 14 min depois
+  como recusa de dados. `isSyncTimeoutError` (`src/services/syncQueueGuards.ts`)
+  separa os dois desfechos: no timeout o registo continua «Pendente Nuvem», a
+  trilha guarda `SYNC_RECORD_EXCEPTION` com o motivo «Servidor não respondeu ao
+  envio em 15 s — nova tentativa automática» e o ciclo seguinte volta a tentar.
+- **O ciclo não insiste com o servidor mudo:** depois de um timeout o laço dos
+  registos pára (200 ativos × 15 s seriam 50 minutos presos) e o botão manual
+  continua disponível.
+
+### Corrigido — a fila actualiza a linha existente em vez de falhar com `duplicate key`
+
+- **Alvo de conflito na fila:** `processDataSyncQueue` fazia
+  `upsert(payload)` sem `onConflict`. A fila não envia `id`, o PostgREST usava a
+  chave primária `(tenantid, id)` e o `INSERT` caía sempre no índice único
+  `(tenantid, primarykey)` — um ativo que já existia na nuvem ficava em `23505
+  duplicate key` em cada ciclo e nunca recebia a conferência. O upsert passa a
+  declarar `onConflict: 'tenantid, primarykey'`, o que actualiza a linha
+  existente sem tocar no `id`; o alvo acompanha também a repetição que retira
+  uma coluna inexistente (PGRST204).
+- **`42P10` accionável:** quando a nuvem não tem o índice único em
+  `(tenantid, primarykey)`, o motivo mostra primeiro a acção a tomar («falta o
+  índice único…», ver `docs/supabase_bootstrap.sql`) em vez de repetir o pedido
+  sem explicação.
+
+### Corrigido — a mesma recusa não volta à trilha por causa do texto volátil
+
+- **A assinatura da falha é estável:** a deduplicação de
+  `SYNC_RECORD_FAIL`/`SYNC_RECORD_EXCEPTION` comparava `primarykey|detalhe` com
+  o detalhe cru. Como a mensagem pode trazer id de pedido, UUID, data/hora ou
+  `ficheiro:linha` da pilha, cada tentativa gerava uma assinatura nova e a mesma
+  recusa era registada outra vez em cada ciclo de 60 s. `assinaturaDeFalha`
+  (`src/utils/syncFalha.ts`) passa a guardar só a causa: código de erro e
+  mensagem, com o resto trocado por marcadores fixos. Linhas antigas são
+  normalizadas também na leitura, por isso continuam a contar na janela.
+
+### Corrigido — o pull e o expurgo não apagam a prova da falha de envio
+
+- **Descer a base já não apaga o carimbo:** o merge do pull remontava a linha
+  local com a versão da nuvem e só preservava `_is_synced`/`_lastUpdated`,
+  deixando cair `_syncFailAt`/`_syncFailReason` — o selo vermelho desaparecia a
+  cada pull e o registo recusado voltava a parecer apenas «na fila».
+  `preservarPendenciaLocal` passa a receber o registo local inteiro e a manter
+  o carimbo (e a data do toque) quando eles existem, sem inventar nenhum.
+- **O expurgo de 7 dias deixa de apagar as recusas do envio:** as linhas
+  `SYNC_RECORD_FAIL`/`SYNC_RECORD_EXCEPTION` são a causa registada de um ativo
+  que não sobe e passam a sobreviver ao *disk saturation guard*
+  (`src/services/auditoriaRetencao.ts`); o resto da trilha continua a ser
+  expurgado aos 7 dias.
+
+### Adicionado — a falha de envio fica visível ao lado do ativo
+
+- **O aparelho distingue «na fila» de «recusado»:** uma recusa da nuvem só
+  existia em `audit_logs` (`SYNC_RECORD_FAIL` / `SYNC_RECORD_EXCEPTION`), longe
+  do cartão. Os dois caminhos de envio — o ciclo de fundo
+  (`processDataSyncQueue`) e o envio em massa (`syncAssetsToCloud`, usado pelo
+  autosave, pelo push delta de boot e pelo Gestor) — passam a carimbar o próprio
+  registo local (`_syncFailAt`/`_syncFailReason`, `src/utils/syncFalha.ts`), no
+  máximo uma vez por janela de 10 min com o mesmo motivo. O carimbo é apagado
+  quando o envio é aceite, pelos dois caminhos (`markAssetsSynced`).
+- **Selo vermelho no cartão:** o ativo com recusa mostra «Falha de envio ·
+  {motivo} · há X» em vez do âmbar «conferência por enviar», sem esconder que
+  continua pendente.
+- **Botão global em vermelho:** o contador de sincronização mostra quantos
+  pendentes têm falha («N falhas de envio») e mantém o toque para forçar o envio.
+- **A falha aparece na aba «Ativos» da Auditoria:** as duas ações passam a ser
+  classificadas como de ativo e pintadas de vermelho, junto da conferência que
+  explica.
+
+### Corrigido — o GPS da conferência chega à ficha, ao mapa e à nuvem
+
+- **Uma ponte para o par de coordenadas:** a conferência grava `latitude`/
+  `longitude`, mas a nuvem guarda o mesmo ponto em `gps_lat`/`gps_lng` e o
+  envio não convertia — o ativo subia sem coordenada. `src/utils/assetGps.ts`
+  faz a conversão nos dois sentidos e é usada pelo envio
+  (`syncAssetsToCloud`), pelo ciclo de fundo (`processDataSyncQueue`), pelo
+  pull (`mapCloudAssetRow`) e pela gravação local
+  (`bulkInsertAssetsOfflineFirst`, que descartava `latitude` ao remontar a
+  linha). O ponto da conferência passa a aparecer na ficha e no mapa de calor.
+- **O envio não apaga a coordenada da nuvem:** o payload só leva `gps_lat`/
+  `gps_lng` quando o ativo tem leitura válida no aparelho. Sem leitura as
+  colunas ficam fora do `upsert` (e não a `null`), por isso um ativo conferido
+  sem GPS — ou com a leitura descartada — preserva o ponto que já está gravado
+  no Supabase.
+- **A captura já não perde leitura utilizável:** a conferência cortava a
+  leitura aos 3 s e só aceitava até 50 m. Passa a aceitar até ao limite de
+  descarte (150 m) e a esperar os limites do sensor (10 s nativo, 5 s web).
+- **A Trilha de Auditoria já não abre vazia:** no modo SUPABASE o ecrã lia
+  apenas `asset_logs`/`audit_logs` da nuvem, onde a conferência feita no
+  aparelho nunca é escrita. Passa a mostrar também a trilha local (Dexie),
+  unida à da nuvem e sem duplicar o mesmo evento.
+
 ### Corrigido — «CONFERIDO» passa a ter uma regra e uma escrita só
 
 - **Uma definição da regra:** os contadores (unidade, painel, conciliação), a

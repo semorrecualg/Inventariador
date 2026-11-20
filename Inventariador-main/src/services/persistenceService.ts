@@ -216,6 +216,65 @@ if (typeof document !== 'undefined') {
   });
 }
 
+/**
+ * A CONTINGÊNCIA MORRE COM O REGISTO
+ * ============================================================================
+ * `queueAssetBackupMirror` (e `syncService.backupContingencyLocal`) guardam
+ * cópias inteiras de ativos em `localStorage`, em `gbr_backup_<tenant>_<filial>`.
+ * A cópia leva o `_syncFailAt` dentro e o arranque do Inventory relê-a e
+ * reinsere o ativo («Recovery Boot»). Uma limpeza local que apagasse só o
+ * inventário deixava o registo — e o carimbo — a ressuscitar no arranque
+ * seguinte, a pintar outra vez o selo e a fila. Removido o ativo, o rascunho
+ * dele (e a escrita coalescida ainda pendente) saem na mesma operação.
+ */
+const chaveContingencia = (asset: Asset): string => {
+  const tenant = String(asset.tenantid ?? '').trim().toUpperCase();
+  const filial = String(asset.filial ?? asset._unitid ?? 'MATRIZ').trim().toUpperCase() || 'MATRIZ';
+  return `gbr_backup_${tenant}_${filial}`;
+};
+
+const removerChavesDeContingencia = (chaves: Iterable<string>): void => {
+  if (typeof localStorage === 'undefined') return;
+  for (const chave of chaves) {
+    try {
+      localStorage.removeItem(chave);
+    } catch {
+      /* modo privado/quota: nada a fazer, o inventário já saiu */
+    }
+  }
+};
+
+/** Descarta a contingência dos ativos removidos (e a escrita coalescida deles). */
+const descartarContingenciaDosRemovidos = (removidos: Asset[]): void => {
+  if (removidos.length === 0) return;
+  const ids = new Set(removidos.map(a => String(a.id ?? a.primarykey ?? '')));
+  for (const [chave, pendentes] of backupMirrorQueue) {
+    ids.forEach(id => pendentes.delete(id));
+    if (pendentes.size === 0) backupMirrorQueue.delete(chave);
+  }
+  removerChavesDeContingencia(new Set(removidos.map(chaveContingencia)));
+};
+
+/** Limpeza total: nenhum rascunho de contingência sobrevive ao inventário. */
+const limparTodaContingencia = (): void => {
+  backupMirrorQueue.clear();
+  if (backupMirrorTimer) {
+    clearTimeout(backupMirrorTimer);
+    backupMirrorTimer = null;
+  }
+  if (typeof localStorage === 'undefined') return;
+  const chaves: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const chave = localStorage.key(i);
+      if (chave && chave.startsWith('gbr_backup_')) chaves.push(chave);
+    }
+  } catch {
+    return;
+  }
+  removerChavesDeContingencia(chaves);
+};
+
 export const saveAssetIncremental = async (asset: Asset): Promise<void> => {
   try {
     await localDb.assets.put(asset);
@@ -590,16 +649,23 @@ export const clearMultipleInventories = async (companiesToClear: string[], mode:
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
         logger.warn('Falha ao decriptografar para limpeza múltipla. Limpando tudo...');
+        await sqliteService.deleteLocalAssetsByUnits(companiesToClear);
         await localforage.removeItem(keys.assets);
         return;
       }
       throw error;
     }
     const normalizedCompanies = companiesToClear.map(c => c.toUpperCase().trim());
+    const pertenceAsUnidades = (a: Asset) =>
+      normalizedCompanies.includes((a.filial || a._unitid || '').toUpperCase().trim());
     
-    const remainingAssets = assets.filter(a => 
-      !normalizedCompanies.includes((a.filial || a._unitid || '').toUpperCase().trim())
-    );
+    const remainingAssets = assets.filter(a => !pertenceAsUnidades(a));
+    const removedAssets = assets.filter(pertenceAsUnidades);
+
+    // O espelho Dexie e a contingência seguem a mesma remoção: sem isto, as
+    // linhas limpas (e o `_syncFailAt` delas) ficavam vivas no selo e na fila.
+    await sqliteService.deleteLocalAssetsByUnits(companiesToClear);
+    descartarContingenciaDosRemovidos(removedAssets);
     
     const encryptedRemaining = await encryption.encrypt(remainingAssets);
     await localforage.setItem(keys.assets, encryptedRemaining);
@@ -622,13 +688,21 @@ export const clearInventory = async (mode: DatabaseMode, companyToClear?: string
       } catch (error: unknown) {
         if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
           logger.warn('Falha ao decriptografar para limpeza parcial. Limpando tudo...');
+          await sqliteService.deleteLocalAssetsByUnits([companyToClear]);
           await localforage.removeItem(keys.assets);
           return;
         }
         throw error;
       }
       const normalizedCompany = companyToClear.toUpperCase().trim();
-      const remainingAssets = assets.filter(a => (a.filial || a._unitid || '').toUpperCase().trim() !== normalizedCompany);
+      const pertenceAUnidade = (a: Asset) => (a.filial || a._unitid || '').toUpperCase().trim() === normalizedCompany;
+      const remainingAssets = assets.filter(a => !pertenceAUnidade(a));
+      const removedAssets = assets.filter(pertenceAUnidade);
+
+      // A linha sai inteira dos espelhos (o carimbo morre com ela) e o rascunho
+      // de contingência da unidade sai junto; os outros ativos não são tocados.
+      await sqliteService.deleteLocalAssetsByUnits([companyToClear]);
+      descartarContingenciaDosRemovidos(removedAssets);
       
       const encryptedRemaining = await encryption.encrypt(remainingAssets);
       await localforage.setItem(keys.assets, encryptedRemaining);
@@ -637,10 +711,11 @@ export const clearInventory = async (mode: DatabaseMode, companyToClear?: string
         localforage.removeItem(keys.assets),
         localforage.removeItem(keys.config)
       ]);
-      // GBR v25: Limpeza Total exige expurgo físico do SQLite
-      if (mode === DatabaseMode.INTERNAL) {
-        await sqliteService.hardResetDatabase();
-      }
+      // GBR v25: Limpeza Total exige expurgo físico do SQLite — nos dois modos,
+      // porque o inventário local inteiro saiu: as linhas (e os carimbos de
+      // falha agarrados a elas) não podem sobreviver nos espelhos.
+      await sqliteService.forcePurgeAndConnect();
+      limparTodaContingencia();
     }
   } catch (error) {
     logger.error('Error clearing inventory from IndexedDB:', error);
