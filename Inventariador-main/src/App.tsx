@@ -14,7 +14,7 @@ import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } 
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
-import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao } from './utils/pendencia';
+import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
 import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
@@ -2813,7 +2813,10 @@ useEffect(() => {
             // anteriores a `_lastUpdated` ficam sem data (o selo omite a idade)
             // em vez de receberem «agora» a cada descarga, que reiniciava a
             // contagem; o carimbo só sobrevive quando já existia.
-            return local && Number(local._is_synced) === 0
+            // EXCLUSÃO VENCE: com a linha apagada na nuvem não se preserva a
+            // pendência — preservá-la reactivava o registo no estado e o envio
+            // seguinte tentava subir a cópia de um ativo apagado, em ciclo.
+            return devePreservarPendencia(cloudAsset, local)
               ? { ...cloudAsset, ...preservarPendenciaLocal(local) }
               : cloudAsset;
           });
@@ -5774,7 +5777,9 @@ useEffect(() => {
     await sqliteService.bulkInsertAssets([restoredAsset]);
 
     if (databaseMode === DatabaseMode.SUPABASE) {
-      await syncAssetsToCloud([restoredAsset], user?.tenantid || '');
+      // O restauro é a ÚNICA operação que pode dizer «vivo» sobre uma linha
+      // apagada na nuvem: a guarda «exclusão vence a subida» é dispensada aqui.
+      await syncAssetsToCloud([restoredAsset], user?.tenantid || '', undefined, { allowUndelete: true });
     }
   }, [inventory.assets, user, databaseMode]);
 

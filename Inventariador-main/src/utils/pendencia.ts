@@ -71,6 +71,20 @@ export const preservarPendenciaLocal = (
   return pendencia;
 };
 
+/**
+ * A pendência local continua a ser preservada no pull?
+ * ============================================================================
+ * Sim para o registo que este aparelho mudou e ainda não subiu — é o que evita
+ * perder trabalho de campo. Não quando a nuvem diz «apagado»: preservar a
+ * pendência reactivava o registo no estado (e o envio seguinte tentava subir
+ * uma cópia de um ativo apagado, em ciclo). A exclusão vence, aqui como em
+ * `mesclarComExclusao`.
+ */
+export const devePreservarPendencia = (
+  nuvem: { _is_deleted?: unknown },
+  local?: { _is_synced?: unknown } | null
+): boolean => Number(local?._is_synced) === 0 && !normalizeFlag(nuvem._is_deleted);
+
 /** O resultado do merge de uma linha da nuvem com a cópia local pendente. */
 export type MergeComExclusao<T> = {
   /** Linha que fica no estado (e é gravada no disco) depois do merge. */
