@@ -26,7 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lixo, carimbo no futuro, exclusão do DEMO, reposição no `sessionStorage` e
   purga no logout; `src/__tests__/localAccessReset.test.ts` fixa a limpeza
   (preserva base/ativos, apaga sessão); `loginFluxoUnico.test.tsx` prova que o
-  perfil sem contrato não deixa sessão guardada.
+  perfil sem contrato não deixa sessão guardada. A regra de arranque vive em
+  `resolveInitialScreenHistory()` e está fixada nos mesmos testes: separador
+  novo com cópia local válida → `#/contexto`, sem sessão → `#/login`.
 
 ### Corrigido — recarregar já não devolve ao login
 

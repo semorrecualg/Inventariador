@@ -84,7 +84,7 @@ import {
 } from './utils/syncCheckpoint';
 import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato, unitNamesCacheKey, readUnitNamesCache, writeUnitNamesCache } from './utils/unitContextUtils';
 import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
-import { clearPersistedSession, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
+import { clearPersistedSession, resolveInitialScreenHistory, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -594,19 +594,9 @@ const App: React.FC = () => {
 
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [history, setHistoryVal] = useState<AppScreen[]>(() => {
-    // Sessão reposta do arranque anterior abre já no CONTRATO DE TRABALHO —
-    // um separador novo não pode começar no ecrã de entrada.
-    try {
-      const guardado = sessionStorage.getItem('app_current_user');
-      if (guardado && guardado !== 'null' && isLocalSessionProfile(JSON.parse(guardado))) {
-        return [AppScreen.WORK_CONTEXT_SELECTION];
-      }
-    } catch {
-      /* segue o fluxo normal de login */
-    }
-    return [AppScreen.LOGIN];
-  });
+  // Sessão reposta do arranque anterior abre já no CONTRATO DE TRABALHO —
+  // um separador novo não pode começar no ecrã de entrada (regra testada).
+  const [history, setHistoryVal] = useState<AppScreen[]>(resolveInitialScreenHistory);
 
   const [screen, setScreenState] = useState<AppScreen>(() => history[history.length - 1] || AppScreen.LOGIN);
 
