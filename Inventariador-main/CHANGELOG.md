@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — nenhum ponto falso no mapa de calor
+
+- **O mapa aceitava mais do que leitura de campo:** o filtro era só
+  `isValidCoordinate` (que já barra `(0,0)` e coordenadas fora de faixa), mas
+  deixava entrar coordenadas de contingência (`_gps_source = 'synthetic'`:
+  âncora/admin/sandbox) e ruído de rede com precisão acima de 150 m
+  (`GPS_ACCURACY.DISCARD`). E lia apenas `latitude`/`longitude`: um ativo com o
+  ponto só na grafia da nuvem (`gps_lat`/`gps_lng`) desaparecia do mapa.
+- **Uma regra para todo o ecrã:** `utils/assetGps.mapPointOf`/`hasMapCoords`
+  (coordenada válida + proveniência ≠ `synthetic` + precisão ≤ 150 m) passam a
+  servir os pontos, o grid, a área/perímetro, o centro inicial e o contador —
+  sempre pela ponte das duas grafias.
+- **A proveniência passou a ser gravada:** a conferência escrevia a coordenada
+  sem `_gps_accuracy`/`_gps_source`/`_gps_at` e o mapeamento do lote deixava
+  cair esses campos. O sensor declara agora `_gps_source = 'sensor'` com a
+  precisão e o instante da leitura, e o lote preserva os três — sem isso a regra
+  do mapa não tinha o que consultar (e o item 9 fica com a data do GPS exata).
+- **Prova:** `src/__tests__/mapaSemPontoFalso.test.ts` (10 casos): sem GPS,
+  `(0,0)`, fora de faixa, sintético (e `' Synthetic '`), precisão 151/200/150,
+  legado sem proveniência, `gps_lat`/`gps_lng`, prioridade de `latitude`, a
+  proveniência a sobreviver ao lote e o contrato de que o ecrã não tem segunda
+  regra.
+- **Limite:** registo legado sem `_gps_source` continua a entrar no mapa se o
+  par for válido (não há como provar a origem retroativamente).
+
 ### Corrigido — o pull não regride a coordenada lida no aparelho
 
 - **O ponto voltava atrás:** o merge do pull remontava a linha do ativo a partir
