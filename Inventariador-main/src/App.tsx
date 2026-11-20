@@ -2817,7 +2817,7 @@ useEffect(() => {
             // pendência — preservá-la reactivava o registo no estado e o envio
             // seguinte tentava subir a cópia de um ativo apagado, em ciclo.
             return devePreservarPendencia(cloudAsset, local)
-              ? { ...cloudAsset, ...preservarPendenciaLocal(local) }
+              ? { ...cloudAsset, ...preservarPendenciaLocal(local, cloudAsset) }
               : cloudAsset;
           });
           const dirtyIds = Array.from(dirtyAssetsRef.current);

@@ -1,4 +1,10 @@
 import { normalizeFlag } from './normalize';
+import {
+  conferenciaLocalVenceNuvem,
+  preservarConferenciaLocal,
+  type CamposDeDecisaoDeConferencia,
+  type DecisaoDeConferencia,
+} from './conferencia';
 
 /**
  * TOQUE DESTE APARELHO = PENDENTE DE NUVEM, COM DATA
@@ -22,7 +28,7 @@ export const marcarAlteracaoLocal = (
 });
 
 /** Campos locais que o pull tem de manter quando remonta a linha da nuvem. */
-export type CamposDePendencia = {
+export type CamposDePendencia = CamposDeDecisaoDeConferencia & {
   _lastUpdated?: unknown;
   _syncFailAt?: unknown;
   _syncFailReason?: unknown;
@@ -33,7 +39,7 @@ export type PendenciaPreservada = {
   _lastUpdated?: string;
   _syncFailAt?: string;
   _syncFailReason?: string;
-};
+} & DecisaoDeConferencia;
 
 /** Só texto com conteúdo conta: campos vazios ou de outro tipo não são dados. */
 const textoUtil = (valor: unknown): string | undefined =>
@@ -54,7 +60,8 @@ const textoUtil = (valor: unknown): string | undefined =>
  * não é copiado — o selo não o saberia mostrar.
  */
 export const preservarPendenciaLocal = (
-  local?: CamposDePendencia | null
+  local?: CamposDePendencia | null,
+  nuvem?: CamposDeDecisaoDeConferencia | null
 ): PendenciaPreservada => {
   const pendencia: PendenciaPreservada = { _is_synced: 0 };
 
@@ -66,6 +73,15 @@ export const preservarPendenciaLocal = (
     pendencia._syncFailAt = falhaEm;
     const motivo = textoUtil(local?._syncFailReason);
     if (motivo) pendencia._syncFailReason = motivo;
+  }
+
+  // A CONFERÊNCIA também é uma decisão do aparelho: o pull trazia a flag da
+  // nuvem (`_conferido = 0`, sem autor nem data) e o item conferido no campo
+  // voltava a «por conferir» no ciclo seguinte. Só se repõe quando a decisão
+  // local é mais recente — a linha da nuvem manda no resto (ver
+  // `conferenciaLocalVenceNuvem`).
+  if (conferenciaLocalVenceNuvem(local, nuvem)) {
+    Object.assign(pendencia, preservarConferenciaLocal(local));
   }
 
   return pendencia;
