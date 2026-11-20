@@ -82,7 +82,7 @@ import {
   resolveDeltaMode,
   syncCheckpointKey
 } from './utils/syncCheckpoint';
-import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato } from './utils/unitContextUtils';
+import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato, unitNamesCacheKey, readUnitNamesCache, writeUnitNamesCache } from './utils/unitContextUtils';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -6556,20 +6556,56 @@ useEffect(() => {
       hasLocalBase: temFiliaisLocaisDoContrato
     });
 
+    const lerCacheDeFiliais = (escopo: string): string | null => {
+      try { return localStorage.getItem(unitNamesCacheKey(escopo)); } catch { return null; }
+    };
+    const guardarCacheDeFiliais = (escopo: string, nomes: string[]) => {
+      try { localStorage.setItem(unitNamesCacheKey(escopo), writeUnitNamesCache(escopo, nomes)); } catch { /* sem cota: a lista em memória continua válida */ }
+    };
+    const usarCacheDeFiliais = (motivo: string): boolean => {
+      const guardada = readUnitNamesCache(lerCacheDeFiliais(cloudUnitNamesScope), cloudUnitNamesScope);
+      if (!guardada) return false;
+      logger.info(`>>> [Unidades] ${motivo}: ${guardada.names.length} filial(is) servida(s) da cache de ${cloudUnitNamesScope}.`);
+      setCloudUnitNames({ scope: cloudUnitNamesScope, names: guardada.names });
+      return true;
+    };
+
     if (acao.type === 'clear') {
+      const escopoAnterior = cloudUnitNames?.scope;
       setCloudUnitNames(null);
+      if (escopoAnterior) {
+        try { localStorage.removeItem(unitNamesCacheKey(escopoAnterior)); } catch { /* nada a limpar */ }
+      }
       return;
     }
-    if (acao.type !== 'fetch') return;
+
+    if (acao.type === 'idle') {
+      // Sem rede não há a quem perguntar: a última lista conhecida DESTE escopo
+      // abre o CONTRATO em vez de uma seleção vazia. A chave e o `scope`
+      // garantem que nunca é a lista de outra conta/contrato, e a base local
+      // (quando já responde pelo contrato) continua a mandar.
+      const cacheServe = !navigator.onLine
+        && !!activeTenant
+        && databaseMode !== DatabaseMode.INTERNAL
+        && !temFiliaisLocaisDoContrato
+        && cloudUnitNames?.scope !== cloudUnitNamesScope;
+      if (cacheServe) usarCacheDeFiliais('Sem rede');
+      return;
+    }
 
     const pedido = ++cloudUnitNamesRequestRef.current;
     void fetchUnitNamesFromCloud(acao.tenant)
       .then(nomes => {
         if (cloudUnitNamesRequestRef.current !== pedido) return; // escopo anterior
         if (nomes.length > 0) {
+          guardarCacheDeFiliais(cloudUnitNamesScope, nomes);
           logger.info(`>>> [Unidades] Lista de filiais do contrato carregada da nuvem: ${nomes.length} unidade(s).`);
           setCloudUnitNames({ scope: cloudUnitNamesScope, names: nomes });
+          return;
         }
+        // Resposta sem nomes (função/paginação falharam ou contrato vazio): o
+        // que já se sabia deste escopo serve melhor do que uma seleção vazia.
+        if (cloudUnitNames?.scope !== cloudUnitNamesScope) usarCacheDeFiliais('Resposta sem filiais');
       })
       .catch(err => logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', err));
   }, [activeTenant, cloudUnitNamesScope, cloudUnitNames, databaseMode, temFiliaisLocaisDoContrato, inventory.assets.length]);
