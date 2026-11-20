@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   perfil sem contrato não deixa sessão guardada. A regra de arranque vive em
   `resolveInitialScreenHistory()` e está fixada nos mesmos testes: separador
   novo com cópia local válida → `#/contexto`, sem sessão → `#/login`.
+  `src/__tests__/bootPipeline.test.ts` fixa o `InitializeBootPipeline`: sessão
+  local mantida, fantasma da nuvem purgado e cópia persistida reposta antes da
+  decisão de arranque.
 
 ### Corrigido — recarregar já não devolve ao login
 
