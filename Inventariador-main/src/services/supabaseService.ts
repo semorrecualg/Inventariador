@@ -1799,15 +1799,44 @@ export const buildConfigCloudPayload = (
  * Muro SRE: sem tenantid não consulta nada — jamais lista filiais de outro
  * contrato.
  */
-export const fetchUnitNamesFromCloud = async (tenantid?: string | null): Promise<string[]> => {
-  if (!supabase || !navigator.onLine) return [];
+/**
+ * UM pedido ao servidor: `unit_names(p_tenantid)` devolve os nomes DISTINTOS do
+ * contrato (5 linhas, neste caso) em vez de 13 páginas de 1000 linhas do
+ * `assets?select=filial` — que existia só para extrair 5 nomes.
+ *
+ * Devolve `null` quando a função ainda não existe no projeto (migração por
+ * aplicar) ou quando o pedido falha: o chamador cai na paginação antiga, para
+ * uma base sem a migração continuar a funcionar em vez de ficar sem filiais.
+ * `[]` é resposta legítima (o contrato não tem filiais) e NÃO cai na paginação.
+ */
+const fetchUnitNamesViaRpc = async (tenant: string): Promise<string[] | null> => {
+  const client = supabase as unknown as {
+    rpc?: (fn: string, args: Record<string, unknown>) => PromiseLike<{
+      data: unknown;
+      error: { message?: string; code?: string } | null;
+    }>;
+  } | null;
+  if (!client || typeof client.rpc !== 'function') return null;
 
-  const tenant = String(tenantid || '').trim().toUpperCase();
-  if (!tenant) {
-    logger.warn('>>> [SRE ISOLAMENTO] Lista de filiais sem contrato resolvido: abortando (não lista unidades de outros contratos).');
-    return [];
+  try {
+    const { data, error } = await client.rpc('unit_names', { p_tenantid: tenant });
+    if (error) {
+      logger.warn('>>> [Unidades] Função unit_names indisponível:', error.message || error.code || 'sem detalhe');
+      return null;
+    }
+    const linhas = Array.isArray(data) ? (data as Array<string | { filial?: string | null }>) : [];
+    return normalizeUnitNames(linhas);
+  } catch (err) {
+    logger.warn('>>> [Unidades] Erro na função unit_names:', err);
+    return null;
   }
+};
 
+/**
+ * Reserva: paginação de `assets?select=filial` (uma página de 1000 por pedido).
+ * Fica para as bases onde a função `unit_names` ainda não foi criada.
+ */
+const fetchUnitNamesPaged = async (tenant: string): Promise<string[]> => {
   const PAGE = 1000;
   const nomes = new Set<string>();
 
@@ -1833,7 +1862,25 @@ export const fetchUnitNamesFromCloud = async (tenantid?: string | null): Promise
     logger.warn('>>> [Unidades] Erro ao listar filiais do contrato:', err);
   }
 
-  const filiais = normalizeUnitNames(Array.from(nomes));
+  return normalizeUnitNames(Array.from(nomes));
+};
+
+export const fetchUnitNamesFromCloud = async (tenantid?: string | null): Promise<string[]> => {
+  if (!supabase || !navigator.onLine) return [];
+
+  const tenant = String(tenantid || '').trim().toUpperCase();
+  if (!tenant) {
+    logger.warn('>>> [SRE ISOLAMENTO] Lista de filiais sem contrato resolvido: abortando (não lista unidades de outros contratos).');
+    return [];
+  }
+
+  const viaRpc = await fetchUnitNamesViaRpc(tenant);
+  if (viaRpc) {
+    logger.info(`>>> [Unidades] ${viaRpc.length} filial(is) do contrato ${tenant} numa única consulta (unit_names).`);
+    return viaRpc;
+  }
+
+  const filiais = await fetchUnitNamesPaged(tenant);
   logger.info(`>>> [Unidades] ${filiais.length} filial(is) listada(s) do contrato ${tenant} (sem baixar ativos).`);
   return filiais;
 };

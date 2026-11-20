@@ -25,6 +25,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ser recriada (ou cujo backup não possa ser gravado) fica registada, sem
   derrubar a migração.
 
+### Adicionado — diagnóstico de acesso no PAINEL COMPLETO
+
+- **O ecrã que responde ao telefone:** «DIAGNÓSTICO DE ACESSO» no PAINEL
+  COMPLETO (ADMIN/MASTER) mostra contrato, modo, contextos, **origem das
+  filiais** (base local → lista da nuvem → cache → nenhuma), âncoras GPS,
+  campanhas ativas, ativos no aparelho, hora da última consulta de nomes, último
+  erro de rede e **se a sessão está persistida** — o achado da prova de arranque
+  a frio (sem chave `sb-*`, recarregar cai no login). Um botão copia o bloco
+  inteiro para pedir suporte.
+- **Teste:** `src/__tests__/accessDiagnostics.test.ts` fixa as regras de origem
+  e a leitura da chave de sessão; `src/__tests__/accessDiagnosticPanel.test.tsx`
+  cobre o ecrã nos dois modos (SUPABASE com lista da nuvem, INTERNAL com base
+  local) e a cópia do texto.
+
+### Alterado — a lista de filiais vem numa consulta e fica em cache por escopo
+
+- **13 pedidos de 1000 linhas para 5 nomes:** a tela de seleção só precisa dos
+  nomes das filiais, mas `fetchUnitNamesFromCloud` paginava
+  `assets?select=filial` até 13 vezes num contrato de 12.636 ativos. Em campo é
+  espera e dados móveis por 5 linhas.
+- **Agora é UM pedido:** a função `public.unit_names(p_tenantid)` (em
+  `docs/supabase_bootstrap.sql`) faz o `DISTINCT` no servidor e devolve só os
+  nomes do contrato; sem contrato devolve vazio, portanto o muro SRE passa a
+  estar também do lado do servidor. A paginação antiga fica como reserva para as
+  bases onde a função ainda não foi criada (`PGRST202`) — nenhuma instalação
+  fica sem filiais por a migração não estar aplicada.
+- **Cache por escopo:** a lista passou a ser guardada em `localStorage` com a
+  chave de `unitListScope(email, tenantid)` e prazo de **1 dia**. Serve quando a
+  rede falha (ou o pedido volta sem nomes), é descartada quando o escopo é outro
+  (outra conta/contrato no mesmo aparelho) e é apagada no logout.
+- **Prova:** `src/__tests__/fetchUnitNamesFromCloud.test.ts` cobre o caminho de
+  uma consulta (sem paginar), a reserva com `PGRST202` e a função que responde
+  vazio (não volta a paginar); `src/__tests__/unitNamesCache.test.ts` cobre
+  escopo, prazo de 1 dia, lixo e carimbo no futuro.
+>>>>>>> origin/main
+
 ### Corrigido — o arranque não desce o contrato inteiro sem filial
 
 - **O que era:** o pull automático da nuvem (login, sessão restaurada,

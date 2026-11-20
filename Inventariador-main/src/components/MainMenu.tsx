@@ -40,6 +40,8 @@ import {
 import ReactMarkdown from 'react-markdown';
 import SecurityPinModal from './SecurityPinModal';
 import PreferencesPanel from './PreferencesPanel';
+import AccessDiagnosticPanel from './AccessDiagnosticPanel';
+import type { AccessDiagnostic } from '../utils/accessDiagnostics';
 
 import { sqliteService } from '../services/sqliteService';
 import { logger } from '../utils/logger';
@@ -104,6 +106,8 @@ interface MainMenuProps {
   onOpenHelp?: () => void;
   campaignsCount?: number;
   currentCampaignId?: string | null;
+  /** Conteúdo do DIAGNÓSTICO DE ACESSO (o App decide, o ecrã só mostra). */
+  accessDiagnostic?: AccessDiagnostic | null;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ 
@@ -156,9 +160,11 @@ const MainMenu: React.FC<MainMenuProps> = ({
   isGpsBypassed = false,
   onCheckIntegrity,
   showModal,
-  onOpenHelp
+  onOpenHelp,
+  accessDiagnostic
 }) => {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
   const [isAuditMenuOpen, setIsAuditMenuOpen] = useState(false);
   const [isPreferencesMenuOpen, setIsPreferencesMenuOpen] = useState(false);
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(initialDataMenuOpen);
@@ -585,6 +591,16 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </button>
 
+              {accessDiagnostic && (
+              <button onClick={() => setIsDiagnosticOpen(true)} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center mr-4 border border-amber-100"><Activity size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Diagnóstico de Acesso</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Origem das filiais, sessão e última falha de rede</p>
+                </div>
+              </button>
+              )}
+
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.UNIT_CONFIGURATOR); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
                 <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Building2 size={16} /></div>
                 <div className="flex-1">
@@ -699,6 +715,13 @@ const MainMenu: React.FC<MainMenuProps> = ({
             <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">Security Protocol</div>
           </div>
         </div>
+      )}
+
+      {isDiagnosticOpen && accessDiagnostic && (
+        <AccessDiagnosticPanel
+          diagnostic={accessDiagnostic}
+          onClose={() => setIsDiagnosticOpen(false)}
+        />
       )}
 
       {isAuditMenuOpen && (

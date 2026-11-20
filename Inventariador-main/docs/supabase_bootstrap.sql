@@ -539,6 +539,32 @@ CREATE POLICY p_all ON public."asset-photos" FOR ALL TO anon, authenticated USIN
 COMMIT;
 
 -- ============================================================================
+-- FUNÇÃO unit_names(p_tenantid) — nomes DISTINTOS do contrato numa consulta
+-- ----------------------------------------------------------------------------
+-- A tela de seleção de filial só precisa dos NOMES. Buscá-los paginando
+-- `assets?select=filial` custa 13 pedidos de 1000 linhas num contrato de 12.636
+-- ativos, só para extrair 5 nomes. A função faz o DISTINCT no servidor e devolve
+-- 5 linhas numa consulta. Sem contrato, devolve vazio: o muro fica no servidor.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.unit_names(p_tenantid text)
+RETURNS SETOF text
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT DISTINCT upper(btrim(a.filial))
+  FROM public.assets a
+  WHERE a.tenantid = upper(btrim(coalesce(p_tenantid, '')))
+    AND btrim(coalesce(a.filial, '')) <> ''
+  ORDER BY 1;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.unit_names(text) TO anon, authenticated;
+
+-- Recarrega o cache de esquema do PostgREST: sem isto o RPC pode responder
+-- 404 (PGRST202) até ao próximo reload.
+NOTIFY pgrst, 'reload schema';
+
+-- ============================================================================
 -- VERIFICAÇÃO (opcional — rode depois):
 --   SELECT table_name FROM information_schema.tables
 --   WHERE table_schema = 'public' ORDER BY table_name;
