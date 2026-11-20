@@ -82,7 +82,7 @@ import {
   resolveDeltaMode,
   syncCheckpointKey
 } from './utils/syncCheckpoint';
-import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato } from './utils/unitContextUtils';
+import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato } from './utils/unitContextUtils';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -2657,7 +2657,27 @@ useEffect(() => {
     }
     
     logger.info(`>>> [Sync] Iniciando pull da nuvem. isGlobalAdmin: ${isGlobalAdmin}, rawTenantid: ${JSON.stringify(rawTenantid)}, effectiveTenantid: ${tenantid || 'Global'}`);
-    
+
+    // NUNCA descer o contrato inteiro num pull automático. Sem filial pedida,
+    // sem filial no perfil e sem última escolha válida, o pull fica BLOCKED e a
+    // filial é escolhida no CONTRATO DE TRABALHO — antes, o login/sessão
+    // restaurada chamava isto com a filial indefinida e baixava as 12.636
+    // linhas do contrato (congelava o ecrã e deixava a base local a «ter» o
+    // contrato, o estado que fechava o CONTRATO DE TRABALHO). Só a acção
+    // explícita do dono («Sincronizar tudo») pode pedir o contrato inteiro.
+    const escopoPull = resolveSyncPullScope({
+      tenantid: rawTenantid,
+      explicitUnitId,
+      explicitForceFull,
+      filialDoPerfil: user?.filial,
+      lastCtx: readLastWorkContext()
+    });
+    if (escopoPull.type === 'blocked') {
+      logger.warn('>>> [Sync] Contrato sem filial resolvida: o contrato inteiro NÃO é baixado. A filial é escolhida no CONTRATO DE TRABALHO.');
+      return;
+    }
+    const unitDoPull = escopoPull.type === 'unit' ? escopoPull.unit : explicitUnitId;
+
     setIsSyncing(true);
     setIsCloudUpdatePending(false); // Reset pending flag immediately
     try {
@@ -2682,7 +2702,7 @@ useEffect(() => {
       // limpa o checkpoint e refaz o pull completo. Muro SRE: o checkpoint é
       // sempre chaveado por [tenant|filial], nunca global.
       const firstTenant = Array.isArray(tenantid) ? tenantid[0] : tenantid;
-      const ckKey = syncCheckpointKey(firstTenant, explicitUnitId);
+      const ckKey = syncCheckpointKey(firstTenant, unitDoPull);
       if (explicitForceFull) clearSyncCheckpoint(ckKey);
       const inMemoryCount = inventoryRef.current?.assets?.length ?? 0;
       const hasLocalData = hasLocalBaseData(inMemoryCount);
@@ -2705,7 +2725,7 @@ useEffect(() => {
       // (explicitForceFull) ignora o dedup de propósito.
       const settledCount = inventoryRef.current?.assets?.length ?? 0;
       const settledHasData = hasLocalBaseData(settledCount);
-      if (!explicitForceFull && shouldSkipPull(wasPullCompleted(firstTenant, explicitUnitId), settledHasData)) {
+      if (!explicitForceFull && shouldSkipPull(wasPullCompleted(firstTenant, unitDoPull), settledHasData)) {
         logger.info(`>>> [Sync] Pull de ${ckKey} já concluído nesta sessão. Pulando sincronização duplicada (anti-loop SYNC_PULL).`);
         return;
       }
@@ -2715,13 +2735,13 @@ useEffect(() => {
       // `TENANT|FILIAL` e não achava — caía em pull completo e a base inteira
       // descia outra vez.
       const { since, incremental } = resolveDeltaMode(
-        hasLocalData ? readCheckpointForDelta(firstTenant, explicitUnitId) : null,
+        hasLocalData ? readCheckpointForDelta(firstTenant, unitDoPull) : null,
         !!explicitForceFull
       );
       if (incremental) {
         logger.info(`>>> [Sync] Delta ativo para ${ckKey} (checkpoint ${String(since)}). Baixando apenas o que mudou desde o último pull (Etapa 5b).`);
       }
-      const cloudData = await fetchFullInventory(tenantid, explicitUnitId, undefined, undefined, {
+      const cloudData = await fetchFullInventory(tenantid, unitDoPull, undefined, undefined, {
         since,
         trackCheckpoint: true
       });
@@ -2951,7 +2971,7 @@ useEffect(() => {
             tenantid: user?.tenantid || readSessionTenantId() || ''
           });
         }
-        markPullCompleted(firstTenant, explicitUnitId);
+        markPullCompleted(firstTenant, unitDoPull);
         setLastSyncTime(syncTimestamp);
         setSyncError(null);
         if (cloudData.assets && cloudData.assets.length > 0) {
