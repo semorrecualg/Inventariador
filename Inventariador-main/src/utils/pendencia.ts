@@ -1,3 +1,5 @@
+import { normalizeFlag } from './normalize';
+
 /**
  * TOQUE DESTE APARELHO = PENDENTE DE NUVEM, COM DATA
  * ============================================================================
@@ -67,4 +69,40 @@ export const preservarPendenciaLocal = (
   }
 
   return pendencia;
+};
+
+/** O resultado do merge de uma linha da nuvem com a cópia local pendente. */
+export type MergeComExclusao<T> = {
+  /** Linha que fica no estado (e é gravada no disco) depois do merge. */
+  registo: T;
+  /** A nuvem tinha o registo apagado e a cópia local foi descartada. */
+  exclusaoVenceu: boolean;
+};
+
+/**
+ * EXCLUSÃO VENCE A EDIÇÃO PENDENTE
+ * ============================================================================
+ * O pull reaplica a cópia local por cima da linha da nuvem para não perder o que
+ * este aparelho mudou e ainda não subiu. Mas a exclusão **não é um campo do
+ * registo**: é o registo inteiro. Quando a nuvem diz «apagado» e o aparelho tem
+ * uma cópia pendente com `_is_deleted = 0` — ficou offline durante a exclusão, o
+ * `delete` falhou antes de sair, ou o registo veio de uma base antiga —,
+ * reaplicar essa cópia desfazia a exclusão em TODOS os aparelhos no ciclo
+ * seguinte: o ativo ressuscitava sozinho, sem ninguém o tocar.
+ *
+ * Aqui a cópia local perde por inteiro (não entra nenhum campo dela) e o
+ * chamador larga a pendência — não há alteração a enviar de um registo apagado.
+ * O contrário continua igual: com a linha viva na nuvem, a edição local ganha
+ * (é o comportamento que evita perder o trabalho de campo).
+ */
+export const mesclarComExclusao = <T extends { _is_deleted?: unknown }>(
+  nuvem: T,
+  local: T
+): MergeComExclusao<T> => {
+  // `normalizeFlag` aceita as três grafias da flag (`true`, `1`, `'1'`); sem a
+  // coluna na nuvem (schema antigo) a linha não conta como apagada.
+  if (normalizeFlag(nuvem._is_deleted)) {
+    return { registo: nuvem, exclusaoVenceu: true };
+  }
+  return { registo: { ...nuvem, ...local }, exclusaoVenceu: false };
 };
