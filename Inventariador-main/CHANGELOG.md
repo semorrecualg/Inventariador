@@ -26,6 +26,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inalcançáveis de `initialOpenPanel` para `'DATA'` e `'AUDIT'`. O caminho
   `initialDataMenuOpen` (admin com base vazia → Gestão e Manutenção) mantém-se.
 
+### Corrigido — uma só linha de auditoria por alteração em `public.assets`
+
+- **Duas linhas por `UPDATE`:** dois triggers na mesma tabela chamavam duas
+  funções de auditoria (`log_asset_changes` e `trg_audit_asset_changes`), e cada
+  alteração entrava duas vezes em `public.asset_logs` — a Auditoria mostrava
+  pares idênticos e qualquer contagem pela trilha valia o dobro.
+- **Um só escritor no servidor:** `scripts/assets-auditoria-unica.sql` remove os
+  triggers que chamam `log_asset_changes` (por função, porque o nome do trigger
+  varia por base) e deixa a função como pass-through (`RETURN OLD` no `DELETE`).
+  Fica apenas `trg_audit_asset_changes`, que cobre CREATE/UPDATE/DELETE, usa o
+  e-mail do JWT e grava `timestamp`. A trilha de campo escrita pelo app
+  (`auditService.logAssetChange`) não é tocada.
+- **Sem risco de ficar sem trilha:** se houver duplicados para remover e a função
+  canónica não existir, o script aborta em vez de apagar o segundo escritor.
+  Idempotente, com bloco de verificação por `BEGIN … ROLLBACK` no cabeçalho.
+- **Prova:** `src/__tests__/assetsAuditoriaUnica.test.ts` fixa o contrato (um só
+  escritor, remoção por função, trava antes do `DROP`, pass-through sem
+  `asset_logs`) e garante que o bootstrap não reintroduz o segundo trigger.
+
 ### Corrigido — o índice da chave de origem tem de servir de alvo ao `ON CONFLICT`
 
 - **Uma base criada pelo bootstrap recusava o upsert da fila:** o
