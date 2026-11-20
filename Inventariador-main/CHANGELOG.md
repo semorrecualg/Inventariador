@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] — 2026-11-20
+
 ### Alterado — o pull grava a base uma vez, não três
 
 - **Três passagens para o mesmo pull:** o download gravava as 12.636 linhas nos
