@@ -1338,15 +1338,24 @@ export class SqliteService {
    * o fazia). Uma transação e três `modify` por índice resolvem N ativos, em vez
    * de N transações abertas pelo cartão.
    */
-  public async markAssetsSynced(primarykeys: string[]): Promise<void> {
+  public async markAssetsSynced(
+    primarykeys: string[],
+    extra?: Record<string, unknown>
+  ): Promise<void> {
     const keys = Array.from(new Set(primarykeys.map(k => String(k || '').trim()).filter(Boolean)));
     if (keys.length === 0) return;
-    /** Enviado e aceite: a pendência E o carimbo de recusa desaparecem juntos. */
+    /**
+     * Enviado e aceite: a pendência E o carimbo de recusa desaparecem juntos —
+     * é este o único ponto que apaga o carimbo no sucesso (ver
+     * `utils/syncFalha.marcarSincronizadoLocal`). `extra` cobre os campos que o
+     * sucesso traz consigo (o `_photoUrl` da fila de fotos).
+     */
     const marcar = (rec: unknown): void => {
       const registo = rec as Record<string, unknown>;
       registo._is_synced = 1;
       delete registo._syncFailAt;
       delete registo._syncFailReason;
+      if (extra) Object.assign(registo, extra);
     };
     await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
       await db.ativos.where('primarykey').anyOf(keys).modify(marcar);
@@ -1427,9 +1436,19 @@ export class SqliteService {
 
     await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
       for (const [primarykey, carimbo] of carimbos) {
-        await db.ativos.where('primarykey').equals(primarykey).modify(carimbo);
-        await db.assets.where('primarykey').equals(primarykey).modify(carimbo);
-        await db.local_assets.where('primarykey').equals(primarykey).modify(carimbo);
+        for (const tabela of [db.ativos, db.assets, db.local_assets]) {
+          // CORRIDA SUCESSO × FALHA: a tentativa que falhou pode chegar aqui
+          // depois de outro caminho (envio em massa, fila, foto, pull) já ter
+          // marcado o registo igual à nuvem. Carimbar essa linha deixava-a
+          // `_is_synced = 1` com um selo vermelho — e o carimbo antigo voltava
+          // a aparecer no toque seguinte. Registo já sincronizado não recebe
+          // carimbo: a recusa era de uma cópia que já não é a local.
+          await tabela
+            .where('primarykey')
+            .equals(primarykey)
+            .filter(rec => Number((rec as unknown as Record<string, unknown>)._is_synced) !== 1)
+            .modify(carimbo);
+        }
       }
     });
     return carimbos.size;

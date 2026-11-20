@@ -17,6 +17,7 @@ import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
 import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
+import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
@@ -5185,7 +5186,7 @@ useEffect(() => {
         // recuo e volta a avisar. (Sem ids aceitos nada foi enviado: offline.)
         cloudBlockedBackoffRef.current = 0;
         resetCloudPushBlockedNotice();
-        const mark = (a: Asset) => (syncedSet.has(String(a.id)) ? { ...a, _is_synced: 1 } : a);
+        const mark = (a: Asset) => (syncedSet.has(String(a.id)) ? marcarSincronizadoLocal(a) : a);
         // Patch local do estado: sem setRefreshVersion, sem reler a base inteira.
         setInventory(prev => ({ ...prev, assets: prev.assets.map(mark) }));
         setSqliteUnitAssets(prev => prev.map(mark));

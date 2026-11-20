@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o carimbo da falha sai sempre que o registo fica sincronizado
+
+- **Três escritas de sucesso, uma só limpeza:** `markAssetsSynced` (envio em
+  massa e fila de fundo) apagava `_syncFailAt`/`_syncFailReason`; a fila de
+  **fotos** marcava `_is_synced = 1` com um `.modify` próprio e deixava o
+  carimbo agarrado, e o **estado visual** do App copiava o carimbo para a linha
+  «sincronizada». A limpeza passa a ser uma regra só
+  (`utils/syncFalha.marcarSincronizadoLocal`), e a foto usa o mesmo ponto
+  (`markAssetsSynced` com `_photoUrl`).
+- **A recusa atrasada já não carimba um registo igual à nuvem:** a tentativa que
+  falhou podia chegar depois de outro caminho (envio em massa, fila, foto,
+  pull) já ter marcado o ativo como sincronizado — ficava `_is_synced = 1` com
+  selo vermelho, e a recusa antiga reaparecia no toque seguinte. `markAssetsFailed`
+  passa a ignorar registos já sincronizados; a falha legítima de um pendente
+  continua a ser carimbada.
+- **Prova:** `src/__tests__/carimboLimpoNoSucesso.test.ts` (7 casos) cobre o
+  patch puro, a fila/envio em massa, a foto, o pull com `markSynced`, a corrida
+  nas duas ordens (falha→sucesso e sucesso→falha atrasada) e a contra-prova de
+  que uma recusa real não é silenciada.
+- **Limite:** bases antigas podem ainda guardar carimbos legados em linhas já
+  sincronizadas; o selo continua a escondê-los (`syncFailureInfo`) e a próxima
+  escrita de sucesso limpa-os.
+
 ### Corrigido — o carimbo da falha morre com o registo na limpeza local
 
 - **O selo contava ativos que já não existiam:** a «Limpeza Total» de uma unidade
