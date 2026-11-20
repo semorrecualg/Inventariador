@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o pull não desfaz a conferência feita no aparelho
+
+- **A marca voltava a «por conferir»:** o merge do pull remontava a linha da
+  nuvem e deixava cair a decisão de conferência da cópia local. Bastava a linha
+  da nuvem chegar com `_conferido = 0` (ou sem `data_leitura`) para o item
+  conferido no campo voltar a «por conferir» no ciclo seguinte, sem que o
+  operador tivesse tocado nele outra vez.
+- **Decidida por tempo, nunca por omissão:** `preservarPendenciaLocal` passa a
+  receber também a linha da nuvem e, quando a decisão local é mais recente que a
+  dela, repõe os campos da decisão (`_conferido`, `_auditor`, `_dataLeitura`,
+  `AUDITOR_STATUS_CONFERENCIA` e o `status` textual). A comparação é
+  `_dataLeitura` com `_dataLeitura` — e o toque (`_lastUpdated`) quando a
+  decisão foi desmarcar, que não tem data de leitura própria. Uma conferência
+  da nuvem posterior ao toque continua a ganhar, e sem data de nenhum dos lados
+  a linha da nuvem fica.
+- **Prova:** `src/__tests__/pullPreservaConferencia.test.ts` (9 casos) cobre o
+  desmarcar que não regressa, a marca com autor e data, a nuvem posterior, a
+  igualdade de conferência com leitura mais recente e a ausência de datas.
+- **Limite:** um aparelho com edição pendente e uma conferência alheia mais
+  antiga continua a fazer valer a sua decisão; o conflito por campo (item 24b da
+  agenda) é o que resolve dois auditores no mesmo ativo.
+
 ### Alterado — Dados e Auditoria passam a viver no Painel Completo
 
 - **Um único hub de governança:** a tool grid da Unidade Operacional fica com
