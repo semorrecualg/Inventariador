@@ -119,12 +119,46 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     expect(result.processedCount).toBe(0);
 
     const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
-    // Continua pendente: o pull seguinte aplica a exclusão ao registo local.
-    expect(Number(local?._is_synced)).toBe(0);
+    // A exclusão é aplicada já ao registo local: sai da fila e das listas.
+    expect(Number(local?._is_deleted)).toBe(1);
+    expect(Number(local?._is_synced)).toBe(1);
 
     const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_DELETE_WINS').toArray();
     expect(logs).toHaveLength(1);
     expect(String(logs[0].details)).toContain('prevalece');
+  });
+
+  // O registo apagado deixava de estar pendente: sem isto a fila voltava a
+  // tentá-lo — e a gravar a decisão — a cada ciclo de 60 s.
+  it('o ciclo seguinte já não toca no registo apagado na nuvem', async () => {
+    await db.local_assets.put(asset() as never);
+    fetchCloudDeletedKeys.mockResolvedValue(new Set(['CICOPAL|01010100000005000001']));
+
+    await processDataSyncQueue();
+    await processDataSyncQueue();
+
+    expect(upsert).not.toHaveBeenCalled();
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_DELETE_WINS').toArray();
+    expect(logs).toHaveLength(1);
+    expect(await db.local_assets.where('_is_synced').equals(0).count()).toBe(0);
+  });
+
+  // Defesa em profundidade: uma gravação de estado atrasada pode repor a cópia
+  // como pendente. A trilha não pode ganhar uma linha por ciclo por causa disso.
+  it('registo reposto como pendente não repete a trilha dentro da janela de 10 min', async () => {
+    await db.local_assets.put(asset() as never);
+    fetchCloudDeletedKeys.mockResolvedValue(new Set(['CICOPAL|01010100000005000001']));
+    await processDataSyncQueue();
+
+    await db.local_assets
+      .where('primarykey')
+      .equals('01010100000005000001')
+      .modify({ _is_deleted: 0, _is_synced: 0 });
+    await processDataSyncQueue();
+
+    expect(upsert).not.toHaveBeenCalled();
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_DELETE_WINS').toArray();
+    expect(logs).toHaveLength(1);
   });
 
   // EXCLUSÃO: o registo apagado no aparelho tem de subir com a flag. Sem ela a
