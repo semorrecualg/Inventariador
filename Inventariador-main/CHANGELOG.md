@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — a lista de filiais vem numa consulta e fica em cache por escopo
+
+- **13 pedidos de 1000 linhas para 5 nomes:** a tela de seleção só precisa dos
+  nomes das filiais, mas `fetchUnitNamesFromCloud` paginava
+  `assets?select=filial` até 13 vezes num contrato de 12.636 ativos. Em campo é
+  espera e dados móveis por 5 linhas.
+- **Agora é UM pedido:** a função `public.unit_names(p_tenantid)` (em
+  `docs/supabase_bootstrap.sql`) faz o `DISTINCT` no servidor e devolve só os
+  nomes do contrato; sem contrato devolve vazio, portanto o muro SRE passa a
+  estar também do lado do servidor. A paginação antiga fica como reserva para as
+  bases onde a função ainda não foi criada (`PGRST202`) — nenhuma instalação
+  fica sem filiais por a migração não estar aplicada.
+- **Cache por escopo:** a lista passou a ser guardada em `localStorage` com a
+  chave de `unitListScope(email, tenantid)` e prazo de **1 dia**. Serve quando a
+  rede falha (ou o pedido volta sem nomes), é descartada quando o escopo é outro
+  (outra conta/contrato no mesmo aparelho) e é apagada no logout.
+- **Prova:** `src/__tests__/fetchUnitNamesFromCloud.test.ts` cobre o caminho de
+  uma consulta (sem paginar), a reserva com `PGRST202` e a função que responde
+  vazio (não volta a paginar); `src/__tests__/unitNamesCache.test.ts` cobre
+  escopo, prazo de 1 dia, lixo e carimbo no futuro.
+
 ### Corrigido — o arranque não desce o contrato inteiro sem filial
 
 - **O que era:** o pull automático da nuvem (login, sessão restaurada,
