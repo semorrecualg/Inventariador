@@ -5,7 +5,7 @@ import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { carimbarFalhaEnvio } from '../utils/syncFalha';
-import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
+import { isConferido, normalizarMarcaConferencia, type MarcaDeConferencia } from '../utils/conferencia';
 import { assetGpsPair } from '../utils/assetGps';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
@@ -355,6 +355,9 @@ export const db = new InventoryDexieDatabase();
 
 /** Marcador da migração única de `tenantid` para UPPER (ver migrateLegacyTenantids). */
 export const TENANT_CASE_MARKER = 'f0_tenant_case_canonical_v1';
+
+/** Marcador da migração única das grafias de `_conferido` (ver migrateLegacyConferencia). */
+export const CONFERIDO_MARKER = 'f0_conferido_canonical_v1';
 
 /**
  * Restore/importação podem trazer `tenantid` fora do UPPER: o marcador deixa de
@@ -1484,6 +1487,66 @@ export class SqliteService {
       await db.assets.update([tenantKey, key], changes);
       await db.local_assets.update([tenantKey, key], changes);
     });
+  }
+
+  /**
+   * MIGRAÇÃO ÚNICA DAS GRAFIAS DE `_conferido` — idempotente
+   * ============================================================================
+   * Percorre os três espelhos uma vez por base (marcador em `SYSTEM_CONTEXT`) e
+   * deixa a prova de conferência na grafia canônica: `_conferido = 1` + data da
+   * leitura quando o registo já tem uma data legível (ver
+   * `utils/conferencia.normalizarMarcaConferencia`). Não inventa datas nem
+   * desmarca ninguém.
+   *
+   * Devolve quantos REGISTOS (por `primarykey`, não por linha dos espelhos)
+   * foram convertidos e quantas linhas mudaram, para o relatório de arranque.
+   * Correr duas vezes dá o mesmo resultado: a segunda passagem encontra o
+   * marcador e devolve `jaCorrida: true` com zero conversões.
+   */
+  public async migrateLegacyConferencia(): Promise<{
+    convertidos: number;
+    linhas: number;
+    jaCorrida: boolean;
+  }> {
+    try {
+      if (await db.SYSTEM_CONTEXT.get(CONFERIDO_MARKER)) {
+        return { convertidos: 0, linhas: 0, jaCorrida: true };
+      }
+    } catch {
+      return { convertidos: 0, linhas: 0, jaCorrida: true };
+    }
+
+    const convertidos = new Set<string>();
+    let linhas = 0;
+    await db.transaction('rw', db.local_assets, db.ativos, db.assets, db.SYSTEM_CONTEXT, async () => {
+      const tabelas: Array<'local_assets' | 'ativos' | 'assets'> = ['local_assets', 'ativos', 'assets'];
+      for (const tabela of tabelas) {
+        const rows = (await db[tabela].toArray()) as unknown as Array<Record<string, unknown>>;
+        for (const row of rows) {
+          const { converter, patch } = normalizarMarcaConferencia(row);
+          if (!converter) continue;
+          const chave: [string, string] = [
+            String(row.tenantid ?? ''),
+            String(row.primarykey ?? row.id ?? '')
+          ];
+          await db[tabela].update(chave, patch as Partial<DexieAsset>);
+          convertidos.add(String(row.primarykey ?? row.id ?? ''));
+          linhas += 1;
+        }
+      }
+      await db.SYSTEM_CONTEXT.put({
+        key: CONFERIDO_MARKER,
+        value: '1',
+        updated_at: new Date().toISOString()
+      });
+    });
+
+    if (linhas > 0) {
+      logger.warn(`[SRE] conferido legado: ${convertidos.size} registo(s) normalizado(s) em ${linhas} linha(s) dos espelhos.`);
+    } else {
+      logger.info('[SRE] conferido legado: nenhuma grafia antiga a converter.');
+    }
+    return { convertidos: convertidos.size, linhas, jaCorrida: false };
   }
 
   public async checkIntegrity(): Promise<boolean> {

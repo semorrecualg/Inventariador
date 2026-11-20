@@ -223,3 +223,51 @@ export const conferenciaLocalVenceNuvem = (
   // linha da nuvem ainda não diz — uma decisão igual não tem nada a repor.
   return decidiuConferido(local) !== decidiuConferido(nuvem);
 };
+
+/**
+ * MIGRAÇÃO ÚNICA DAS GRAFIAS DE `_conferido`
+ * ============================================================================
+ * As bases antigas guardam a marca em todas as grafias que a regra aceita:
+ * `true` (Dexie/app), `1` (carga/espelho), `'true'`/`'1'` (JSON importado) e
+ * ainda há registos cuja única prova é a coluna de auditoria
+ * (`AUDITOR_STATUS_CONFERENCIA = 'SIM'`). `isConferido` lê todas, mas o
+ * registo continua a ser gravado como veio — e a decisão por TEMPO do pull só
+ * compara datas quando as há.
+ *
+ * Esta passagem deixa a marca na grafia canônica (`1`, número) e garante a
+ * data da leitura quando o registo já tem uma data legível — `_dataLeitura`
+ * primeiro, `_lastUpdated` como contingência. NUNCA inventa «agora»: uma
+ * conferência sem data não pode parecer mais recente do que a da nuvem e
+ * ganhar o merge por fabrico (ver `conferenciaLocalVenceNuvem`).
+ *
+ * Desmarcados (`_conferido = 0`/`false`) ficam como estão: a migração só
+ * normaliza a prova de conferência, não decide conferência.
+ */
+export interface NormalizacaoDeConferido {
+  /** O registo tem prova de conferência e ainda não está na grafia canônica. */
+  converter: boolean;
+  /** Patch a aplicar ao registo (vazio quando não há nada a fazer). */
+  patch: { _conferido?: 1; _dataLeitura?: string };
+}
+
+/** Data em texto ISO legível, ou `null` quando o campo não traz data. */
+const dataLegivel = (valor: unknown): string | null => {
+  const texto = String(valor ?? '').trim();
+  if (!texto) return null;
+  return Number.isFinite(Date.parse(texto)) ? texto : null;
+};
+
+export const normalizarMarcaConferencia = (
+  asset?: CamposDeDecisaoDeConferencia | null
+): NormalizacaoDeConferido => {
+  if (!asset || !isConferido(asset)) return { converter: false, patch: {} };
+
+  const patch: NormalizacaoDeConferido['patch'] = {};
+  if (asset._conferido !== 1) patch._conferido = 1;
+  if (!dataLegivel(asset._dataLeitura)) {
+    const data = dataLegivel(asset._lastUpdated);
+    if (data) patch._dataLeitura = data;
+  }
+
+  return { converter: Object.keys(patch).length > 0, patch };
+};

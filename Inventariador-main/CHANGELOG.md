@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — as grafias antigas de «conferido» ficam numa só
+
+- **A marca continuava gravada como veio:** `isConferido` já aceitava tudo —
+  `true`/`false` (Dexie e app), `1`/`0` (carga e espelho SQLite), `'true'`/`'1'`
+  (JSON importado) e a coluna de auditoria `AUDITOR_STATUS_CONFERENCIA = 'SIM'`
+  —, mas cada gravado guardava a sua grafia. Como a decisão por tempo do pull só
+  compara datas quando elas existem, a conferência antiga sem data nunca podia
+  valer contra a nuvem.
+- **Migração única e idempotente:** `utils/conferencia.normalizarMarcaConferencia`
+  decide o patch (é regra, não varredura) e
+  `sqliteService.migrateLegacyConferencia()` aplica-o aos três espelhos numa só
+  transação, uma vez por base (marcador `f0_conferido_canonical_v1` em
+  `SYSTEM_CONTEXT`), no arranque logo a seguir à migração de casing. A marca
+  passa a `1` (número) e a data da leitura é preenchida a partir de
+  `_dataLeitura` ou, na falta dela, de `_lastUpdated`.
+- **Não inventa datas nem desmarca ninguém:** a conferência sem data fica só com
+  a flag normalizada — uma data fabricada («agora») faria a decisão local ganhar
+  o merge por fabrico. Registos sem prova de conferência ficam como estão.
+- **Relatório:** o arranque registra quantos registos (por `primarykey`) e
+  quantas linhas dos espelhos foram convertidos.
+- **Prova:** `src/__tests__/migracaoConferido.test.ts` (9 casos) — as quatro
+  grafias e a coluna de auditoria na mesma base, data preservada/derivada/sem
+  invenção, desmarcado intacto nos três espelhos, segunda passagem com
+  `jaCorrida: true` e o mesmo estado, e o contrato de que o boot chama a
+  passagem. Com a regra a deixar passar todos os registos, 5 casos falham.
+
 ### Corrigido — nenhum ponto falso no mapa de calor
 
 - **O mapa aceitava mais do que leitura de campo:** o filtro era só
