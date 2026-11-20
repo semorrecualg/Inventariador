@@ -835,7 +835,7 @@ useEffect(() => {
   const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
   const [startWithDataMenu, setStartWithDataMenu] = useState(false);
   // Painel do MainMenu a abrir ao chegar — acionado pela tool grid da Unidade Operacional.
-  const [menuPanelToOpen, setMenuPanelToOpen] = useState<'PREFERENCES' | 'DATA' | 'ADMIN' | 'AUDIT' | null>(null);
+  const [menuPanelToOpen, setMenuPanelToOpen] = useState<'PREFERENCES' | 'ADMIN' | null>(null);
   const [consultationFilters, setConsultationFilters] = useState<SearchFilters>(() => {
     try {
       const saved = localStorage.getItem('app_consultation_filters');

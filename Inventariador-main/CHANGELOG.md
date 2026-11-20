@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — Dados e Auditoria passam a viver no Painel Completo
+
+- **Um único hub de governança:** a tool grid da Unidade Operacional fica com
+  **AJUSTES · PAINEL**; os botões DADOS e AUDITORIA saíram dela. O **Painel
+  Completo** (`isAdminMenuOpen`) passa a abrir os painéis **Gestão e Manutenção**
+  (`isDataMenuOpen`, ADMIN) e **Auditoria e Concordância** (`isAuditMenuOpen`,
+  TRILHA B) como camadas sobre o próprio hub — o «Voltar» de cada um devolve ao
+  Painel Completo, sem passar pelo menu.
+- **Acesso ao auditor preservado:** o botão PAINEL aparece para ADMIN **e** AUDITOR,
+  para que a TRILHA B continue a chegar à trilha de auditoria; os itens
+  administrativos do hub ficam ocultos para quem não é administrador.
+- **Contrato fixado por teste:** `src/__tests__/painelCompletoHub.test.tsx` monta a
+  grelha (ADMIN e AUDITOR) e prova que só existem AJUSTES e PAINEL, e que o Painel
+  Completo abre Gestão e Manutenção e Auditoria (com o «Voltar» a devolver ao hub).
+- **Resíduos removidos:** `NavigationParams.openPanel` e o estado do App ficam
+  restritos a `'PREFERENCES' | 'ADMIN'`, e saem do efeito do `MainMenu` os ramos
+  inalcançáveis de `initialOpenPanel` para `'DATA'` e `'AUDIT'`. O caminho
+  `initialDataMenuOpen` (admin com base vazia → Gestão e Manutenção) mantém-se.
+
 ### Corrigido — o índice da chave de origem tem de servir de alvo ao `ON CONFLICT`
 
 - **Uma base criada pelo bootstrap recusava o upsert da fila:** o

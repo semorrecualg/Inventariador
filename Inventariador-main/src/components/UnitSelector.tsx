@@ -14,9 +14,7 @@ import {
   Calendar,
   ChevronRight,
   SlidersHorizontal,
-  DatabaseZap,
-  Settings,
-  ListChecks
+  Settings
 } from 'lucide-react';
 import BackButton from './BackButton';
 import { AppScreen, DatabaseMode, NavigationParams, UnitConfig } from '../types';
@@ -549,7 +547,8 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
           />
         </div>
 
-        {/* TOOL GRID — transferida do MainMenu (fig. 1): AJUSTES · DADOS · PAINEL · AUDITORIA */}
+        {/* TOOL GRID — transferida do MainMenu (fig. 1): AJUSTES · PAINEL.
+            DADOS e AUDITORIA passaram a viver dentro do PAINEL COMPLETO. */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-1.5 md:space-x-4 font-sans">
             <button 
@@ -563,42 +562,16 @@ const UnitSelector: React.FC<UnitSelectorProps> = ({
               <span className="text-[8px] md:text-[9px] font-bold text-ink-muted uppercase tracking-widest">Ajustes</span>
             </button>
 
-            {isAdmin && (
-              <button 
-                onClick={() => onNavigate?.(AppScreen.MAIN_MENU, { openPanel: 'DATA' })} 
-                className="flex flex-col items-center space-y-1 group"
-                title="Gestão de Dados"
-              >
-                <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
-                  <DatabaseZap size={20} />
-                </div>
-                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Dados</span>
-              </button>
-            )}
-
-            {isAdmin && (
+            {(isAdmin || isAuditor) && (
               <button 
                 onClick={() => onNavigate?.(AppScreen.MAIN_MENU, { openPanel: 'ADMIN' })} 
                 className="flex flex-col items-center space-y-1 group"
-                title="Painel Administrativo"
+                title="Painel Completo"
               >
                 <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-500 group-active:scale-90 transition-all group-hover:bg-accent-soft group-hover:text-accent">
                   <Settings size={20} />
                 </div>
                 <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Painel</span>
-              </button>
-            )}
-
-            {isAuditor && (
-              <button 
-                onClick={() => onNavigate?.(AppScreen.MAIN_MENU, { openPanel: 'AUDIT' })} 
-                className="flex flex-col items-center space-y-1 group"
-                title="Trilha de Auditoria"
-              >
-                <div className="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600 group-active:scale-90 transition-all group-hover:bg-emerald-600 group-hover:text-white">
-                  <ListChecks size={20} />
-                </div>
-                <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">Auditoria</span>
               </button>
             )}
           </div>

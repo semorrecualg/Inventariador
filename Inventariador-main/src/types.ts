@@ -362,7 +362,7 @@ export interface NavigationParams {
   mode?: 'PARTIAL' | 'FINAL';
   responsibleName?: string;
   /** Painel do MainMenu a abrir automaticamente ao chegar (usado pela tool grid da Unidade Operacional). */
-  openPanel?: 'PREFERENCES' | 'DATA' | 'ADMIN' | 'AUDIT';
+  openPanel?: 'PREFERENCES' | 'ADMIN';
   /** Abre o cadastro de NOVO USUÁRIO direto no formulário (Painel Completo → Acessos). */
   openAddUser?: boolean;
 }
