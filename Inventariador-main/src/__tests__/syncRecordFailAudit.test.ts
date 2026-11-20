@@ -38,6 +38,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
 
 import { db } from '../services/sqliteService';
 import { processDataSyncQueue } from '../services/syncService';
+import { inicioDoDiaDaFalha } from '../utils/syncFalha';
 
 const RLS_ERROR = { code: '42501', message: 'new row violates row-level security policy' };
 
@@ -126,16 +127,24 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
     expect(await failureLogs()).toHaveLength(2);
   });
 
-  it('volta a registar a mesma falha depois da janela de 10 min', async () => {
+  it('não volta a registar a mesma falha no mesmo dia — e volta no dia seguinte', async () => {
     await db.local_assets.put(asset() as never);
 
     await processDataSyncQueue();
     const [log] = await failureLogs();
     expect(log).toBeTruthy();
 
-    // Recua a linha para fora da janela: a próxima recusa volta a ser auditada.
+    // A janela das falhas preservadas é o DIA (item 14): no mesmo dia, mesmo que
+    // a linha tenha horas, a recusa é a mesma e não ganha outra linha.
     await db.audit_logs.update(String(log.id), {
       updated_at: new Date(Date.now() - 11 * 60 * 1000).toISOString()
+    });
+    await processDataSyncQueue();
+    expect(await failureLogs()).toHaveLength(1);
+
+    // Ontem: a falha continua e o dia é novo — uma linha por dia, não zero.
+    await db.audit_logs.update(String(log.id), {
+      updated_at: new Date(Date.parse(inicioDoDiaDaFalha()) - 1).toISOString()
     });
     await processDataSyncQueue();
     expect(await failureLogs()).toHaveLength(2);
@@ -175,7 +184,7 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
     expect(await exceptionLogs()).toHaveLength(2);
   });
 
-  it('volta a registar a excepção depois da janela de 10 min', async () => {
+  it('a excepção segue o mesmo teto: uma linha por dia', async () => {
     await db.local_assets.put(asset() as never);
     upsert.mockRejectedValue(new Error('rede caiu no envio'));
     await processDataSyncQueue();
@@ -186,6 +195,12 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
       updated_at: new Date(Date.now() - 11 * 60 * 1000).toISOString()
     });
 
+    await processDataSyncQueue();
+    expect(await exceptionLogs()).toHaveLength(1);
+
+    await db.audit_logs.update(String(log.id), {
+      updated_at: new Date(Date.parse(inicioDoDiaDaFalha()) - 1).toISOString()
+    });
     await processDataSyncQueue();
     expect(await exceptionLogs()).toHaveLength(2);
   });

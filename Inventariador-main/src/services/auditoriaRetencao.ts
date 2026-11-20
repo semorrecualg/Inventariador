@@ -13,6 +13,7 @@
  */
 import { db } from './sqliteService';
 import { ehFalhaDeEnvio } from '../utils/auditActions';
+import { idsDeFalhasRepetidas } from '../utils/syncFalha';
 
 /** Idade a partir da qual a trilha é expurgada (falhas de envio de fora). */
 export const RETENCAO_AUDITORIA_DIAS = 7;
@@ -20,6 +21,8 @@ export const RETENCAO_AUDITORIA_DIAS = 7;
 export interface ResultadoDoExpurgo {
   /** Linhas apagadas nesta passagem. */
   apagadas: number;
+  /** Das apagadas, quantas eram falhas de envio repetidas do mesmo dia. */
+  consolidadas: number;
   /** Limite usado (ISO) — tudo o que é anterior e não é falha de envio sai. */
   limite: string;
 }
@@ -39,9 +42,21 @@ export const purgarAuditoriaAntiga = async (
   // fica, e o expurgo tem de ser explícito sobre o que apagou.
   const vencidas = await db.audit_logs.where('updated_at').below(limite).toArray();
   const alvo = vencidas.filter((log) => !ehFalhaDeEnvio(log.acao));
+
+  // TETO: as falhas preservadas ficam com a linha mais recente de cada
+  // (ação + registo + dia + assinatura). O histórico anterior a este teto tem
+  // uma linha a cada 10 min do mesmo erro (144/dia) e era preservado para
+  // sempre — aqui passa a uma por dia. As linhas sem assinatura legível não são
+  // tocadas (não há como saber se são a mesma falha).
+  const falhasVencidas = vencidas.filter((log) => ehFalhaDeEnvio(log.acao));
+  const repetidas = idsDeFalhasRepetidas(falhasVencidas);
+  if (repetidas.length > 0) {
+    await db.audit_logs.bulkDelete(repetidas);
+  }
+
   if (alvo.length > 0) {
     await db.audit_logs.bulkDelete(alvo.map((log) => log.id));
   }
 
-  return { apagadas: alvo.length, limite };
+  return { apagadas: alvo.length + repetidas.length, consolidadas: repetidas.length, limite };
 };

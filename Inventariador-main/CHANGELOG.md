@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — as falhas de envio têm teto: uma linha por dia
+
+- **A trilha preservada crescia sem limite:** as recusas de envio
+  (`SYNC_RECORD_FAIL`/`SYNC_RECORD_EXCEPTION`) ficaram fora do expurgo de 7 dias
+  — são a prova de por que um ativo não subiu —, mas a janela de deduplicação era
+  de 10 min: um ativo preso com o mesmo erro escrevia 144 linhas por dia, para
+  sempre, na trilha que existe para diagnosticar exactamente isso.
+- **A janela passa a ser o DIA (UTC):** `inicioDoDiaDaFalha` define o corte e a
+  mesma assinatura (`primarykey|erro estável`) escreve no máximo uma linha por
+  dia. O dia seguinte ganha a sua — a falha continua visível enquanto durar.
+- **O histórico já gravado é colapsado:** `idsDeFalhasRepetidas` deixa a linha
+  mais recente de cada (ação + registo + dia + assinatura) e o expurgo apaga as
+  restantes; o resultado do expurgo passa a reportar `consolidadas`. Linhas de
+  falha sem assinatura legível não são tocadas (não há como provar que são a
+  mesma). O resto da trilha continua a expirar aos 7 dias.
+- **Assinatura mais estável:** ids de pedido («req 42», «pedido #7») passam a
+  marcador `<pedido>` — a regra dos números de 6+ dígitos não os apanhava e cada
+  ciclo reabria a janela.
+- **Prova:** `src/__tests__/tetoLinhasFalha.test.ts` (9 casos) — 100 ciclos
+  espalhados pelas 24 h do mesmo dia → 1 linha (com a janela de 10 min: 100),
+  dia seguinte → 2, erros diferentes no mesmo dia → linhas diferentes, expurgo a
+  colapsar 30 linhas do mesmo dia em 1 e a preservar dias distintos, e a regra
+  pura (`inicioDoDiaDaFalha`, `chaveDeFalhaNoDia`, `idsDeFalhasRepetidas`). Os
+  testes de `syncRecordFailAudit` passam a fixar o contrato do dia (11 min
+  depois ainda é a mesma linha; ontem permite a de hoje).
+
 ### Corrigido — os últimos ecrãs que decidiam a conferência sozinhos
 
 - **A ficha PDF não mostrava a conferência:** imprimia `_conferidoEm`/

@@ -11,7 +11,7 @@ import { UPSERT_TIMEOUT_MS, withUpsertTimeout, isSyncTimeoutError } from './sync
 import { isConferido } from '../utils/conferencia';
 import { purgarAuditoriaAntiga } from './auditoriaRetencao';
 import { assetGpsColumns } from '../utils/assetGps';
-import { assinaturaDeFalha } from '../utils/syncFalha';
+import { assinaturaDeFalha, inicioDoDiaDaFalha } from '../utils/syncFalha';
 import { normalizeFlag } from '../utils/normalize';
 
 /**
@@ -131,6 +131,11 @@ const SYNC_RECORD_FAIL_AUDIT = 'SYNC_RECORD_FAIL';
 const SYNC_RECORD_EXCEPTION_AUDIT = 'SYNC_RECORD_EXCEPTION';
 /** Janela em que a mesma falha (primarykey + erro) não volta a ser registada. */
 const SYNC_FAILURE_AUDIT_WINDOW_MS = 10 * 60 * 1000;
+/**
+ * As recusas de envio são PRESERVADAS pelo expurgo, por isso a janela delas é o
+ * dia e não os 10 min das outras ações: a mesma assinatura escreve no máximo uma
+ * linha por dia (`inicioDoDiaDaFalha`), em vez de 144 num ativo preso.
+ */
 
 /**
  * Uma linha de auditoria por registo falhado, por janela — e não a cada ciclo.
@@ -149,8 +154,12 @@ const SYNC_FAILURE_AUDIT_WINDOW_MS = 10 * 60 * 1000;
  * pode trazer id de pedido, UUID, data/hora ou ficheiro:linha da pilha, e cada
  * variante reabria a janela — a mesma recusa voltava a ser registada.
  */
-const loadRecentSyncAuditSignatures = async (acao: string): Promise<Set<string>> => {
-  const cutoffIso = new Date(Date.now() - SYNC_FAILURE_AUDIT_WINDOW_MS).toISOString();
+const loadRecentSyncAuditSignatures = async (
+  acao: string,
+  agora: number = Date.now()
+): Promise<Set<string>> => {
+  // Dia (UTC) corrente: a linha de hoje é a que impede a repetição de hoje.
+  const cutoffIso = inicioDoDiaDaFalha(agora);
   const recentes = await db.audit_logs.where('updated_at').above(cutoffIso).toArray();
   const signatures = new Set<string>();
   for (const log of recentes) {
@@ -205,6 +214,7 @@ const auditSyncRecordFailure = async (
   primaryKey: string,
   details: string,
   jaAuditadas: Set<string>,
+  agora: number = Date.now(),
 ): Promise<void> => {
   const signature = assinaturaDeFalha(primaryKey, details);
   if (jaAuditadas.has(signature)) return;
@@ -214,10 +224,32 @@ const auditSyncRecordFailure = async (
     'local_assets',
     primaryKey,
     details,
-    JSON.stringify({ signature })
+    JSON.stringify({ signature }),
+    new Date(agora).toISOString()
   );
   jaAuditadas.add(signature);
 };
+
+/**
+ * A TRILHA DE RECUSAS, PARA O CICLO E PARA OS TESTES
+ * ============================================================================
+ * As assinaturas já registadas HOJE (a janela é o dia — ver `inicioDoDiaDaFalha`)
+ * e o registo de uma recusa passam a ter nome próprio e exportado: é o mesmo
+ * caminho que o ciclo usa, sem duplicar a regra no teste.
+ */
+export const assinaturasDeFalhaDeHoje = (
+  acao: string,
+  agora: number = Date.now()
+): Promise<Set<string>> => loadRecentSyncAuditSignatures(acao, agora);
+
+export const registarRecusaNaTrilha = (
+  userId: string,
+  acao: string,
+  primaryKey: string,
+  details: string,
+  jaAuditadas: Set<string>,
+  agora: number = Date.now()
+): Promise<void> => auditSyncRecordFailure(userId, acao, primaryKey, details, jaAuditadas, agora);
 
 /**
  * CARIMBO DA RECUSA NO PRÓPRIO REGISTO
