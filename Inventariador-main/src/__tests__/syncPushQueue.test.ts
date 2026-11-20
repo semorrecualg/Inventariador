@@ -99,6 +99,18 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     expect(Number(local?._is_synced)).toBe(1);
   });
 
+  // EXCLUSÃO: o registo apagado no aparelho tem de subir com a flag. Sem ela a
+  // nuvem mantinha a linha viva e o ativo voltava a aparecer em todos os
+  // aparelhos (e neste, ao reiniciar).
+  it('leva is_deleted no payload do ativo apagado', async () => {
+    await db.local_assets.put(asset({ _is_deleted: 1 }) as never);
+
+    await processDataSyncQueue();
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.is_deleted).toBe(true);
+  });
+
   // O CARIMBO DA NUVEM É DO SERVIDOR: se a fila enviasse `updated_at`, um
   // relógio adiantado no aparelho empurrava o checkpoint do pull delta para o
   // futuro e os outros aparelhos saltavam alterações até esse instante. Quem

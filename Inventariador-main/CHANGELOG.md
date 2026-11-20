@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — a exclusão de um ativo chega à nuvem e desaparece nos outros aparelhos
+
+- **O soft delete não saía do aparelho:** `_is_deleted` vive só no registo
+  local, a tabela `assets` não tinha onde o guardar e o payload não o enviava.
+  A linha da nuvem ficava intacta, o pull seguinte devolvia-a ativa e o ativo
+  «ressuscitava» no outro telemóvel — e, ao reiniciar, no próprio aparelho que o
+  apagou. A coluna `is_deleted` passa a viajar no envio em massa
+  (`buildPayload`) e na fila (`processDataSyncQueue`), e o pull traduz-a de
+  volta para `_is_deleted` (`mapCloudAssetRow`). Bloco SQL em
+  `scripts/assets-exclusao.sql` para a base actual e em
+  `docs/supabase_bootstrap.sql` para as bases novas.
+- **A linha continua na nuvem, marcada:** nada é apagado com `delete`, para o
+  restauro e a auditoria continuarem possíveis. O restauro sobe
+  `is_deleted = false`.
+- **A exclusão grava-se no disco antes de falar com a nuvem:** antes só o modo
+  interno escrevia o registo apagado (o modo Supabase só o enviava), e o
+  `saveInventory` seguinte não apaga linhas — a exclusão perdia-se ao reiniciar
+  e o envio seguinte ressuscitava o ativo.
+
 ### Corrigido — o `updated_at` de `assets` passa a mudar em cada actualização
 
 - **A conferência de um aparelho não chegava aos outros:** o pull delta baixa

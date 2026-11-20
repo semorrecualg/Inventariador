@@ -22,6 +22,7 @@ import { matchUnitKeys, normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
+import { normalizeFlag } from '../utils/normalize';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
 import {
   checkCloudPushGuard,
@@ -1240,7 +1241,13 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
           : '') || null,
         data_leitura: (cleanAsset._dataLeitura !== undefined && cleanAsset._dataLeitura !== null
           ? String(cleanAsset._dataLeitura)
-          : null)
+          : null),
+        // EXCLUSÃO (soft delete): a linha da nuvem é a única cópia que os outros
+        // aparelhos vêem. Sem esta coluna a exclusão não saía do aparelho — o
+        // pull devolvia a linha intacta e o ativo «ressuscitava» no ciclo
+        // seguinte, aqui ao reiniciar e em qualquer outro telemóvel.
+        // `normalizeFlag` aceita as três grafias locais (`true`, `1`, `'1'`).
+        is_deleted: normalizeFlag(cleanAsset._is_deleted)
       };
 
       byKey.set(`${row.tenantid}|${row.primarykey}`, {
@@ -2362,6 +2369,11 @@ export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
     unitid: uId, // Legado
     ...(gps ? { latitude: gps.lat, longitude: gps.lng, gps_lat: gps.lat, gps_lng: gps.lng } : {}),
     ...camposDeConferencia(row),
+    // EXCLUSÃO: `is_deleted` da nuvem volta ao vocabulário local para que as
+    // listas escondam o registo como escondem um apagado neste aparelho. A
+    // linha continua a descer e a ficar gravada: o restauro e a auditoria
+    // precisam do registo, não de um buraco na base.
+    _is_deleted: normalizeFlag(row.is_deleted) ? 1 : 0,
   };
 };
 

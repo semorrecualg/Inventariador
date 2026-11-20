@@ -12,6 +12,7 @@ import { isConferido } from '../utils/conferencia';
 import { purgarAuditoriaAntiga } from './auditoriaRetencao';
 import { assetGpsColumns } from '../utils/assetGps';
 import { assinaturaDeFalha } from '../utils/syncFalha';
+import { normalizeFlag } from '../utils/normalize';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -732,7 +733,11 @@ const _syncService = {
               isConferido(record) ||
               String(record.status || '').toUpperCase().includes('CONFERIDO'),
             auditor: record._auditor !== undefined && record._auditor !== null ? String(record._auditor).trim() || null : null,
-            data_leitura: record._dataLeitura !== undefined && record._dataLeitura !== null ? String(record._dataLeitura) : null
+            data_leitura: record._dataLeitura !== undefined && record._dataLeitura !== null ? String(record._dataLeitura) : null,
+            // EXCLUSÃO: o registo apagado neste aparelho sobe com a flag. Sem
+            // ela a nuvem mantinha a linha viva e o ativo voltava a aparecer em
+            // todos os aparelhos (e neste, ao reiniciar).
+            is_deleted: normalizeFlag(record._is_deleted)
           };
 
           // O envio repete sem a coluna que a nuvem ainda não tem (PGRST204), em
