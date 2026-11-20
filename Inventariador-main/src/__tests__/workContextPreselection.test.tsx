@@ -8,8 +8,10 @@
 //      (contrato, filial e módulo já apontados) e a entrada continua a ser um
 //      toque explícito em "Acessar o Módulo".
 //   2. O módulo INVENTARIADOR trabalha sempre dentro de uma filial: contrato
-//      sem filial na base mantém o ACESSAR desativado; o CONTROLE DE ATIVO, que
-//      não usa endereço de campo, continua liberado.
+//      sem filial na base mantém o ACESSAR desativado para o AUDITOR; quem
+//      administra a base segue para a Unidade Operacional (é lá que a filial é
+//      escolhida/cadastrada). O CONTROLE DE ATIVO, que não usa endereço de
+//      campo, continua liberado.
 // ============================================================================
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
@@ -123,8 +125,9 @@ describe('CONTRATO DE TRABALHO · pré-seleção da última escolha (Fase 1)', (
 describe('CONTRATO DE TRABALHO · INVENTARIADOR exige filial', () => {
   afterEach(() => cleanup());
 
-  it('contrato sem filial: ACESSAR desativado, aviso visível e nada é selecionado', () => {
+  it('auditor · contrato sem filial: ACESSAR desativado, aviso visível e nada é selecionado', () => {
     const { onSelect } = renderSelector({
+      role: UserRole.AUDITOR,
       user: { filial: '', units: [] },
       contexts: [{ tenantid: TENANT, filial: '' }]
     });
@@ -135,7 +138,25 @@ describe('CONTRATO DE TRABALHO · INVENTARIADOR exige filial', () => {
     fireEvent.click(accessButton());
     expect(onSelect).not.toHaveBeenCalled();
     expect(
-      screen.getByText(/Este contrato ainda não tem filial na base/i)
+      screen.getByText(/Peça ao administrador para cadastrar a unidade/i)
+    ).toBeTruthy();
+  });
+
+  it('admin · contrato sem filial: ACESSAR segue para a Unidade Operacional', () => {
+    const { onSelect } = renderSelector({
+      user: { filial: '', units: [] },
+      contexts: [{ tenantid: TENANT, filial: '' }]
+    });
+
+    chooseModule('INVENTARIADOR');
+
+    // Sem filial nenhuma na lista não há escolha a fazer: a filial é escolhida
+    // na tela seguinte (Unidade Operacional), como o aviso já prometia.
+    expect(accessButton().disabled).toBe(false);
+    fireEvent.click(accessButton());
+    expect(onSelect).toHaveBeenCalledWith({ tenantid: TENANT, filial: '' }, AppModule.INVENTORY);
+    expect(
+      screen.getByText(/Siga para a Unidade Operacional/i)
     ).toBeTruthy();
   });
 

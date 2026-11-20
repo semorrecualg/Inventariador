@@ -9,7 +9,8 @@ import {
   resolveBootPullPlan,
   normalizeUnitNames,
   unitListScope,
-  decideUnitListAction
+  decideUnitListAction,
+  hasFiliaisLocaisDoContrato
 } from '../utils/unitContextUtils';
 
 describe('resolveUnitFilter — filtro de filial dos pulls do fluxo inicial (Etapa 2)', () => {
@@ -252,5 +253,44 @@ describe('decideUnitListAction — o que fazer com a lista de filiais guardada',
     expect(decideUnitListAction({ ...base, online: false })).toEqual({ type: 'idle' });
     expect(decideUnitListAction({ ...base, isLocalDatabase: true })).toEqual({ type: 'idle' });
     expect(decideUnitListAction({ ...base, hasLocalBase: true })).toEqual({ type: 'idle' });
+  });
+});
+
+describe('hasFiliaisLocaisDoContrato — ter base não é ter as filiais do contrato', () => {
+  it('ativos de OUTRO contrato não dispensam a lista da nuvem', () => {
+    // Base de demonstração no aparelho e sessão no CICOPAL: a lista local não
+    // responde pelas filiais do CICOPAL — era aqui que o contrato ficava sem
+    // filiais e o INVENTARIADOR inacessível.
+    expect(
+      hasFiliaisLocaisDoContrato('CICOPAL', { DEMO_DEFAULT: ['MATRIZ'] }, [])
+    ).toBe(false);
+  });
+
+  it('ativos do contrato sem filial também não contam', () => {
+    expect(hasFiliaisLocaisDoContrato('CICOPAL', { CICOPAL: [] }, [])).toBe(false);
+    expect(hasFiliaisLocaisDoContrato('CICOPAL', { CICOPAL: ['  '] }, [])).toBe(false);
+  });
+
+  it('filial real na base em memória ou nas unidades lidas do SQL conta', () => {
+    expect(hasFiliaisLocaisDoContrato('CICOPAL', { CICOPAL: ['010101 CICOPAL GO'] }, [])).toBe(true);
+    expect(
+      hasFiliaisLocaisDoContrato(' cicopal ', undefined, [
+        { tenantid: 'CICOPAL', filial: '010101 CICOPAL GO' }
+      ])
+    ).toBe(true);
+  });
+
+  it('unidade SQL de outro contrato (ou sem filial) não conta', () => {
+    expect(
+      hasFiliaisLocaisDoContrato('CICOPAL', undefined, [
+        { tenantid: 'DEMO_DEFAULT', filial: 'MATRIZ' },
+        { tenantid: 'CICOPAL', filial: '   ' }
+      ])
+    ).toBe(false);
+  });
+
+  it('sem contrato resolvido não há filiais locais a declarar', () => {
+    expect(hasFiliaisLocaisDoContrato('', { CICOPAL: ['010101 CICOPAL GO'] }, [])).toBe(false);
+    expect(hasFiliaisLocaisDoContrato(null, { CICOPAL: ['010101 CICOPAL GO'] }, [])).toBe(false);
   });
 });

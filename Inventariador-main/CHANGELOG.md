@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o contrato volta a ver as filiais que estão na nuvem
+
+- **O que era:** a lista de filiais do contrato só era pedida à nuvem quando o
+  aparelho não tinha base local **nenhuma**. Uma base de outro contrato (ex.:
+  demonstração) ou ativos do próprio contrato sem `filial` contavam como «já
+  tenho as filiais» — a nuvem nunca era consultada e o **CONTRATO DE TRABALHO**
+  abria com «Nenhuma filial na base deste contrato», deixando o INVENTARIADOR
+  inacessível (o «Acessar o Módulo» exige filial).
+- **Agora:** a consulta só é dispensada quando a base local responde de facto
+  pelas filiais **deste** contrato — `hasFiliaisLocaisDoContrato` (filiais em
+  memória do contrato ou unidades lidas do SQL, ambas com filial preenchida).
+  Caso contrário a lista vem da nuvem, só nomes (sem baixar ativos).
+- **O que era (2):** quando a lista ficava vazia, o aviso dizia «a unidade
+  será escolhida na próxima tela» mas o **Acessar o Módulo** ficava desativado
+  (o INVENTARIADOR exige filial): sem saída para o INVENTARIADOR, nem para
+  cadastrar a filial.
+- **Agora (2):** com a lista vazia, quem administra a base segue para a
+  **Unidade Operacional** (é lá que a filial é escolhida/cadastrada) e o aviso
+  diz isso. O auditor continua bloqueado, com a instrução de pedir ao
+  administrador (evita o vaivém `/unit` ↔ `/contexto`).
+- **Teste:** `src/__tests__/unitContextUtils.test.ts` cobre base de outro
+  contrato, ativos sem filial, SQL por contrato e contrato não resolvido;
+  `src/__tests__/accessFlowStandardization.test.ts` cobre a exceção do
+  administrador e a manutenção do bloqueio do auditor.
+
 ### Corrigido — o «Voltar» do Gestor de Base devolve ao PAINEL COMPLETO
 
 - **O que era:** a rota `/db-manager` tinha o regresso fixo em

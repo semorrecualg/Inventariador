@@ -82,7 +82,7 @@ import {
   resolveDeltaMode,
   syncCheckpointKey
 } from './utils/syncCheckpoint';
-import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, unitListScope, decideUnitListAction } from './utils/unitContextUtils';
+import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato } from './utils/unitContextUtils';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -6515,6 +6515,13 @@ useEffect(() => {
   const cloudUnitNamesScope = unitListScope(user?.email, activeTenant);
   // Só cresce: qualquer resposta de um pedido anterior é descartada.
   const cloudUnitNamesRequestRef = useRef(0);
+  // A base local só dispensa a nuvem quando já responde pelas filiais DESTE
+  // contrato. Booleano memoizado: o efeito depende dele (e não da identidade
+  // das listas, renovada a cada leitura do SQL) para não repetir o pedido.
+  const temFiliaisLocaisDoContrato = useMemo(
+    () => hasFiliaisLocaisDoContrato(activeTenant, workContextFiliais, sqliteOperationalUnits),
+    [activeTenant, workContextFiliais, sqliteOperationalUnits]
+  );
 
   useEffect(() => {
     const acao = decideUnitListAction({
@@ -6523,7 +6530,10 @@ useEffect(() => {
       tenantid: activeTenant,
       isLocalDatabase: databaseMode === DatabaseMode.INTERNAL,
       online: navigator.onLine,
-      hasLocalBase: sqliteOperationalUnits.length > 0 || inventory.assets.length > 0
+      // «Base local» só conta quando ela já diz QUAIS são as filiais DESTE
+      // contrato: ativos de outro contrato (ou sem `filial`) não são uma lista
+      // e não podem dispensar a consulta à nuvem.
+      hasLocalBase: temFiliaisLocaisDoContrato
     });
 
     if (acao.type === 'clear') {
@@ -6542,7 +6552,7 @@ useEffect(() => {
         }
       })
       .catch(err => logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', err));
-  }, [activeTenant, cloudUnitNamesScope, cloudUnitNames, databaseMode, sqliteOperationalUnits.length, inventory.assets.length]);
+  }, [activeTenant, cloudUnitNamesScope, cloudUnitNames, databaseMode, temFiliaisLocaisDoContrato, inventory.assets.length]);
 
   const fullCompaniesWithStatus = useMemo(() => {
     if (sqliteService.isImportingBatch || isImportingBatchState) {

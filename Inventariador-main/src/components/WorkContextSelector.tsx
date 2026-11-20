@@ -25,6 +25,7 @@ import {
   type WorkContextPreselection,
   buildFilialOptions,
   canConfirmWorkContext,
+  canConfirmWorkContextSemFiliais,
   groupContextsByTenant,
   normalizeWorkTenant,
   normalizeWorkFilial
@@ -256,11 +257,20 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   // Fase 1: INVENTARIADOR exige FILIAL escolhida (ver `canConfirmWorkContext`).
   const missingFilialForInventory =
     selectedModule === AppModule.INVENTORY && !String(chosenFilial || '').trim();
+  // Sem filial NENHUMA na lista não há escolha a fazer: bloquear aqui fechava a
+  // porta (o aviso prometia a Unidade Operacional na tela seguinte). Quem
+  // administra segue para lá; o auditor continua bloqueado.
+  const podeAdministrar = canAccessDatabaseManager(user);
+  const semFiliaisNaLista = filialOptionsView.length === 0;
   const canProceed =
     !!selectedTenant &&
     !!selectedModule &&
     !blockedByRelease &&
-    canConfirmWorkContext(selectedModule, chosenFilial);
+    (canConfirmWorkContext(selectedModule, chosenFilial) ||
+      canConfirmWorkContextSemFiliais(selectedModule, {
+        temFiliaisNaLista: !semFiliaisNaLista,
+        podeAdministrar
+      }));
 
   const getTenantIdentity = (tenantid: string) => {
     const hash = tenantid.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
@@ -767,7 +777,9 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
         {missingFilialForInventory && (
           <p className="text-[9px] font-extrabold uppercase tracking-wider text-amber-600 text-center leading-relaxed">
             {filialOptionsView.length === 0
-              ? 'Este contrato ainda não tem filial na base. Cadastre a filial na Unidade Operacional ou use CONTROLE DE ATIVO, que não exige endereço de campo.'
+              ? (podeAdministrar
+                  ? 'Sem filial na base deste contrato: siga para a Unidade Operacional para escolher ou cadastrar a unidade.'
+                  : 'Este contrato ainda não tem filial na base. Peça ao administrador para cadastrar a unidade (ou use CONTROLE DE ATIVO, que não exige endereço de campo).')
               : 'Escolha a filial para entrar no INVENTARIADOR.'}
           </p>
         )}

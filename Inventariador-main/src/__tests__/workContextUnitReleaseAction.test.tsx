@@ -416,3 +416,48 @@ describe('CONTRATO DE TRABALHO · filiais que só o catálogo vivo conhece', () 
     expect(screen.getByText(/Nenhuma filial na base deste contrato/)).toBeTruthy();
   });
 });
+
+// ============================================================================
+// Contrato sem UMA ÚNICA filial na lista (base local de outro contrato, ou
+// aparelho ainda sem a lista da nuvem): o aviso prometia «a unidade será
+// escolhida na próxima tela» e o botão ficava desativado. Quem administra
+// segue para a Unidade Operacional; o auditor continua bloqueado.
+// ============================================================================
+describe('CONTRATO DE TRABALHO · contrato sem filial nenhuma na lista', () => {
+  afterEach(() => cleanup());
+
+  const renderVazio = (role: UserRole) => {
+    const onSelect = vi.fn();
+    render(
+      React.createElement(WorkContextSelector, {
+        user: { ...buildUser(role), filial: '', units: [] } as User,
+        contexts: [{ tenantid: TENANT, filial: '' }],
+        unitRelease: releaseMap,
+        availableFiliais: {},
+        onSelect,
+        onLogout: vi.fn(),
+        onOpenAdmin: vi.fn()
+      })
+    );
+    return { onSelect };
+  };
+
+  it('admin: escolhe INVENTARIADOR e segue para a Unidade Operacional', () => {
+    const { onSelect } = renderVazio(UserRole.ADMIN);
+
+    expect(accessButton().disabled).toBe(true); // ainda sem módulo escolhido
+    chooseModule('INVENTARIADOR');
+    expect(accessButton().disabled).toBe(false);
+
+    fireEvent.click(accessButton());
+    expect(onSelect).toHaveBeenCalledWith({ tenantid: TENANT, filial: '' }, AppModule.INVENTORY);
+  });
+
+  it('auditor: continua bloqueado e o aviso manda pedir ao administrador', () => {
+    renderVazio(UserRole.AUDITOR);
+
+    chooseModule('INVENTARIADOR');
+    expect(accessButton().disabled).toBe(true);
+    expect(screen.getByText(/Peça ao administrador para cadastrar a unidade/i)).toBeTruthy();
+  });
+});

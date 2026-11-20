@@ -288,6 +288,29 @@ export function canConfirmWorkContext(
   return true;
 }
 
+/**
+ * A exceção à regra acima: quando NÃO HÁ filial a escolher.
+ *
+ * `canConfirmWorkContext` exige filial para o INVENTARIADOR porque sem ela a
+ * trilha cai na Unidade Operacional — e o auditor entraria num vaivém
+ * `/unit` ↔ `/contexto`. Mas quando o contrato não tem uma única filial na
+ * lista (base local de outro contrato, aparelho ainda sem a lista da nuvem) a
+ * exigência fechava a porta: o aviso dizia «a unidade será escolhida na próxima
+ * tela» e o botão ficava desativado, sem saída.
+ *
+ * Quem administra a base segue para a Unidade Operacional — é lá que a filial é
+ * escolhida/cadastrada e a unidade é liberada. O auditor continua bloqueado,
+ * com a instrução de pedir ao administrador.
+ */
+export function canConfirmWorkContextSemFiliais(
+  module: AppModule | null | undefined,
+  options: { temFiliaisNaLista: boolean; podeAdministrar: boolean }
+): boolean {
+  if (module !== AppModule.INVENTORY) return false;
+  if (options.temFiliaisNaLista) return false;
+  return options.podeAdministrar;
+}
+
 /** Valores que o seletor de contrato deve abrir já apontados (pré-seleção). */
 export interface WorkContextPreselection {
   tenantid: string;
