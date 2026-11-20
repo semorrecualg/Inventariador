@@ -17,8 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decisão de arranque, com a marca `APP` para não ser tratado como fantasma da
   nuvem. Qualquer logout explícito apaga a cópia (`clearPersistedSession`), tal
   como a expiração de sessão.
+- **Saídas do Login:** «Redefinir Acesso Local» e o bloqueio de perfil sem
+  contrato passam pelo mesmo `resetLocalAccessStorage()`, que apaga a cópia
+  persistida — antes quem saía por ali voltava a entrar sozinho. Só perfis de
+  credencial local são guardados: a sessão DEMO não reabre sozinha e a da nuvem
+  continua a ser mantida pelo token do Supabase (não escapa à revalidação).
 - **Teste:** `src/__tests__/sessionPersistence.test.ts` cobre gravação, prazo,
-  lixo, carimbo no futuro, reposição no `sessionStorage` e purga no logout.
+  lixo, carimbo no futuro, exclusão do DEMO, reposição no `sessionStorage` e
+  purga no logout; `src/__tests__/localAccessReset.test.ts` fixa a limpeza
+  (preserva base/ativos, apaga sessão); `loginFluxoUnico.test.tsx` prova que o
+  perfil sem contrato não deixa sessão guardada.
 
 ### Corrigido — recarregar já não devolve ao login
 

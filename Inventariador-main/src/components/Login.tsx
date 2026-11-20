@@ -14,6 +14,8 @@ import { demoService } from '../services/demoService';
 import { APP_VERSION, APP_VERSION_LABEL } from '../utils/appVersion';
 import { logger } from '../utils/logger';
 import { readSessionTenantId, readLocalTenantId } from '../utils/tenantUtils';
+import { resetLocalAccessStorage } from '../utils/localAccessReset';
+import { clearPersistedSession } from '../utils/sessionPersistence';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -259,16 +261,9 @@ const Login: React.FC<LoginProps> = ({
             localDb.unitConfigs.clear()
           ]);
 
-          // Remove apenas chaves de estado, preservando o banco de ativos se possível
-          const keysToKeep = ['app_database_mode', 'inventory_assets_v24_internal_secure', 'inventory_assets_v24_supabase_secure'];
-          const allKeys = Object.keys(localStorage);
-          allKeys.forEach(key => {
-            if (!keysToKeep.some(k => key.includes(k))) {
-              localStorage.removeItem(key);
-            }
-          });
-
-          sessionStorage.clear();
+          // Um único ponto de limpeza: também apaga a cópia com prazo da
+          // sessão, senão o próximo arranque voltava a entrar sozinho.
+          resetLocalAccessStorage();
           window.location.reload();
         } catch (err) {
           logger.error('Erro ao limpar sessão:', err);
@@ -694,6 +689,8 @@ const Login: React.FC<LoginProps> = ({
             if (supabase) {
               await supabase.auth.signOut();
             }
+            // Perfil inutilizável: não pode ficar guardado para o próximo arranque.
+            clearPersistedSession();
             throw new Error("Erro de Configuração: Perfil de usuário sem vínculo de empresa ativo. Contate o administrador.");
           }
 

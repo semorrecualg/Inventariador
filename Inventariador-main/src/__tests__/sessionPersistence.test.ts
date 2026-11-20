@@ -42,6 +42,16 @@ describe('writePersistedSession / readPersistedSession', () => {
     expect(localStorage.getItem(PERSISTED_SESSION_KEY)).toBeNull();
   });
 
+  it('não guarda a sessão DEMO (experimentação não reabre sozinha)', () => {
+    writePersistedSession({ ...USER, role: 'DEMO' as UserRole }, 1_000);
+    expect(localStorage.getItem(PERSISTED_SESSION_KEY)).toBeNull();
+  });
+
+  it('não guarda perfil da nuvem (quem mantém a sessão é o token do Supabase)', () => {
+    writePersistedSession({ ...USER, email: 'auditor@example.com', role: 'AUDITOR' as UserRole }, 1_000);
+    expect(localStorage.getItem(PERSISTED_SESSION_KEY)).toBeNull();
+  });
+
   it('expira ao fim do prazo', () => {
     writePersistedSession(USER, 1_000);
     expect(readPersistedSession(1_000 + PERSISTED_SESSION_TTL_MS + 1)).toBeNull();
@@ -65,6 +75,16 @@ describe('restorePersistedSession', () => {
     expect(sessionStorage.getItem('gbr_session_origin')).toBe('APP');
     expect(sessionStorage.getItem('tenantid')).toBe('CICOPAL');
     expect(sessionStorage.getItem('filial')).toBe('TODAS');
+  });
+
+  it('ignora cópia de perfil da nuvem gravada por uma versão anterior', () => {
+    localStorage.setItem(
+      PERSISTED_SESSION_KEY,
+      JSON.stringify({ savedAt: 1_000, user: { email: 'auditor@example.com', role: 'AUDITOR' } })
+    );
+    expect(restorePersistedSession(2_000)).toBeNull();
+    expect(sessionStorage.getItem('app_current_user')).toBeNull();
+    expect(sessionStorage.getItem('gbr_session_origin')).toBeNull();
   });
 
   it('não repõe nada depois do prazo', () => {

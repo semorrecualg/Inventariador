@@ -10,6 +10,7 @@
 // token. O perfil já vivia no aparelho em `app_users`; isto não acrescenta
 // segredos, só evita que o utilizador tenha de repetir o login a cada sessão.
 // ============================================================================
+import { isLocalSessionProfile } from './authUtils';
 import type { User } from '../types';
 
 export const PERSISTED_SESSION_KEY = 'gbr_persisted_session';
@@ -25,9 +26,16 @@ interface PersistedSession {
   savedAt: number;
 }
 
-/** Guarda o perfil para o próximo arranque. Sem utilizador, não faz nada. */
+/**
+ * Guarda o perfil para o próximo arranque. Só perfis de credencial local (e
+ * nunca DEMO: «experimentar grátis» não reabre sozinho). A sessão da nuvem já
+ * tem o token do Supabase a mantê-la — guardá-la aqui só criaria um perfil
+ * velho marcado como local, que escaparia à revalidação.
+ */
 export function writePersistedSession(user: User | null | undefined, now: number = Date.now()): void {
   if (!user || typeof user.email !== 'string' || !user.email.trim()) return;
+  if (String(user.role || '').toUpperCase() === 'DEMO') return;
+  if (!isLocalSessionProfile(user)) return;
   try {
     localStorage.setItem(PERSISTED_SESSION_KEY, JSON.stringify({ user, savedAt: now }));
   } catch {
@@ -78,7 +86,8 @@ export function restorePersistedSession(
   ttl: number = PERSISTED_SESSION_TTL_MS
 ): User | null {
   const user = readPersistedSession(now, ttl);
-  if (!user) return null;
+  // Cópia de perfil da nuvem (versão anterior) não vale como sessão local.
+  if (!user || !isLocalSessionProfile(user)) return null;
 
   try {
     sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(user));
