@@ -145,3 +145,21 @@ export function shouldReturnHubToWorkContext(
   if (hasPanelIntent) return false;
   return !String(selectedUnit || '').trim();
 }
+
+/**
+ * Destino do «Voltar» quando a pilha não tem ecrã anterior: a raiz da trilha
+ * única é o CONTRATO DE TRABALHO. A tela legada de módulos (`/modules`,
+ * `MODULE_SELECTION`) NÃO é destino de «Voltar» — antecede o contrato e
+ * retiraria o utilizador do contexto que ele já escolheu.
+ */
+export const VOLTAR_SEM_HISTORICO: AppScreen = AppScreen.WORK_CONTEXT_SELECTION;
+
+/**
+ * Pilha depois do «Voltar», numa regra só: recua um passo no histórico e, sem
+ * histórico, ancora no CONTRATO DE TRABALHO. Usada pelo `popScreen` do App e
+ * pelos fallbacks internos das sub-telas do PAINEL COMPLETO (Gestor de Base,
+ * Histórico de Cargas).
+ */
+export function historicoAposVoltar(history: AppScreen[]): AppScreen[] {
+  return history.length > 1 ? history.slice(0, -1) : [VOLTAR_SEM_HISTORICO];
+}

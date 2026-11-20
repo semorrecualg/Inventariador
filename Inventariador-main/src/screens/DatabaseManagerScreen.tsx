@@ -15,6 +15,7 @@ import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline,
 import { redactDiagnosticText } from '../utils/diagnosticRedaction';
 import { SRE_PROTOCOL_LINE, CLOUD_STATE_LABEL, formatBasesLine, type CloudBaseCount } from '../utils/sreProtocol';
 import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download, Copy, Check, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
+import { VOLTAR_SEM_HISTORICO } from '../utils/routingUtils';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const data = await DatabaseLoaderService.extrairDadosDaPlanilha(file);
@@ -819,11 +820,13 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             if (onBack) {
               onBack();
             } else {
+              // Mesma regra do App (`historicoAposVoltar`): sem histórico, a
+              // raiz da trilha é o CONTRATO DE TRABALHO — nunca `/modules`.
               const hasPush = typeof window !== 'undefined' && typeof (window as any).pushScreen === 'function'; // eslint-disable-line @typescript-eslint/no-explicit-any
               if (hasPush) {
-                (window as any).pushScreen(AppScreen.MODULE_SELECTION); // eslint-disable-line @typescript-eslint/no-explicit-any
+                (window as any).pushScreen(VOLTAR_SEM_HISTORICO); // eslint-disable-line @typescript-eslint/no-explicit-any
               } else {
-                localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.MODULE_SELECTION]));
+                localStorage.setItem('gbr_kardek_history', JSON.stringify([VOLTAR_SEM_HISTORICO]));
               }
             }
           }}

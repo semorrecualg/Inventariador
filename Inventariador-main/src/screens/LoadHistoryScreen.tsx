@@ -3,6 +3,7 @@ import { ArrowLeft, Database, History, RefreshCw, ChevronDown, ChevronRight, Fil
 import { AppScreen } from '../types';
 import { fetchLoadHistory } from '../services/supabaseService';
 import { logger } from '../utils/logger';
+import { VOLTAR_SEM_HISTORICO } from '../utils/routingUtils';
 import {
   groupLoadHistory,
   normalizeTenantLabel,
@@ -122,11 +123,13 @@ export const LoadHistoryScreen: React.FC<LoadHistoryScreenProps> = ({ onBack, te
     if (onBack) {
       onBack();
     } else {
+      // Mesma regra do App (`historicoAposVoltar`): sem histórico, a raiz da
+      // trilha é o CONTRATO DE TRABALHO — nunca `/modules`.
       const hasPush = typeof window !== 'undefined' && typeof (window as { pushScreen?: (s: AppScreen) => void }).pushScreen === 'function';
       if (hasPush) {
-        (window as { pushScreen?: (s: AppScreen) => void }).pushScreen?.(AppScreen.MODULE_SELECTION);
+        (window as { pushScreen?: (s: AppScreen) => void }).pushScreen?.(VOLTAR_SEM_HISTORICO);
       } else {
-        localStorage.setItem('gbr_kardek_history', JSON.stringify([AppScreen.MODULE_SELECTION]));
+        localStorage.setItem('gbr_kardek_history', JSON.stringify([VOLTAR_SEM_HISTORICO]));
       }
     }
   };

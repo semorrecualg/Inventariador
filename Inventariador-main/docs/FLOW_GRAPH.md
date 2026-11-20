@@ -87,7 +87,8 @@ graph TD
     UNIT_SEL -->|Selecionar Unidade| DASHBOARD
     UNIT_SEL -->|Carga / Migração de Dados| DB_MGR
     UNIT_SEL -->|Trocar Módulo| MODULE_SEL
-    DB_MGR -->|Voltar| MODULE_SEL
+    DB_MGR -->|Voltar| MAIN_MENU
+    DB_MGR -->|Voltar (sem histórico)| TENANT_WORK
 
     %% Transições - Dashboard
     DASHBOARD -->|Iniciar Bipagem / Selecionar Local| ADDR_SEL
@@ -210,7 +211,8 @@ literal do grafo, a decisão registrada é a seguinte:
 | 3 | LOGIN → BIOMETRIC | acionado na tela de login | pós-login automático (`pushScreen(BIOMETRIC_REGISTRATION)` após auth, com `popScreen` ao concluir/ignorar) | **Manter.** Resultado equivalente ao grafo: usuário cai em `MODULE_SELECTION` após concluir/ignorar (o `pop` retorna à tela abaixo, que é o destino pós-login). |
 | 4 | STRESS → | `LOGIN` | `setHistory([LOGIN])` ao voltar | ✅ Conforme o grafo. Sem mudança. |
 | 5 | LOGIN → TENANT_WORK | `MODULE_SEL` (grafo antigo) | `TENANT_WORK_SELECTION` quando `buildWorkContexts(user) > 1` (multi-contrato/filial) | **Manter o seletor.** Com autorização em mais de um contrato/filial, o usuário escolhe onde vai operar antes de qualquer carga; ao escolher, `handleSelectWorkContext` persiste o contexto, sincroniza SÓ o contrato e roteia por perfil/base (`resolvePostSelectionScreen`: base vazia → `DATABASE_MANAGER`; auditor com base → `UNIT_SELECTION`; demais → `MODULE_SELECTION`). |
-| 6 | MAIN_MENU → LOAD_HISTORY | — (tela nova) | Submenu Admin → `onNavigate(LOAD_HISTORY)` com gate `manage_database` | **Manter.** A tela lê o `audit_logs` (IMPORT/SYNC_PULL) por contrato e só aparece para quem gerencia a base; `onBack` retorna ao menu via `popScreen`. |
+| 6 | DB_MGR → | `MODULE_SEL` (grafo antigo) | `popScreen` → `MAIN_MENU` (PAINEL COMPLETO de onde se veio); sem histórico → `WORK_CONTEXT_SELECTION` | **Corrigido.** O regresso fixo em `ModuleSelector` saía da trilha única e, para o auditor, era rebatido ao contrato pelo RouteGuard (ida e volta sem destino). `historicoAposVoltar` é a regra única (também nos fallbacks de `DatabaseManagerScreen`/`LoadHistoryScreen`); `/modules` deixa de ser destino de «Voltar». |
+| 7 | MAIN_MENU → LOAD_HISTORY | — (tela nova) | Submenu Admin → `onNavigate(LOAD_HISTORY)` com gate `manage_database` | **Manter.** A tela lê o `audit_logs` (IMPORT/SYNC_PULL) por contrato e só aparece para quem gerencia a base; `onBack` retorna ao menu via `popScreen`. |
 
 ## 4. Higienização estrutural (consolidado em 05/08/2026)
 
