@@ -271,3 +271,40 @@ export const normalizarMarcaConferencia = (
 
   return { converter: Object.keys(patch).length > 0, patch };
 };
+
+/**
+ * O RELATÓRIO E A FICHA IMPRIMEM A MESMA CONFERÊNCIA DOS ECRÃS
+ * ============================================================================
+ * A ficha PDF do ativo lia campos que não existem no registo (`_conferidoEm`,
+ * `_conferidoPor`) e imprimia «DATA AUDITORIA: PENDENTE» e «AUDITOR: NÃO
+ * IDENTIFICADO**» em TODOS os cartões, incluindo os conferidos no campo — a
+ * prova que sai para o cliente não mostrava quem conferiu nem quando. E a ficha
+ * de impressão usava a coluna de auditoria crua como texto de conformidade:
+ * um item conferido só pela flag saía a dizer «sem ressalvas» por omissão.
+ *
+ * Aqui a leitura é uma só, com as mesmas grafias de `isConferido`: quem confere
+ * decide-se pela regra, e a data/quem só existem quando há conferência. O
+ * formato (data legível) fica com quem imprime.
+ */
+export interface AuditoriaDoAtivo {
+  conferido: boolean;
+  /** Rótulo de conferência que o documento imprime. */
+  situacao: 'SIM' | 'NÃO';
+  /** Instante da leitura, como está no registo (ISO), ou `null`. */
+  dataLeitura: string | null;
+  /** Quem conferiu, ou `null` quando o registo não diz. */
+  auditor: string | null;
+}
+
+export const auditoriaDoAtivo = (
+  asset?: (CamposDeDecisaoDeConferencia & { _auditor?: unknown }) | null
+): AuditoriaDoAtivo => {
+  const conferido = !!asset && isConferido(asset);
+  const auditor = conferido ? String(asset?._auditor ?? '').trim() : '';
+  return {
+    conferido,
+    situacao: conferido ? 'SIM' : 'NÃO',
+    dataLeitura: conferido ? dataLegivel(asset?._dataLeitura) : null,
+    auditor: auditor || null
+  };
+};

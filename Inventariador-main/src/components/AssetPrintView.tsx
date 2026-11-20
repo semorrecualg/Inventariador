@@ -179,7 +179,7 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
                     <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Conformidade e Localização</p>
                     <div className="space-y-1">
                         <p className="text-xs text-slate-700 leading-relaxed italic">
-                            &quot;{asset.AUDITOR_STATUS_CONFERENCIA || 'Conferência física realizada sem ressalvas.'}&quot;
+                            &quot;{asset.AUDITOR_STATUS_CONFERENCIA || (isConferido(asset) ? 'Conferência física realizada sem ressalvas.' : 'Aguardando conferência física.')}&quot;
                         </p>
                         <p className="text-[9px] font-bold text-slate-400 uppercase mt-2">
                             GeoRef: {asset.latitude ? `${asset.latitude}, ${asset.longitude}` : 'Coordenadas não registradas'} | {asset.endereco || 'Localidade indefinida'}
