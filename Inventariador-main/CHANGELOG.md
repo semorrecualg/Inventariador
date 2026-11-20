@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a auditoria de ativos deixava de abortar as escritas
+
+- **`log_asset_changes()` lia a coluna legada:** a função, criada na base fora
+  do repositório, gravava `NEW._auditor` em `asset_logs.user_email`. Nas linhas
+  com `_auditor` nulo o `INSERT` recebia NULL e — como `user_email` é
+  `NOT NULL` — a transacção inteira abortava com `23502`. Toda a `UPDATE`
+  desses ativos falhava na nuvem, incluindo o restauro pelo app, que passava na
+  trava `assets_bloquear_ressurreicao` e estourava a seguir na auditoria.
+  O e-mail passa a vir de `coalesce(auditor, _auditor, JWT, 'system@gbr.com.br')`,
+  lido por `to_jsonb(NEW)` para não depender de a coluna existir em todas as
+  bases. Script: `scripts/fix-asset-log-auditor-legado.sql`; contrato guardado
+  por `src/__tests__/assetLogAuditorLegado.test.ts`.
+
 ## [2.8.1] — 2026-11-20
 
 ### Adicionado — trava no servidor contra a ressurreição de ativos apagados
