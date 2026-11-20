@@ -117,6 +117,31 @@ ALTER TABLE public.assets ADD PRIMARY KEY (tenantid, id);
 CREATE INDEX IF NOT EXISTS assets_tenantid_idx ON public.assets (tenantid);
 CREATE INDEX IF NOT EXISTS assets_tenant_filial_idx ON public.assets (tenantid, filial);
 
+-- CARIMBO DA NUVEM EM CADA UPDATE: o pull delta baixa `updated_at > checkpoint`
+-- (fetchFullInventory, ETAPA 5b). Sem trigger, `updated_at` só valia no INSERT:
+-- o upsert da conferência actualizava a linha sem mexer no carimbo e a alteração
+-- ficava invisível aos outros aparelhos. O app não envia `updated_at` (o relógio
+-- do aparelho podia empurrar o checkpoint para o futuro); quem carimba é o
+-- servidor. Numa base que já existe, o mesmo bloco vive em
+-- scripts/assets-updated-at-trigger.sql.
+UPDATE public.assets SET updated_at = COALESCE(created_at, now()) WHERE updated_at IS NULL;
+
+CREATE OR REPLACE FUNCTION public.touch_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS assets_touch_updated_at ON public.assets;
+CREATE TRIGGER assets_touch_updated_at
+  BEFORE UPDATE ON public.assets
+  FOR EACH ROW
+  EXECUTE FUNCTION public.touch_updated_at();
+
 -- ============================================================================
 -- 2. INVENTORY_CONFIG — config de unidade + âncora GPS (upsert por filial)
 -- ============================================================================

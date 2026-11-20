@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o `updated_at` de `assets` passa a mudar em cada actualização
+
+- **A conferência de um aparelho não chegava aos outros:** o pull delta baixa
+  `updated_at > checkpoint`, mas a coluna só tinha `DEFAULT now()` — valia no
+  `INSERT` e nunca mais. O upsert da fila e o espelhamento actualizavam a linha
+  (`conferido`, `auditor`, `data_leitura`) sem tocar no carimbo, e a alteração
+  ficava invisível a todos os aparelhos até um pull completo. Um trigger
+  `BEFORE UPDATE` (`assets_touch_updated_at`) passa a escrever
+  `NEW.updated_at = now()` no servidor — bloco em
+  `scripts/assets-updated-at-trigger.sql` para a base actual e em
+  `docs/supabase_bootstrap.sql` para as bases novas.
+- **O cliente não escreve o carimbo:** a fila continua a não enviar
+  `updated_at` de propósito. Com o relógio do aparelho adiantado, um carimbo do
+  cliente empurrava o checkpoint do pull para o futuro e os restantes aparelhos
+  saltavam alterações até esse instante. O carimbo é do servidor; o app só lê.
+- **Linhas sem carimbo:** o backfill (`updated_at = COALESCE(created_at,
+  now())`) tira do limbo as linhas antigas, que nunca apareciam no delta.
+
 ### Corrigido — o timeout deixa de ser carimbado como recusa definitiva
 
 - **Timeout ≠ recusa:** quando o pedido não responde em 15 s, a fila carimbava

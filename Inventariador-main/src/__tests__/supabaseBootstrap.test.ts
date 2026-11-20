@@ -36,8 +36,13 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     // 26000 de format()/EXECUTE dinâmico nas políticas. O único DO permitido é o
     // bloco estático e condicional que torna unit_id opcional em schema legado
     // (sem ele, o ALTER quebraria em instalação nova — coluna inexistente).
+    // `EXECUTE FUNCTION`/`EXECUTE PROCEDURE` é a sintaxe estática do
+    // CREATE TRIGGER (`assets_touch_updated_at`), não SQL dinâmico: o que
+    // partia no SQL Editor era `EXECUTE '<string>'`, e esse continua proibido.
     const dynamic = codeLines.filter(
-      (l) => /^(EXECUTE\s)/i.test(l) || /format\(/.test(l)
+      (l) =>
+        (/^(EXECUTE\s)/i.test(l) && !/^EXECUTE\s+(?:FUNCTION|PROCEDURE)\b/i.test(l)) ||
+        /format\(/.test(l)
     );
     expect(dynamic).toEqual([]);
     const doBlocks = codeLines.filter((l) => /^DO\s*\$\$/i.test(l));

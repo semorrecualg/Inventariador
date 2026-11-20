@@ -99,6 +99,21 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     expect(Number(local?._is_synced)).toBe(1);
   });
 
+  // O CARIMBO DA NUVEM É DO SERVIDOR: se a fila enviasse `updated_at`, um
+  // relógio adiantado no aparelho empurrava o checkpoint do pull delta para o
+  // futuro e os outros aparelhos saltavam alterações até esse instante. Quem
+  // escreve o carimbo é o trigger `assets_touch_updated_at`
+  // (scripts/assets-updated-at-trigger.sql); o cliente só lê.
+  it('não envia updated_at — o carimbo da nuvem é do servidor', async () => {
+    await db.local_assets.put(asset({ updated_at: '2026-11-12T13:00:00.000Z' }) as never);
+
+    await processDataSyncQueue();
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('updated_at');
+    expect(payload.conferido).toBe(true);
+  });
+
   // TIMEOUT ≠ RECUSA: o servidor pode só não ter respondido em 15 s. Carimbar
   // `_syncFailAt` pintava o cartão de «Falha de envio» e o operador lia o
   // atraso como recusa de dados (ecrãs de 2026-11-19).
