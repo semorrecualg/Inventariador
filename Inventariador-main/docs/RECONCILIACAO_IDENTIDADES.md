@@ -1,9 +1,9 @@
 # Reconciliação de identidades — nuvem ↔ aparelho
 
-> **Item 21** de `artifacts/AVALIACAO_SYNC_PRIMARYKEY.md`. Este documento é
-> **diagnóstico read-only**: não escreve, não apaga e não renumera chaves. A
-> decisão sobre as cópias é de produto e toma-se **com os números** que estas
-> consultas devolvem.
+> **Item 21** da avaliação do «duplicate key» e do «Tempo esgotado» (documento
+> de trabalho da agenda, fora do repositório). Este documento é **diagnóstico
+> read-only**: não escreve, não apaga e não renumera chaves. A decisão sobre as
+> cópias é de produto e toma-se **com os números** que estas consultas devolvem.
 
 O problema que isto mede: a Unidade Operacional chegou a mostrar **50.544**
 linhas onde a nuvem tem **12.636** (`src/utils/assetKey.ts` conta a origem —
