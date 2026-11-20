@@ -1324,7 +1324,13 @@ export const syncAssetsToCloud = async (
         // pull devolvia a linha intacta e o ativo «ressuscitava» no ciclo
         // seguinte, aqui ao reiniciar e em qualquer outro telemóvel.
         // `normalizeFlag` aceita as três grafias locais (`true`, `1`, `'1'`).
-        is_deleted: normalizeFlag(cleanAsset._is_deleted)
+        is_deleted: normalizeFlag(cleanAsset._is_deleted),
+        // RESTAURO EXPLÍCITO (trava do servidor): o trigger
+        // `assets_bloquear_ressurreicao` só aceita `is_deleted = false` com um
+        // `restored_at` novo. Sem esta marca, o upsert de um APK que não conhece
+        // a regra falha — a exclusão fica de pé em vez de ressuscitar o ativo.
+        // Só o caminho de restauro pede `allowUndelete`, por isso só ele a envia.
+        ...(permiteRessuscitar ? { restored_at: new Date().toISOString() } : {})
       };
 
       byKey.set(`${row.tenantid}|${row.primarykey}`, {
