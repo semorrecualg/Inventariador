@@ -6035,7 +6035,10 @@ useEffect(() => {
         updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
         
         updates.TAG_INVENTARIO = determineTag({ ...a, ...updates }, targetLoc);
-        updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
+        // A coluna de auditoria diz se o item foi conferido — não é o rótulo da
+        // etiqueta. Gravar ali `TAG_INVENTARIO` («ETIQUETAR», «ADOTADO»…)
+        // apagava a prova 'SIM' de quem já tinha conferido o ativo.
+        updates.AUDITOR_STATUS_CONFERENCIA = isConferido({ ...a, ...updates }) ? 'SIM' : 'NAO';
         updates._camposAlterados = Array.from(alteredFields);
         updates._valoresOriginais = originalValues;
 

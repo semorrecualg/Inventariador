@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — os últimos ecrãs que decidiam a conferência sozinhos
+
+- **A ficha PDF não mostrava a conferência:** imprimia `_conferidoEm`/
+  `_conferidoPor`, campos que não existem no registo — TODOS os cartões saíam
+  «DATA AUDITORIA: PENDENTE» e «AUDITOR: NÃO IDENTIFICADO», mesmo os conferidos
+  no campo. Passa a usar `auditoriaDoAtivo` (`isConferido` + `_dataLeitura` +
+  `_auditor`), com a data legível no formato que o documento já usava.
+- **A ficha de impressão dava conformidade por omissão:** sem a coluna de
+  auditoria dizia «Conferência física realizada sem ressalvas» também para itens
+  por conferir; agora só o diz quando `isConferido` confirma, e os restantes
+  ficam «Aguardando conferência física».
+- **A coluna de auditoria deixou de ser sobrescrita pela etiqueta:** o fluxo de
+  aplicar localização gravava `AUDITOR_STATUS_CONFERENCIA = TAG_INVENTARIO`
+  («ETIQUETAR», «ADOTADO»…), apagando a prova `'SIM'` de quem já tinha
+  conferido o ativo; agora grava `'SIM'`/`'NAO'` pela regra única.
+- **Prova:** `src/__tests__/touchpointsConferido.test.ts` (8 casos) cobre a
+  leitura única (`auditoriaDoAtivo`) e o contrato dos ficheiros — nenhum volta a
+  ler `_conferidoEm`/`_conferidoPor`, a dar conformidade por omissão, a
+  sobrescrever a coluna com a etiqueta ou a decidir pela marca crua
+  (`!x._conferido`, `_conferido === 1`, `Number(_conferido)`,
+  `AUDITOR_STATUS_CONFERENCIA === 'SIM'`) fora de `utils/conferencia.ts`.
+  Com as duas regressões repostas, 2 casos falham.
+- **Justificados (escritas, não decisões):** `_conferido: false` ao desmembrar
+  (`App.tsx`, filho nasce por conferir), `assetRepository.updateStatus` e os
+  seeds de `sqliteService`/`stressTestService` (recebem o booleano já decidido),
+  `dedupAssets`/`UnitSelector` (gravam `isConferido`), `syncService` e
+  `supabaseService` (leem pela regra), `localDbService.mergeCopiasDeAtivo`
+  (merge monotónico por `isConferido`) e os filtros de chaves de `AuditLogs` e
+  `constants/schema`.
+
 ### Alterado — as grafias antigas de «conferido» ficam numa só
 
 - **A marca continuava gravada como veio:** `isConferido` já aceitava tudo —
