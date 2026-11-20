@@ -67,7 +67,7 @@ interface MainMenuProps {
   onUpdateScannerMode: (mode: ScannerMode) => void;
   initialDataMenuOpen?: boolean;
   /** Painel a abrir automaticamente ao montar (tool grid da Unidade Operacional). */
-  initialOpenPanel?: 'PREFERENCES' | 'DATA' | 'ADMIN' | 'AUDIT' | null;
+  initialOpenPanel?: 'PREFERENCES' | 'ADMIN' | null;
   databaseMode: DatabaseMode;
   onUpdateDatabaseMode: (mode: DatabaseMode) => void;
   selectedUnit: string | null;
@@ -211,13 +211,13 @@ const MainMenu: React.FC<MainMenuProps> = ({
   }, [isDataMenuOpen, isAdmin]);
 
   // Abre automaticamente o painel solicitado pela tool grid da Unidade Operacional
-  // (AJUSTES/PAINEL) ao chegar no MainMenu.
+  // (AJUSTES/PAINEL) ao chegar no MainMenu. DADOS e AUDITORIA não têm porta na
+  // grelha: vivem dentro do Painel Completo. A Gestão e Manutenção aberta por
+  // `initialDataMenuOpen` (admin com base vazia) tem o seu próprio caminho.
   useEffect(() => {
     if (!initialOpenPanel) return;
     if (initialOpenPanel === 'ADMIN' && (isAdmin || isAuditor)) setIsAdminMenuOpen(true);
-    if (initialOpenPanel === 'AUDIT' && isAuditor) setIsAuditMenuOpen(true);
     if (initialOpenPanel === 'PREFERENCES') setIsPreferencesMenuOpen(true);
-    if (initialOpenPanel === 'DATA' && isAdmin) setIsDataMenuOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

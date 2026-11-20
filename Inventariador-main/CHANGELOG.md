@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Contrato fixado por teste:** `src/__tests__/painelCompletoHub.test.tsx` monta a
   grelha (ADMIN e AUDITOR) e prova que só existem AJUSTES e PAINEL, e que o Painel
   Completo abre Gestão e Manutenção e Auditoria (com o «Voltar» a devolver ao hub).
+- **Resíduos removidos:** `NavigationParams.openPanel` e o estado do App ficam
+  restritos a `'PREFERENCES' | 'ADMIN'`, e saem do efeito do `MainMenu` os ramos
+  inalcançáveis de `initialOpenPanel` para `'DATA'` e `'AUDIT'`. O caminho
+  `initialDataMenuOpen` (admin com base vazia → Gestão e Manutenção) mantém-se.
 
 ### Corrigido — o índice da chave de origem tem de servir de alvo ao `ON CONFLICT`
 
