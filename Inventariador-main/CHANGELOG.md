@@ -50,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Regra única:** `src/utils/mergePorCampo.ts`, usada pelo pull completo
   (`App`) e pelo delta (`mergeDeltaPull`). A exclusão da nuvem continua a vencer
   o registo inteiro.
+- **O `status` só volta quando é prova de conferência:** a conferência da nuvem
+  a vencer repunha o `status` inteiro, e um estado pendente deste aparelho
+  («EM MANUTENÇÃO», «BAIXADO»…) era apagado sem nunca ter subido. O campo
+  continua no grupo da conferência **apenas** quando o valor da nuvem é o
+  marcador (`statusDeConferencia`, o mesmo predicado do desmarcar); um estado
+  de outro teor fica com quem o alterou. Se o aparelho não tiver o campo, o da
+  nuvem mantém-se.
 - **Limite (declarado):** fora da conferência e do GPS o modelo não tem carimbo
   por campo, por isso continua a vencer este aparelho — mas o conflito deixa de
   ser silencioso: a trilha grava `SYNC_CONFLICT` com os grupos em disputa.

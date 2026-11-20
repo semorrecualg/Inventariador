@@ -67,14 +67,23 @@ export const marcaLocalConferida = (asset: CamposDeConferencia): boolean =>
 /**
  * O `status` textual também é marcador de conferência: a planilha/ERP traz
  * «CONFERIDO» e a carga, o envio e o pull da nuvem leem-no como conferido.
- * Deixá-lo de pé ao desmarcar contradizia a flag e a decisão perdia-se na
- * sincronização: o envio voltava a gravar `conferido = true` (o `status` era
- * lido como marcador) e o item regressava conferido ao aparelho.
+ *
+ * O predicado é público porque o merge do pull precisa dele do outro lado: o
+ * `status` só volta da nuvem quando é prova de conferência — um estado de
+ * outro teor não é decisão de auditoria e não pode viajar junto dela.
+ */
+export const statusDeConferencia = (status: unknown): boolean =>
+  /conferido/i.test(String(status ?? ''));
+
+/**
+ * Deixar o marcador de pé ao desmarcar contradizia a flag e a decisão
+ * perdia-se na sincronização: o envio voltava a gravar `conferido = true` (o
+ * `status` era lido como marcador) e o item regressava conferido ao aparelho.
  *
  * Só o marcador é substituído — um status de outro teor fica como está.
  */
 export const statusAoDesmarcar = (status: unknown): string =>
-  /conferido/i.test(String(status ?? '')) ? 'PENDENTE' : String(status ?? '');
+  statusDeConferencia(status) ? 'PENDENTE' : String(status ?? '');
 
 /** Campos que uma marcação/desmarcação altera no ativo. */
 export type PatchDeConferencia = {

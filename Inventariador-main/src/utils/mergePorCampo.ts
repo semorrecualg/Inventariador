@@ -34,6 +34,7 @@ import { normalizeFlag } from './normalize';
 import {
   conferenciaLocalVenceNuvem,
   isConferido,
+  statusDeConferencia,
   type CamposDeDecisaoDeConferencia
 } from './conferencia';
 import { assetGpsPair, preservarGpsMaisRecente } from './assetGps';
@@ -76,9 +77,17 @@ const temValor = (linha: Linha, campo: string): boolean => {
  * Só sobrescreve o que a nuvem REALMENTE diz: uma chave ausente na linha da
  * nuvem não apaga a decisão local por omissão — quem decide é
  * `conferenciaLocalVenceNuvem`, e ela já correu antes.
+ *
+ * O `status` é a excepção: ele é do grupo só quando é o MARCADOR de conferência
+ * (`isConferido`/`statusAoDesmarcar`). Um estado de outro teor («EM
+ * MANUTENÇÃO», «BAIXADO»…) vive no mesmo campo e é trabalho deste aparelho —
+ * a conferência alheia a vencer não o pode apagar, ou a alteração de estado
+ * pendente desaparecia do registo sem nunca ter subido. Se o aparelho não
+ * tiver o campo, o valor da nuvem fica (vem do spread, não daqui).
  */
 const reporConferenciaDaNuvem = (registo: Linha, nuvem: Linha): void => {
   for (const campo of CAMPOS_DA_CONFERENCIA) {
+    if (campo === 'status' && !statusDeConferencia(nuvem.status)) continue;
     if (temValor(nuvem, campo)) registo[campo] = nuvem[campo];
   }
 };

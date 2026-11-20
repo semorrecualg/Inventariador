@@ -93,6 +93,38 @@ describe('mesclarConflitoPorCampo — a nuvem e o aparelho no mesmo ativo', () =
     expect(registo._dataLeitura).toBe('2026-11-20T13:00:00Z');
   });
 
+  it('estado pendente do aparelho não é apagado quando a conferência da nuvem vence', () => {
+    const nuvem = daNuvem({
+      _conferido: true,
+      _auditor: 'auditor.a@gbr.com.br',
+      _dataLeitura: '2026-11-20T12:00:00Z',
+      status: 'BAIXADO'
+    });
+    // Este aparelho mudou o estado e ainda não o subiu.
+    const local = doAparelho({ _conferido: 0, status: 'EM MANUTENCAO' });
+
+    const { registo } = mesclarConflitoPorCampo(nuvem, local);
+
+    // A conferência é de quem conferiu; o estado é trabalho deste aparelho.
+    expect(registo._conferido).toBe(true);
+    expect(registo._auditor).toBe('auditor.a@gbr.com.br');
+    expect(registo.status).toBe('EM MANUTENCAO');
+  });
+
+  it('o status da nuvem volta quando ele próprio é o marcador de conferência', () => {
+    const nuvem = daNuvem({
+      _conferido: true,
+      _auditor: 'auditor.a@gbr.com.br',
+      _dataLeitura: '2026-11-20T12:00:00Z',
+      status: 'CONFERIDO'
+    });
+    const local = doAparelho({ _conferido: 0, status: 'EM MANUTENCAO' });
+
+    const { registo } = mesclarConflitoPorCampo(nuvem, local);
+
+    expect(registo.status).toBe('CONFERIDO');
+  });
+
   it('desmarcar local (sem data de leitura) resiste a uma conferência antiga da nuvem', () => {
     const nuvem = daNuvem({
       _conferido: true,
@@ -184,5 +216,24 @@ describe('mergeDeltaPull — o delta do dia a dia usa a mesma regra', () => {
     expect(assets[0].endereco).toBe('RUA NOVA');
     expect(assets[0]._auditor).toBe('auditor.a@gbr.com.br');
     expect(assets[0]._conferido).toBe(true);
+  });
+
+  it('o delta também não apaga o estado pendente do aparelho', () => {
+    const nuvem = daNuvem({
+      _conferido: true,
+      _auditor: 'auditor.a@gbr.com.br',
+      _dataLeitura: '2026-11-20T12:00:00Z',
+      status: 'BAIXADO'
+    }) as unknown as Asset;
+    const local = doAparelho({ _conferido: 0, status: 'EM MANUTENCAO' }) as unknown as Asset;
+
+    const { assets } = mergeDeltaPull({
+      prevAssets: [local],
+      cloudAssets: [nuvem],
+      dirtyIds: ['PK-1']
+    });
+
+    expect(assets[0]._conferido).toBe(true);
+    expect(assets[0].status).toBe('EM MANUTENCAO');
   });
 });
