@@ -84,7 +84,7 @@ import {
 } from './utils/syncCheckpoint';
 import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato, unitNamesCacheKey, readUnitNamesCache, writeUnitNamesCache } from './utils/unitContextUtils';
 import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
-import { clearPersistedSession, resolveInitialScreenHistory, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
+import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -700,6 +700,11 @@ useEffect(() => {
           logger.info("[SRE_NAV] Preservando viewport no Gestor de Base após purga bem-sucedida.");
           sessionStorage.removeItem('app_just_cleared_data');
           setHistoryRef.current([AppScreen.DATABASE_MANAGER]);
+        } else if (hasLocalSessionInCache()) {
+          // Há sessão local válida: ancora no CONTRATO. Ancorar no login fazia
+          // o ecrã de entrada aparecer por um instante no arranque.
+          logger.info("[SRE_NAV] Sessão local preservada; ancorando no contrato de trabalho.");
+          setHistoryRef.current([AppScreen.WORK_CONTEXT_SELECTION]);
         } else {
           logger.info("[SRE_NAV] Forçando ancoragem no portal unificado de autenticação.");
           setHistoryRef.current([AppScreen.LOGIN]);
@@ -1353,8 +1358,10 @@ useEffect(() => {
           logger.warn(">>> [SRE-REBOOT] Falha na validação prévia de boot:", err);
         }
 
-        // COMPORTAMENTO ANTI-SESSÃO FANTASMA: limpa dados residuais se NÃO for um boot resiliente (F5 legítimo)
-        if (!isSessionValid) {
+        // COMPORTAMENTO ANTI-SESSÃO FANTASMA: limpa dados residuais se NÃO for um boot resiliente (F5 legítimo).
+        // Uma sessão local reposta no arranque não é fantasma: limpá-la aqui
+        // devolvia o utilizador ao login a meio do boot.
+        if (!isSessionValid && !hasLocalSessionInCache()) {
           try {
             if (typeof sessionStorage !== 'undefined') {
               sessionStorage.clear();
@@ -1387,7 +1394,8 @@ useEffect(() => {
             setIsEngineReady(true);
             setIsInitializing(false);
             setAuthLoading(false);
-            setHistory([AppScreen.LOGIN]);
+            // Com sessão local reposta ancora no contrato, nunca no login.
+            setHistory([hasLocalSessionInCache() ? AppScreen.WORK_CONTEXT_SELECTION : AppScreen.LOGIN]);
             removerLoaderEstatico();
           }
           return;

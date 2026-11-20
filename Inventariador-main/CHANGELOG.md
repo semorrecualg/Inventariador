@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decisão de arranque, com a marca `APP` para não ser tratado como fantasma da
   nuvem. Qualquer logout explícito apaga a cópia (`clearPersistedSession`), tal
   como a expiração de sessão.
+- **Arranque sem login intermitente:** `verificarEstadoEBoot`, o fim do
+  `initApp` na web e a purga anti-fantasma deixam de ancorar em `LOGIN`/limpar
+  a sessão quando há uma sessão local reposta — era isso que fazia o ecrã de
+  entrada aparecer por um instante num separador novo. `bootMount.test.tsx`
+  monta o `App` com só a cópia em `localStorage` e prova que a primeira rota é
+  `#/contexto`, que a sessão reposta é a mesma e que o login nunca é escrito
+  nem desenhado.
 - **Saídas do Login:** «Redefinir Acesso Local» e o bloqueio de perfil sem
   contrato passam pelo mesmo `resetLocalAccessStorage()`, que apaga a cópia
   persistida — antes quem saía por ali voltava a entrar sozinho. Só perfis de

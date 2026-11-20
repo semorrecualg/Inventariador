@@ -110,16 +110,17 @@ export function restorePersistedSession(
  * sem sessão, no login. É esta decisão que impede um separador novo de parar no
  * ecrã de entrada.
  */
-export function resolveInitialScreenHistory(): AppScreen[] {
+export function hasLocalSessionInCache(): boolean {
   try {
     const guardado = sessionStorage.getItem(SESSION_CACHE_KEY);
-    if (guardado && guardado !== 'null' && isLocalSessionProfile(JSON.parse(guardado))) {
-      return [AppScreen.WORK_CONTEXT_SELECTION];
-    }
+    return !!guardado && guardado !== 'null' && isLocalSessionProfile(JSON.parse(guardado));
   } catch {
-    /* cache ilegível — segue para o login */
+    return false;
   }
-  return [AppScreen.LOGIN];
+}
+
+export function resolveInitialScreenHistory(): AppScreen[] {
+  return hasLocalSessionInCache() ? [AppScreen.WORK_CONTEXT_SELECTION] : [AppScreen.LOGIN];
 }
 
 /** Logout explícito: o próximo arranque tem de pedir credenciais. */
