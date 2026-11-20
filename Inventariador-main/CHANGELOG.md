@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a exclusão da nuvem vence a edição pendente (o ativo deixa de ressuscitar)
+
+- **A cópia local desfazia a exclusão:** o merge do pull reaplica a cópia local
+  por cima da linha da nuvem para não perder alterações por subir. Um aparelho
+  que ficou com `_is_deleted = 0` (offline durante a exclusão, `delete` que
+  falhou antes, base antiga) desfazia a exclusão em todos os aparelhos no ciclo
+  seguinte, sem ninguém tocar no ativo. A exclusão não é um campo do registo: é
+  o registo inteiro — quando a nuvem diz «apagado», a cópia local perde por
+  inteiro, a pendência é largada (não há o que enviar de um registo apagado) e
+  a trilha regista `SYNC_DELETE_WINS`. Com a linha viva na nuvem, a edição
+  local continua a ganhar como antes (regra em `src/utils/pendencia.ts` →
+  `mesclarComExclusao`).
+
 ### Adicionado — a exclusão de um ativo chega à nuvem e desaparece nos outros aparelhos
 
 - **O soft delete não saía do aparelho:** `_is_deleted` vive só no registo

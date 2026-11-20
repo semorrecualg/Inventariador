@@ -14,7 +14,7 @@ import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } 
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
-import { marcarAlteracaoLocal, preservarPendenciaLocal } from './utils/pendencia';
+import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao } from './utils/pendencia';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
 import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
@@ -2827,7 +2827,31 @@ useEffect(() => {
                 const index = mergedAssets.findIndex(a => String(a.id) === id);
                 if (index !== -1) {
                   const cloudAsset = mergedAssets[index];
-                  
+                  // EXCLUSÃO VENCE A EDIÇÃO PENDENTE: a cópia local é reaplicada
+                  // por cima da nuvem para não perder alterações por subir — mas
+                  // um aparelho que ficou com `_is_deleted = 0` (offline durante
+                  // a exclusão, ou `delete` que falhou antes) desfazia a
+                  // exclusão em TODOS os aparelhos no ciclo seguinte. A exclusão
+                  // é do registo inteiro: quando a nuvem diz «apagado», a cópia
+                  // local perde e a pendência é largada.
+                  const decisao = mesclarComExclusao(cloudAsset, localDirty);
+                  if (decisao.exclusaoVenceu) {
+                    logger.warn(`>>> [Sync] Exclusão da nuvem vence a edição local pendente do ativo ${cloudAsset.etiqueta || id}.`);
+                    logAuditEvent({
+                      user_email: user?.email || 'system',
+                      action: 'SYNC_DELETE_WINS',
+                      record_id: String(id),
+                      table_name: 'assets',
+                      old_data: cloudAsset,
+                      new_data: localDirty,
+                      details: `Exclusão na nuvem prevalece sobre a alteração local pendente do ativo ${cloudAsset.etiqueta || id}: a cópia local foi descartada e o registo fica excluído.`,
+                      tenantid: user?.tenantid || readSessionTenantId() || ''
+                    });
+                    dirtyAssetsRef.current.delete(id);
+                    mergedAssets[index] = decisao.registo;
+                    return;
+                  }
+
                   // Detecção de Conflito: Se o item na nuvem também foi alterado (versão diferente ou conferido por outro)
                   const isConflict = isConferido(cloudAsset) && 
                                    cloudAsset._auditor && 
@@ -2848,7 +2872,7 @@ useEffect(() => {
                     });
                   }
 
-                  mergedAssets[index] = { ...mergedAssets[index], ...localDirty };
+                  mergedAssets[index] = decisao.registo;
                 } else {
                   mergedAssets.push(localDirty);
                 }
