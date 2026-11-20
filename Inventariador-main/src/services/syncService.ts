@@ -173,6 +173,32 @@ const loadRecentSyncAuditSignatures = async (acao: string): Promise<Set<string>>
   return signatures;
 };
 
+/**
+ * A exclusão que venceu a subida — uma linha de trilha por registo e por janela.
+ *
+ * Mesmo com o registo já aplicado (`markAssetsDeleted`), uma gravação de estado
+ * atrasada pode voltar a pô-lo pendente. A janela de 10 min garante que, nesse
+ * caso, a trilha não ganha uma linha `SYNC_DELETE_WINS` a cada ciclo de 60 s.
+ */
+const auditDeleteWins = async (
+  userId: string,
+  primaryKey: string,
+  details: string
+): Promise<void> => {
+  try {
+    const cutoffIso = new Date(Date.now() - SYNC_FAILURE_AUDIT_WINDOW_MS).toISOString();
+    const recentes = await db.audit_logs
+      .where('updated_at')
+      .above(cutoffIso)
+      .filter((log) => log.acao === 'SYNC_DELETE_WINS' && String(log.registro_id || '') === primaryKey)
+      .toArray();
+    if (recentes.length > 0) return;
+    await sqliteService.logAuditEvent(userId, 'SYNC_DELETE_WINS', 'local_assets', primaryKey, details);
+  } catch (err) {
+    logger.warn('>>> [Sync] Falha ao registar a exclusão que prevaleceu na trilha:', err);
+  }
+};
+
 const auditSyncRecordFailure = async (
   userId: string,
   acao: string,
@@ -686,17 +712,19 @@ const _syncService = {
           // seguinte aplica a exclusão (`mesclarComExclusao`). A trilha diz o
           // que aconteceu, para o «Pendente Nuvem» não ficar sem explicação.
           logger.warn(`>>> [Sync] Ativo ${pKey} apagado na nuvem: a exclusão prevalece e nada foi enviado.`);
+          // Aplica já a exclusão ao registo local: sem isto ele continuava
+          // pendente e a fila voltava a tentá-lo (e a regravar a decisão) a
+          // cada ciclo de 60 s até um pull chegar.
           try {
-            await sqliteService.logAuditEvent(
-              user.email || 'system',
-              'SYNC_DELETE_WINS',
-              'local_assets',
-              String(pKey),
-              'Exclusão na nuvem prevalece sobre a cópia local pendente: nada foi enviado; a cópia local será descartada no próximo pull.'
-            );
-          } catch (auditErr) {
-            logger.warn('>>> [Sync] Falha ao registar a exclusão que prevaleceu na trilha:', auditErr);
+            await sqliteService.markAssetsDeleted([String(pKey)]);
+          } catch (markErr) {
+            logger.warn('>>> [Sync] Falha ao aplicar a exclusão da nuvem ao registo local:', markErr);
           }
+          await auditDeleteWins(
+            user.email || 'system',
+            String(pKey),
+            'Exclusão na nuvem prevalece sobre a cópia local pendente: nada foi enviado e o registo local fica apagado (restauro explícito para voltar).'
+          );
           continue;
         }
 

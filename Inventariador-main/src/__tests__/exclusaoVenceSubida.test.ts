@@ -33,6 +33,7 @@ vi.stubGlobal('sessionStorage', memoryStorage());
 
 let syncAssetsToCloud: typeof SupabaseService.syncAssetsToCloud;
 let supabaseStub: { from: (table: string) => unknown };
+let db: typeof import('../services/sqliteService').db;
 
 const asset = (over: Record<string, unknown> = {}) =>
   ({
@@ -70,12 +71,17 @@ describe('exclusão vence a subida — o upsert consulta a nuvem antes de escrev
     const mod = await import('../services/supabaseService');
     syncAssetsToCloud = mod.syncAssetsToCloud;
     supabaseStub = mod.supabase as unknown as { from: (table: string) => unknown };
+    db = (await import('../services/sqliteService')).db;
   }, 120000);
 
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'SUPABASE');
+    await db.local_assets.clear();
+    await db.ativos.clear();
+    await db.assets.clear();
+    await db.audit_logs.clear();
   });
 
   afterEach(() => {
@@ -88,6 +94,28 @@ describe('exclusão vence a subida — o upsert consulta a nuvem antes de escrev
     const enviados = await syncAssetsToCloud([asset({ _is_deleted: 0 })], 'CICOPAL');
 
     expect(upsert).not.toHaveBeenCalled();
+    expect(enviados).toEqual([]);
+  });
+
+  // Sem aplicar a exclusão ao registo local, ele ficava pendente e a fila
+  // voltava a tentá-lo a cada ciclo até um pull chegar.
+  it('a exclusão descartada é aplicada ao registo local (sai da fila)', async () => {
+    stubTables({ error: null }, [linhaApagada]);
+    await db.local_assets.put({
+      id: 'PK-1',
+      primarykey: 'PK-1',
+      tenantid: 'CICOPAL',
+      filial: '010101 CICOPAL GO',
+      etiqueta: '007222',
+      _is_deleted: 0,
+      _is_synced: 0
+    } as never);
+
+    const enviados = await syncAssetsToCloud([asset({ _is_deleted: 0 })], 'CICOPAL');
+
+    const local = await db.local_assets.where('primarykey').equals('PK-1').first();
+    expect(Number(local?._is_deleted)).toBe(1);
+    expect(Number(local?._is_synced)).toBe(1);
     expect(enviados).toEqual([]);
   });
 
