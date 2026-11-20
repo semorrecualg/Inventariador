@@ -808,6 +808,10 @@ useEffect(() => {
   // COMPLETO — sem devtools, o dono vê o que aconteceu.
   const [unitNamesConsultadosEm, setUnitNamesConsultadosEm] = useState<number | null>(null);
   const [unitNamesErroDeRede, setUnitNamesErroDeRede] = useState<string | null>(null);
+  // A mesma lista em memória pode vir da nuvem ou da cache — e o diagnóstico
+  // tem de dizer qual foi. Sem isto, uma lista servida da cache aparecia como
+  // «lista da nuvem» e escondia precisamente o caso que se quer diagnosticar.
+  const [unitNamesOrigem, setUnitNamesOrigem] = useState<'nuvem' | 'cache' | null>(null);
   const [isDatabaseEmpty, setIsDatabaseEmpty] = useState<boolean>(false);
   // Etapa 2 da trilha única: "segurança biométrica" é um passo da esteira.
   // Fica true quando o usuário registra a biometria OU a dispensa na tela —
@@ -6573,12 +6577,14 @@ useEffect(() => {
       if (!guardada) return false;
       logger.info(`>>> [Unidades] ${motivo}: ${guardada.names.length} filial(is) servida(s) da cache de ${cloudUnitNamesScope}.`);
       setCloudUnitNames({ scope: cloudUnitNamesScope, names: guardada.names });
+      setUnitNamesOrigem('cache');
       return true;
     };
 
     if (acao.type === 'clear') {
       const escopoAnterior = cloudUnitNames?.scope;
       setCloudUnitNames(null);
+      setUnitNamesOrigem(null);
       if (escopoAnterior) {
         try { localStorage.removeItem(unitNamesCacheKey(escopoAnterior)); } catch { /* nada a limpar */ }
       }
@@ -6607,6 +6613,7 @@ useEffect(() => {
           guardarCacheDeFiliais(cloudUnitNamesScope, nomes);
           logger.info(`>>> [Unidades] Lista de filiais do contrato carregada da nuvem: ${nomes.length} unidade(s).`);
           setCloudUnitNames({ scope: cloudUnitNamesScope, names: nomes });
+          setUnitNamesOrigem('nuvem');
           setUnitNamesConsultadosEm(Date.now());
           setUnitNamesErroDeRede(null);
           return;
@@ -6977,12 +6984,16 @@ useEffect(() => {
   // tem em memória — e a chave de sessão do aparelho, que revela se recarregar
   // volta ao login.
   const accessDiagnostic = useMemo(() => {
-    let nomesDaCache = 0;
+    const nomesEmMemoria = cloudUnitNames && cloudUnitNames.scope === cloudUnitNamesScope
+      ? cloudUnitNames.names.length
+      : 0;
+
+    let nomesDaCacheGuardada = 0;
     try {
       const guardada = readUnitNamesCache(localStorage.getItem(unitNamesCacheKey(cloudUnitNamesScope)), cloudUnitNamesScope);
-      nomesDaCache = guardada?.names.length ?? 0;
+      nomesDaCacheGuardada = guardada?.names.length ?? 0;
     } catch {
-      nomesDaCache = 0;
+      nomesDaCacheGuardada = 0;
     }
 
     let sessaoPersistida = false;
@@ -6997,8 +7008,8 @@ useEffect(() => {
       modo: databaseMode === DatabaseMode.INTERNAL ? 'INTERNAL' : 'SUPABASE',
       contextos: fullCompaniesWithStatus.length,
       filiaisNaBase: temFiliaisLocaisDoContrato,
-      filiaisDaNuvem: cloudUnitNames && cloudUnitNames.scope === cloudUnitNamesScope ? cloudUnitNames.names.length : 0,
-      filiaisDaCache: nomesDaCache,
+      filiaisDaNuvem: unitNamesOrigem === 'nuvem' ? nomesEmMemoria : 0,
+      filiaisDaCache: unitNamesOrigem === 'cache' ? nomesEmMemoria : nomesDaCacheGuardada,
       unidadesComAncora: fullCompaniesWithStatus.filter((unidade) => unidade.hasGps).length,
       unidadesComCampanha: fullCompaniesWithStatus.filter((unidade) => unidade.hasCampaign).length,
       ativosLocais: inventory.assets.length,
@@ -7006,7 +7017,7 @@ useEffect(() => {
       ultimoErroDeRede: unitNamesErroDeRede,
       sessaoPersistida
     });
-  }, [activeTenant, currentTenantid, databaseMode, fullCompaniesWithStatus, temFiliaisLocaisDoContrato, cloudUnitNames, cloudUnitNamesScope, inventory.assets.length, unitNamesConsultadosEm, unitNamesErroDeRede]);
+  }, [activeTenant, currentTenantid, databaseMode, fullCompaniesWithStatus, temFiliaisLocaisDoContrato, cloudUnitNames, cloudUnitNamesScope, unitNamesOrigem, inventory.assets.length, unitNamesConsultadosEm, unitNamesErroDeRede]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref
