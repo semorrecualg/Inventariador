@@ -59,7 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uma consulta (sem paginar), a reserva com `PGRST202` e a função que responde
   vazio (não volta a paginar); `src/__tests__/unitNamesCache.test.ts` cobre
   escopo, prazo de 1 dia, lixo e carimbo no futuro.
->>>>>>> origin/main
 
 ### Corrigido — o arranque não desce o contrato inteiro sem filial
 
