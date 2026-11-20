@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   isAppManagedSession,
+  isLocalSessionProfile,
   markAppManagedSession,
   resolveProfileUnitId,
 } from '../utils/authUtils';
@@ -48,6 +49,32 @@ describe('resolveProfileUnitId', () => {
 
   it('normaliza espaços e maiúsculas do rótulo da filial', () => {
     expect(resolveProfileUnitId({ filial: '  010102 cicopal sp  ' })).toBe('010102 CICOPAL SP');
+  });
+});
+
+describe('isLocalSessionProfile — quem sobrevive ao F5 sem token da nuvem', () => {
+  it('ADMIN é sessão local (era o perfil que o boot apagava)', () => {
+    expect(isLocalSessionProfile({ email: 'semorr@gmail.com', role: 'ADMIN' }, '')).toBe(true);
+  });
+
+  it('DEMO, MASTER e MOBILE_SINGLE também', () => {
+    for (const role of ['DEMO', 'MASTER', 'MOBILE_SINGLE']) {
+      expect(isLocalSessionProfile({ email: 'x@y.com', role }, '')).toBe(true);
+    }
+  });
+
+  it('o ADMIN_EMAIL configurado vale mesmo sem role', () => {
+    expect(isLocalSessionProfile({ email: 'Dono@Empresa.com' }, 'dono@empresa.com')).toBe(true);
+  });
+
+  it('auditor sem role local não sobrevive (perfil precisa da nuvem)', () => {
+    expect(isLocalSessionProfile({ email: 'auditor@cicopal.com', role: 'AUDITOR' }, '')).toBe(false);
+  });
+
+  it('valor nulo/lixo não é sessão', () => {
+    expect(isLocalSessionProfile(null)).toBe(false);
+    expect(isLocalSessionProfile('null')).toBe(false);
+    expect(isLocalSessionProfile({ role: 'ADMIN' })).toBe(false);
   });
 });
 
