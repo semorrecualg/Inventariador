@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Acesso ao auditor preservado:** o botão PAINEL aparece para ADMIN **e** AUDITOR,
   para que a TRILHA B continue a chegar à trilha de auditoria; os itens
   administrativos do hub ficam ocultos para quem não é administrador.
+- **Contrato fixado por teste:** `src/__tests__/painelCompletoHub.test.tsx` monta a
+  grelha (ADMIN e AUDITOR) e prova que só existem AJUSTES e PAINEL, e que o Painel
+  Completo abre Gestão e Manutenção e Auditoria (com o «Voltar» a devolver ao hub).
 
 ### Corrigido — o índice da chave de origem tem de servir de alvo ao `ON CONFLICT`
 
