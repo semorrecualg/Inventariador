@@ -32,6 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Limite:** a limpeza continua a ser por unidade e sem escopo por `tenantid`
   (a mesma regra que o localforage e o estado já aplicam).
 
+### Adicionado — filtro e exportação das falhas de envio na Auditoria
+
+- **A causa de um «Pendente Nuvem» deixa de se procurar à mão:** a aba «Ativos»
+  da Trilha de Auditoria ganha o botão **Só falhas**, que isola as recusas de
+  envio (`SYNC_RECORD_FAIL`/`SYNC_RECORD_EXCEPTION`) pela mesma regra
+  (`ehFalhaDeEnvio`) dos selos e da retenção de 7 dias. O filtro aplica-se por
+  cima da busca, da ação e das datas — dá para cruzar «as falhas de ontem».
+- **Levar a lista para fora:** com o filtro ligado, dois botões exportam as
+  falhas em **CSV** e **JSON**, com as três colunas que interessam:
+  `primarykey` (a chave de origem, ou `record_id` na trilha antiga), `motivo`
+  (o detalhe da recusa) e `data`. O ficheiro acompanha o que está no ecrã e um
+  motivo com aspas não parte o CSV.
+- **Prova:** `src/__tests__/auditoriaFiltroFalhas.test.ts` (11 casos) cobre o
+  filtro (uma falha, uma conferência), o cabeçalho e as linhas do CSV, o escape
+  de aspas, os campos em falta, as duas ações de recusa e o JSON — mais o
+  contrato do ecrã (sem uma segunda regra de falha dentro do componente).
+
 ### Corrigido — o pull não desfaz a conferência feita no aparelho
 
 - **A marca voltava a «por conferir»:** o merge do pull remontava a linha da
