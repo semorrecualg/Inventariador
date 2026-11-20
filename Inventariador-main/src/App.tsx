@@ -2779,9 +2779,21 @@ useEffect(() => {
             const byId = new Map(prev.assets.map(a => [String(a.id), a]));
             // O delta também não regride a coordenada: a linha da nuvem só
             // substitui o ponto quando é mais recente que a leitura local.
+            // Só as linhas cuja decisão local venceu a da nuvem voltam ao disco:
+            // o download já gravou o resto (`fetchFullInventory`). O delta, que
+            // é o pull do dia a dia, deixa de reescrever a base inteira por
+            // causa de algumas linhas.
+            const decisaoLocal: Asset[] = [];
             cloudAssets.forEach(a => {
               const local = byId.get(String(a.id));
-              byId.set(String(a.id), local ? { ...a, ...preservarGpsMaisRecente(local, a) } : a);
+              if (!local) {
+                byId.set(String(a.id), a);
+                return;
+              }
+              const gpsDaqui = preservarGpsMaisRecente(local, a) as Record<string, unknown>;
+              const merged = { ...a, ...gpsDaqui } as Asset;
+              byId.set(String(a.id), merged);
+              if (Object.keys(gpsDaqui).length > 0) decisaoLocal.push(merged);
             });
             const mergedAssets = Array.from(byId.values());
             const dirtyIds = Array.from(dirtyAssetsRef.current);
@@ -2790,8 +2802,10 @@ useEffect(() => {
                 const localDirty = prev.assets.find(a => String(a.id) === id);
                 if (!localDirty) return;
                 const index = mergedAssets.findIndex(a => String(a.id) === id);
-                if (index !== -1) mergedAssets[index] = { ...mergedAssets[index], ...localDirty };
-                else mergedAssets.push(localDirty);
+                if (index !== -1) {
+                  mergedAssets[index] = { ...mergedAssets[index], ...localDirty };
+                  decisaoLocal.push(mergedAssets[index]);
+                } else mergedAssets.push(localDirty);
               });
             }
             const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.filial || '').trim().toUpperCase()))).filter(Boolean);
@@ -2803,7 +2817,13 @@ useEffect(() => {
               status: mergedAssets.length > 0 ? DatabaseStatus.LOADED : prev.status,
               lastUpdated: syncTimestamp
             };
-            saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
+            saveInventory(newState, undefined, false, true).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
+            // As linhas dos espelhos já estão gravadas pelo download; só a
+            // decisão local precisa de uma escrita (e é um punhado de linhas).
+            if (decisaoLocal.length > 0) {
+              sqliteService.persistAssetsBatch(decisaoLocal as unknown as Record<string, unknown>[])
+                .catch(e => logger.error('Erro ao regravar a decisão local do delta:', e));
+            }
             if (cloudAssets.length > 0) {
               syncAuditDetails = `Sincronização incremental de ${cloudAssets.length} ativos da nuvem para o local (delta).`;
             }
@@ -2815,6 +2835,12 @@ useEffect(() => {
           // com _is_synced = 0 há alteração deste aparelho que ainda não subiu —
           // nesse caso continua a valer "PENDENTE NUVEM".
           const localById = new Map(prev.assets.map(a => [String(a.id), a]));
+          // Linhas cuja decisão local (GPS mais recente, pendência, edição não
+          // enviada) vencem a linha da nuvem: são as únicas que precisam de
+          // voltar ao disco depois do merge. O resto já foi gravado pelo
+          // download — reescrever os 12.636 × 3 espelhos outra vez era o custo
+          // do pull que este item mede.
+          const decisaoLocal: Asset[] = [];
           const mergedAssets = cloudAssets.map(cloudAsset => {
             const local = localById.get(String(cloudAsset.id));
             // O pull não apaga a pendência local — nem a data do toque que a
@@ -2829,10 +2855,13 @@ useEffect(() => {
             // GPS: a linha da nuvem pode trazer um ponto mais antigo do que a
             // leitura de campo deste aparelho (envio anterior, outro aparelho).
             // O ponto local mais recente repõe-se por cima, nas duas grafias.
-            const base = { ...cloudAsset, ...preservarGpsMaisRecente(local, cloudAsset) };
-            return devePreservarPendencia(cloudAsset, local)
+            const gpsDaqui = preservarGpsMaisRecente(local, cloudAsset) as Record<string, unknown>;
+            const base = { ...cloudAsset, ...gpsDaqui };
+            const merged = devePreservarPendencia(cloudAsset, local)
               ? { ...base, ...preservarPendenciaLocal(local, cloudAsset) }
               : base;
+            if (Object.keys(gpsDaqui).length > 0 || merged !== base) decisaoLocal.push(merged as Asset);
+            return merged;
           });
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           
@@ -2866,6 +2895,7 @@ useEffect(() => {
                     });
                     dirtyAssetsRef.current.delete(id);
                     mergedAssets[index] = decisao.registo;
+                    // Exclusão vence: a linha da nuvem já é a que fica gravada.
                     return;
                   }
 
@@ -2890,6 +2920,7 @@ useEffect(() => {
                   }
 
                   mergedAssets[index] = decisao.registo;
+                  decisaoLocal.push(decisao.registo);
                 } else {
                   mergedAssets.push(localDirty);
                 }
@@ -2908,13 +2939,18 @@ useEffect(() => {
             status: (mergedAssets.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
             lastUpdated: syncTimestamp
           };
-          saveInventory(newState)
+          saveInventory(newState, undefined, false, true)
             .then(() => {
               if (!incremental) {
                 autoRegisterPerfBaseline('pull.full', Array.isArray(firstTenant) ? firstTenant[0] : firstTenant);
               }
             })
             .catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
+          // Uma escrita só, e só das linhas com decisão local.
+          if (decisaoLocal.length > 0) {
+            sqliteService.persistAssetsBatch(decisaoLocal as unknown as Record<string, unknown>[])
+              .catch(e => logger.error('Erro ao regravar a decisão local do pull:', e));
+          }
           if (cloudAssets.length > 0) {
             syncAuditDetails = `Sincronização de ${cloudAssets.length} ativos da nuvem para o local.`;
           }

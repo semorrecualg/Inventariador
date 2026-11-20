@@ -778,6 +778,79 @@ export class SqliteService {
     return safeChunk;
   }
 
+  /**
+   * A LINHA DA NUVEM → A LINHA DOS ESPELHOS, UMA VEZ
+   * ============================================================================
+   * Esta conversão grava a coordenada nas duas grafias, a proveniência do ponto,
+   * a conferência e o selo. Estava dentro do laço do lote; o pull passou a
+   * reaproveitá-la para gravar só as linhas que carregam decisão local, e duas
+   * cópias do mapeamento seriam a forma garantida de as duas divergirem.
+   */
+  private mapAssetToDexie(asset: Record<string, unknown>, markSynced: boolean): DexieAsset {
+    const primaryKeyVal = String(asset.primarykey || asset.id || '');
+    if (!primaryKeyVal) {
+      throw new Error("[FATAL_IMPORT_CRASH] Chave primária vazia detectada no lote.");
+    }
+    const gps = assetGpsPair(asset);
+
+    const mapped: DexieAsset = {
+      id: primaryKeyVal,
+      primarykey: primaryKeyVal,
+      // UPPER canônico — chave composta [tenantid+primarykey] consistente.
+      tenantid: String(asset.tenantid || '').trim().toUpperCase(),
+      filial: String(asset.filial || asset._unitid || asset.unitid || asset.unitId || ''),
+      status: String(asset.status || 'P'),
+      etiqueta: String(asset.etiqueta || ''),
+      tag: String(asset.tag || asset.etiqueta || ''),
+      qt: Number(asset.qt ?? 1),
+      descricaodoativo: String(asset.descricaodoativo || ''),
+      serial: asset.serial !== undefined && asset.serial !== null ? String(asset.serial) : null,
+      dataaqusic: asset.dataaqusic !== undefined && asset.dataaqusic !== null ? String(asset.dataaqusic) : null,
+      cnpj: asset.cnpj !== undefined && asset.cnpj !== null ? String(asset.cnpj) : null,
+      nomefornecedor: asset.nomefornecedor !== undefined && asset.nomefornecedor !== null ? String(asset.nomefornecedor) : null,
+      notafiscal: asset.notafiscal !== undefined && asset.notafiscal !== null ? String(asset.notafiscal) : null,
+      endereco: asset.endereco !== undefined && asset.endereco !== null ? String(asset.endereco) : null,
+      registro: asset.registro !== undefined && asset.registro !== null ? String(asset.registro) : null,
+      subreg: asset.subreg !== undefined && asset.subreg !== null ? String(asset.subreg) : null,
+      databaixa: asset.databaixa !== undefined && asset.databaixa !== null ? String(asset.databaixa) : null,
+      contacontabil: asset.contacontabil !== undefined && asset.contacontabil !== null ? String(asset.contacontabil) : null,
+      centrodecusto: asset.centrodecusto !== undefined && asset.centrodecusto !== null ? String(asset.centrodecusto) : null,
+      vlraquisic: Number(asset.vlraquisic ?? 0),
+      sn1_recno: asset.sn1_recno !== undefined && asset.sn1_recno !== null ? Number(asset.sn1_recno) : null,
+      sn3_recno: asset.sn3_recno !== undefined && asset.sn3_recno !== null ? Number(asset.sn3_recno) : null,
+      _is_synced: markSynced ? 1 : (Number(asset._is_synced) === 1 ? 1 : 0),
+      _is_deleted: asset._is_deleted ? 1 : 0,
+      _conferido: isConferido(asset) ? 1 : 0,
+      _auditor: asset._auditor !== undefined && asset._auditor !== null ? String(asset._auditor) : null,
+      _dataLeitura: asset._dataLeitura !== undefined && asset._dataLeitura !== null ? String(asset._dataLeitura) : null,
+      _plaquetado: asset._plaquetado ? 1 : 0,
+      _aprovado: asset._aprovado ? 1 : 0,
+      _isNew: asset._isNew ? 1 : 0,
+      _is_unitized: asset._is_unitized ? 1 : 0,
+      _is_divergent_baixa: asset._is_divergent_baixa ? 1 : 0,
+      _history: asset._history !== undefined && asset._history !== null ? String(asset._history) : null,
+      DE_PARA: asset.DE_PARA !== undefined && asset.DE_PARA !== null ? String(asset.DE_PARA) : null,
+      _photoUrl: asset._photoUrl !== undefined && asset._photoUrl !== null ? String(asset._photoUrl) : null,
+      // PONTE GPS: a linha que desce da nuvem traz `gps_lat`/`gps_lng` e
+      // a conferência grava `latitude`/`longitude`. As duas grafias são
+      // gravadas para que ficha, mapa e envio leiam o mesmo ponto.
+      gps_lat: gps?.lat ?? null,
+      gps_lng: gps?.lng ?? null,
+      latitude: gps?.lat ?? null,
+      longitude: gps?.lng ?? null,
+      // Proveniência do ponto: sem estas três colunas no mapeamento, o
+      // lote (autosave/pull/carga) gravava a coordenada sem saber se era
+      // do sensor — e o mapa de calor não tinha como descartar sintético
+      // nem ruído (ver utils/assetGps.hasMapCoords).
+      _gps_accuracy: asset._gps_accuracy !== undefined && asset._gps_accuracy !== null ? Number(asset._gps_accuracy) : null,
+      _gps_source: asset._gps_source !== undefined && asset._gps_source !== null ? String(asset._gps_source) : null,
+      _gps_at: asset._gps_at !== undefined && asset._gps_at !== null ? String(asset._gps_at) : null,
+      currentCampaignId: asset.currentCampaignId !== undefined && asset.currentCampaignId !== null ? String(asset.currentCampaignId) : null
+    };
+
+    return mapped;
+  }
+
   public async bulkInsertAssetsOfflineFirst(
     assets: Record<string, unknown>[],
     onProgress?: (processed: number, total: number) => void,
@@ -798,70 +871,9 @@ export class SqliteService {
         for (let i = 0; i < total; i += CHUNK_SIZE) {
           const chunk = assets.slice(i, i + CHUNK_SIZE);
           
-          const mappedChunk: DexieAsset[] = chunk.map(asset => {
-            const primaryKeyVal = String(asset.primarykey || asset.id || '');
-            if (!primaryKeyVal) {
-              throw new Error("[FATAL_IMPORT_CRASH] Chave primária vazia detectada no lote.");
-            }
-            const gps = assetGpsPair(asset);
-
-            const mapped: DexieAsset = {
-              id: primaryKeyVal,
-              primarykey: primaryKeyVal,
-              // UPPER canônico — chave composta [tenantid+primarykey] consistente.
-              tenantid: String(asset.tenantid || '').trim().toUpperCase(),
-              filial: String(asset.filial || asset._unitid || asset.unitid || asset.unitId || ''),
-              status: String(asset.status || 'P'),
-              etiqueta: String(asset.etiqueta || ''),
-              tag: String(asset.tag || asset.etiqueta || ''),
-              qt: Number(asset.qt ?? 1),
-              descricaodoativo: String(asset.descricaodoativo || ''),
-              serial: asset.serial !== undefined && asset.serial !== null ? String(asset.serial) : null,
-              dataaqusic: asset.dataaqusic !== undefined && asset.dataaqusic !== null ? String(asset.dataaqusic) : null,
-              cnpj: asset.cnpj !== undefined && asset.cnpj !== null ? String(asset.cnpj) : null,
-              nomefornecedor: asset.nomefornecedor !== undefined && asset.nomefornecedor !== null ? String(asset.nomefornecedor) : null,
-              notafiscal: asset.notafiscal !== undefined && asset.notafiscal !== null ? String(asset.notafiscal) : null,
-              endereco: asset.endereco !== undefined && asset.endereco !== null ? String(asset.endereco) : null,
-              registro: asset.registro !== undefined && asset.registro !== null ? String(asset.registro) : null,
-              subreg: asset.subreg !== undefined && asset.subreg !== null ? String(asset.subreg) : null,
-              databaixa: asset.databaixa !== undefined && asset.databaixa !== null ? String(asset.databaixa) : null,
-              contacontabil: asset.contacontabil !== undefined && asset.contacontabil !== null ? String(asset.contacontabil) : null,
-              centrodecusto: asset.centrodecusto !== undefined && asset.centrodecusto !== null ? String(asset.centrodecusto) : null,
-              vlraquisic: Number(asset.vlraquisic ?? 0),
-              sn1_recno: asset.sn1_recno !== undefined && asset.sn1_recno !== null ? Number(asset.sn1_recno) : null,
-              sn3_recno: asset.sn3_recno !== undefined && asset.sn3_recno !== null ? Number(asset.sn3_recno) : null,
-              _is_synced: options?.markSynced ? 1 : (Number(asset._is_synced) === 1 ? 1 : 0),
-              _is_deleted: asset._is_deleted ? 1 : 0,
-              _conferido: isConferido(asset) ? 1 : 0,
-              _auditor: asset._auditor !== undefined && asset._auditor !== null ? String(asset._auditor) : null,
-              _dataLeitura: asset._dataLeitura !== undefined && asset._dataLeitura !== null ? String(asset._dataLeitura) : null,
-              _plaquetado: asset._plaquetado ? 1 : 0,
-              _aprovado: asset._aprovado ? 1 : 0,
-              _isNew: asset._isNew ? 1 : 0,
-              _is_unitized: asset._is_unitized ? 1 : 0,
-              _is_divergent_baixa: asset._is_divergent_baixa ? 1 : 0,
-              _history: asset._history !== undefined && asset._history !== null ? String(asset._history) : null,
-              DE_PARA: asset.DE_PARA !== undefined && asset.DE_PARA !== null ? String(asset.DE_PARA) : null,
-              _photoUrl: asset._photoUrl !== undefined && asset._photoUrl !== null ? String(asset._photoUrl) : null,
-              // PONTE GPS: a linha que desce da nuvem traz `gps_lat`/`gps_lng` e
-              // a conferência grava `latitude`/`longitude`. As duas grafias são
-              // gravadas para que ficha, mapa e envio leiam o mesmo ponto.
-              gps_lat: gps?.lat ?? null,
-              gps_lng: gps?.lng ?? null,
-              latitude: gps?.lat ?? null,
-              longitude: gps?.lng ?? null,
-              // Proveniência do ponto: sem estas três colunas no mapeamento, o
-              // lote (autosave/pull/carga) gravava a coordenada sem saber se era
-              // do sensor — e o mapa de calor não tinha como descartar sintético
-              // nem ruído (ver utils/assetGps.hasMapCoords).
-              _gps_accuracy: asset._gps_accuracy !== undefined && asset._gps_accuracy !== null ? Number(asset._gps_accuracy) : null,
-              _gps_source: asset._gps_source !== undefined && asset._gps_source !== null ? String(asset._gps_source) : null,
-              _gps_at: asset._gps_at !== undefined && asset._gps_at !== null ? String(asset._gps_at) : null,
-              currentCampaignId: asset.currentCampaignId !== undefined && asset.currentCampaignId !== null ? String(asset.currentCampaignId) : null
-            };
-
-            return mapped;
-          });
+          const mappedChunk: DexieAsset[] = chunk.map(asset =>
+            this.mapAssetToDexie(asset, !!options?.markSynced)
+          );
 
           // SRE ISOLAMENTO (local): nunca sobrescrever registros de OUTRO contrato
           // (mesma regra aplicada na nuvem com onConflict 'tenantid, id').
@@ -1346,6 +1358,32 @@ export class SqliteService {
 
   public async bulkInsertAssets(assets: Record<string, unknown>[]): Promise<void> {
     await this.bulkInsertAssetsOfflineFirst(assets);
+  }
+
+  /**
+   * GRAVA SÓ AS LINHAS QUE CARREGAM DECISÃO LOCAL — num lote só
+   * ============================================================================
+   * O pull grava a base da nuvem em lotes (`bulkInsertAssetsOfflineFirst`) e
+   * depois remonta o estado em memória para pôr a decisão DESTE aparelho por
+   * cima (GPS mais recente, conferência/pendência, edição não enviada). O que
+   * volta ao disco é só esse subconjunto: reescrever a base inteira outra vez
+   * duplicava 12.636 × 3 escritas por pull para corrigir algumas dezenas de
+   * linhas.
+   *
+   * Usa o MESMO mapeamento do lote (`mapAssetToDexie`) e respeita o
+   * `_is_synced` de cada linha (não força o selo do download: as linhas
+   * pendentes continuam pendentes). Devolve quantas linhas foram gravadas.
+   */
+  public async persistAssetsBatch(assets: Record<string, unknown>[]): Promise<number> {
+    if (assets.length === 0) return 0;
+    const mapped = assets.map(asset => this.mapAssetToDexie(asset, false));
+    const safe = await this.filterCrossTenantWrites(mapped);
+    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      await db.ativos.bulkPut(safe);
+      await db.assets.bulkPut(safe);
+      await db.local_assets.bulkPut(safe);
+    });
+    return safe.length;
   }
 
   /**

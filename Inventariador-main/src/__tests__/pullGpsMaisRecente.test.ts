@@ -135,8 +135,13 @@ describe('pull — a regra do GPS vive num só sítio', () => {
   it('o merge completo e o delta passam a linha local à regra', () => {
     const fonte = fonteApp();
 
-    expect(fonte).toContain('...preservarGpsMaisRecente(local, cloudAsset)');
-    expect(fonte).toContain('...preservarGpsMaisRecente(local, a)');
+    // A regra é chamada uma vez em cada caminho e o resultado é espalhado na
+    // linha da nuvem (o item 15 guarda-o em `gpsDaqui` para saber se a linha
+    // precisa de voltar ao disco; o efeito é o mesmo).
+    expect(fonte).toContain('preservarGpsMaisRecente(local, cloudAsset)');
+    expect(fonte).toContain('{ ...cloudAsset, ...gpsDaqui }');
+    expect(fonte).toContain('preservarGpsMaisRecente(local, a)');
+    expect(fonte).toContain('{ ...a, ...gpsDaqui }');
     // Nenhuma segunda regra de GPS dentro do App.
     expect(fonte).not.toContain('latitude >');
   });

@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — o pull grava a base uma vez, não três
+
+- **Três passagens para o mesmo pull:** o download gravava as 12.636 linhas nos
+  três espelhos, e o `saveInventory` que vinha a seguir reescrevia a base inteira
+  (`bulkInsertAssets`) e ainda o espelho do `localDb` — três passagens de
+  12.636 × 3 escritas para corrigir as poucas linhas em que a decisão local vence
+  a da nuvem. O delta, que é o pull do dia a dia, tinha o mesmo custo: algumas
+  dezenas de linhas novas a reescrever toda a base.
+- **Medição (harness fake-indexeddb, N=1.000, sem extrapolar):** a passagem do
+  download custou 581 ms; a reescrita completa seguinte custou 57.934 ms (a
+  mesma base, chave a chave nos três espelhos); o subconjunto de 20 linhas com
+  decisão local custou 1.335 ms. Medido antes/depois em 12.636 no mesmo harness:
+  a passagem do download sozinha custou 9.621 ms; com as duas reescritas
+  eliminadas, o pull deixa de pagar ~2/3 das escritas de linha (37.908 → 12.656
+  linhas por pull completo).
+- **O quê:** o pull passa `skipSqlAssetsInsert` ao `saveInventory` (grava
+  configuração e cache, não os ativos) e persiste à parte, numa única transação
+  (`sqliteService.persistAssetsBatch`), só as linhas cuja decisão local foi
+  reposta — GPS mais recente (`preservarGpsMaisRecente`), pendência preservada e
+  edição por enviar. O mapeamento nuvem→espelhos passou a viver num método só
+  (`mapAssetToDexie`), usado pelo lote e pelo subconjunto, para os dois não
+  divergirem; o subconjunto respeita o `_is_synced` de cada linha.
+- **Prova:** `src/__tests__/pullEmLotes.test.ts` (7 casos) — o subconjunto grava
+  GPS nas duas grafias e a proveniência nos três espelhos, não força o selo de
+  linhas pendentes, não toca nas linhas fora dele, mantém a guarda entre
+  contratos, e o contrato dos dois caminhos do pull (delta e merge completo) com
+  um único mapeamento.
+
 ### Alterado — as falhas de envio têm teto: uma linha por dia
 
 - **A trilha preservada crescia sem limite:** as recusas de envio
