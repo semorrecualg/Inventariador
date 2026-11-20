@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — a sessão sobrevive a fechar o separador
+
+- **O que era:** o login vivia só em `sessionStorage`, que morre com o separador;
+  fechar e reabrir a app voltava sempre ao ecrã de entrada.
+- **Agora:** o perfil (email, papel, contrato, filial — **sem senha nem token**)
+  fica também em `localStorage` (`gbr_persisted_session`) com prazo de **7 dias**;
+  `restorePersistedSession()` repõe-no no cache do separador antes de qualquer
+  decisão de arranque, com a marca `APP` para não ser tratado como fantasma da
+  nuvem. Qualquer logout explícito apaga a cópia (`clearPersistedSession`), tal
+  como a expiração de sessão.
+- **Teste:** `src/__tests__/sessionPersistence.test.ts` cobre gravação, prazo,
+  lixo, carimbo no futuro, reposição no `sessionStorage` e purga no logout.
+
 ### Corrigido — recarregar já não devolve ao login
 
 - **O que era:** `InitializeBootPipeline()` removia `app_current_user` e

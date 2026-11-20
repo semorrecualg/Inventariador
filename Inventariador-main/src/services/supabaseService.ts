@@ -17,6 +17,7 @@ import { resolveCanonicalUnitAnchor } from '../utils/unitAnchorPriority';
 import { buildUnitConfigRowPayload } from '../utils/unitConfigPayload';
 import { buildUnitFlags, mergeUnitFlags } from '../utils/unitConfigFlags';
 import { isAdminEmail } from '../utils/authUtils';
+import { clearPersistedSession } from '../utils/sessionPersistence';
 import { pullDedupKey } from '../utils/syncDedup';
 import { matchUnitKeys, normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
@@ -470,6 +471,10 @@ export const supabase = createSupabaseInterceptor(rawSupabase);
  * Realiza o logout completo do sistema, limpando sessões locais e da nuvem
  */
 export const signOut = async () => {
+  // O próximo arranque tem de pedir credenciais: apaga também a cópia com
+  // prazo que mantém a sessão entre separadores.
+  clearPersistedSession();
+
   if (supabase) {
     try {
       await supabase.auth.signOut();
