@@ -73,6 +73,7 @@ export interface Asset {
   _history?: any[];
   gps_lat?: number | null;
   gps_lng?: number | null;
+
   _localMaster?: string;
   _origemTransacao?: string;
   // Proveniência do ponto do Mapa de Calor (docs/GPS_ANCORA_E_MAPA_DE_CALOR.md).

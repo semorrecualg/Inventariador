@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   desaparecer quando o ativo sobe. `_is_synced = 1` cala o aviso mesmo com
   carimbo antigo, como no cartão.
 
+### Corrigido — a guarda de perímetro usa o núcleo único e não tranca por uma leitura má
+
+- **Distância própria fora do núcleo:** o `GPSComplianceGuard` calculava a
+  distância com `@turf/turf`, fora do núcleo de GPS que o resto do app já usa —
+  outra regra de validação, outro cálculo, outro comportamento. Passa a decidir
+  por `DecisorDePerimetro` (`utils/gpsPerimeter`), que assenta no núcleo único e
+  leva a precisão da leitura para a decisão.
+- **Histerese contra o jitter:** uma leitura isolada fora do raio já não tranca o
+  auditor (o sensor de celular oscila dezenas de metros parado). A primeira
+  leitura fora mantém o acesso e só a confirmação bloqueia; leitura repetida ou
+  salto fisicamente impossível são descartados, e o monitor contínuo passa a
+  aceitar posição em cache até 60 s (antes 30 s).
+- **Custo:** o auditor que está mesmo fora do perímetro mantém o acesso durante
+  a confirmação — uma folga deliberada, não um bypass: o admin continua a ser o
+  único perfil que entra sem perímetro.
+
 ## [2.9.0] — 2026-11-20
 
 ### Alterado — o pull grava a base uma vez, não três
