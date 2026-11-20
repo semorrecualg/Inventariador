@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.1] — 2026-11-20
+
 ### Adicionado — trava no servidor contra a ressurreição de ativos apagados
 
 - **A exclusão deixa de depender do cliente:** a guarda do #128 só existe no
