@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — os scripts de campanhas e de políticas deixam de abortar a migração
+
+- **O que era:** `docs/supabase_campanhas_fase1.sql` abortava ao criar o índice
+  único `campaigns_uma_aberta_por_filial` (23505) quando já havia duas campanhas
+  abertas na mesma filial — era o caso de `010101 CICOPAL GO`. E o PASSO 5-B de
+  `docs/supabase_tenantid_migration.sql` abortava a migração inteira (42703) se
+  `public._gbr_policies_backup` já existisse noutro formato, sem a coluna `ddl`:
+  `CREATE TABLE IF NOT EXISTS` não altera tabelas existentes e o `INSERT` do
+  backup falhava **dentro** do `EXCEPTION` que devia tolerar o erro.
+- **Agora:** antes do índice, as campanhas abertas duplicadas são **arquivadas**
+  (`status = 'ARCHIVED'`), nunca apagadas — a linha inteira fica em
+  `public._gbr_campaigns_arquivadas_fase1` e sobrevive a campanha ATIVA mais
+  recente (empate resolvido por `start_date`, `created_at` e `id`). No PASSO 5-B
+  as colunas do backup são garantidas com `ADD COLUMN IF NOT EXISTS` e a gravação
+  do backup passou a ter tratamento de erro próprio: uma política que não possa
+  ser recriada (ou cujo backup não possa ser gravado) fica registada, sem
+  derrubar a migração.
+
 ### Adicionado — diagnóstico de acesso no PAINEL COMPLETO
 
 - **O ecrã que responde ao telefone:** «DIAGNÓSTICO DE ACESSO» no PAINEL

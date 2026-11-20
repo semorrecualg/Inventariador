@@ -1,5 +1,5 @@
 -- ============================================================================
--- GBR KARDEK — Consolidação das colunas de tenant em `tenantid`  (v5)
+-- GBR KARDEK — Consolidação das colunas de tenant em `tenantid`  (v6)
 -- ----------------------------------------------------------------------------
 -- Objectivo: cada tabela de `public` passa a ter UMA coluna canónica chamada
 -- `tenantid`. As variantes legadas (`tenant_id`, `_tenantid`, `_tenantId`,
@@ -26,6 +26,14 @@
 --       PASSO 2); o PASSO 5-A só garante o search_path e o PASSO 5-B é
 --       tolerante: uma política que não possa ser recriada não desfaz a
 --       migração — fica guardada em public._gbr_policies_backup com o erro.
+--   v6: em produção public._gbr_policies_backup já existia com outro formato
+--       (sem a coluna `ddl`, criada por uma versão anterior do script). Como
+--       CREATE TABLE IF NOT EXISTS não altera tabelas existentes, o INSERT do
+--       PASSO 5-B falhava com 42703 DENTRO do EXCEPTION e derrubava a migração
+--       inteira. Agora as colunas são garantidas uma a uma e a gravação do
+--       backup tem tratamento de erro próprio: falhar o backup nunca desfaz a
+--       migração (o DDL aparece no WARNING e a política é listada de novo no
+--       fim).
 --
 -- Como usar:
 --   1. Colar o ficheiro INTEIRO no SQL Editor do Supabase e executar.
@@ -464,7 +472,8 @@ DECLARE
   roles text;
   cmd   text;
   per   text;
-  ddl   text;
+  v_ddl  text;
+  v_erro text;
 BEGIN
   CREATE TABLE IF NOT EXISTS public._gbr_policies_backup (
     schemaname name        NOT NULL,
@@ -475,6 +484,16 @@ BEGIN
     salvo_em   timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (schemaname, tablename, polname)
   );
+
+  -- A tabela pode já existir com outro formato (foi o caso em produção: sem
+  -- `ddl`). CREATE TABLE IF NOT EXISTS não acrescenta colunas a tabelas
+  -- existentes — garantir cada uma explicitamente.
+  ALTER TABLE public._gbr_policies_backup ADD COLUMN IF NOT EXISTS schemaname name;
+  ALTER TABLE public._gbr_policies_backup ADD COLUMN IF NOT EXISTS tablename  name;
+  ALTER TABLE public._gbr_policies_backup ADD COLUMN IF NOT EXISTS polname    name;
+  ALTER TABLE public._gbr_policies_backup ADD COLUMN IF NOT EXISTS ddl        text;
+  ALTER TABLE public._gbr_policies_backup ADD COLUMN IF NOT EXISTS erro       text;
+  ALTER TABLE public._gbr_policies_backup ADD COLUMN IF NOT EXISTS salvo_em   timestamptz DEFAULT now();
 
   FOR p IN SELECT * FROM _gbr_policies_to_rebuild LOOP
     q := p.qual;
@@ -517,7 +536,7 @@ BEGIN
            END;
     per := CASE WHEN p.polpermissive THEN 'PERMISSIVE' ELSE 'RESTRICTIVE' END;
 
-    ddl := CASE
+    v_ddl := CASE
       WHEN q IS NULL AND w IS NULL THEN
         format('CREATE POLICY %I ON %I.%I AS %s FOR %s TO %s',
           p.polname, p.schemaname, p.tablename, per, cmd, roles)
@@ -533,16 +552,32 @@ BEGIN
     END;
 
     BEGIN
-      EXECUTE ddl;
+      EXECUTE v_ddl;
       RAISE NOTICE 'PASSO 5-B: política %.%.% recriada com tenantid',
         p.schemaname, p.tablename, p.polname;
     EXCEPTION WHEN others THEN
-      INSERT INTO public._gbr_policies_backup (schemaname, tablename, polname, ddl, erro)
-      VALUES (p.schemaname, p.tablename, p.polname, ddl, SQLERRM)
-      ON CONFLICT (schemaname, tablename, polname)
-      DO UPDATE SET ddl = EXCLUDED.ddl, erro = EXCLUDED.erro, salvo_em = now();
+      v_erro := SQLERRM;
       RAISE NOTICE 'PASSO 5-B: ATENÇÃO política %.%.% NÃO recriada (%); DDL guardado em public._gbr_policies_backup',
-        p.schemaname, p.tablename, p.polname, SQLERRM;
+        p.schemaname, p.tablename, p.polname, v_erro;
+
+      -- Gravar o backup é acessório: se também falhar (tabela antiga com
+      -- restrições inesperadas, por exemplo), a migração CONTINUA e o DDL fica
+      -- no WARNING para poder ser recuperado do log.
+      BEGIN
+        UPDATE public._gbr_policies_backup
+           SET ddl = v_ddl, erro = v_erro, salvo_em = now()
+         WHERE schemaname = p.schemaname
+           AND tablename  = p.tablename
+           AND polname    = p.polname;
+
+        IF NOT FOUND THEN
+          INSERT INTO public._gbr_policies_backup (schemaname, tablename, polname, ddl, erro)
+          VALUES (p.schemaname, p.tablename, p.polname, v_ddl, v_erro);
+        END IF;
+      EXCEPTION WHEN others THEN
+        RAISE WARNING 'PASSO 5-B: backup da política %.%.% NÃO gravado (%); DDL: %',
+          p.schemaname, p.tablename, p.polname, SQLERRM, v_ddl;
+      END;
     END;
   END LOOP;
 END $$;
