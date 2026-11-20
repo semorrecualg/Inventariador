@@ -139,6 +139,33 @@ export const isAppManagedSession = (): boolean => {
   }
 };
 
+/** Perfis cuja sessão nasce de credencial local do app (sem token do Supabase). */
+const LOCAL_SESSION_ROLES = new Set(['DEMO', 'ADMIN', 'MASTER', 'MOBILE_SINGLE']);
+
+/**
+ * `true` quando o perfil guardado no aparelho justifica manter a sessão sem
+ * token do Supabase: perfil local conhecido ou o `ADMIN_EMAIL` configurado.
+ *
+ * É a mesma regra usada em todos os outros pontos do arranque. O boot (F5)
+ * tinha uma lista mais estreita (só `MASTER`/`ADMIN_EMAIL`) e por isso apagava
+ * o `sessionStorage` de um ADMIN antes de o utilizador ser reidratado —
+ * recarregar voltava ao login.
+ */
+export const isLocalSessionProfile = (
+  profile: unknown,
+  adminEmail: string = ADMIN_EMAIL
+): boolean => {
+  if (!profile || typeof profile !== 'object') return false;
+  const dados = profile as { email?: unknown; role?: unknown };
+  const email = typeof dados.email === 'string' ? dados.email.trim().toLowerCase() : '';
+  if (!email) return false;
+
+  const admin = String(adminEmail || '').trim().toLowerCase();
+  if (admin && email === admin) return true;
+
+  return LOCAL_SESSION_ROLES.has(String(dados.role || '').trim().toUpperCase());
+};
+
 const INVALID_SCOPE_VALUES = new Set(['', 'DEFAULT', 'NULL', 'UNDEFINED', 'NULO', '0']);
 
 const normalizeScopeValue = (value: unknown): string => {

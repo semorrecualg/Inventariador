@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — recarregar já não devolve ao login
+
+- **O que era:** `InitializeBootPipeline()` removia `app_current_user` e
+  `tenantid` do `sessionStorage` em todos os arranques; a validação anti-fantasma
+  seguinte aceitava só `MASTER`/`ADMIN_EMAIL`, pelo que um perfil `ADMIN` num
+  aparelho sem base local via a sessão apagada e o F5 caía em `#/login`. O efeito
+  de persistência ainda gravava `null` por cima da chave, impedindo qualquer
+  recuperação.
+- **Agora:** a sessão local válida sobrevive ao arranque (a purga só acontece
+  quando o perfil guardado não é local), a lista de perfis é a mesma de todos os
+  outros pontos do boot (DEMO/ADMIN/MASTER/MOBILE_SINGLE ou `ADMIN_EMAIL`) e a
+  gravação em `sessionStorage` só ocorre com utilizador. O DIAGNÓSTICO DE ACESSO
+  passa a dizer «sessão persistida» quando o login veio de credencial local.
+- **Prova:** no preview, login → CONTRATO (`#/contexto`) → recarregar → continua
+  em `#/contexto` com o mesmo utilizador (`gbr_session_origin = APP`).
+
 ### Corrigido — os scripts de campanhas e de políticas deixam de abortar a migração
 
 - **O que era:** `docs/supabase_campanhas_fase1.sql` abortava ao criar o índice

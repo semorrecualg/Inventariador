@@ -21,7 +21,7 @@ import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } 
 import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { preservarGpsMaisRecente } from './utils/assetGps';
 import { mergeDeltaPull } from './utils/mergeDeltaPull';
-import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
+import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, isAuditorUser, userHasPermission } from './services/rbacService';
@@ -343,9 +343,21 @@ const removerLoaderEstatico = () => {
 
 export function InitializeBootPipeline(): void {
   try {
-    // 1. Limpeza rigorosa de sessões fantasma no boot (Diretriz 5)
-    sessionStorage.removeItem('app_current_user');
-    sessionStorage.removeItem('tenantid');
+    // 1. Só fantasmas são purgados. Uma sessão local (credencial do app) tem de
+    // sobreviver ao F5: era esta remoção incondicional que devolvia o dono ao
+    // login em cada recarregamento.
+    let manterSessao = false;
+    try {
+      const guardado = sessionStorage.getItem('app_current_user');
+      manterSessao = !!guardado && isLocalSessionProfile(JSON.parse(guardado));
+    } catch {
+      manterSessao = false;
+    }
+
+    if (!manterSessao) {
+      sessionStorage.removeItem('app_current_user');
+      sessionStorage.removeItem('tenantid');
+    }
 
     // 2. Isolamento e equivalência de diretório físico via Capacitor
     if (Capacitor.isNativePlatform()) {
@@ -357,9 +369,12 @@ export function InitializeBootPipeline(): void {
       logger.info("[SRE_BOOT] Ambiente Desktop/Windows detectado. Diretório alvo: C:\\GBR_Inventario");
     }
 
-    // 3. Forçamento atômico da Rota Zero Absoluta (Garantia de F5 Resiliente)
-    const rotaInicial: AppScreen[] = [AppScreen.LOGIN];
-    localStorage.setItem('gbr_kardek_history', JSON.stringify(rotaInicial));
+    // 3. Rota Zero Absoluta apenas sem sessão a preservar (F5 com login válido
+    //    continua de onde estava).
+    if (!manterSessao) {
+      const rotaInicial: AppScreen[] = [AppScreen.LOGIN];
+      localStorage.setItem('gbr_kardek_history', JSON.stringify(rotaInicial));
+    }
 
   } catch (error) {
     // Fallback de contingência para evitar tela preta
@@ -1297,9 +1312,12 @@ useEffect(() => {
               if (parsedUser && parsedUser.email) {
                 // Validar integridade via Dexie/IndexedDB antes de limpar (busca atômica sub-12ms)
                 const dbUser = await (localDb.users as unknown as { get: (criteria: { email: string }) => Promise<User | null> }).get({ email: parsedUser.email });
-                const hasLocalUsers = !!dbUser || 
-                                      parsedUser.email === ADMIN_EMAIL || 
-                                      parsedUser.role === 'MASTER';
+                // A regra do boot tem de ser a MESMA dos outros pontos de
+                // arranque (DEMO/ADMIN/MASTER/MOBILE_SINGLE ou ADMIN_EMAIL).
+                // Com a lista estreita anterior (só MASTER/ADMIN_EMAIL), um
+                // ADMIN num aparelho sem base local via o sessionStorage ser
+                // apagado aqui — e recarregar devolvia-o ao login.
+                const hasLocalUsers = !!dbUser || isLocalSessionProfile(parsedUser, ADMIN_EMAIL);
                 
                 // Progresso da auditoria física: verificar se há ativos carregados no Dexie ou SQLite
                 const assetCount = await sqliteService.getAssetCount();
@@ -4174,7 +4192,11 @@ useEffect(() => {
           dirtyAssetsRef.current.clear();
         }
         localStorage.setItem('app_screen_history', safeStringify(history));
-        sessionStorage.setItem('app_current_user', safeStringify(user));
+        // `null` nunca pode substituir a sessão: no arranque o utilizador ainda
+        // não foi reidratado e esta gravação apagava o login do separador.
+        if (user) {
+          sessionStorage.setItem('app_current_user', safeStringify(user));
+        }
         localStorage.setItem('app_users', safeStringify(users));
         localStorage.setItem('app_selected_unit', selectedUnit || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
@@ -6998,7 +7020,9 @@ useEffect(() => {
 
     let sessaoPersistida = false;
     try {
-      sessaoPersistida = sessaoPersistidaNasChaves(Object.keys(localStorage));
+      // Sessão do app (credencial local) não cria `sb-*`; a marca em
+      // `sessionStorage` prova que recarregar mantém o login.
+      sessaoPersistida = sessaoPersistidaNasChaves(Object.keys(localStorage)) || appManagedSession;
     } catch {
       sessaoPersistida = false;
     }
@@ -7017,7 +7041,7 @@ useEffect(() => {
       ultimoErroDeRede: unitNamesErroDeRede,
       sessaoPersistida
     });
-  }, [activeTenant, currentTenantid, databaseMode, fullCompaniesWithStatus, temFiliaisLocaisDoContrato, cloudUnitNames, cloudUnitNamesScope, unitNamesOrigem, inventory.assets.length, unitNamesConsultadosEm, unitNamesErroDeRede]);
+  }, [activeTenant, currentTenantid, databaseMode, fullCompaniesWithStatus, temFiliaisLocaisDoContrato, cloudUnitNames, cloudUnitNamesScope, unitNamesOrigem, appManagedSession, inventory.assets.length, unitNamesConsultadosEm, unitNamesErroDeRede]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref
