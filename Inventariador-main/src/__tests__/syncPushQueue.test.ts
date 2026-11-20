@@ -15,6 +15,9 @@ vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
 
 const upsert = vi.fn();
+// Guarda «exclusão vence a subida»: por omissão a nuvem não tem nada apagado.
+// `vi.hoisted` porque o factory de `vi.mock` é içado acima destes `const`.
+const { fetchCloudDeletedKeys } = vi.hoisted(() => ({ fetchCloudDeletedKeys: vi.fn() }));
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: vi.fn(() => true) }
@@ -27,6 +30,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
     supabase: {
       from: () => ({ upsert: (...args: unknown[]) => upsert(...args) })
     },
+    fetchCloudDeletedKeys,
     registerCampaignSyncQueueDelegate: vi.fn()
   };
 });
@@ -60,6 +64,8 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
   beforeEach(async () => {
     upsert.mockReset();
     upsert.mockResolvedValue({ error: null });
+    fetchCloudDeletedKeys.mockReset();
+    fetchCloudDeletedKeys.mockResolvedValue(new Set<string>());
     await db.local_assets.clear();
     await db.ativos.clear();
     await db.assets.clear();
@@ -97,6 +103,28 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     // A etiqueta PENDENTE NUVEM só desaparece com a marcação local.
     const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
     expect(Number(local?._is_synced)).toBe(1);
+  });
+
+  // EXCLUSÃO VENCE A SUBIDA: a cópia local está ativa, mas a nuvem diz
+  // «apagado». Reenviá-la reactivava o ativo em todos os aparelhos.
+  it('não reenvia o registo apagado na nuvem e regista a decisão na trilha', async () => {
+    await db.local_assets.put(asset() as never);
+    fetchCloudDeletedKeys.mockResolvedValue(
+      new Set(['CICOPAL|01010100000005000001'])
+    );
+
+    const result = await processDataSyncQueue();
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(result.processedCount).toBe(0);
+
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    // Continua pendente: o pull seguinte aplica a exclusão ao registo local.
+    expect(Number(local?._is_synced)).toBe(0);
+
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_DELETE_WINS').toArray();
+    expect(logs).toHaveLength(1);
+    expect(String(logs[0].details)).toContain('prevalece');
   });
 
   // EXCLUSÃO: o registo apagado no aparelho tem de subir com a flag. Sem ela a

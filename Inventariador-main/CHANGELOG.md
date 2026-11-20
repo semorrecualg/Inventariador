@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a subida deixa de reativar um ativo apagado na nuvem
+
+- **O upsert não lia o estado remoto:** um aparelho que ficou offline com a
+  cópia ativa de um ativo apagado noutro lado reenviava-a e reactivava a linha
+  em todos os aparelhos — a exclusão nunca era definitiva. O envio passa a
+  perguntar à nuvem antes de escrever (`fetchCloudDeletedKeys`, uma consulta por
+  lote) e deixa de fora as chaves apagadas, tanto no espelhamento
+  (`syncAssetsToCloud`) como na fila de fundo (`processDataSyncQueue`).
+- **O restauro é a única excepção:** `syncAssetsToCloud(..., { allowUndelete:
+  true })`, usado só por `restoreAsset` — é a operação que pode dizer «vivo»
+  sobre uma linha apagada.
+- **Sem ciclo de pendência:** com a linha apagada, o pull deixa de preservar a
+  pendência local (`devePreservarPendencia`). Antes o registo voltava a
+  «Pendente Nuvem» e o envio tentava subi-lo em todos os ciclos.
+- **Sem a coluna na nuvem a guarda fica inerte:** se a consulta falhar (schema
+  antigo), o envio segue como antes — nunca um bloqueio.
+
 ### Corrigido — a exclusão da nuvem vence a edição pendente (o ativo deixa de ressuscitar)
 
 - **A cópia local desfazia a exclusão:** o merge do pull reaplica a cópia local

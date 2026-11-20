@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
-import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode } from './supabaseService';
+import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys } from './supabaseService';
 import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
@@ -650,6 +650,15 @@ const _syncService = {
         return { success: true, processedCount: 0, failedCount: 0 };
       }
 
+      // EXCLUSÃO VENCE A SUBIDA: o upsert não lê o estado remoto, por isso um
+      // aparelho offline reenviava a cópia ativa de um ativo apagado noutro
+      // lado e reactivava-o em todos. A nuvem é consultada UMA vez por ciclo
+      // (nunca por registo) e os apagados ficam fora do envio.
+      const apagadasNaNuvem = await fetchCloudDeletedKeys(
+        [tenantidClean],
+        records.map(record => String(record.primarykey || record.id || ''))
+      );
+
       const syncedPrimaryKeys: string[] = [];
       const failedPrimaryKeys: string[] = [];
       // Assinaturas das recusas já auditadas na janela. Carregadas no primeiro
@@ -668,6 +677,26 @@ const _syncService = {
         const pKey = sanitizeAssetKey(record.primarykey || record.id);
         if (isStringInvalid(pKey)) {
           failedPrimaryKeys.push(String(pKey));
+          continue;
+        }
+
+        if (apagadasNaNuvem.has(`${tenantidClean.trim().toUpperCase()}|${String(pKey).trim()}`)) {
+          // O registo está apagado na nuvem: nada sobe daqui. NÃO se marca como
+          // sincronizado — a cópia local ainda está desactualizada e o pull
+          // seguinte aplica a exclusão (`mesclarComExclusao`). A trilha diz o
+          // que aconteceu, para o «Pendente Nuvem» não ficar sem explicação.
+          logger.warn(`>>> [Sync] Ativo ${pKey} apagado na nuvem: a exclusão prevalece e nada foi enviado.`);
+          try {
+            await sqliteService.logAuditEvent(
+              user.email || 'system',
+              'SYNC_DELETE_WINS',
+              'local_assets',
+              String(pKey),
+              'Exclusão na nuvem prevalece sobre a cópia local pendente: nada foi enviado; a cópia local será descartada no próximo pull.'
+            );
+          } catch (auditErr) {
+            logger.warn('>>> [Sync] Falha ao registar a exclusão que prevaleceu na trilha:', auditErr);
+          }
           continue;
         }
 

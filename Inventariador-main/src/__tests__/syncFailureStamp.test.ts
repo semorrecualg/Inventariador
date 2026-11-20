@@ -14,6 +14,9 @@ vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
 
 const upsert = vi.fn();
+// Guarda «exclusão vence a subida»: mockada para não ir à rede (nada apagado).
+const { fetchCloudDeletedKeys } = vi.hoisted(() => ({ fetchCloudDeletedKeys: vi.fn() }));
+fetchCloudDeletedKeys.mockResolvedValue(new Set<string>());
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: vi.fn(() => true) }
@@ -26,6 +29,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
     supabase: {
       from: () => ({ upsert: (...args: unknown[]) => upsert(...args) })
     },
+    fetchCloudDeletedKeys,
     registerCampaignSyncQueueDelegate: vi.fn()
   };
 });
