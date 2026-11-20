@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — trava no servidor contra a ressurreição de ativos apagados
+
+- **A exclusão deixa de depender do cliente:** a guarda do #128 só existe no
+  APK que a tem. Um APK antigo — ou uma cópia local que nunca recebeu a
+  exclusão — envia `is_deleted = false` sobre a linha apagada e o ativo volta
+  para todos. O trigger `assets_bloquear_ressurreicao` (`BEFORE UPDATE` em
+  `public.assets`) recusa essa escrita com P0001, excepto quando a mesma
+  escrita traz um `restored_at` novo.
+- **A marca de restauro é explícita:** `restored_at` (coluna nova) só é enviada
+  pelo caminho de restauro (`syncAssetsToCloud(..., { allowUndelete: true })`,
+  usado por `restoreAsset`). Update normal de um ativo apagado passa (a flag
+  fica `true`); restauro passa (traz a marca).
+- **Blocos SQL:** `scripts/assets-restauro-trigger.sql` para a base actual e
+  `docs/supabase_bootstrap.sql` para as bases novas, ambos idempotentes.
+
 ### Corrigido — a exclusão que vence a subida passa a ser aplicada ao registo local
 
 - **O registo ficava pendente para sempre:** quando a guarda de envio

@@ -130,6 +130,8 @@ describe('exclusão vence a subida — o upsert consulta a nuvem antes de escrev
     expect(upsert).toHaveBeenCalledTimes(1);
     const payload = upsert.mock.calls[0][0] as Record<string, unknown>[];
     expect(payload.map(r => r.primarykey)).toEqual(['PK-2']);
+    // Envio normal não leva a marca de restauro.
+    expect(payload[0]).not.toHaveProperty('restored_at');
     expect(enviados).toEqual(['PK-2']);
   });
 
@@ -146,6 +148,9 @@ describe('exclusão vence a subida — o upsert consulta a nuvem antes de escrev
     expect(upsert).toHaveBeenCalledTimes(1);
     const payload = upsert.mock.calls[0][0] as Record<string, unknown>[];
     expect(payload[0]).toMatchObject({ primarykey: 'PK-1', is_deleted: false });
+    // A trava do servidor (`assets_bloquear_ressurreicao`) só aceita a reativação
+    // com uma marca de restauro nova; o restauro explícito é quem a envia.
+    expect(typeof payload[0].restored_at).toBe('string');
     expect(enviados).toEqual(['PK-1']);
   });
 

@@ -106,6 +106,34 @@ ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS is_deleted boolean DEFAULT fa
 UPDATE public.assets SET is_deleted = false WHERE is_deleted IS NULL;
 ALTER TABLE public.assets ALTER COLUMN is_deleted SET DEFAULT false;
 
+-- TRAVA CONTRA A RESSURREIÇÃO: um APK antigo (ou uma cópia local que nunca viu
+-- a exclusão) envia `is_deleted = false` sobre a linha apagada e o ativo volta
+-- para todos. O trigger recusa, excepto quando a mesma escrita traz um
+-- `restored_at` novo — a marca explícita de restauro que só `restoreAsset`
+-- envia. Numa base que já existe, o mesmo bloco vive em
+-- scripts/assets-restauro-trigger.sql.
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS restored_at timestamptz;
+
+CREATE OR REPLACE FUNCTION public.assets_bloquear_ressurreicao()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.is_deleted IS TRUE AND NEW.is_deleted IS NOT TRUE THEN
+    IF NEW.restored_at IS NULL OR NEW.restored_at IS NOT DISTINCT FROM OLD.restored_at THEN
+      RAISE EXCEPTION 'Exclusão prevalece: para pôr is_deleted = false é preciso um restored_at novo (restauro explícito).';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS assets_bloquear_ressurreicao ON public.assets;
+CREATE TRIGGER assets_bloquear_ressurreicao
+  BEFORE UPDATE ON public.assets
+  FOR EACH ROW
+  EXECUTE FUNCTION public.assets_bloquear_ressurreicao();
+
 -- SRE ISOLAMENTO DE CONTRATO: a unicidade da chave de origem é POR TENANT —
 -- a mesma chave primária pode existir legitimamente em contratos diferentes
 -- (ex.: base de teste do CLIENTETESTE copiada do CICOPAL). O índice GLOBAL
