@@ -116,12 +116,37 @@ export const carimbarFalhaEnvio = (
 };
 
 /**
+ * ESTADO DE UM REGISTO QUE A NUVEM JÁ ACEITOU — UMA SÓ REGRA
+ * ============================================================================
+ * `_is_synced = 1` («esta linha é igual à nuvem») e `_syncFailAt` («a nuvem
+ * recusou este registo») são estados que se excluem. Quem marca o sucesso tem
+ * de apagar o carimbo na mesma escrita; senão o carimbo fica órfão num registo
+ * sincronizado e volta a pintar o selo no primeiro toque que reponha
+ * `_is_synced = 0` — uma recusa antiga a fingir de nova.
+ *
+ * O patch vive aqui (uma regra só) e é usado pelas escritas de sucesso:
+ * `sqliteService.markAssetsSynced` (envio em massa, fila e fotos) e o estado
+ * visual do App que espelha o que a nuvem aceitou.
+ */
+export interface MarcaSincronizada {
+  _is_synced: 1;
+}
+
+export const marcarSincronizadoLocal = <T extends object>(asset: T): T & MarcaSincronizada => {
+  const copia = { ...asset } as Record<string, unknown>;
+  delete copia._syncFailAt;
+  delete copia._syncFailReason;
+  copia._is_synced = 1;
+  return copia as T & MarcaSincronizada;
+};
+
+/**
  * Motivo e idade para o selo do cartão. Sem carimbo não há aviso — um registo
  * só na fila continua a ser «Pendente Nuvem» sem falha nenhuma a declarar.
  *
- * `_is_synced = 1` manda calar o aviso mesmo que o carimbo tenha ficado para
- * trás: o ativo subiu por outro caminho (`syncAssetsToCloudAndMark`, pull com
- * `markSynced`) e um selo vermelho num registo igual à nuvem seria falso.
+ * `_is_synced = 1` continua a calar um carimbo legado (bases gravadas antes de
+ * a limpeza passar a ser feita na própria escrita do sucesso): um selo vermelho
+ * num registo igual à nuvem seria falso.
  */
 export const syncFailureInfo = (
   asset: { _syncFailAt?: unknown; _syncFailReason?: unknown; _is_synced?: unknown } | null | undefined,

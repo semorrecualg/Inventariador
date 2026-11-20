@@ -591,11 +591,11 @@ export const photoSyncManager = {
           // Atualização nas tabelas oficiais via Dexie (IndexedDB) sem usar SQL puro.
           // Chave composta [tenantid+primarykey] (v6): flags são aplicadas por
           // primarykey via índice (todas as linhas da chave, qualquer contrato).
+          // O sucesso passa pelo ponto único (`markAssetsSynced`): além de
+          // `_is_synced = 1` e do `_photoUrl`, apaga o carimbo de recusa — um
+          // registo igual à nuvem não pode ficar com selo vermelho agarrado.
           const assetKey = String(item.assetId).trim();
-          const photoChanges = { _photoUrl: publicUrl, _is_synced: 1 };
-          await db.ativos.where('primarykey').equals(assetKey).modify(photoChanges);
-          await db.local_assets.where('primarykey').equals(assetKey).modify(photoChanges);
-          await db.assets.where('primarykey').equals(assetKey).modify(photoChanges);
+          await sqliteService.markAssetsSynced([assetKey], { _photoUrl: publicUrl });
 
           await photoQueueStore.removeItem(key);
           uploadCount++;
