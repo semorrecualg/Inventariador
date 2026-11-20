@@ -200,6 +200,58 @@ export function hasFiliaisLocaisDoContrato(
 }
 
 /**
+ * Escopo de um pull da nuvem pedido PELO PRÓPRIO APP (arranque, sessão
+ * restaurada, actualização pendente, troca de modo) — distinto de uma acção
+ * explícita do dono («Sincronizar tudo»).
+ */
+export type SyncPullScope =
+  | { type: 'full' }
+  | { type: 'unit'; unit: string }
+  | { type: 'blocked' };
+
+export interface SyncPullScopeInput {
+  /** Contrato resolvido (lista quando o chamador passa vários tenants). */
+  tenantid?: string | string[] | null;
+  /** Filial pedida explicitamente pelo chamador (escolha do utilizador). */
+  explicitUnitId?: string | null;
+  /** «Sincronizar tudo»: o dono pediu o contrato inteiro de propósito. */
+  explicitForceFull?: boolean;
+  /** Filial fixa do perfil (auditor de campo). */
+  filialDoPerfil?: string | null;
+  /** Última escolha do utilizador (`app_last_work_context`). */
+  lastCtx?: { tenantid?: string; filial?: string } | null;
+}
+
+/**
+ * Decide se um pull automático pode correr e com que filtro.
+ *
+ * O pull automático NUNCA desce o contrato inteiro: sem filial pedida, sem
+ * filial no perfil e sem última escolha válida, o plano é `blocked` e o
+ * utilizador escolhe a filial no CONTRATO DE TRABALHO. Antes, o login/sessão
+ * restaurada chamava o pull com a filial indefinida e baixava as 12.636 linhas
+ * do contrato — congelava o ecrã e deixava a base local a «ter» o contrato,
+ * que é precisamente o estado que fechava o CONTRATO DE TRABALHO.
+ *
+ * `full` fica reservado a: acção explícita do dono (`explicitForceFull`) e
+ * pulls sem contrato resolvido (dono global, vários tenants) — onde não há uma
+ * filial a exigir e o isolamento é tratado a montante.
+ */
+export function resolveSyncPullScope(input: SyncPullScopeInput): SyncPullScope {
+  if (input.explicitForceFull) return { type: 'full' };
+
+  const pedida = resolveUnitFilter(input.explicitUnitId);
+  if (pedida) return { type: 'unit', unit: pedida };
+
+  const tenants = (Array.isArray(input.tenantid) ? input.tenantid : [input.tenantid])
+    .map((t) => String(t || '').trim().toUpperCase())
+    .filter((t) => !!t);
+  if (tenants.length !== 1) return { type: 'full' };
+
+  const plano = resolveBootPullPlan(input.filialDoPerfil, input.lastCtx, tenants[0]);
+  return plano.unit ? { type: 'unit', unit: plano.unit } : { type: 'blocked' };
+}
+
+/**
  * Normaliza a lista de filiais (vem da nuvem quando o aparelho ainda não tem
  * base local): trim + UPPER, descarta sentinelas, remove duplicados e ordena.
  */

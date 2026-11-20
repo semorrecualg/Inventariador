@@ -10,7 +10,8 @@ import {
   normalizeUnitNames,
   unitListScope,
   decideUnitListAction,
-  hasFiliaisLocaisDoContrato
+  hasFiliaisLocaisDoContrato,
+  resolveSyncPullScope
 } from '../utils/unitContextUtils';
 
 describe('resolveUnitFilter — filtro de filial dos pulls do fluxo inicial (Etapa 2)', () => {
@@ -253,6 +254,51 @@ describe('decideUnitListAction — o que fazer com a lista de filiais guardada',
     expect(decideUnitListAction({ ...base, online: false })).toEqual({ type: 'idle' });
     expect(decideUnitListAction({ ...base, isLocalDatabase: true })).toEqual({ type: 'idle' });
     expect(decideUnitListAction({ ...base, hasLocalBase: true })).toEqual({ type: 'idle' });
+  });
+});
+
+describe('resolveSyncPullScope — o pull automático nunca desce o contrato inteiro', () => {
+  const lastCtx = { tenantid: 'CICOPAL', filial: '010201 SNACKS PA' };
+
+  it('sem filial pedida e sem última escolha: BLOCKED (escolher no contrato)', () => {
+    expect(resolveSyncPullScope({ tenantid: 'CICOPAL', filialDoPerfil: 'TODAS' }))
+      .toEqual({ type: 'blocked' });
+    expect(resolveSyncPullScope({ tenantid: 'CICOPAL', filialDoPerfil: null, lastCtx: null }))
+      .toEqual({ type: 'blocked' });
+  });
+
+  it('filial pedida pelo chamador vence tudo (e é normalizada)', () => {
+    expect(
+      resolveSyncPullScope({ tenantid: 'CICOPAL', explicitUnitId: ' 010105 cicopal pa ', filialDoPerfil: 'TODAS' })
+    ).toEqual({ type: 'unit', unit: '010105 CICOPAL PA' });
+  });
+
+  it('perfil com filial fixa (auditor) ou última escolha do MESMO contrato → filial', () => {
+    expect(resolveSyncPullScope({ tenantid: 'CICOPAL', filialDoPerfil: '010101 CICOPAL GO' }))
+      .toEqual({ type: 'unit', unit: '010101 CICOPAL GO' });
+    expect(resolveSyncPullScope({ tenantid: 'CICOPAL', filialDoPerfil: 'TODAS', lastCtx }))
+      .toEqual({ type: 'unit', unit: '010201 SNACKS PA' });
+  });
+
+  it('última escolha de OUTRO contrato não autoriza o pull (muro SRE)', () => {
+    expect(
+      resolveSyncPullScope({
+        tenantid: 'CICOPAL',
+        filialDoPerfil: 'TODAS',
+        lastCtx: { tenantid: 'CLIENTETESTE', filial: '010101 CICOPAL GO' }
+      })
+    ).toEqual({ type: 'blocked' });
+  });
+
+  it('«Sincronizar tudo» (explícita) pode pedir o contrato inteiro', () => {
+    expect(
+      resolveSyncPullScope({ tenantid: 'CICOPAL', filialDoPerfil: 'TODAS', explicitForceFull: true })
+    ).toEqual({ type: 'full' });
+  });
+
+  it('sem contrato resolvido (dono global) ou vários contratos: mantém o comportamento', () => {
+    expect(resolveSyncPullScope({ filialDoPerfil: 'TODAS' })).toEqual({ type: 'full' });
+    expect(resolveSyncPullScope({ tenantid: ['CICOPAL', 'CLIENTETESTE'] })).toEqual({ type: 'full' });
   });
 });
 

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o arranque não desce o contrato inteiro sem filial
+
+- **O que era:** o pull automático da nuvem (login, sessão restaurada,
+  actualização pendente, troca de modo) corria com a filial indefinida quando o
+  perfil não fixa filial e não há última escolha válida — o `fetchFullInventory`
+  sem filtro baixava o **contrato inteiro** (12.636 ativos do CICOPAL, medido no
+  preview em 5,3 s) e gravava-o na base local. Além do tráfego, isso deixava a
+  base local a «ter» o contrato — o estado que fechava o CONTRATO DE TRABALHO —
+  e congelava o ecrã enquanto aplicava as linhas.
+- **Agora:** `resolveSyncPullScope` decide o pull automático. Sem filial pedida,
+  sem filial no perfil e sem última escolha do **mesmo** contrato, o plano é
+  `blocked`: nenhum pedido é feito e a filial é escolhida no CONTRATO DE
+  TRABALHO antes de qualquer download. `full` fica reservado à acção explícita
+  do dono («Sincronizar tudo») e a pulls sem contrato resolvido (dono global),
+  onde não há filial a exigir.
+- **Teste:** `src/__tests__/unitContextUtils.test.ts` cobre as seis decisões
+  (blocked sem filial, filial pedida, filial do perfil, última escolha do mesmo
+  contrato, última escolha de outro contrato, «Sincronizar tudo» e sem
+  contrato/vários contratos).
+
 ### Corrigido — o contrato volta a ver as filiais que estão na nuvem
 
 - **O que era:** a lista de filiais do contrato só era pedida à nuvem quando o
