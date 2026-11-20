@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linhas sem carimbo:** o backfill (`updated_at = COALESCE(created_at,
   now())`) tira do limbo as linhas antigas, que nunca apareciam no delta.
 
+### Corrigido — o `23505` do espelhamento deixa de contar como sincronizado em silêncio
+
+- **A chave existe com outro `id`:** no isolamento por ativo de
+  `syncAssetsToCloud`, um `23505` em `(tenantid, primarykey)` era contado como
+  sucesso e o payload era deitado fora — o aparelho ficava «sincronizado» e a
+  nuvem por actualizar, com a conferência perdida sem aviso. O envio passa a
+  repetir o upsert com `onConflict: 'tenantid, primarykey'`, que actualiza a
+  linha certa (mantendo a adaptação de `id`/colunas do `sendBatch`). Só se a
+  repetição também falhar é que o ativo é dado como recusado, com motivo.
+
 ### Corrigido — o timeout deixa de ser carimbado como recusa definitiva
 
 - **Timeout ≠ recusa:** quando o pedido não responde em 15 s, a fila carimbava

@@ -1258,7 +1258,10 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   // contrato, para a carga de um contrato nunca sobrescrever outra base com a
   // mesma chave de origem. O payload é adaptado ao schema remoto (tipo de `id`
   // e colunas existentes) sem degradar para 500 requisições individuais.
-  const sendBatch = async (rows: Record<string, unknown>[]) => {
+  const sendBatch = async (
+    rows: Record<string, unknown>[],
+    conflictTarget: 'tenantid, id' | 'tenantid, primarykey' = 'tenantid, id'
+  ) => {
     if (!supabase) throw new Error('Instância do Supabase indisponível.');
 
     // O schema remoto decide o formato de `id` e o conjunto de colunas:
@@ -1272,7 +1275,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         ? projected.map(r => ({ ...r, id: assetUuid(String(r.tenantid), String(r.primarykey ?? r.id ?? '')) }))
         : projected;
 
-      const result = await supabase.from('assets').upsert(payload, { onConflict: 'tenantid, id' });
+      const result = await supabase.from('assets').upsert(payload, { onConflict: conflictTarget });
       if (!result.error) return;
 
       const err = result.error as { code?: string; message?: string; details?: string; hint?: string };
@@ -1336,10 +1339,22 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
             await sendBatch([row]);
             successfullySyncedIds.push(localKey);
           } catch (rowErr: unknown) {
-            // 23505 em `assets_tenant_primarykey_key`: a chave de origem já está
-            // na nuvem (com id anterior) — o ativo está sincronizado, não rejeitado.
+            // 23505 em `assets_tenant_primarykey_key`: a chave de origem já
+            // existe na nuvem com outro `id`. Antes isto contava como
+            // «sincronizado» e o payload era deitado fora — o aparelho dizia
+            // que sim e a nuvem ficava por actualizar (a conferência perdia-se
+            // em silêncio). Repetir o upsert pelo alvo (tenantid, primarykey)
+            // actualiza a linha certa; só se essa repetição também falhar é
+            // que o ativo conta como recusado.
             if ((rowErr as { code?: string }).code === '23505') {
-              successfullySyncedIds.push(localKey);
+              try {
+                await sendBatch([row], 'tenantid, primarykey');
+                successfullySyncedIds.push(localKey);
+              } catch (retryErr: unknown) {
+                const motivo = `${describeSupabaseError(retryErr)} (a chave de origem já existe com outro id e a repetição por primarykey falhou)`;
+                failedRows.push(`${row.primarykey ?? localKey}: ${motivo}`);
+                falhasDesteLote.push({ primarykey: String(row.primarykey ?? localKey), motivo });
+              }
               return;
             }
             const motivo = describeSupabaseError(rowErr);
