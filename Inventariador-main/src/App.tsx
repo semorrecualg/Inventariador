@@ -83,6 +83,7 @@ import {
   syncCheckpointKey
 } from './utils/syncCheckpoint';
 import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato, unitNamesCacheKey, readUnitNamesCache, writeUnitNamesCache } from './utils/unitContextUtils';
+import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -802,6 +803,15 @@ useEffect(() => {
   // aparelho novo a lista vinha dos dados locais (vazios) e o usuário ficava
   // preso. Esta consulta traz só os NOMES (coluna `filial`), nunca os ativos.
   const [cloudUnitNames, setCloudUnitNames] = useState<{ scope: string; names: string[] } | null>(null);
+  // DIAGNÓSTICO DE ACESSO: quando os nomes foram consultados à nuvem nesta
+  // sessão e a última falha de rede da lista. Alimentam o ecrã do PAINEL
+  // COMPLETO — sem devtools, o dono vê o que aconteceu.
+  const [unitNamesConsultadosEm, setUnitNamesConsultadosEm] = useState<number | null>(null);
+  const [unitNamesErroDeRede, setUnitNamesErroDeRede] = useState<string | null>(null);
+  // A mesma lista em memória pode vir da nuvem ou da cache — e o diagnóstico
+  // tem de dizer qual foi. Sem isto, uma lista servida da cache aparecia como
+  // «lista da nuvem» e escondia precisamente o caso que se quer diagnosticar.
+  const [unitNamesOrigem, setUnitNamesOrigem] = useState<'nuvem' | 'cache' | null>(null);
   const [isDatabaseEmpty, setIsDatabaseEmpty] = useState<boolean>(false);
   // Etapa 2 da trilha única: "segurança biométrica" é um passo da esteira.
   // Fica true quando o usuário registra a biometria OU a dispensa na tela —
@@ -6567,12 +6577,14 @@ useEffect(() => {
       if (!guardada) return false;
       logger.info(`>>> [Unidades] ${motivo}: ${guardada.names.length} filial(is) servida(s) da cache de ${cloudUnitNamesScope}.`);
       setCloudUnitNames({ scope: cloudUnitNamesScope, names: guardada.names });
+      setUnitNamesOrigem('cache');
       return true;
     };
 
     if (acao.type === 'clear') {
       const escopoAnterior = cloudUnitNames?.scope;
       setCloudUnitNames(null);
+      setUnitNamesOrigem(null);
       if (escopoAnterior) {
         try { localStorage.removeItem(unitNamesCacheKey(escopoAnterior)); } catch { /* nada a limpar */ }
       }
@@ -6601,13 +6613,19 @@ useEffect(() => {
           guardarCacheDeFiliais(cloudUnitNamesScope, nomes);
           logger.info(`>>> [Unidades] Lista de filiais do contrato carregada da nuvem: ${nomes.length} unidade(s).`);
           setCloudUnitNames({ scope: cloudUnitNamesScope, names: nomes });
+          setUnitNamesOrigem('nuvem');
+          setUnitNamesConsultadosEm(Date.now());
+          setUnitNamesErroDeRede(null);
           return;
         }
         // Resposta sem nomes (função/paginação falharam ou contrato vazio): o
         // que já se sabia deste escopo serve melhor do que uma seleção vazia.
         if (cloudUnitNames?.scope !== cloudUnitNamesScope) usarCacheDeFiliais('Resposta sem filiais');
       })
-      .catch(err => logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', err));
+      .catch(err => {
+        setUnitNamesErroDeRede(err instanceof Error ? err.message : String(err));
+        logger.warn('>>> [Unidades] Falha ao listar filiais do contrato:', err);
+      });
   }, [activeTenant, cloudUnitNamesScope, cloudUnitNames, databaseMode, temFiliaisLocaisDoContrato, inventory.assets.length]);
 
   const fullCompaniesWithStatus = useMemo(() => {
@@ -6960,6 +6978,46 @@ useEffect(() => {
     logger.info(`>>> [fullCompaniesWithStatus] Total units calculated: ${finalResult.length}`);
     return finalResult;
   }, [inventory.companies, inventory.assets, inventory.databaseMode, user, currentTenantid, campaigns, activeCampaignUnits, recordedCampaignUnits, unitConfigs, isImportingBatchState, databaseMode, sqliteOperationalUnits, cloudUnitNames, cloudUnitNamesScope]);
+
+  // DIAGNÓSTICO DE ACESSO (PAINEL COMPLETO): tudo o que o ecrã mostra é decidido
+  // em `utils/accessDiagnostics.ts`; aqui só se recolhem os sinais que o App já
+  // tem em memória — e a chave de sessão do aparelho, que revela se recarregar
+  // volta ao login.
+  const accessDiagnostic = useMemo(() => {
+    const nomesEmMemoria = cloudUnitNames && cloudUnitNames.scope === cloudUnitNamesScope
+      ? cloudUnitNames.names.length
+      : 0;
+
+    let nomesDaCacheGuardada = 0;
+    try {
+      const guardada = readUnitNamesCache(localStorage.getItem(unitNamesCacheKey(cloudUnitNamesScope)), cloudUnitNamesScope);
+      nomesDaCacheGuardada = guardada?.names.length ?? 0;
+    } catch {
+      nomesDaCacheGuardada = 0;
+    }
+
+    let sessaoPersistida = false;
+    try {
+      sessaoPersistida = sessaoPersistidaNasChaves(Object.keys(localStorage));
+    } catch {
+      sessaoPersistida = false;
+    }
+
+    return buildAccessDiagnostic({
+      contrato: activeTenant || String(currentTenantid || '').trim().toUpperCase(),
+      modo: databaseMode === DatabaseMode.INTERNAL ? 'INTERNAL' : 'SUPABASE',
+      contextos: fullCompaniesWithStatus.length,
+      filiaisNaBase: temFiliaisLocaisDoContrato,
+      filiaisDaNuvem: unitNamesOrigem === 'nuvem' ? nomesEmMemoria : 0,
+      filiaisDaCache: unitNamesOrigem === 'cache' ? nomesEmMemoria : nomesDaCacheGuardada,
+      unidadesComAncora: fullCompaniesWithStatus.filter((unidade) => unidade.hasGps).length,
+      unidadesComCampanha: fullCompaniesWithStatus.filter((unidade) => unidade.hasCampaign).length,
+      ativosLocais: inventory.assets.length,
+      nomesConsultadosEm: unitNamesConsultadosEm,
+      ultimoErroDeRede: unitNamesErroDeRede,
+      sessaoPersistida
+    });
+  }, [activeTenant, currentTenantid, databaseMode, fullCompaniesWithStatus, temFiliaisLocaisDoContrato, cloudUnitNames, cloudUnitNamesScope, unitNamesOrigem, inventory.assets.length, unitNamesConsultadosEm, unitNamesErroDeRede]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref
@@ -7506,6 +7564,7 @@ useEffect(() => {
             onCheckIntegrity={handleCheckIntegrity}
             campaignsCount={campaigns.length}
             currentCampaignId={inventory.currentCampaignId}
+            accessDiagnostic={accessDiagnostic}
           />} />
           {/* «Voltar» do GESTOR DE BASE: recua no histórico e devolve o hub
               (`MAIN_MENU`), que reabre o PAINEL COMPLETO de onde se veio; sem

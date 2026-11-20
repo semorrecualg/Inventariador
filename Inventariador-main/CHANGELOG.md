@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — diagnóstico de acesso no PAINEL COMPLETO
+
+- **O ecrã que responde ao telefone:** «DIAGNÓSTICO DE ACESSO» no PAINEL
+  COMPLETO (ADMIN/MASTER) mostra contrato, modo, contextos, **origem das
+  filiais** (base local → lista da nuvem → cache → nenhuma), âncoras GPS,
+  campanhas ativas, ativos no aparelho, hora da última consulta de nomes, último
+  erro de rede e **se a sessão está persistida** — o achado da prova de arranque
+  a frio (sem chave `sb-*`, recarregar cai no login). Um botão copia o bloco
+  inteiro para pedir suporte.
+- **Teste:** `src/__tests__/accessDiagnostics.test.ts` fixa as regras de origem
+  e a leitura da chave de sessão; `src/__tests__/accessDiagnosticPanel.test.tsx`
+  cobre o ecrã nos dois modos (SUPABASE com lista da nuvem, INTERNAL com base
+  local) e a cópia do texto.
+
 ### Alterado — a lista de filiais vem numa consulta e fica em cache por escopo
 
 - **13 pedidos de 1000 linhas para 5 nomes:** a tela de seleção só precisa dos
