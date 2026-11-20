@@ -11,6 +11,7 @@
 // segredos, só evita que o utilizador tenha de repetir o login a cada sessão.
 // ============================================================================
 import { isLocalSessionProfile } from './authUtils';
+import { AppScreen } from '../types';
 import type { User } from '../types';
 
 export const PERSISTED_SESSION_KEY = 'gbr_persisted_session';
@@ -101,6 +102,24 @@ export function restorePersistedSession(
     /* sem sessionStorage a sessão não pode ser reposta */
   }
   return user;
+}
+
+/**
+ * Regra de arranque do ecrã inicial: com sessão local no cache do separador
+ * (incluindo a reposta de uma cópia persistida) começa no CONTRATO DE TRABALHO;
+ * sem sessão, no login. É esta decisão que impede um separador novo de parar no
+ * ecrã de entrada.
+ */
+export function resolveInitialScreenHistory(): AppScreen[] {
+  try {
+    const guardado = sessionStorage.getItem(SESSION_CACHE_KEY);
+    if (guardado && guardado !== 'null' && isLocalSessionProfile(JSON.parse(guardado))) {
+      return [AppScreen.WORK_CONTEXT_SELECTION];
+    }
+  } catch {
+    /* cache ilegível — segue para o login */
+  }
+  return [AppScreen.LOGIN];
 }
 
 /** Logout explícito: o próximo arranque tem de pedir credenciais. */

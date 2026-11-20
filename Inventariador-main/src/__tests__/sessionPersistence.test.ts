@@ -10,10 +10,13 @@ import {
   PERSISTED_SESSION_TTL_MS,
   clearPersistedSession,
   readPersistedSession,
+  resolveInitialScreenHistory,
   restorePersistedSession,
   writePersistedSession
 } from '../utils/sessionPersistence';
+import { AppScreen } from '../types';
 import type { User, UserRole } from '../types';
+import { screenToPath } from '../router/routes';
 
 const USER = {
   id: 'u-1',
@@ -91,6 +94,41 @@ describe('restorePersistedSession', () => {
     writePersistedSession(USER, 1_000);
     expect(restorePersistedSession(1_000 + PERSISTED_SESSION_TTL_MS + 1)).toBeNull();
     expect(sessionStorage.getItem('app_current_user')).toBeNull();
+  });
+});
+
+describe('resolveInitialScreenHistory — regra de arranque', () => {
+  it('separador novo com cópia local válida abre no CONTRATO DE TRABALHO', () => {
+    // Estado de um separador novo: sessionStorage vazio, cópia em localStorage.
+    writePersistedSession(USER, 1_000);
+    sessionStorage.clear();
+
+    restorePersistedSession(2_000);
+    const historico = resolveInitialScreenHistory();
+
+    expect(historico).toEqual([AppScreen.WORK_CONTEXT_SELECTION]);
+    expect(screenToPath[historico[historico.length - 1]]).toBe('/contexto');
+  });
+
+  it('sem sessão nenhuma começa no login', () => {
+    expect(resolveInitialScreenHistory()).toEqual([AppScreen.LOGIN]);
+    expect(screenToPath[AppScreen.LOGIN]).toBe('/login');
+  });
+
+  it('cache ilegível ou nulo não inventa sessão', () => {
+    sessionStorage.setItem('app_current_user', '{lixo');
+    expect(resolveInitialScreenHistory()).toEqual([AppScreen.LOGIN]);
+
+    sessionStorage.setItem('app_current_user', 'null');
+    expect(resolveInitialScreenHistory()).toEqual([AppScreen.LOGIN]);
+  });
+
+  it('sessão da nuvem não é tratada como sessão local no arranque', () => {
+    sessionStorage.setItem(
+      'app_current_user',
+      JSON.stringify({ email: 'auditor@example.com', role: 'AUDITOR' })
+    );
+    expect(resolveInitialScreenHistory()).toEqual([AppScreen.LOGIN]);
   });
 });
 
