@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — a recusa da nuvem aparece na ficha do ativo
+
+- **Selo de falha e reenvio no detalhe:** `AssetListItem` e o botão global já
+  mostravam a recusa, mas na ficha o operador via só «PENDENTE NUVEM» — sem
+  motivo, sem idade e sem forma de tentar outra vez. `AssetDetail` passa a
+  mostrar um aviso vermelho com o motivo e a idade (`syncFailureInfo`) e um
+  botão **Tentar agora** que chama `processDataSyncQueue` (o mesmo caminho do
+  botão global e do ciclo de fundo) e relê a tabela viva `ativos` para o selo
+  desaparecer quando o ativo sobe. `_is_synced = 1` cala o aviso mesmo com
+  carimbo antigo, como no cartão.
+
 ## [2.9.0] — 2026-11-20
 
 ### Alterado — o pull grava a base uma vez, não três
