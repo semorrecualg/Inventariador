@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o carimbo da falha morre com o registo na limpeza local
+
+- **O selo contava ativos que já não existiam:** a «Limpeza Total» de uma unidade
+  (`MainMenu`/`DataManagementPanel`) e a limpeza em massa filtravam o cache do
+  localforage e o estado React, mas deixavam as linhas da unidade nos três
+  espelhos Dexie (`local_assets`/`ativos`/`assets`) — com o `_syncFailAt`
+  agarrado a elas. O contador do selo somava falhas órfãs e a fila de fundo
+  voltava a tentar enviá-las a cada ciclo.
+- **A cópia de contingência ressuscitava o ativo:** o rascunho
+  `gbr_backup_<tenant>_<filial>` em `localStorage` guarda o ativo inteiro
+  (carimbo incluído) e o «Recovery Boot» do Inventory relê-o no arranque. Os
+  dois caminhos de limpeza passam a descartar o rascunho e a escrita coalescida
+  dos ativos removidos; a limpeza total descarta todos os `gbr_backup_*`.
+- **Remoção por unidade, numa transação:** `sqliteService.deleteLocalAssetsByUnits`
+  apaga dos três espelhos as linhas das unidades limpas. O carimbo sai com a
+  linha e nada mais é tocado: os ativos das outras unidades mantêm
+  `_syncFailAt`, `_syncFailReason` e a pendência («morre com o registo, nunca
+  antes»).
+- **Prova:** `src/__tests__/carimboNoReset.test.ts` (5 casos), um por caminho —
+  limpeza total, limpeza de uma unidade, limpeza em massa, «Desvincular e
+  Reiniciar» (`hardResetDatabase`) e higienização do Gestor de Base — e em cada
+  um o ativo mantido fica com o carimbo intacto.
+- **Limite:** a limpeza continua a ser por unidade e sem escopo por `tenantid`
+  (a mesma regra que o localforage e o estado já aplicam).
+
 ### Corrigido — o pull não desfaz a conferência feita no aparelho
 
 - **A marca voltava a «por conferir»:** o merge do pull remontava a linha da

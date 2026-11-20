@@ -1264,6 +1264,49 @@ export class SqliteService {
     return false;
   }
 
+  /**
+   * LIMPEZA DE UNIDADES — O CARIMBO DA FALHA MORRE COM O REGISTO
+   * ============================================================================
+   * A «Limpeza Total» de uma unidade (MainMenu/DataManagementPanel) filtrava o
+   * cache do localforage e o estado React, mas deixava as linhas da unidade nos
+   * três espelhos Dexie (`local_assets`/`ativos`/`assets`) — com o `_syncFailAt`
+   * agarrado a elas. O selo contava falhas de ativos que já não existiam no
+   * inventário e a fila de fundo voltava a tentar enviá-los a cada ciclo.
+   *
+   * A remoção é por UNIDADE — a mesma regra que o localforage e o estado já
+   * aplicam — e numa só transação: sai a linha inteira e o carimbo sai com ela.
+   * Nada mais é tocado; os ativos das outras unidades ficam com o carimbo e a
+   * pendência intactos («morre com o registo, nunca antes»).
+   *
+   * Devolve quantas linhas saíram (a maior das três contagens, a mesma regra de
+   * `getAssetCount`).
+   */
+  public async deleteLocalAssetsByUnits(units: string[]): Promise<number> {
+    const alvos = new Set(
+      units.map(u => String(u ?? '').trim().toUpperCase()).filter(Boolean)
+    );
+    if (alvos.size === 0) return 0;
+    const pertence = (rec: unknown): boolean => {
+      const registo = rec as Record<string, unknown>;
+      const unidade = String(registo.filial ?? registo._unitid ?? '').trim().toUpperCase();
+      return alvos.has(unidade);
+    };
+
+    let removidos = 0;
+    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      for (const tabela of [db.ativos, db.assets, db.local_assets]) {
+        const chaves = await tabela.filter(pertence).primaryKeys();
+        if (chaves.length === 0) continue;
+        await tabela.bulkDelete(chaves);
+        removidos = Math.max(removidos, chaves.length);
+      }
+    });
+    if (removidos > 0) {
+      logger.info(`>>> [SqliteService] Limpeza local: ${removidos} ativo(s) removido(s) dos espelhos (unidades: ${[...alvos].join(', ')}).`);
+    }
+    return removidos;
+  }
+
   public async forcePurgeAndConnect(): Promise<void> {
     logger.info(">>> [SqliteService SRE] Iniciando expurgo imperativo do banco local...");
     this.isImportingBatch = true;
