@@ -34,6 +34,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a confirmação — uma folga deliberada, não um bypass: o admin continua a ser o
   único perfil que entra sem perímetro.
 
+### Alterado — dois auditores no mesmo ativo deixam de se atropelar
+
+- **O que era:** o merge do pull era last-write-wins por APARELHO. Com a cópia
+  local pendente (`_is_synced = 0`), o `{ ...nuvem, ...local }` entrava inteiro —
+  a conferência feita por outro auditor, já na nuvem, desaparecia por causa de
+  uma edição noutro campo (endereço, descrição, foto). O conflito era detectado
+  e registado na trilha, mas a decisão do outro lado perdia-se.
+- **O que passa a ser:** o merge decide por grupos, com os carimbos que já
+  existem (`_dataLeitura`, `_gps_at`, `_lastUpdated`, `updated_at`). A
+  **conferência** e o **ponto de GPS** ficam com a leitura mais recente — venha
+  ela da nuvem ou deste aparelho; o **resto dos campos** continua a ser deste
+  aparelho, porque é trabalho de campo por subir. Resultado: um auditor fica com
+  a conferência e o outro mantém o endereço que editou.
+- **Regra única:** `src/utils/mergePorCampo.ts`, usada pelo pull completo
+  (`App`) e pelo delta (`mergeDeltaPull`). A exclusão da nuvem continua a vencer
+  o registo inteiro.
+- **O `status` só volta quando é prova de conferência:** a conferência da nuvem
+  a vencer repunha o `status` inteiro, e um estado pendente deste aparelho
+  («EM MANUTENÇÃO», «BAIXADO»…) era apagado sem nunca ter subido. O campo
+  continua no grupo da conferência **apenas** quando o valor da nuvem é o
+  marcador (`statusDeConferencia`, o mesmo predicado do desmarcar); um estado
+  de outro teor fica com quem o alterou. Se o aparelho não tiver o campo, o da
+  nuvem mantém-se.
+- **Limite (declarado):** fora da conferência e do GPS o modelo não tem carimbo
+  por campo, por isso continua a vencer este aparelho — mas o conflito deixa de
+  ser silencioso: a trilha grava `SYNC_CONFLICT` com os grupos em disputa.
+- **Sem schema novo:** nenhuma coluna, nenhuma migração, nenhum SQL para correr.
+
 ## [2.9.0] — 2026-11-20
 
 ### Alterado — o pull grava a base uma vez, não três

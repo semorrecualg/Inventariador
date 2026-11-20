@@ -1,5 +1,6 @@
 import type { Asset } from '../types';
 import { preservarGpsMaisRecente } from './assetGps';
+import { mesclarConflitoPorCampo } from './mergePorCampo';
 
 /**
  * O DELTA DO PULL — quem vence e quem volta ao disco
@@ -75,7 +76,16 @@ export const mergeDeltaPull = ({
         assets.push(localDirty);
         continue;
       }
-      assets[index] = { ...assets[index], ...localDirty };
+      // CONFLITO POR CAMPO (item 24b) — o delta usa a mesma regra do pull
+      // completo: a conferência e o ponto de GPS ficam com a leitura mais
+      // recente (a da nuvem pode ser de outro auditor), o resto é deste
+      // aparelho, e a exclusão da nuvem vence o registo inteiro.
+      const porCampo = mesclarConflitoPorCampo(
+        assets[index] as unknown as Record<string, unknown>,
+        localDirty as unknown as Record<string, unknown>
+      );
+      assets[index] = porCampo.registo as unknown as Asset;
+      if (porCampo.exclusaoVenceu) continue;
       // Só a linha que o download acabou de sobrescrever precisa de voltar ao
       // disco; uma pendência fora do delta ficou intacta nos espelhos.
       if (veioNoDelta.has(String(localDirty.id))) decisaoLocal.push(assets[index]);
