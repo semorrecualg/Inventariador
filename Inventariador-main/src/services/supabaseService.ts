@@ -1213,6 +1213,17 @@ export const syncAssetsToCloud = async (
     const descartadas = rows.length - mantidos.length;
     if (descartadas > 0) {
       logger.warn(`>>> [Supabase] Exclusão prevalece: ${descartadas} ativo(s) apagados na nuvem não foram reenviados.`);
+      // A exclusão é aplicada já ao registo local: sem isto ele continuava
+      // pendente e a fila voltava a tentá-lo a cada ciclo até um pull chegar.
+      try {
+        await sqliteService.markAssetsDeleted(
+          rows
+            .filter(row => apagadas.has(chaveDaNuvem(row.tenantid, row.primarykey)))
+            .map(row => String(row.primarykey || ''))
+        );
+      } catch (markErr) {
+        logger.warn('>>> [Supabase] Falha ao aplicar a exclusão da nuvem ao registo local:', markErr);
+      }
     }
     return { rows: mantidos.map(m => m.row), keys: mantidos.map(m => m.key) };
   };

@@ -1313,6 +1313,36 @@ export class SqliteService {
   }
 
   /**
+   * EXCLUSÃO QUE VENCEU A SUBIDA — aplica-a ao registo local
+   * ============================================================================
+   * Quando a guarda de envio encontra a linha já apagada na nuvem, não envia
+   * nada. Deixar o registo pendente (`_is_synced = 0`) fazia a fila voltar a
+   * tentá-lo — e a gravar a decisão na trilha — a cada ciclo de 60 s, até um
+   * pull acontecer. Aplicar aqui a exclusão (`_is_deleted = 1`, já `_is_synced =
+   * 1` porque a nuvem é quem manda) fecha o ciclo no instante da descoberta: o
+   * registo sai da fila e das listas.
+   *
+   * O carimbo da recusa morre com ele: não há falha de envio nenhuma, o ativo
+   * está apagado na nuvem e assim fica até um restauro explícito.
+   */
+  public async markAssetsDeleted(primarykeys: string[]): Promise<void> {
+    const keys = Array.from(new Set(primarykeys.map(k => String(k || '').trim()).filter(Boolean)));
+    if (keys.length === 0) return;
+    const marcar = (rec: unknown): void => {
+      const registo = rec as Record<string, unknown>;
+      registo._is_deleted = 1;
+      registo._is_synced = 1;
+      delete registo._syncFailAt;
+      delete registo._syncFailReason;
+    };
+    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      await db.ativos.where('primarykey').anyOf(keys).modify(marcar);
+      await db.assets.where('primarykey').anyOf(keys).modify(marcar);
+      await db.local_assets.where('primarykey').anyOf(keys).modify(marcar);
+    });
+  }
+
+  /**
    * CARIMBO DA RECUSA NO PRÓPRIO REGISTO — escrita única dos dois caminhos
    * ============================================================================
    * A recusa da nuvem passou a ficar no ativo (`_syncFailAt`/`_syncFailReason`)

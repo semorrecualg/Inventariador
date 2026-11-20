@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a exclusão que vence a subida passa a ser aplicada ao registo local
+
+- **O registo ficava pendente para sempre:** quando a guarda de envio
+  encontrava a linha já apagada na nuvem, nada era enviado mas o registo local
+  continuava `_is_synced = 0`. A fila voltava a tentá-lo — e a gravar
+  `SYNC_DELETE_WINS` na trilha — a cada ciclo de 60 s, até um pull chegar.
+  `markAssetsDeleted` aplica a exclusão no próprio ciclo (`_is_deleted = 1`,
+  `_is_synced = 1`, sem carimbo de falha): o registo sai da fila e das listas,
+  e o envio em massa faz o mesmo com as linhas que descarta.
+- **A trilha tem janela:** `SYNC_DELETE_WINS` é registada uma vez por registo e
+  por janela de 10 min. Mesmo que uma gravação de estado atrasada reponha a
+  cópia como pendente, a trilha não ganha uma linha por ciclo.
+
 ### Corrigido — a subida deixa de reativar um ativo apagado na nuvem
 
 - **O upsert não lia o estado remoto:** um aparelho que ficou offline com a
