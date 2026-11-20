@@ -83,7 +83,7 @@ describe('o pull da nuvem não apaga o carimbo de falha', () => {
   it('o merge do pull parte do registo local inteiro, não só da data', () => {
     const fonte = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
 
-    expect(fonte).toContain('preservarPendenciaLocal(local)');
-    expect(fonte).not.toContain('preservarPendenciaLocal(local._lastUpdated)');
+    expect(fonte).toContain('preservarPendenciaLocal(local, cloudAsset)');
+    expect(fonte).not.toContain('preservarPendenciaLocal(local._lastUpdated');
   });
 });

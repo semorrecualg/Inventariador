@@ -5,7 +5,7 @@ import { logger } from '../utils/logger';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { carimbarFalhaEnvio } from '../utils/syncFalha';
-import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
+import { isConferido, normalizarMarcaConferencia, type MarcaDeConferencia } from '../utils/conferencia';
 import { assetGpsPair } from '../utils/assetGps';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
@@ -47,6 +47,11 @@ export interface DexieAsset {
   // de outra unidade. O registo novo fica com `sn1_recno` nulo, sem duplicar a
   // chave, e o vínculo vive aqui (`rad_` = REGISTRO ADOTADO + sequência).
   rad_recno?: string | null;
+  // Proveniência do ponto do Mapa de Calor (docs/GPS_ANCORA_E_MAPA_DE_CALOR.md
+  // §3.3): o sensor declara `sensor`; `synthetic` nunca entra no mapa.
+  _gps_accuracy?: number | null;
+  _gps_source?: 'sensor' | 'synthetic' | string | null;
+  _gps_at?: string | null;
   _is_synced: number; // 0 or 1
   _is_deleted: number; // 0 or 1
   // 0/1 nas linhas do SQLite; as escritas do Dexie gravam o booleano da
@@ -350,6 +355,9 @@ export const db = new InventoryDexieDatabase();
 
 /** Marcador da migração única de `tenantid` para UPPER (ver migrateLegacyTenantids). */
 export const TENANT_CASE_MARKER = 'f0_tenant_case_canonical_v1';
+
+/** Marcador da migração única das grafias de `_conferido` (ver migrateLegacyConferencia). */
+export const CONFERIDO_MARKER = 'f0_conferido_canonical_v1';
 
 /**
  * Restore/importação podem trazer `tenantid` fora do UPPER: o marcador deixa de
@@ -675,7 +683,9 @@ export class SqliteService {
     tabela: string,
     registro_id: string,
     details: string,
-    delta?: string
+    delta?: string,
+    /** Instante da linha (ISO). Só os testes o fixam; o runtime usa «agora». */
+    atualizadoEm?: string
   ): Promise<void> {
     const id = 'LOG_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
     await db.audit_logs.put({
@@ -686,7 +696,7 @@ export class SqliteService {
       registro_id,
       details,
       delta: delta ?? null,
-      updated_at: new Date().toISOString()
+      updated_at: atualizadoEm ?? new Date().toISOString()
     });
   }
 
@@ -768,6 +778,79 @@ export class SqliteService {
     return safeChunk;
   }
 
+  /**
+   * A LINHA DA NUVEM → A LINHA DOS ESPELHOS, UMA VEZ
+   * ============================================================================
+   * Esta conversão grava a coordenada nas duas grafias, a proveniência do ponto,
+   * a conferência e o selo. Estava dentro do laço do lote; o pull passou a
+   * reaproveitá-la para gravar só as linhas que carregam decisão local, e duas
+   * cópias do mapeamento seriam a forma garantida de as duas divergirem.
+   */
+  private mapAssetToDexie(asset: Record<string, unknown>, markSynced: boolean): DexieAsset {
+    const primaryKeyVal = String(asset.primarykey || asset.id || '');
+    if (!primaryKeyVal) {
+      throw new Error("[FATAL_IMPORT_CRASH] Chave primária vazia detectada no lote.");
+    }
+    const gps = assetGpsPair(asset);
+
+    const mapped: DexieAsset = {
+      id: primaryKeyVal,
+      primarykey: primaryKeyVal,
+      // UPPER canônico — chave composta [tenantid+primarykey] consistente.
+      tenantid: String(asset.tenantid || '').trim().toUpperCase(),
+      filial: String(asset.filial || asset._unitid || asset.unitid || asset.unitId || ''),
+      status: String(asset.status || 'P'),
+      etiqueta: String(asset.etiqueta || ''),
+      tag: String(asset.tag || asset.etiqueta || ''),
+      qt: Number(asset.qt ?? 1),
+      descricaodoativo: String(asset.descricaodoativo || ''),
+      serial: asset.serial !== undefined && asset.serial !== null ? String(asset.serial) : null,
+      dataaqusic: asset.dataaqusic !== undefined && asset.dataaqusic !== null ? String(asset.dataaqusic) : null,
+      cnpj: asset.cnpj !== undefined && asset.cnpj !== null ? String(asset.cnpj) : null,
+      nomefornecedor: asset.nomefornecedor !== undefined && asset.nomefornecedor !== null ? String(asset.nomefornecedor) : null,
+      notafiscal: asset.notafiscal !== undefined && asset.notafiscal !== null ? String(asset.notafiscal) : null,
+      endereco: asset.endereco !== undefined && asset.endereco !== null ? String(asset.endereco) : null,
+      registro: asset.registro !== undefined && asset.registro !== null ? String(asset.registro) : null,
+      subreg: asset.subreg !== undefined && asset.subreg !== null ? String(asset.subreg) : null,
+      databaixa: asset.databaixa !== undefined && asset.databaixa !== null ? String(asset.databaixa) : null,
+      contacontabil: asset.contacontabil !== undefined && asset.contacontabil !== null ? String(asset.contacontabil) : null,
+      centrodecusto: asset.centrodecusto !== undefined && asset.centrodecusto !== null ? String(asset.centrodecusto) : null,
+      vlraquisic: Number(asset.vlraquisic ?? 0),
+      sn1_recno: asset.sn1_recno !== undefined && asset.sn1_recno !== null ? Number(asset.sn1_recno) : null,
+      sn3_recno: asset.sn3_recno !== undefined && asset.sn3_recno !== null ? Number(asset.sn3_recno) : null,
+      _is_synced: markSynced ? 1 : (Number(asset._is_synced) === 1 ? 1 : 0),
+      _is_deleted: asset._is_deleted ? 1 : 0,
+      _conferido: isConferido(asset) ? 1 : 0,
+      _auditor: asset._auditor !== undefined && asset._auditor !== null ? String(asset._auditor) : null,
+      _dataLeitura: asset._dataLeitura !== undefined && asset._dataLeitura !== null ? String(asset._dataLeitura) : null,
+      _plaquetado: asset._plaquetado ? 1 : 0,
+      _aprovado: asset._aprovado ? 1 : 0,
+      _isNew: asset._isNew ? 1 : 0,
+      _is_unitized: asset._is_unitized ? 1 : 0,
+      _is_divergent_baixa: asset._is_divergent_baixa ? 1 : 0,
+      _history: asset._history !== undefined && asset._history !== null ? String(asset._history) : null,
+      DE_PARA: asset.DE_PARA !== undefined && asset.DE_PARA !== null ? String(asset.DE_PARA) : null,
+      _photoUrl: asset._photoUrl !== undefined && asset._photoUrl !== null ? String(asset._photoUrl) : null,
+      // PONTE GPS: a linha que desce da nuvem traz `gps_lat`/`gps_lng` e
+      // a conferência grava `latitude`/`longitude`. As duas grafias são
+      // gravadas para que ficha, mapa e envio leiam o mesmo ponto.
+      gps_lat: gps?.lat ?? null,
+      gps_lng: gps?.lng ?? null,
+      latitude: gps?.lat ?? null,
+      longitude: gps?.lng ?? null,
+      // Proveniência do ponto: sem estas três colunas no mapeamento, o
+      // lote (autosave/pull/carga) gravava a coordenada sem saber se era
+      // do sensor — e o mapa de calor não tinha como descartar sintético
+      // nem ruído (ver utils/assetGps.hasMapCoords).
+      _gps_accuracy: asset._gps_accuracy !== undefined && asset._gps_accuracy !== null ? Number(asset._gps_accuracy) : null,
+      _gps_source: asset._gps_source !== undefined && asset._gps_source !== null ? String(asset._gps_source) : null,
+      _gps_at: asset._gps_at !== undefined && asset._gps_at !== null ? String(asset._gps_at) : null,
+      currentCampaignId: asset.currentCampaignId !== undefined && asset.currentCampaignId !== null ? String(asset.currentCampaignId) : null
+    };
+
+    return mapped;
+  }
+
   public async bulkInsertAssetsOfflineFirst(
     assets: Record<string, unknown>[],
     onProgress?: (processed: number, total: number) => void,
@@ -788,63 +871,9 @@ export class SqliteService {
         for (let i = 0; i < total; i += CHUNK_SIZE) {
           const chunk = assets.slice(i, i + CHUNK_SIZE);
           
-          const mappedChunk: DexieAsset[] = chunk.map(asset => {
-            const primaryKeyVal = String(asset.primarykey || asset.id || '');
-            if (!primaryKeyVal) {
-              throw new Error("[FATAL_IMPORT_CRASH] Chave primária vazia detectada no lote.");
-            }
-            const gps = assetGpsPair(asset);
-
-            const mapped: DexieAsset = {
-              id: primaryKeyVal,
-              primarykey: primaryKeyVal,
-              // UPPER canônico — chave composta [tenantid+primarykey] consistente.
-              tenantid: String(asset.tenantid || '').trim().toUpperCase(),
-              filial: String(asset.filial || asset._unitid || asset.unitid || asset.unitId || ''),
-              status: String(asset.status || 'P'),
-              etiqueta: String(asset.etiqueta || ''),
-              tag: String(asset.tag || asset.etiqueta || ''),
-              qt: Number(asset.qt ?? 1),
-              descricaodoativo: String(asset.descricaodoativo || ''),
-              serial: asset.serial !== undefined && asset.serial !== null ? String(asset.serial) : null,
-              dataaqusic: asset.dataaqusic !== undefined && asset.dataaqusic !== null ? String(asset.dataaqusic) : null,
-              cnpj: asset.cnpj !== undefined && asset.cnpj !== null ? String(asset.cnpj) : null,
-              nomefornecedor: asset.nomefornecedor !== undefined && asset.nomefornecedor !== null ? String(asset.nomefornecedor) : null,
-              notafiscal: asset.notafiscal !== undefined && asset.notafiscal !== null ? String(asset.notafiscal) : null,
-              endereco: asset.endereco !== undefined && asset.endereco !== null ? String(asset.endereco) : null,
-              registro: asset.registro !== undefined && asset.registro !== null ? String(asset.registro) : null,
-              subreg: asset.subreg !== undefined && asset.subreg !== null ? String(asset.subreg) : null,
-              databaixa: asset.databaixa !== undefined && asset.databaixa !== null ? String(asset.databaixa) : null,
-              contacontabil: asset.contacontabil !== undefined && asset.contacontabil !== null ? String(asset.contacontabil) : null,
-              centrodecusto: asset.centrodecusto !== undefined && asset.centrodecusto !== null ? String(asset.centrodecusto) : null,
-              vlraquisic: Number(asset.vlraquisic ?? 0),
-              sn1_recno: asset.sn1_recno !== undefined && asset.sn1_recno !== null ? Number(asset.sn1_recno) : null,
-              sn3_recno: asset.sn3_recno !== undefined && asset.sn3_recno !== null ? Number(asset.sn3_recno) : null,
-              _is_synced: options?.markSynced ? 1 : (Number(asset._is_synced) === 1 ? 1 : 0),
-              _is_deleted: asset._is_deleted ? 1 : 0,
-              _conferido: isConferido(asset) ? 1 : 0,
-              _auditor: asset._auditor !== undefined && asset._auditor !== null ? String(asset._auditor) : null,
-              _dataLeitura: asset._dataLeitura !== undefined && asset._dataLeitura !== null ? String(asset._dataLeitura) : null,
-              _plaquetado: asset._plaquetado ? 1 : 0,
-              _aprovado: asset._aprovado ? 1 : 0,
-              _isNew: asset._isNew ? 1 : 0,
-              _is_unitized: asset._is_unitized ? 1 : 0,
-              _is_divergent_baixa: asset._is_divergent_baixa ? 1 : 0,
-              _history: asset._history !== undefined && asset._history !== null ? String(asset._history) : null,
-              DE_PARA: asset.DE_PARA !== undefined && asset.DE_PARA !== null ? String(asset.DE_PARA) : null,
-              _photoUrl: asset._photoUrl !== undefined && asset._photoUrl !== null ? String(asset._photoUrl) : null,
-              // PONTE GPS: a linha que desce da nuvem traz `gps_lat`/`gps_lng` e
-              // a conferência grava `latitude`/`longitude`. As duas grafias são
-              // gravadas para que ficha, mapa e envio leiam o mesmo ponto.
-              gps_lat: gps?.lat ?? null,
-              gps_lng: gps?.lng ?? null,
-              latitude: gps?.lat ?? null,
-              longitude: gps?.lng ?? null,
-              currentCampaignId: asset.currentCampaignId !== undefined && asset.currentCampaignId !== null ? String(asset.currentCampaignId) : null
-            };
-
-            return mapped;
-          });
+          const mappedChunk: DexieAsset[] = chunk.map(asset =>
+            this.mapAssetToDexie(asset, !!options?.markSynced)
+          );
 
           // SRE ISOLAMENTO (local): nunca sobrescrever registros de OUTRO contrato
           // (mesma regra aplicada na nuvem com onConflict 'tenantid, id').
@@ -1264,6 +1293,49 @@ export class SqliteService {
     return false;
   }
 
+  /**
+   * LIMPEZA DE UNIDADES — O CARIMBO DA FALHA MORRE COM O REGISTO
+   * ============================================================================
+   * A «Limpeza Total» de uma unidade (MainMenu/DataManagementPanel) filtrava o
+   * cache do localforage e o estado React, mas deixava as linhas da unidade nos
+   * três espelhos Dexie (`local_assets`/`ativos`/`assets`) — com o `_syncFailAt`
+   * agarrado a elas. O selo contava falhas de ativos que já não existiam no
+   * inventário e a fila de fundo voltava a tentar enviá-los a cada ciclo.
+   *
+   * A remoção é por UNIDADE — a mesma regra que o localforage e o estado já
+   * aplicam — e numa só transação: sai a linha inteira e o carimbo sai com ela.
+   * Nada mais é tocado; os ativos das outras unidades ficam com o carimbo e a
+   * pendência intactos («morre com o registo, nunca antes»).
+   *
+   * Devolve quantas linhas saíram (a maior das três contagens, a mesma regra de
+   * `getAssetCount`).
+   */
+  public async deleteLocalAssetsByUnits(units: string[]): Promise<number> {
+    const alvos = new Set(
+      units.map(u => String(u ?? '').trim().toUpperCase()).filter(Boolean)
+    );
+    if (alvos.size === 0) return 0;
+    const pertence = (rec: unknown): boolean => {
+      const registo = rec as Record<string, unknown>;
+      const unidade = String(registo.filial ?? registo._unitid ?? '').trim().toUpperCase();
+      return alvos.has(unidade);
+    };
+
+    let removidos = 0;
+    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      for (const tabela of [db.ativos, db.assets, db.local_assets]) {
+        const chaves = await tabela.filter(pertence).primaryKeys();
+        if (chaves.length === 0) continue;
+        await tabela.bulkDelete(chaves);
+        removidos = Math.max(removidos, chaves.length);
+      }
+    });
+    if (removidos > 0) {
+      logger.info(`>>> [SqliteService] Limpeza local: ${removidos} ativo(s) removido(s) dos espelhos (unidades: ${[...alvos].join(', ')}).`);
+    }
+    return removidos;
+  }
+
   public async forcePurgeAndConnect(): Promise<void> {
     logger.info(">>> [SqliteService SRE] Iniciando expurgo imperativo do banco local...");
     this.isImportingBatch = true;
@@ -1289,18 +1361,83 @@ export class SqliteService {
   }
 
   /**
+   * GRAVA SÓ AS LINHAS QUE CARREGAM DECISÃO LOCAL — num lote só
+   * ============================================================================
+   * O pull grava a base da nuvem em lotes (`bulkInsertAssetsOfflineFirst`) e
+   * depois remonta o estado em memória para pôr a decisão DESTE aparelho por
+   * cima (GPS mais recente, conferência/pendência, edição não enviada). O que
+   * volta ao disco é só esse subconjunto: reescrever a base inteira outra vez
+   * duplicava 12.636 × 3 escritas por pull para corrigir algumas dezenas de
+   * linhas.
+   *
+   * Usa o MESMO mapeamento do lote (`mapAssetToDexie`) e respeita o
+   * `_is_synced` de cada linha (não força o selo do download: as linhas
+   * pendentes continuam pendentes). Devolve quantas linhas foram gravadas.
+   */
+  public async persistAssetsBatch(assets: Record<string, unknown>[]): Promise<number> {
+    if (assets.length === 0) return 0;
+    const mapped = assets.map(asset => this.mapAssetToDexie(asset, false));
+    const safe = await this.filterCrossTenantWrites(mapped);
+    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      await db.ativos.bulkPut(safe);
+      await db.assets.bulkPut(safe);
+      await db.local_assets.bulkPut(safe);
+    });
+    return safe.length;
+  }
+
+  /**
    * Marca em UMA transação os ativos que a nuvem já aceitou (_is_synced = 1).
    * Sem isto a etiqueta "PENDENTE NUVEM" ficava amber para sempre: o upsert na
    * nuvem acontecia, mas o flag local nunca era atualizado (só o download da base
    * o fazia). Uma transação e três `modify` por índice resolvem N ativos, em vez
    * de N transações abertas pelo cartão.
    */
-  public async markAssetsSynced(primarykeys: string[]): Promise<void> {
+  public async markAssetsSynced(
+    primarykeys: string[],
+    extra?: Record<string, unknown>
+  ): Promise<void> {
     const keys = Array.from(new Set(primarykeys.map(k => String(k || '').trim()).filter(Boolean)));
     if (keys.length === 0) return;
-    /** Enviado e aceite: a pendência E o carimbo de recusa desaparecem juntos. */
+    /**
+     * Enviado e aceite: a pendência E o carimbo de recusa desaparecem juntos —
+     * é este o único ponto que apaga o carimbo no sucesso (ver
+     * `utils/syncFalha.marcarSincronizadoLocal`). `extra` cobre os campos que o
+     * sucesso traz consigo (o `_photoUrl` da fila de fotos).
+     */
     const marcar = (rec: unknown): void => {
       const registo = rec as Record<string, unknown>;
+      registo._is_synced = 1;
+      delete registo._syncFailAt;
+      delete registo._syncFailReason;
+      if (extra) Object.assign(registo, extra);
+    };
+    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      await db.ativos.where('primarykey').anyOf(keys).modify(marcar);
+      await db.assets.where('primarykey').anyOf(keys).modify(marcar);
+      await db.local_assets.where('primarykey').anyOf(keys).modify(marcar);
+    });
+  }
+
+  /**
+   * EXCLUSÃO QUE VENCEU A SUBIDA — aplica-a ao registo local
+   * ============================================================================
+   * Quando a guarda de envio encontra a linha já apagada na nuvem, não envia
+   * nada. Deixar o registo pendente (`_is_synced = 0`) fazia a fila voltar a
+   * tentá-lo — e a gravar a decisão na trilha — a cada ciclo de 60 s, até um
+   * pull acontecer. Aplicar aqui a exclusão (`_is_deleted = 1`, já `_is_synced =
+   * 1` porque a nuvem é quem manda) fecha o ciclo no instante da descoberta: o
+   * registo sai da fila e das listas.
+   *
+   * O carimbo da recusa morre com ele: não há falha de envio nenhuma, o ativo
+   * está apagado na nuvem e assim fica até um restauro explícito.
+   */
+  public async markAssetsDeleted(primarykeys: string[]): Promise<void> {
+    const keys = Array.from(new Set(primarykeys.map(k => String(k || '').trim()).filter(Boolean)));
+    if (keys.length === 0) return;
+    const marcar = (rec: unknown): void => {
+      const registo = rec as Record<string, unknown>;
+      registo._is_deleted = 1;
       registo._is_synced = 1;
       delete registo._syncFailAt;
       delete registo._syncFailReason;
@@ -1354,9 +1491,19 @@ export class SqliteService {
 
     await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
       for (const [primarykey, carimbo] of carimbos) {
-        await db.ativos.where('primarykey').equals(primarykey).modify(carimbo);
-        await db.assets.where('primarykey').equals(primarykey).modify(carimbo);
-        await db.local_assets.where('primarykey').equals(primarykey).modify(carimbo);
+        for (const tabela of [db.ativos, db.assets, db.local_assets]) {
+          // CORRIDA SUCESSO × FALHA: a tentativa que falhou pode chegar aqui
+          // depois de outro caminho (envio em massa, fila, foto, pull) já ter
+          // marcado o registo igual à nuvem. Carimbar essa linha deixava-a
+          // `_is_synced = 1` com um selo vermelho — e o carimbo antigo voltava
+          // a aparecer no toque seguinte. Registo já sincronizado não recebe
+          // carimbo: a recusa era de uma cópia que já não é a local.
+          await tabela
+            .where('primarykey')
+            .equals(primarykey)
+            .filter(rec => Number((rec as unknown as Record<string, unknown>)._is_synced) !== 1)
+            .modify(carimbo);
+        }
       }
     });
     return carimbos.size;
@@ -1380,6 +1527,66 @@ export class SqliteService {
       await db.assets.update([tenantKey, key], changes);
       await db.local_assets.update([tenantKey, key], changes);
     });
+  }
+
+  /**
+   * MIGRAÇÃO ÚNICA DAS GRAFIAS DE `_conferido` — idempotente
+   * ============================================================================
+   * Percorre os três espelhos uma vez por base (marcador em `SYSTEM_CONTEXT`) e
+   * deixa a prova de conferência na grafia canônica: `_conferido = 1` + data da
+   * leitura quando o registo já tem uma data legível (ver
+   * `utils/conferencia.normalizarMarcaConferencia`). Não inventa datas nem
+   * desmarca ninguém.
+   *
+   * Devolve quantos REGISTOS (por `primarykey`, não por linha dos espelhos)
+   * foram convertidos e quantas linhas mudaram, para o relatório de arranque.
+   * Correr duas vezes dá o mesmo resultado: a segunda passagem encontra o
+   * marcador e devolve `jaCorrida: true` com zero conversões.
+   */
+  public async migrateLegacyConferencia(): Promise<{
+    convertidos: number;
+    linhas: number;
+    jaCorrida: boolean;
+  }> {
+    try {
+      if (await db.SYSTEM_CONTEXT.get(CONFERIDO_MARKER)) {
+        return { convertidos: 0, linhas: 0, jaCorrida: true };
+      }
+    } catch {
+      return { convertidos: 0, linhas: 0, jaCorrida: true };
+    }
+
+    const convertidos = new Set<string>();
+    let linhas = 0;
+    await db.transaction('rw', db.local_assets, db.ativos, db.assets, db.SYSTEM_CONTEXT, async () => {
+      const tabelas: Array<'local_assets' | 'ativos' | 'assets'> = ['local_assets', 'ativos', 'assets'];
+      for (const tabela of tabelas) {
+        const rows = (await db[tabela].toArray()) as unknown as Array<Record<string, unknown>>;
+        for (const row of rows) {
+          const { converter, patch } = normalizarMarcaConferencia(row);
+          if (!converter) continue;
+          const chave: [string, string] = [
+            String(row.tenantid ?? ''),
+            String(row.primarykey ?? row.id ?? '')
+          ];
+          await db[tabela].update(chave, patch as Partial<DexieAsset>);
+          convertidos.add(String(row.primarykey ?? row.id ?? ''));
+          linhas += 1;
+        }
+      }
+      await db.SYSTEM_CONTEXT.put({
+        key: CONFERIDO_MARKER,
+        value: '1',
+        updated_at: new Date().toISOString()
+      });
+    });
+
+    if (linhas > 0) {
+      logger.warn(`[SRE] conferido legado: ${convertidos.size} registo(s) normalizado(s) em ${linhas} linha(s) dos espelhos.`);
+    } else {
+      logger.info('[SRE] conferido legado: nenhuma grafia antiga a converter.');
+    }
+    return { convertidos: convertidos.size, linhas, jaCorrida: false };
   }
 
   public async checkIntegrity(): Promise<boolean> {

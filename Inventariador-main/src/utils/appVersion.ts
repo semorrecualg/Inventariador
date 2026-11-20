@@ -10,8 +10,8 @@ import pkg from '../../package.json';
  */
 export const APP_VERSION = String(pkg?.version ?? 'desconhecida').trim() || 'desconhecida';
 
-/** Etiqueta padrão das telas: `v2.8.0`. */
+/** Etiqueta padrão das telas: `v2.8.1`. */
 export const APP_VERSION_LABEL = `v${APP_VERSION}`;
 
-/** Selo curto com a marca do produto: `GBR v2.8.0`. */
+/** Selo curto com a marca do produto: `GBR v2.8.1`. */
 export const APP_VERSION_STAMP = `GBR ${APP_VERSION_LABEL}`;

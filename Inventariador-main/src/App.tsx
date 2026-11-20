@@ -14,9 +14,12 @@ import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } 
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
-import { marcarAlteracaoLocal, preservarPendenciaLocal } from './utils/pendencia';
+import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
 import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
+import { marcarSincronizadoLocal } from './utils/syncFalha';
+import { preservarGpsMaisRecente } from './utils/assetGps';
+import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
@@ -167,6 +170,9 @@ const autoRegisterPerfBaseline = (
     try {
       // Migração de casing uma vez por base, fora da contagem (transação própria).
       await sqliteService.migrateLegacyTenantids();
+      // Grafias antigas de «conferido» (`true`/`'1'`/coluna de auditoria) →
+      // canónica `1` + data da leitura. Também uma vez por base (marcador).
+      await sqliteService.migrateLegacyConferencia();
       const mirrors = await sqliteService.countAssetMirrors(tenantid || null);
       // Base vazia (boot sem dados/login) não é linha de base: preserva o último
       // retrato útil em vez de o sobrescrever com zeros.
@@ -835,7 +841,7 @@ useEffect(() => {
   const [inventorySearchValue, setInventorySearchValue] = useState<string | null>(null);
   const [startWithDataMenu, setStartWithDataMenu] = useState(false);
   // Painel do MainMenu a abrir ao chegar — acionado pela tool grid da Unidade Operacional.
-  const [menuPanelToOpen, setMenuPanelToOpen] = useState<'PREFERENCES' | 'DATA' | 'ADMIN' | 'AUDIT' | null>(null);
+  const [menuPanelToOpen, setMenuPanelToOpen] = useState<'PREFERENCES' | 'ADMIN' | null>(null);
   const [consultationFilters, setConsultationFilters] = useState<SearchFilters>(() => {
     try {
       const saved = localStorage.getItem('app_consultation_filters');
@@ -2771,19 +2777,15 @@ useEffect(() => {
           // raro: base limpa com flag/checkpoint obsoletos), cai no merge completo
           // abaixo — substituição é segura, jamais perde dados de outro contrato.
           if (incremental && prev.assets.length > 0) {
-            const byId = new Map(prev.assets.map(a => [String(a.id), a]));
-            cloudAssets.forEach(a => byId.set(String(a.id), a));
-            const mergedAssets = Array.from(byId.values());
-            const dirtyIds = Array.from(dirtyAssetsRef.current);
-            if (dirtyIds.length > 0) {
-              dirtyIds.forEach(id => {
-                const localDirty = prev.assets.find(a => String(a.id) === id);
-                if (!localDirty) return;
-                const index = mergedAssets.findIndex(a => String(a.id) === id);
-                if (index !== -1) mergedAssets[index] = { ...mergedAssets[index], ...localDirty };
-                else mergedAssets.push(localDirty);
-              });
-            }
+            // O merge do delta é uma regra só (`mergeDeltaPull`): devolve o
+            // estado remontado E as linhas cuja decisão local venceu a da
+            // nuvem — as únicas que precisam de voltar ao disco, porque o
+            // download já gravou o resto (`fetchFullInventory`).
+            const { assets: mergedAssets, decisaoLocal } = mergeDeltaPull({
+              prevAssets: prev.assets,
+              cloudAssets,
+              dirtyIds: Array.from(dirtyAssetsRef.current)
+            });
             const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.filial || '').trim().toUpperCase()))).filter(Boolean);
             const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
             const newState: InventoryState = {
@@ -2793,7 +2795,13 @@ useEffect(() => {
               status: mergedAssets.length > 0 ? DatabaseStatus.LOADED : prev.status,
               lastUpdated: syncTimestamp
             };
-            saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
+            saveInventory(newState, undefined, false, true).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
+            // As linhas dos espelhos já estão gravadas pelo download; só a
+            // decisão local precisa de uma escrita (e é um punhado de linhas).
+            if (decisaoLocal.length > 0) {
+              sqliteService.persistAssetsBatch(decisaoLocal as unknown as Record<string, unknown>[])
+                .catch(e => logger.error('Erro ao regravar a decisão local do delta:', e));
+            }
             if (cloudAssets.length > 0) {
               syncAuditDetails = `Sincronização incremental de ${cloudAssets.length} ativos da nuvem para o local (delta).`;
             }
@@ -2805,6 +2813,12 @@ useEffect(() => {
           // com _is_synced = 0 há alteração deste aparelho que ainda não subiu —
           // nesse caso continua a valer "PENDENTE NUVEM".
           const localById = new Map(prev.assets.map(a => [String(a.id), a]));
+          // Linhas cuja decisão local (GPS mais recente, pendência, edição não
+          // enviada) vencem a linha da nuvem: são as únicas que precisam de
+          // voltar ao disco depois do merge. O resto já foi gravado pelo
+          // download — reescrever os 12.636 × 3 espelhos outra vez era o custo
+          // do pull que este item mede.
+          const decisaoLocal: Asset[] = [];
           const mergedAssets = cloudAssets.map(cloudAsset => {
             const local = localById.get(String(cloudAsset.id));
             // O pull não apaga a pendência local — nem a data do toque que a
@@ -2813,9 +2827,19 @@ useEffect(() => {
             // anteriores a `_lastUpdated` ficam sem data (o selo omite a idade)
             // em vez de receberem «agora» a cada descarga, que reiniciava a
             // contagem; o carimbo só sobrevive quando já existia.
-            return local && Number(local._is_synced) === 0
-              ? { ...cloudAsset, ...preservarPendenciaLocal(local) }
-              : cloudAsset;
+            // EXCLUSÃO VENCE: com a linha apagada na nuvem não se preserva a
+            // pendência — preservá-la reactivava o registo no estado e o envio
+            // seguinte tentava subir a cópia de um ativo apagado, em ciclo.
+            // GPS: a linha da nuvem pode trazer um ponto mais antigo do que a
+            // leitura de campo deste aparelho (envio anterior, outro aparelho).
+            // O ponto local mais recente repõe-se por cima, nas duas grafias.
+            const gpsDaqui = preservarGpsMaisRecente(local, cloudAsset) as Record<string, unknown>;
+            const base = { ...cloudAsset, ...gpsDaqui };
+            const merged = devePreservarPendencia(cloudAsset, local)
+              ? { ...base, ...preservarPendenciaLocal(local, cloudAsset) }
+              : base;
+            if (Object.keys(gpsDaqui).length > 0 || merged !== base) decisaoLocal.push(merged as Asset);
+            return merged;
           });
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           
@@ -2827,7 +2851,32 @@ useEffect(() => {
                 const index = mergedAssets.findIndex(a => String(a.id) === id);
                 if (index !== -1) {
                   const cloudAsset = mergedAssets[index];
-                  
+                  // EXCLUSÃO VENCE A EDIÇÃO PENDENTE: a cópia local é reaplicada
+                  // por cima da nuvem para não perder alterações por subir — mas
+                  // um aparelho que ficou com `_is_deleted = 0` (offline durante
+                  // a exclusão, ou `delete` que falhou antes) desfazia a
+                  // exclusão em TODOS os aparelhos no ciclo seguinte. A exclusão
+                  // é do registo inteiro: quando a nuvem diz «apagado», a cópia
+                  // local perde e a pendência é largada.
+                  const decisao = mesclarComExclusao(cloudAsset, localDirty);
+                  if (decisao.exclusaoVenceu) {
+                    logger.warn(`>>> [Sync] Exclusão da nuvem vence a edição local pendente do ativo ${cloudAsset.etiqueta || id}.`);
+                    logAuditEvent({
+                      user_email: user?.email || 'system',
+                      action: 'SYNC_DELETE_WINS',
+                      record_id: String(id),
+                      table_name: 'assets',
+                      old_data: cloudAsset,
+                      new_data: localDirty,
+                      details: `Exclusão na nuvem prevalece sobre a alteração local pendente do ativo ${cloudAsset.etiqueta || id}: a cópia local foi descartada e o registo fica excluído.`,
+                      tenantid: user?.tenantid || readSessionTenantId() || ''
+                    });
+                    dirtyAssetsRef.current.delete(id);
+                    mergedAssets[index] = decisao.registo;
+                    // Exclusão vence: a linha da nuvem já é a que fica gravada.
+                    return;
+                  }
+
                   // Detecção de Conflito: Se o item na nuvem também foi alterado (versão diferente ou conferido por outro)
                   const isConflict = isConferido(cloudAsset) && 
                                    cloudAsset._auditor && 
@@ -2848,7 +2897,8 @@ useEffect(() => {
                     });
                   }
 
-                  mergedAssets[index] = { ...mergedAssets[index], ...localDirty };
+                  mergedAssets[index] = decisao.registo;
+                  decisaoLocal.push(decisao.registo);
                 } else {
                   mergedAssets.push(localDirty);
                 }
@@ -2867,13 +2917,18 @@ useEffect(() => {
             status: (mergedAssets.length > 0 || prev.assets.length > 0) ? DatabaseStatus.LOADED : DatabaseStatus.EMPTY,
             lastUpdated: syncTimestamp
           };
-          saveInventory(newState)
+          saveInventory(newState, undefined, false, true)
             .then(() => {
               if (!incremental) {
                 autoRegisterPerfBaseline('pull.full', Array.isArray(firstTenant) ? firstTenant[0] : firstTenant);
               }
             })
             .catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
+          // Uma escrita só, e só das linhas com decisão local.
+          if (decisaoLocal.length > 0) {
+            sqliteService.persistAssetsBatch(decisaoLocal as unknown as Record<string, unknown>[])
+              .catch(e => logger.error('Erro ao regravar a decisão local do pull:', e));
+          }
           if (cloudAssets.length > 0) {
             syncAuditDetails = `Sincronização de ${cloudAssets.length} ativos da nuvem para o local.`;
           }
@@ -5158,7 +5213,7 @@ useEffect(() => {
         // recuo e volta a avisar. (Sem ids aceitos nada foi enviado: offline.)
         cloudBlockedBackoffRef.current = 0;
         resetCloudPushBlockedNotice();
-        const mark = (a: Asset) => (syncedSet.has(String(a.id)) ? { ...a, _is_synced: 1 } : a);
+        const mark = (a: Asset) => (syncedSet.has(String(a.id)) ? marcarSincronizadoLocal(a) : a);
         // Patch local do estado: sem setRefreshVersion, sem reler a base inteira.
         setInventory(prev => ({ ...prev, assets: prev.assets.map(mark) }));
         setSqliteUnitAssets(prev => prev.map(mark));
@@ -5477,6 +5532,13 @@ useEffect(() => {
         // esta actualização os dois pares divergiam no mesmo registo.
         gps_lat: loc.lat,
         gps_lng: loc.lng,
+        // Proveniência do ponto (docs/GPS_ANCORA_E_MAPA_DE_CALOR.md §3.3): é o
+        // que permite ao mapa descartar coordenadas sintéticas e ruído de rede.
+        // `getCurrentLocation` só devolve leitura do sensor — o bypass é
+        // recusado antes por `persistableAssetGps`.
+        _gps_accuracy: loc.accuracy ?? null,
+        _gps_source: 'sensor',
+        _gps_at: new Date().toISOString(),
         _altitude_metros: loc.altitude || 0,
         _id_andar: andar,
         _history: history
@@ -5725,6 +5787,7 @@ useEffect(() => {
     const restoredAsset: Asset = {
       ...assetToRestore,
       _is_deleted: false,
+      ...marcarAlteracaoLocal(),
       _version: (assetToRestore._version || 1) + 1,
       _history: [
         ...(assetToRestore._history || []),
@@ -5743,8 +5806,15 @@ useEffect(() => {
       lastUpdated: new Date().toISOString()
     }));
 
+    // O restauro também tem de sobreviver ao reinício: sem esta gravação o
+    // registo voltava `_is_deleted = 1` do disco e o ativo continuava apagado
+    // aqui, mesmo depois de restaurado na nuvem.
+    await sqliteService.bulkInsertAssets([restoredAsset]);
+
     if (databaseMode === DatabaseMode.SUPABASE) {
-      await syncAssetsToCloud([restoredAsset], user?.tenantid || '');
+      // O restauro é a ÚNICA operação que pode dizer «vivo» sobre uma linha
+      // apagada na nuvem: a guarda «exclusão vence a subida» é dispensada aqui.
+      await syncAssetsToCloud([restoredAsset], user?.tenantid || '', undefined, { allowUndelete: true });
     }
   }, [inventory.assets, user, databaseMode]);
 
@@ -5782,6 +5852,9 @@ useEffect(() => {
     const deletedAsset: Asset = {
       ...assetToDelete,
       _is_deleted: true,
+      // Toque deste aparelho: fica `_is_synced = 0` até a nuvem aceitar a
+      // exclusão, para a fila de fundo voltar a tentar se este envio falhar.
+      ...marcarAlteracaoLocal(),
       _version: (assetToDelete._version || 1) + 1,
       _dataLeitura: new Date().toISOString(),
       _auditor: user?.email || 'unknown'
@@ -5800,11 +5873,15 @@ useEffect(() => {
     setIsProcessing(true);
     try {
       // 1. TENTA SALVAR NO BANCO PRIMEIRO
-      if (databaseMode === DatabaseMode.INTERNAL) {
-        // No modo interno, salvamos o registro marcado como deletado no SQLite
-        await sqliteService.bulkInsertAssets([deletedAsset]);
-      } else {
-        // No modo Supabase, sincronizamos o flag _is_deleted
+      // A gravação local acontece nos DOIS modos: o `saveInventory` seguinte
+      // grava só os ativos que ficaram na lista e não apaga esta linha. Sem
+      // ela, o registo voltava `_is_deleted = 0` do disco ao reiniciar e o
+      // envio seguinte ressuscitava-o na nuvem.
+      await sqliteService.bulkInsertAssets([deletedAsset]);
+
+      if (databaseMode !== DatabaseMode.INTERNAL) {
+        // Sobe a exclusão (`is_deleted`) para os outros aparelhos a receberem
+        // no pull delta.
         await syncAssetsToCloud([deletedAsset], user?.tenantid);
         
         // Log de Auditoria Global
@@ -5887,7 +5964,15 @@ useEffect(() => {
         const updates: Asset & Record<string, unknown> = { 
           ...a, 
           ...(manualUpdates || {}), 
-          ...(gpsCoords ? { latitude: gpsCoords.lat, longitude: gpsCoords.lng } : {}),
+          ...(gpsCoords
+            ? {
+                latitude: gpsCoords.lat,
+                longitude: gpsCoords.lng,
+                // `persistableAssetGps` devolve só o par; a leitura é do sensor.
+                _gps_source: 'sensor',
+                _gps_at: new Date().toISOString(),
+              }
+            : {}),
           _origemTransacao: origin // Aplica o código fixo
         };
         
@@ -5964,7 +6049,10 @@ useEffect(() => {
         updates.DE_PARA = hasChanges ? 'COM ALTERAÇÃO' : 'SEM ALTERAÇÃO';
         
         updates.TAG_INVENTARIO = determineTag({ ...a, ...updates }, targetLoc);
-        updates.AUDITOR_STATUS_CONFERENCIA = updates.TAG_INVENTARIO;
+        // A coluna de auditoria diz se o item foi conferido — não é o rótulo da
+        // etiqueta. Gravar ali `TAG_INVENTARIO` («ETIQUETAR», «ADOTADO»…)
+        // apagava a prova 'SIM' de quem já tinha conferido o ativo.
+        updates.AUDITOR_STATUS_CONFERENCIA = isConferido({ ...a, ...updates }) ? 'SIM' : 'NAO';
         updates._camposAlterados = Array.from(alteredFields);
         updates._valoresOriginais = originalValues;
 

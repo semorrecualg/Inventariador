@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { Asset } from '../types';
 import { getLocalPhoto } from '../services/photoService';
-import { isConferido } from './conferencia';
+import { auditoriaDoAtivo, isConferido } from './conferencia';
 
 /**
  * Converte um Blob em uma string DataURL (Base64)
@@ -129,9 +129,17 @@ export const generateKardexFichas = async (assets: Asset[], unitName: string): P
     doc.line(15, 192, 195, 192);
 
     doc.setTextColor(20, 20, 20);
-    doc.text(`CONFERIDO: ${isConferido(asset) ? 'SIM' : 'NÃO'}`, 15, 200);
-    doc.text(`DATA AUDITORIA: ${asset._conferidoEm ? new Date(asset._conferidoEm).toLocaleString('pt-BR') : 'PENDENTE'}`, 15, 210);
-    doc.text(`AUDITOR: ${asset._conferidoPor || 'NÃO IDENTIFICADO'}`, 15, 220);
+    // A ficha lê a conferência pela regra única (`isConferido`): a flag em
+    // qualquer grafia e a coluna de auditoria valem; `_conferidoEm`/
+    // `_conferidoPor` não existem no registo e faziam todos os cartões sair
+    // «PENDENTE»/«NÃO IDENTIFICADO», mesmo os conferidos no campo.
+    const auditoria = auditoriaDoAtivo(asset);
+    const dataAuditoria = auditoria.dataLeitura
+      ? new Date(auditoria.dataLeitura).toLocaleString('pt-BR')
+      : 'PENDENTE';
+    doc.text(`CONFERIDO: ${auditoria.situacao}`, 15, 200);
+    doc.text(`DATA AUDITORIA: ${dataAuditoria}`, 15, 210);
+    doc.text(`AUDITOR: ${auditoria.auditor || 'NÃO IDENTIFICADO'}`, 15, 220);
     
     doc.setFontSize(9);
     doc.text('OBSERVAÇÕES:', 15, 235);

@@ -11,7 +11,7 @@
  * primeiro, `gps_lat`/`gps_lng` como contingência (carga de planilha antiga).
  */
 
-import { isValidCoordinate } from './gpsCore';
+import { GPS_ACCURACY, isValidCoordinate } from './gpsCore';
 
 export interface AssetGpsPair {
   lat: number;
@@ -64,3 +64,104 @@ export const assetGpsColumns = (asset: unknown): { gps_lat?: number; gps_lng?: n
   const gps = assetGpsPair(asset);
   return gps ? { gps_lat: gps.lat, gps_lng: gps.lng } : {};
 };
+
+/**
+ * O PONTO DA LEITURA DE CAMPO MAIS RECENTE VENCE O PULL
+ * ============================================================================
+ * O pull remontava a linha do ativo a partir da nuvem, e o ponto descia com
+ * ela. Um aparelho que já tinha lido o GPS no campo recebia de volta a
+ * coordenada antiga que a nuvem ainda guardava (envio anterior, outro aparelho,
+ * coluna `gps_lat` que só agora existe) e o mapa de calor voltava ao ponto
+ * errado — sem que ninguém tivesse tocado no ativo outra vez.
+ *
+ * A regra é por TEMPO, como a decisão da conferência (ver `utils/conferencia`):
+ *   1. sem ponto local válido, não há nada a defender — a nuvem fica;
+ *   2. a nuvem sem ponto não apaga a leitura local (a coluna ausente do upsert
+ *      já não limpa a coordenada do outro lado, ver `assetGpsColumns`);
+ *   3. com ponto dos dois lados, vence o mais recente; sem data de nenhum dos
+ *      lados, a nuvem fica. Nunca se inventa uma data para o carimbo local.
+ *
+ * Devolve só o par a repor (vazio quando a nuvem vence), para o merge fazer
+ * `{ ...linhaDaNuvem, ...preservarGpsMaisRecente(local, linhaDaNuvem) }`.
+ */
+
+/** Data legível do ponto: a do GPS quando existir, senão a da leitura/toque. */
+const dataDoPonto = (asset: unknown): string | null => {
+  if (!asset || typeof asset !== 'object') return null;
+  const row = asset as Record<string, unknown>;
+  const candidatos = [row._gps_at, row._dataLeitura, row._lastUpdated, row.updated_at];
+  for (const valor of candidatos) {
+    if (valor === null || valor === undefined) continue;
+    const texto = String(valor).trim();
+    if (texto) return texto;
+  }
+  return null;
+};
+
+const instanteDoPonto = (asset: unknown): number | null => {
+  const data = dataDoPonto(asset);
+  if (!data) return null;
+  const instante = new Date(data).getTime();
+  return Number.isFinite(instante) ? instante : null;
+};
+
+export const preservarGpsMaisRecente = (
+  local: unknown,
+  nuvem: unknown
+): { latitude?: number; longitude?: number; gps_lat?: number; gps_lng?: number } => {
+  const gpsLocal = assetGpsPair(local);
+  if (!gpsLocal) return {};
+  const gpsNuvem = assetGpsPair(nuvem);
+  const repor = () => ({
+    latitude: gpsLocal.lat,
+    longitude: gpsLocal.lng,
+    gps_lat: gpsLocal.lat,
+    gps_lng: gpsLocal.lng,
+  });
+  if (!gpsNuvem) return repor();
+
+  const tLocal = instanteDoPonto(local);
+  if (tLocal === null) return {}; // sem data local, não se afirma que é mais nova
+  const tNuvem = instanteDoPonto(nuvem);
+  if (tNuvem !== null && tNuvem >= tLocal) return {};
+  return repor();
+};
+
+/**
+ * O PONTO QUE PODE ENTRAR NO MAPA DE CALOR
+ * ============================================================================
+ * O mapa filtrava só por `isValidCoordinate` — o que já barra o par `(0,0)` e as
+ * coordenadas fora de faixa, mas deixava passar duas coisas que não são
+ * leitura de campo:
+ *
+ *   - `_gps_source = 'synthetic'` (âncora/admin/sandbox): coordenada de
+ *     contingência, nunca do sensor — plotá-la no mapa dá um ponto que ninguém
+ *     leu;
+ *   - precisão acima de `GPS_ACCURACY.DISCARD` (150 m): ruído de rede/célula.
+ *
+ * Registo legado (sem `_gps_source`, sem `_gps_accuracy`) continua a entrar se
+ * o par for válido — é o caso das cargas antigas de planilha. O ponto pode
+ * estar em `latitude`/`longitude` ou na grafia da nuvem (`gps_lat`/`gps_lng`);
+ * ambos passam por `assetGpsPair`.
+ *
+ * @see docs/GPS_ANCORA_E_MAPA_DE_CALOR.md §2 (item 8) e §3.3
+ */
+export const mapPointOf = (asset: unknown): AssetGpsPair | null => {
+  const ponto = assetGpsPair(asset);
+  if (!ponto) return null;
+  const row = asset as Record<string, unknown>;
+
+  if (String(row._gps_source ?? '').trim().toLowerCase() === 'synthetic') return null;
+
+  const precisao = row._gps_accuracy;
+  if (precisao !== null && precisao !== undefined && precisao !== '') {
+    const acc = Number(precisao);
+    // Precisão declarada e utilizável: acima do limite é ruído de rede.
+    if (Number.isFinite(acc) && acc > GPS_ACCURACY.DISCARD) return null;
+  }
+
+  return ponto;
+};
+
+/** Atalho booleano para os filtros do mapa. */
+export const hasMapCoords = (asset: unknown): boolean => mapPointOf(asset) !== null;

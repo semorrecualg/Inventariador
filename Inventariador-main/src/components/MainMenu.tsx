@@ -67,7 +67,7 @@ interface MainMenuProps {
   onUpdateScannerMode: (mode: ScannerMode) => void;
   initialDataMenuOpen?: boolean;
   /** Painel a abrir automaticamente ao montar (tool grid da Unidade Operacional). */
-  initialOpenPanel?: 'PREFERENCES' | 'DATA' | 'ADMIN' | 'AUDIT' | null;
+  initialOpenPanel?: 'PREFERENCES' | 'ADMIN' | null;
   databaseMode: DatabaseMode;
   onUpdateDatabaseMode: (mode: DatabaseMode) => void;
   selectedUnit: string | null;
@@ -211,13 +211,13 @@ const MainMenu: React.FC<MainMenuProps> = ({
   }, [isDataMenuOpen, isAdmin]);
 
   // Abre automaticamente o painel solicitado pela tool grid da Unidade Operacional
-  // (AJUSTES/DADOS/PAINEL/AUDITORIA) ao chegar no MainMenu.
+  // (AJUSTES/PAINEL) ao chegar no MainMenu. DADOS e AUDITORIA não têm porta na
+  // grelha: vivem dentro do Painel Completo. A Gestão e Manutenção aberta por
+  // `initialDataMenuOpen` (admin com base vazia) tem o seu próprio caminho.
   useEffect(() => {
     if (!initialOpenPanel) return;
-    if (initialOpenPanel === 'ADMIN' && isAdmin) setIsAdminMenuOpen(true);
-    if (initialOpenPanel === 'AUDIT' && isAuditor) setIsAuditMenuOpen(true);
+    if (initialOpenPanel === 'ADMIN' && (isAdmin || isAuditor)) setIsAdminMenuOpen(true);
     if (initialOpenPanel === 'PREFERENCES') setIsPreferencesMenuOpen(true);
-    if (initialOpenPanel === 'DATA' && isAdmin) setIsDataMenuOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -509,10 +509,34 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   <ShieldCheck className="text-accent" size={32} />
                 </div>
                 <h2 className="text-xl font-bold text-ink uppercase tracking-tight">Painel Completo</h2>
-                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.3em] mt-1.5">Integridade · Fotos · Protheus</p>
+                <p className="text-[9px] font-bold text-ink-muted uppercase tracking-[0.3em] mt-1.5">Dados · Auditoria · Integridade</p>
               </div>
             
             <div className="space-y-2.5 max-h-[65vh] overflow-y-auto no-scrollbar pr-1">
+              {/* GESTÃO E MANUTENÇÃO e AUDITORIA vivem AQUI: o PAINEL COMPLETO é a
+                  única porta para os dois painéis (a tool grid da Unidade Operacional
+                  ficou só com AJUSTES · PAINEL). «Voltar» em cada um devolve ao hub. */}
+              {isAdmin && (
+              <button onClick={() => setIsDataMenuOpen(true)} className="w-full flex items-center p-4 bg-white border border-accent/20 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><DatabaseZap size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Gestão e Manutenção</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Base, sincronização, carga e limpeza</p>
+                </div>
+              </button>
+              )}
+
+              {isAuditor && (
+              <button onClick={() => setIsAuditMenuOpen(true)} className="w-full flex items-center p-4 bg-white border border-emerald-100 rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
+                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center mr-4 border border-emerald-100"><ListChecks size={16} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Auditoria</h4>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Conciliação, trilha e desmobilizados</p>
+                </div>
+              </button>
+              )}
+
+              {isAdmin && (<>
               <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.FIELD_CONFIGURATOR); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
                 <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Settings size={16} /></div>
                 <div className="flex-1">
@@ -544,14 +568,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Novo Usuário</h4>
                   <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Cadastrar acesso</p>
-                </div>
-              </button>
-
-              <button onClick={() => { setIsAdminMenuOpen(false); onNavigate(AppScreen.AUDIT_LOGS); }} className="w-full flex items-center p-4 bg-white border border-border rounded-2xl active:scale-[0.98] transition-all text-left shadow-sm">
-                <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><Activity size={16} /></div>
-                <div className="flex-1">
-                  <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Auditoria</h4>
-                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Trilha de Auditoria</p>
                 </div>
               </button>
 
@@ -678,6 +694,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   </div>
                 </div>
               </div>
+              </>)}
             </div>
             <div className="pt-4 text-center text-[8px] font-bold text-slate-300 uppercase tracking-[0.4em]">Security Protocol</div>
           </div>

@@ -220,10 +220,17 @@ MAIN_MENU · MainMenu.tsx            ← entrada após a seleção de unidade (t
 ```
 
 **Tool grid na Unidade Operacional (2026-08-12):** o `UnitSelector.tsx` agora exibe a
-fileira **AJUSTES · DADOS · PAINEL · AUDITORIA** (transferida do MainMenu) + contador
+fileira **AJUSTES · PAINEL** (transferida do MainMenu) + contador
 "X Ativos · Base Local". Cada botão abre o `MAIN_MENU` com o painel correspondente já
-aberto via `NavigationParams.openPanel`: AJUSTES → `PREFERENCES`, DADOS → `DATA`,
-PAINEL → `ADMIN`, AUDITORIA → `AUDIT`. O MainMenu **não** exibe mais a tool grid.
+aberto via `NavigationParams.openPanel`: AJUSTES → `PREFERENCES`, PAINEL → `ADMIN`.
+O MainMenu **não** exibe mais a tool grid.
+
+**Painel Completo como hub único (2026-11-20):** os antigos botões **DADOS** e
+**AUDITORIA** saíram da tool grid. Os painéis **Gestão e Manutenção**
+(`isDataMenuOpen`, ADMIN) e **Auditoria e Concordância** (`isAuditMenuOpen`, TRILHA B)
+são abertos por dentro do **Painel Completo** (`isAdminMenuOpen`) e o «Voltar» de cada
+um devolve ao hub. O botão PAINEL aparece para ADMIN e AUDITOR; os itens
+administrativos do hub ficam ocultos para quem não é administrador.
 
 ---
 

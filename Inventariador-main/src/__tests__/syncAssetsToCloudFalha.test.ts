@@ -47,8 +47,13 @@ const asset = (over: Record<string, unknown> = {}) =>
   }) as unknown as Asset;
 
 /** Stub de `from('assets')`: upsert + a leitura de identidades (select/in/in). */
-const stubTables = (upsertResult: unknown) => {
-  const upsert = vi.fn().mockResolvedValue(upsertResult);
+const stubTables = (upsertResult: unknown) => stubTablesSequence([upsertResult]);
+
+/** Igual, mas com uma resposta diferente por chamada (as repetições). */
+const stubTablesSequence = (upsertResults: unknown[]) => {
+  const upsert = vi.fn();
+  for (const resultado of upsertResults) upsert.mockResolvedValueOnce(resultado);
+  upsert.mockResolvedValue(upsertResults[upsertResults.length - 1]);
   const byEtiqueta = vi.fn().mockResolvedValue({ data: [], error: null });
   const byTenant = vi.fn(() => ({ in: byEtiqueta }));
   const select = vi.fn(() => ({ in: byTenant }));
@@ -117,6 +122,44 @@ describe('syncAssetsToCloud — carimbo da recusa no registo local', () => {
     expect(result).toEqual(['PK-1']);
     const local = await registoLocal();
     expect(local?._syncFailAt).toBeUndefined();
+  });
+
+  // 23505 dizia «já está sincronizado» e o payload era deitado fora: o aparelho
+  // ficava verde e a nuvem por actualizar, com a conferência perdida em silêncio.
+  it('23505 com outro id: repete pelo (tenantid, primarykey) e actualiza a linha', async () => {
+    const duplicado = {
+      error: {
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "assets_tenant_primarykey_key"'
+      }
+    };
+    // Lote recusado → isolamento por linha recusado → repetição aceite.
+    const { upsert } = stubTablesSequence([duplicado, duplicado, { error: null }]);
+    await semear();
+
+    const result = await syncAssetsToCloud([asset()], 'CICOPAL');
+
+    expect(result).toEqual(['PK-1']);
+    expect(upsert).toHaveBeenCalledTimes(3);
+    expect(upsert.mock.calls[2][1]).toEqual({ onConflict: 'tenantid, primarykey' });
+    expect(upsert.mock.calls[2][0][0]).toMatchObject({ primarykey: 'PK-1', conferido: true });
+
+    const local = await registoLocal();
+    expect(local?._syncFailAt).toBeUndefined();
+  });
+
+  it('23505 que a repetição também recusa não conta como sincronizado', async () => {
+    const duplicado = {
+      error: { code: '23505', message: 'duplicate key value violates unique constraint' }
+    };
+    stubTablesSequence([duplicado, duplicado, duplicado]);
+    await semear();
+
+    await expect(syncAssetsToCloud([asset()], 'CICOPAL')).rejects.toThrow(/chave de origem já existe/);
+
+    const local = await registoLocal();
+    expect(Number(local?._is_synced)).toBe(0);
+    expect(typeof local?._syncFailAt).toBe('string');
   });
 
   it('o envio seguinte apaga o carimbo quando a nuvem aceita', async () => {

@@ -1,3 +1,11 @@
+import { normalizeFlag } from './normalize';
+import {
+  conferenciaLocalVenceNuvem,
+  preservarConferenciaLocal,
+  type CamposDeDecisaoDeConferencia,
+  type DecisaoDeConferencia,
+} from './conferencia';
+
 /**
  * TOQUE DESTE APARELHO = PENDENTE DE NUVEM, COM DATA
  * ============================================================================
@@ -20,7 +28,7 @@ export const marcarAlteracaoLocal = (
 });
 
 /** Campos locais que o pull tem de manter quando remonta a linha da nuvem. */
-export type CamposDePendencia = {
+export type CamposDePendencia = CamposDeDecisaoDeConferencia & {
   _lastUpdated?: unknown;
   _syncFailAt?: unknown;
   _syncFailReason?: unknown;
@@ -31,7 +39,7 @@ export type PendenciaPreservada = {
   _lastUpdated?: string;
   _syncFailAt?: string;
   _syncFailReason?: string;
-};
+} & DecisaoDeConferencia;
 
 /** Só texto com conteúdo conta: campos vazios ou de outro tipo não são dados. */
 const textoUtil = (valor: unknown): string | undefined =>
@@ -52,7 +60,8 @@ const textoUtil = (valor: unknown): string | undefined =>
  * não é copiado — o selo não o saberia mostrar.
  */
 export const preservarPendenciaLocal = (
-  local?: CamposDePendencia | null
+  local?: CamposDePendencia | null,
+  nuvem?: CamposDeDecisaoDeConferencia | null
 ): PendenciaPreservada => {
   const pendencia: PendenciaPreservada = { _is_synced: 0 };
 
@@ -66,5 +75,64 @@ export const preservarPendenciaLocal = (
     if (motivo) pendencia._syncFailReason = motivo;
   }
 
+  // A CONFERÊNCIA também é uma decisão do aparelho: o pull trazia a flag da
+  // nuvem (`_conferido = 0`, sem autor nem data) e o item conferido no campo
+  // voltava a «por conferir» no ciclo seguinte. Só se repõe quando a decisão
+  // local é mais recente — a linha da nuvem manda no resto (ver
+  // `conferenciaLocalVenceNuvem`).
+  if (conferenciaLocalVenceNuvem(local, nuvem)) {
+    Object.assign(pendencia, preservarConferenciaLocal(local));
+  }
+
   return pendencia;
+};
+
+/**
+ * A pendência local continua a ser preservada no pull?
+ * ============================================================================
+ * Sim para o registo que este aparelho mudou e ainda não subiu — é o que evita
+ * perder trabalho de campo. Não quando a nuvem diz «apagado»: preservar a
+ * pendência reactivava o registo no estado (e o envio seguinte tentava subir
+ * uma cópia de um ativo apagado, em ciclo). A exclusão vence, aqui como em
+ * `mesclarComExclusao`.
+ */
+export const devePreservarPendencia = (
+  nuvem: { _is_deleted?: unknown },
+  local?: { _is_synced?: unknown } | null
+): boolean => Number(local?._is_synced) === 0 && !normalizeFlag(nuvem._is_deleted);
+
+/** O resultado do merge de uma linha da nuvem com a cópia local pendente. */
+export type MergeComExclusao<T> = {
+  /** Linha que fica no estado (e é gravada no disco) depois do merge. */
+  registo: T;
+  /** A nuvem tinha o registo apagado e a cópia local foi descartada. */
+  exclusaoVenceu: boolean;
+};
+
+/**
+ * EXCLUSÃO VENCE A EDIÇÃO PENDENTE
+ * ============================================================================
+ * O pull reaplica a cópia local por cima da linha da nuvem para não perder o que
+ * este aparelho mudou e ainda não subiu. Mas a exclusão **não é um campo do
+ * registo**: é o registo inteiro. Quando a nuvem diz «apagado» e o aparelho tem
+ * uma cópia pendente com `_is_deleted = 0` — ficou offline durante a exclusão, o
+ * `delete` falhou antes de sair, ou o registo veio de uma base antiga —,
+ * reaplicar essa cópia desfazia a exclusão em TODOS os aparelhos no ciclo
+ * seguinte: o ativo ressuscitava sozinho, sem ninguém o tocar.
+ *
+ * Aqui a cópia local perde por inteiro (não entra nenhum campo dela) e o
+ * chamador larga a pendência — não há alteração a enviar de um registo apagado.
+ * O contrário continua igual: com a linha viva na nuvem, a edição local ganha
+ * (é o comportamento que evita perder o trabalho de campo).
+ */
+export const mesclarComExclusao = <T extends { _is_deleted?: unknown }>(
+  nuvem: T,
+  local: T
+): MergeComExclusao<T> => {
+  // `normalizeFlag` aceita as três grafias da flag (`true`, `1`, `'1'`); sem a
+  // coluna na nuvem (schema antigo) a linha não conta como apagada.
+  if (normalizeFlag(nuvem._is_deleted)) {
+    return { registo: nuvem, exclusaoVenceu: true };
+  }
+  return { registo: { ...nuvem, ...local }, exclusaoVenceu: false };
 };

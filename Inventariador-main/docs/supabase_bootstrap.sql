@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS public.assets (
   gps_lat           numeric,
   gps_lng           numeric,
   currentCampaignId text,
+  is_deleted        boolean NOT NULL DEFAULT false,
   created_at        timestamptz DEFAULT now(),
   updated_at        timestamptz DEFAULT now()
 );
@@ -97,6 +98,42 @@ ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS gps_lng numeric(18,10);
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS "DE_PARA" text;
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS "currentCampaignId" text;
 
+-- EXCLUSÃO (SOFT DELETE): a flag local `_is_deleted` viaja no payload como
+-- `is_deleted`. Sem esta coluna a exclusão nunca saía do aparelho: o pull
+-- devolvia a linha ativa e o ativo ressuscitava. Numa base que já existe, o
+-- mesmo bloco vive em scripts/assets-exclusao.sql.
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS is_deleted boolean DEFAULT false;
+UPDATE public.assets SET is_deleted = false WHERE is_deleted IS NULL;
+ALTER TABLE public.assets ALTER COLUMN is_deleted SET DEFAULT false;
+
+-- TRAVA CONTRA A RESSURREIÇÃO: um APK antigo (ou uma cópia local que nunca viu
+-- a exclusão) envia `is_deleted = false` sobre a linha apagada e o ativo volta
+-- para todos. O trigger recusa, excepto quando a mesma escrita traz um
+-- `restored_at` novo — a marca explícita de restauro que só `restoreAsset`
+-- envia. Numa base que já existe, o mesmo bloco vive em
+-- scripts/assets-restauro-trigger.sql.
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS restored_at timestamptz;
+
+CREATE OR REPLACE FUNCTION public.assets_bloquear_ressurreicao()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.is_deleted IS TRUE AND NEW.is_deleted IS NOT TRUE THEN
+    IF NEW.restored_at IS NULL OR NEW.restored_at IS NOT DISTINCT FROM OLD.restored_at THEN
+      RAISE EXCEPTION 'Exclusão prevalece: para pôr is_deleted = false é preciso um restored_at novo (restauro explícito).';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS assets_bloquear_ressurreicao ON public.assets;
+CREATE TRIGGER assets_bloquear_ressurreicao
+  BEFORE UPDATE ON public.assets
+  FOR EACH ROW
+  EXECUTE FUNCTION public.assets_bloquear_ressurreicao();
+
 -- SRE ISOLAMENTO DE CONTRATO: a unicidade da chave de origem é POR TENANT —
 -- a mesma chave primária pode existir legitimamente em contratos diferentes
 -- (ex.: base de teste do CLIENTETESTE copiada do CICOPAL). O índice GLOBAL
@@ -104,8 +141,15 @@ ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS "currentCampaignId" text;
 -- o upsert por 'id', permitia que uma carga SOBRESCREVESSE ativos de outro
 -- contrato. Ambos os problemas são resolvidos escopando por (tenantid, ...).
 DROP INDEX IF EXISTS public.assets_primarykey_key;
+-- SEM `WHERE primarykey IS NOT NULL`: um índice único PARCIAL não serve de
+-- alvo para o `upsert(…, { onConflict: 'tenantid, primarykey' })` da fila
+-- (`syncService.processDataSyncQueue`) — o PostgREST não envia o predicado, o
+-- ON CONFLICT não encontra o índice e a escrita vira INSERT, que colide no
+-- próprio índice (23505) em vez de actualizar a linha. O predicado era
+-- redundante: num índice único, NULLs são distintos por omissão.
+-- Contrato guardado por `src/__tests__/assetsConflictIndex.test.ts`.
 CREATE UNIQUE INDEX IF NOT EXISTS assets_tenant_primarykey_key
-  ON public.assets (tenantid, primarykey) WHERE primarykey IS NOT NULL;
+  ON public.assets (tenantid, primarykey);
 
 -- PK COMPOSTA (tenantid, id): a MESMA chave de origem pode existir em
 -- contratos diferentes SEM sobrescrever — é o alvo de conflito do upsert do
@@ -116,6 +160,31 @@ ALTER TABLE public.assets ADD PRIMARY KEY (tenantid, id);
 
 CREATE INDEX IF NOT EXISTS assets_tenantid_idx ON public.assets (tenantid);
 CREATE INDEX IF NOT EXISTS assets_tenant_filial_idx ON public.assets (tenantid, filial);
+
+-- CARIMBO DA NUVEM EM CADA UPDATE: o pull delta baixa `updated_at > checkpoint`
+-- (fetchFullInventory, ETAPA 5b). Sem trigger, `updated_at` só valia no INSERT:
+-- o upsert da conferência actualizava a linha sem mexer no carimbo e a alteração
+-- ficava invisível aos outros aparelhos. O app não envia `updated_at` (o relógio
+-- do aparelho podia empurrar o checkpoint para o futuro); quem carimba é o
+-- servidor. Numa base que já existe, o mesmo bloco vive em
+-- scripts/assets-updated-at-trigger.sql.
+UPDATE public.assets SET updated_at = COALESCE(created_at, now()) WHERE updated_at IS NULL;
+
+CREATE OR REPLACE FUNCTION public.touch_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS assets_touch_updated_at ON public.assets;
+CREATE TRIGGER assets_touch_updated_at
+  BEFORE UPDATE ON public.assets
+  FOR EACH ROW
+  EXECUTE FUNCTION public.touch_updated_at();
 
 -- ============================================================================
 -- 2. INVENTORY_CONFIG — config de unidade + âncora GPS (upsert por filial)

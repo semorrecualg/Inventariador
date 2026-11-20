@@ -30,9 +30,9 @@ Este mapa documenta a topologia e as conexões físicas dos mais de 35 component
                                          v
 +---------------------------------------------------------------------------------+
 |                      SELETOR DE UNIDADE OPERACIONAL  (UnitSelector.tsx)         |
-|   - Tool grid (AJUSTES · DADOS · PAINEL · AUDITORIA) + contador de ativos      |
+|   - Tool grid (AJUSTES · PAINEL) + contador de ativos                          |
 |   - Botões abrem o MAIN_MENU com o painel já aberto (openPanel:               |
-|     PREFERENCES/DATA/ADMIN/AUDIT)                                              |
+|     PREFERENCES/ADMIN)                                                         |
 +---------------------------------------------------------------------------------+
                                          |
                                          v
@@ -67,8 +67,8 @@ Este mapa documenta a topologia e as conexões físicas dos mais de 35 component
 - **`Login.tsx`**: Ponto inicial de controle de acesso — **login por contrato** (usuário × `tenantid`): o perfil vem do `user_permissions` na nuvem; a Barreira Local bloqueia admin/master sem contrato (nunca "GLOBAL"). O backdoor MASTER DRIVE foi **removido**.
 - **`TenantWorkSelector.tsx`**: Seletor de contrato/filial pós-login (multi-contrato) — persiste o contexto e sincroniza apenas o contrato escolhido.
 - **`ModuleSelector.tsx`**: Roteador de módulos (Gestor de Base / Inventariador / Controle de Ativo) baseado nos privilégios do operador.
-- **`MainMenu.tsx`**: Hub operacional do auditor — painéis admin/auditoria (RBAC via `rbacService`/`PermissionGate`); a tool grid foi transferida para o `UnitSelector`.
-- **`UnitSelector.tsx`**: Carrega unidades/filiais da base local; exibe a **tool grid** (AJUSTES · DADOS · PAINEL · AUDITORIA) + contador de ativos, navegando ao `MAIN_MENU` com o painel aberto (`openPanel`).
+- **`MainMenu.tsx`**: Hub operacional do auditor — o **Painel Completo** concentra os painéis **Gestão e Manutenção** (ADMIN) e **Auditoria e Concordância** (TRILHA B), além dos itens administrativos (RBAC via `rbacService`/`PermissionGate`); a tool grid foi transferida para o `UnitSelector`.
+- **`UnitSelector.tsx`**: Carrega unidades/filiais da base local; exibe a **tool grid** (AJUSTES · PAINEL) + contador de ativos, navegando ao `MAIN_MENU` com o painel aberto (`openPanel`).
 - **`AddressSelector.tsx` [Novo Componente v2.60]**: Nova âncora de roteamento que isola os inventários por seu endereço nativo coletado do Excel parser.
 - **`LoadHistoryScreen.tsx`** (`src/screens/`): Histórico de cargas/sincronizações por contrato (lê `audit_logs` — IMPORT/SYNC_PULL), gate `manage_database`.
 - **`LicenseProvisioning.tsx`**: Provisionamento de novo cliente — cria MASTER amarrado ao `tenantid` com senha forte (`passwordPolicy`), sem backdoor.

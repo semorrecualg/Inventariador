@@ -22,6 +22,7 @@ import { matchUnitKeys, normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
+import { normalizeFlag } from '../utils/normalize';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
 import {
   checkCloudPushGuard,
@@ -1081,7 +1082,60 @@ const warnIdentityConflicts = async (rows: Record<string, unknown>[]): Promise<v
   announceIdentityOnce(formatCloudPushIdentityConflicts(conflicts));
 };
 
-export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | string[], onProgress?: (processed: number, total: number) => void): Promise<string[]> => {
+/** Chave canónica (tenantid|primarykey) usada pelas guardas de exclusão. */
+const chaveDaNuvem = (tenantid: unknown, primarykey: unknown): string =>
+  `${String(tenantid || '').trim().toUpperCase()}|${String(primarykey || '').trim()}`;
+
+/**
+ * EXCLUSÃO VENCE A SUBIDA — leitura do estado remoto antes da escrita
+ * ============================================================================
+ * O upsert não lê o estado remoto: um aparelho que ficou offline com a cópia
+ * ativa de um ativo apagado noutro lado reenviava-a e reactivava a linha em
+ * todos os aparelhos. Antes de escrever, o envio pergunta à nuvem quais destas
+ * chaves estão apagadas e não manda essas linhas.
+ *
+ * Uma única consulta por lote/ciclo (nunca por registo), com o `in` limitado às
+ * chaves que vão subir. Sem a coluna na nuvem (schema antigo) a consulta falha
+ * e a guarda fica inerte — é o comportamento anterior, nunca um bloqueio do
+ * envio.
+ *
+ * O restauro é a excepção explícita (`allowUndelete` em `syncAssetsToCloud`): é
+ * a única operação que pode dizer «vivo» sobre uma linha apagada.
+ */
+export const fetchCloudDeletedKeys = async (
+  tenantids: Array<string | null | undefined>,
+  primarykeys: Array<string | null | undefined>
+): Promise<Set<string>> => {
+  const vazia = new Set<string>();
+  if (!supabase) return vazia;
+  const tenants = Array.from(new Set(tenantids.map(t => String(t || '').trim().toUpperCase()).filter(Boolean)));
+  const keys = Array.from(new Set(primarykeys.map(k => String(k || '').trim()).filter(Boolean)));
+  if (tenants.length === 0 || keys.length === 0) return vazia;
+  try {
+    const { data, error } = await supabase
+      .from('assets')
+      .select('tenantid, primarykey, is_deleted')
+      .in('tenantid', tenants)
+      .in('primarykey', keys);
+    if (error || !Array.isArray(data)) return vazia;
+    const apagadas = new Set<string>();
+    for (const row of data as Record<string, unknown>[]) {
+      // `normalizeFlag` aceita `true`, `1` e `'1'` (grafias que a base já tem).
+      if (normalizeFlag(row.is_deleted)) apagadas.add(chaveDaNuvem(row.tenantid, row.primarykey));
+    }
+    return apagadas;
+  } catch (err) {
+    logger.warn('>>> [Supabase] Não foi possível verificar exclusões na nuvem; a subida segue sem essa guarda:', err);
+    return vazia;
+  }
+};
+
+export const syncAssetsToCloud = async (
+  assets: Asset[],
+  tenantid?: string | string[],
+  onProgress?: (processed: number, total: number) => void,
+  options?: { allowUndelete?: boolean }
+): Promise<string[]> => {
   if (!assets || assets.length === 0) {
     logger.error('>>> [Supabase] Fluxo Bloqueado: Ação explícita de sincronia abortada. Array de ativos nulo ou vazio detectado.');
     throw new SupabaseNetworkException('Ação Bloqueada: Não há ativos gravados no disco local para espelhamento Delta.');
@@ -1138,6 +1192,41 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   // 'uuid' = UUID derivado) e colunas que o schema remoto não tem.
   let idMode: 'key' | 'uuid' = assetsIdMode;
   const omittedColumns = new Set<string>();
+
+  /** Tira do envio as linhas que a nuvem já tem como apagadas (ver `fetchCloudDeletedKeys`). */
+  const permiteRessuscitar = Boolean(options?.allowUndelete);
+  const descartarApagadasNaNuvem = async (
+    rows: Record<string, unknown>[],
+    keys: string[]
+  ): Promise<{ rows: Record<string, unknown>[]; keys: string[] }> => {
+    if (permiteRessuscitar || rows.length === 0) return { rows, keys };
+    const apagadas = await fetchCloudDeletedKeys(
+      rows.map(r => String(r.tenantid || '')),
+      rows.map(r => String(r.primarykey || ''))
+    );
+    if (apagadas.size === 0) return { rows, keys };
+    // As chaves locais viajam aos pares com as linhas: filtrar só um lado
+    // marcaria como sincronizado o ativo errado.
+    const mantidos = rows
+      .map((row, i) => ({ row, key: keys[i] }))
+      .filter(({ row }) => !apagadas.has(chaveDaNuvem(row.tenantid, row.primarykey)));
+    const descartadas = rows.length - mantidos.length;
+    if (descartadas > 0) {
+      logger.warn(`>>> [Supabase] Exclusão prevalece: ${descartadas} ativo(s) apagados na nuvem não foram reenviados.`);
+      // A exclusão é aplicada já ao registo local: sem isto ele continuava
+      // pendente e a fila voltava a tentá-lo a cada ciclo até um pull chegar.
+      try {
+        await sqliteService.markAssetsDeleted(
+          rows
+            .filter(row => apagadas.has(chaveDaNuvem(row.tenantid, row.primarykey)))
+            .map(row => String(row.primarykey || ''))
+        );
+      } catch (markErr) {
+        logger.warn('>>> [Supabase] Falha ao aplicar a exclusão da nuvem ao registo local:', markErr);
+      }
+    }
+    return { rows: mantidos.map(m => m.row), keys: mantidos.map(m => m.key) };
+  };
 
   const buildPayload = (chunk: Asset[]): { rows: Record<string, unknown>[]; keys: string[] } => {
     // Dedupe por (tenantid, primarykey): a mesma chave repetida no lote faz o
@@ -1240,7 +1329,19 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
           : '') || null,
         data_leitura: (cleanAsset._dataLeitura !== undefined && cleanAsset._dataLeitura !== null
           ? String(cleanAsset._dataLeitura)
-          : null)
+          : null),
+        // EXCLUSÃO (soft delete): a linha da nuvem é a única cópia que os outros
+        // aparelhos vêem. Sem esta coluna a exclusão não saía do aparelho — o
+        // pull devolvia a linha intacta e o ativo «ressuscitava» no ciclo
+        // seguinte, aqui ao reiniciar e em qualquer outro telemóvel.
+        // `normalizeFlag` aceita as três grafias locais (`true`, `1`, `'1'`).
+        is_deleted: normalizeFlag(cleanAsset._is_deleted),
+        // RESTAURO EXPLÍCITO (trava do servidor): o trigger
+        // `assets_bloquear_ressurreicao` só aceita `is_deleted = false` com um
+        // `restored_at` novo. Sem esta marca, o upsert de um APK que não conhece
+        // a regra falha — a exclusão fica de pé em vez de ressuscitar o ativo.
+        // Só o caminho de restauro pede `allowUndelete`, por isso só ele a envia.
+        ...(permiteRessuscitar ? { restored_at: new Date().toISOString() } : {})
       };
 
       byKey.set(`${row.tenantid}|${row.primarykey}`, {
@@ -1258,7 +1359,10 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   // contrato, para a carga de um contrato nunca sobrescrever outra base com a
   // mesma chave de origem. O payload é adaptado ao schema remoto (tipo de `id`
   // e colunas existentes) sem degradar para 500 requisições individuais.
-  const sendBatch = async (rows: Record<string, unknown>[]) => {
+  const sendBatch = async (
+    rows: Record<string, unknown>[],
+    conflictTarget: 'tenantid, id' | 'tenantid, primarykey' = 'tenantid, id'
+  ) => {
     if (!supabase) throw new Error('Instância do Supabase indisponível.');
 
     // O schema remoto decide o formato de `id` e o conjunto de colunas:
@@ -1272,7 +1376,7 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
         ? projected.map(r => ({ ...r, id: assetUuid(String(r.tenantid), String(r.primarykey ?? r.id ?? '')) }))
         : projected;
 
-      const result = await supabase.from('assets').upsert(payload, { onConflict: 'tenantid, id' });
+      const result = await supabase.from('assets').upsert(payload, { onConflict: conflictTarget });
       if (!result.error) return;
 
       const err = result.error as { code?: string; message?: string; details?: string; hint?: string };
@@ -1308,12 +1412,23 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
   const processBatch = async (batchIndex: number) => {
     const start = batchIndex * CHUNK_SIZE;
     const chunk = assets.slice(start, start + CHUNK_SIZE);
-    const { rows, keys } = buildPayload(chunk);
+    const { rows: todasAsRows, keys: todasAsKeys } = buildPayload(chunk);
     // Identidade na nuvem: um `primarykey` novo para uma identidade existente é
     // uma cópia — o upsert por (tenantid, id) não a impede. A consulta é
     // limitada às etiquetas deste lote e corre antes de qualquer escrita.
-    await warnIdentityConflicts(rows);
+    await warnIdentityConflicts(todasAsRows);
+    // EXCLUSÃO VENCE A SUBIDA: consulta a nuvem antes da escrita, para um
+    // aparelho offline não reactivar um ativo que outro apagou.
+    const { rows, keys } = await descartarApagadasNaNuvem(todasAsRows, todasAsKeys);
     const lote = batchIndex + 1;
+
+    if (rows.length === 0) {
+      // Lote inteiro apagado na nuvem: nada a enviar, nada a marcar como
+      // sincronizado (o pull seguinte aplica a exclusão ao registo local).
+      processedRows += chunk.length;
+      if (onProgress) onProgress(Math.min(processedRows, total), total);
+      return;
+    }
 
     try {
       await sendBatch(rows);
@@ -1336,10 +1451,22 @@ export const syncAssetsToCloud = async (assets: Asset[], tenantid?: string | str
             await sendBatch([row]);
             successfullySyncedIds.push(localKey);
           } catch (rowErr: unknown) {
-            // 23505 em `assets_tenant_primarykey_key`: a chave de origem já está
-            // na nuvem (com id anterior) — o ativo está sincronizado, não rejeitado.
+            // 23505 em `assets_tenant_primarykey_key`: a chave de origem já
+            // existe na nuvem com outro `id`. Antes isto contava como
+            // «sincronizado» e o payload era deitado fora — o aparelho dizia
+            // que sim e a nuvem ficava por actualizar (a conferência perdia-se
+            // em silêncio). Repetir o upsert pelo alvo (tenantid, primarykey)
+            // actualiza a linha certa; só se essa repetição também falhar é
+            // que o ativo conta como recusado.
             if ((rowErr as { code?: string }).code === '23505') {
-              successfullySyncedIds.push(localKey);
+              try {
+                await sendBatch([row], 'tenantid, primarykey');
+                successfullySyncedIds.push(localKey);
+              } catch (retryErr: unknown) {
+                const motivo = `${describeSupabaseError(retryErr)} (a chave de origem já existe com outro id e a repetição por primarykey falhou)`;
+                failedRows.push(`${row.primarykey ?? localKey}: ${motivo}`);
+                falhasDesteLote.push({ primarykey: String(row.primarykey ?? localKey), motivo });
+              }
               return;
             }
             const motivo = describeSupabaseError(rowErr);
@@ -2347,6 +2474,11 @@ export const mapCloudAssetRow = (row: Record<string, unknown>): Asset => {
     unitid: uId, // Legado
     ...(gps ? { latitude: gps.lat, longitude: gps.lng, gps_lat: gps.lat, gps_lng: gps.lng } : {}),
     ...camposDeConferencia(row),
+    // EXCLUSÃO: `is_deleted` da nuvem volta ao vocabulário local para que as
+    // listas escondam o registo como escondem um apagado neste aparelho. A
+    // linha continua a descer e a ficar gravada: o restauro e a auditoria
+    // precisam do registo, não de um buraco na base.
+    _is_deleted: normalizeFlag(row.is_deleted) ? 1 : 0,
   };
 };
 
