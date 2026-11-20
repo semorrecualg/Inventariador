@@ -683,7 +683,9 @@ export class SqliteService {
     tabela: string,
     registro_id: string,
     details: string,
-    delta?: string
+    delta?: string,
+    /** Instante da linha (ISO). Só os testes o fixam; o runtime usa «agora». */
+    atualizadoEm?: string
   ): Promise<void> {
     const id = 'LOG_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
     await db.audit_logs.put({
@@ -694,7 +696,7 @@ export class SqliteService {
       registro_id,
       details,
       delta: delta ?? null,
-      updated_at: new Date().toISOString()
+      updated_at: atualizadoEm ?? new Date().toISOString()
     });
   }
 

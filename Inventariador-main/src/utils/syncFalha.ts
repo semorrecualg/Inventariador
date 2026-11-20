@@ -71,6 +71,10 @@ const MARCADORES_DE_FALHA: ReadonlyArray<readonly [RegExp, string]> = [
   [/\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b/g, '<hora>'],
   [/\b[\w./-]+\.(?:tsx?|jsx?|mjs|cjs):\d+(?::\d+)?/g, '<origem>'],
   [/\b0x[0-9a-f]+\b/gi, '<hex>'],
+  // Id de pedido («req 42», «pedido #7»): muda a cada tentativa, não é a causa.
+  // A regra dos números de 6+ dígitos não o apanhava e cada ciclo reabria a
+  // janela — 100 ciclos do mesmo erro davam 100 linhas.
+  [/\b(?:req|request|pedido)\s*#?\s*\d+\b/gi, '<pedido>'],
   [/\b\d{6,}\b/g, '<numero>'],
   [/\b\d+(?:[.,]\d+)?\s?(?:ms|s)\b/g, '<duracao>']
 ];
@@ -87,6 +91,101 @@ export const normalizarDetalheFalha = (details: string): string => {
   for (const [padrao, marcador] of MARCADORES_DE_FALHA) texto = texto.replace(padrao, marcador);
 
   return texto.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, SYNC_FAILURE_SIGNATURE_MAX);
+};
+
+/**
+ * TETO DAS LINHAS DE FALHA PRESERVADAS — UMA POR DIA
+ * ============================================================================
+ * As recusas de envio ficaram fora do expurgo de 7 dias (são a prova de por que
+ * um ativo não subiu), mas a janela de deduplicação era de 10 min: um ativo
+ * preso com o mesmo erro voltava a escrever uma linha a cada janela — 144 por
+ * dia, para sempre, e a trilha «preservada» crescia até tapar o diagnóstico que
+ * ela própria serve para fazer.
+ *
+ * A janela passa a ser o DIA (UTC): a mesma assinatura (`primarykey|erro
+ * estável`) escreve no máximo uma linha por dia. O dia seguinte é uma linha
+ * nova — a falha continua visível enquanto durar, sem repetir o mesmo dia.
+ * E o expurgo colapsa o histórico já gravado (as 144 linhas diárias de antes)
+ * na mais recente de cada dia.
+ */
+export const inicioDoDiaDaFalha = (agora: number = Date.now()): string => {
+  const d = new Date(agora);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString();
+};
+
+/** Linha da trilha com o que a agregação lê. */
+export interface LinhaDeFalhaNaTrilha {
+  id: string;
+  acao?: unknown;
+  registro_id?: unknown;
+  delta?: unknown;
+  details?: unknown;
+  updated_at?: unknown;
+}
+
+/** Dia (UTC, `YYYY-MM-DD`) da linha — a chave do teto. */
+export const diaDaFalhaNaTrilha = (updatedAt: unknown): string | null => {
+  const texto = String(updatedAt ?? '').trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(texto) ? texto.slice(0, 10) : null;
+};
+
+/**
+ * Assinatura que a linha guarda — a do `delta`, ou (linhas antigas, gravadas
+ * antes de o `delta` existir) o detalhe normalizado. `null` quando a linha não
+ * diz qual foi a falha: sem assinatura não há como agregar, e ela não é tocada.
+ */
+export const assinaturaDaTrilha = (linha: LinhaDeFalhaNaTrilha): string | null => {
+  try {
+    const delta = JSON.parse(String(linha.delta ?? '{}')) as { signature?: unknown };
+    if (typeof delta.signature === 'string' && delta.signature) {
+      const corte = delta.signature.indexOf('|');
+      return corte === -1
+        ? delta.signature
+        : assinaturaDeFalha(delta.signature.slice(0, corte), delta.signature.slice(corte + 1));
+    }
+  } catch {
+    // delta ilegível: cai no detalhe.
+  }
+  const detalhe = normalizarDetalheFalha(String(linha.details ?? ''));
+  return detalhe ? assinaturaDeFalha(String(linha.registro_id ?? ''), detalhe) : null;
+};
+
+/** Chave do teto: ação | registo | dia | assinatura. */
+export const chaveDeFalhaNoDia = (linha: LinhaDeFalhaNaTrilha): string | null => {
+  const dia = diaDaFalhaNaTrilha(linha.updated_at);
+  const assinatura = assinaturaDaTrilha(linha);
+  if (!dia || !assinatura) return null;
+  return `${String(linha.acao ?? '').toUpperCase()}|${String(linha.registro_id ?? '')}|${dia}|${assinatura}`;
+};
+
+/**
+ * Ids das linhas de falha REPETIDAS — tudo o que excede a mais recente de cada
+ * `chaveDeFalhaNoDia`. É a limpeza do histórico anterior ao teto (144 linhas
+ * por dia do mesmo erro passam a 1) e não toca no que não é falha de envio.
+ */
+export const idsDeFalhasRepetidas = (linhas: readonly LinhaDeFalhaNaTrilha[]): string[] => {
+  const ultimaPorChave = new Map<string, { id: string; instante: number }>();
+  const repetidas: string[] = [];
+
+  for (const linha of linhas) {
+    const chave = chaveDeFalhaNoDia(linha);
+    if (!chave) continue;
+    const instante = Date.parse(String(linha.updated_at ?? ''));
+    const anterior = ultimaPorChave.get(chave);
+    if (!anterior) {
+      ultimaPorChave.set(chave, { id: linha.id, instante });
+      continue;
+    }
+    const novaGanha = instante > anterior.instante || (instante === anterior.instante && linha.id > anterior.id);
+    if (novaGanha) {
+      repetidas.push(anterior.id);
+      ultimaPorChave.set(chave, { id: linha.id, instante });
+    } else {
+      repetidas.push(linha.id);
+    }
+  }
+
+  return repetidas;
 };
 
 /** Chave de deduplicação de uma recusa: `primarykey|detalhe estável`. */
