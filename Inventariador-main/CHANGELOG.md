@@ -11,29 +11,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Três passagens para o mesmo pull:** o download gravava as 12.636 linhas nos
   três espelhos, e o `saveInventory` que vinha a seguir reescrevia a base inteira
-  (`bulkInsertAssets`) e ainda o espelho do `localDb` — três passagens de
-  12.636 × 3 escritas para corrigir as poucas linhas em que a decisão local vence
-  a da nuvem. O delta, que é o pull do dia a dia, tinha o mesmo custo: algumas
-  dezenas de linhas novas a reescrever toda a base.
-- **Medição (harness fake-indexeddb, N=1.000, sem extrapolar):** a passagem do
-  download custou 581 ms; a reescrita completa seguinte custou 57.934 ms (a
-  mesma base, chave a chave nos três espelhos); o subconjunto de 20 linhas com
-  decisão local custou 1.335 ms. Medido antes/depois em 12.636 no mesmo harness:
-  a passagem do download sozinha custou 9.621 ms; com as duas reescritas
-  eliminadas, o pull deixa de pagar ~2/3 das escritas de linha (37.908 → 12.656
-  linhas por pull completo).
+  (`bulkInsertAssets`) e ainda o espelho do `localDb` — três passagens completas
+  para corrigir as poucas linhas em que a decisão local vence a da nuvem. O
+  delta, que é o pull do dia a dia, tinha o mesmo custo: algumas dezenas de
+  linhas novas reescreviam a base inteira.
+- **Ganho ESTRUTURAL (a única alegação deste item):** por pull completo, as
+  linhas escritas nos espelhos passam de **37.908** (3 × 12.636) para **12.656**
+  (uma passagem do download + o subconjunto com decisão local). O delta passa de
+  37.908 para o número de linhas com decisão local — no teste, **2 de 200**.
+- **Sem alegação de tempo:** não há medição de tempo no aparelho. O harness de
+  testes usa `fake-indexeddb`, que mede a semântica do código e não o custo do
+  IndexedDB real (lá, actualizar uma linha existente é muito mais caro do que
+  inserir uma nova), pelo que nenhum número de milissegundos deste trabalho
+  sustenta ganho de tempo. Só medições no APK, comparando o mesmo pull antes e
+  depois, poderiam sustentá-lo.
 - **O quê:** o pull passa `skipSqlAssetsInsert` ao `saveInventory` (grava
   configuração e cache, não os ativos) e persiste à parte, numa única transação
   (`sqliteService.persistAssetsBatch`), só as linhas cuja decisão local foi
   reposta — GPS mais recente (`preservarGpsMaisRecente`), pendência preservada e
-  edição por enviar. O mapeamento nuvem→espelhos passou a viver num método só
-  (`mapAssetToDexie`), usado pelo lote e pelo subconjunto, para os dois não
-  divergirem; o subconjunto respeita o `_is_synced` de cada linha.
-- **Prova:** `src/__tests__/pullEmLotes.test.ts` (7 casos) — o subconjunto grava
-  GPS nas duas grafias e a proveniência nos três espelhos, não força o selo de
-  linhas pendentes, não toca nas linhas fora dele, mantém a guarda entre
-  contratos, e o contrato dos dois caminhos do pull (delta e merge completo) com
-  um único mapeamento.
+  edição por enviar. O merge do delta passou a ser uma regra própria
+  (`utils/mergeDeltaPull`), que devolve o estado e a lista `decisaoLocal`. O
+  mapeamento nuvem→espelhos vive num método só (`mapAssetToDexie`), usado pelo
+  lote e pelo subconjunto, para os dois não divergirem; o subconjunto respeita o
+  `_is_synced` de cada linha.
+- **Prova:** `src/__tests__/pullEmLotes.test.ts` (7 casos) fixa o subconjunto
+  (GPS nas duas grafias e proveniência nos três espelhos, `_is_synced` das
+  pendentes preservado, linhas fora do subconjunto intactas, guarda entre
+  contratos, um único mapeamento) e `src/__tests__/deltaPullDecisaoLocal.test.ts`
+  (7 casos) fixa o caminho do delta: 200 linhas na base, delta de 2 linhas com
+  decisão local (GPS do aparelho e edição por enviar) → exactamente 2 voltam ao
+  disco, as outras 198 ficam como o download as gravou, a base continua com 200
+  e a pendência continua pendente.
+
 
 ### Alterado — as falhas de envio têm teto: uma linha por dia
 

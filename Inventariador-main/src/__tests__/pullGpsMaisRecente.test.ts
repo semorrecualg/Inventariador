@@ -140,8 +140,11 @@ describe('pull — a regra do GPS vive num só sítio', () => {
     // precisa de voltar ao disco; o efeito é o mesmo).
     expect(fonte).toContain('preservarGpsMaisRecente(local, cloudAsset)');
     expect(fonte).toContain('{ ...cloudAsset, ...gpsDaqui }');
-    expect(fonte).toContain('preservarGpsMaisRecente(local, a)');
-    expect(fonte).toContain('{ ...a, ...gpsDaqui }');
+    // O delta passou a chamar a regra dentro de `utils/mergeDeltaPull`.
+    expect(fonte).toContain('mergeDeltaPull({');
+    const delta = readFileSync(join(process.cwd(), 'src', 'utils', 'mergeDeltaPull.ts'), 'utf8');
+    expect(delta).toContain('preservarGpsMaisRecente(local, daNuvem)');
+    expect(delta).toContain('{ ...daNuvem, ...gpsDaqui }');
     // Nenhuma segunda regra de GPS dentro do App.
     expect(fonte).not.toContain('latitude >');
   });

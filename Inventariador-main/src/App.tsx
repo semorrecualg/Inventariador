@@ -19,6 +19,7 @@ import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
 import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
 import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { preservarGpsMaisRecente } from './utils/assetGps';
+import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
@@ -2776,38 +2777,15 @@ useEffect(() => {
           // raro: base limpa com flag/checkpoint obsoletos), cai no merge completo
           // abaixo — substituição é segura, jamais perde dados de outro contrato.
           if (incremental && prev.assets.length > 0) {
-            const byId = new Map(prev.assets.map(a => [String(a.id), a]));
-            // O delta também não regride a coordenada: a linha da nuvem só
-            // substitui o ponto quando é mais recente que a leitura local.
-            // Só as linhas cuja decisão local venceu a da nuvem voltam ao disco:
-            // o download já gravou o resto (`fetchFullInventory`). O delta, que
-            // é o pull do dia a dia, deixa de reescrever a base inteira por
-            // causa de algumas linhas.
-            const decisaoLocal: Asset[] = [];
-            cloudAssets.forEach(a => {
-              const local = byId.get(String(a.id));
-              if (!local) {
-                byId.set(String(a.id), a);
-                return;
-              }
-              const gpsDaqui = preservarGpsMaisRecente(local, a) as Record<string, unknown>;
-              const merged = { ...a, ...gpsDaqui } as Asset;
-              byId.set(String(a.id), merged);
-              if (Object.keys(gpsDaqui).length > 0) decisaoLocal.push(merged);
+            // O merge do delta é uma regra só (`mergeDeltaPull`): devolve o
+            // estado remontado E as linhas cuja decisão local venceu a da
+            // nuvem — as únicas que precisam de voltar ao disco, porque o
+            // download já gravou o resto (`fetchFullInventory`).
+            const { assets: mergedAssets, decisaoLocal } = mergeDeltaPull({
+              prevAssets: prev.assets,
+              cloudAssets,
+              dirtyIds: Array.from(dirtyAssetsRef.current)
             });
-            const mergedAssets = Array.from(byId.values());
-            const dirtyIds = Array.from(dirtyAssetsRef.current);
-            if (dirtyIds.length > 0) {
-              dirtyIds.forEach(id => {
-                const localDirty = prev.assets.find(a => String(a.id) === id);
-                if (!localDirty) return;
-                const index = mergedAssets.findIndex(a => String(a.id) === id);
-                if (index !== -1) {
-                  mergedAssets[index] = { ...mergedAssets[index], ...localDirty };
-                  decisaoLocal.push(mergedAssets[index]);
-                } else mergedAssets.push(localDirty);
-              });
-            }
             const extractedCompanies = Array.from(new Set(mergedAssets.map(a => (a.filial || '').trim().toUpperCase()))).filter(Boolean);
             const finalCompanies = cloudCompanies.length > 0 ? cloudCompanies : extractedCompanies;
             const newState: InventoryState = {
