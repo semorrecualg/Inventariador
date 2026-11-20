@@ -141,7 +141,10 @@ export interface UnitListInput {
   /** Base interna (sqlite): a lista vem dos dados locais, não da nuvem. */
   isLocalDatabase: boolean;
   online: boolean;
-  /** Já há base local (SQL ou ativos): a lista da nuvem não faz falta. */
+  /**
+   * A base local já responde pelas filiais DESTE contrato (ver
+   * `hasFiliaisLocaisDoContrato`): a lista da nuvem não faz falta.
+   */
   hasLocalBase: boolean;
 }
 
@@ -169,6 +172,32 @@ export function decideUnitListAction(input: UnitListInput): UnitListAction {
 
 /** Sentinelas que nunca são filial. */
 const UNIT_SENTINELS = new Set(['', 'TODAS', 'NULL', 'UNDEFINED', '0', 'DEFAULT', 'SEM FILIAL']);
+
+/**
+ * `true` quando a BASE LOCAL já responde «quais são as filiais deste contrato?».
+ *
+ * Ter base local não chega: um aparelho pode ter ativos de OUTRO contrato (ex.:
+ * base de demonstração) ou ativos do próprio contrato sem `filial` — em ambos
+ * a lista local não tem uma única unidade e a nuvem é a única fonte. Enquanto
+ * «há base» bastava para dispensar a consulta, o CONTRATO DE TRABALHO ficava a
+ * dizer «Nenhuma filial na base deste contrato» e o INVENTARIADOR inacessível,
+ * mesmo com as filiais na nuvem.
+ */
+export function hasFiliaisLocaisDoContrato(
+  tenantid: string | null | undefined,
+  filiaisDaBase: Record<string, string[]> | undefined,
+  unidadesSql: ReadonlyArray<{ tenantid?: string | null; filial?: string | null }> = []
+): boolean {
+  const tenant = String(tenantid || '').trim().toUpperCase();
+  if (!tenant) return false;
+  const daBase = (filiaisDaBase && filiaisDaBase[tenant]) || [];
+  if (daBase.some((filial) => !!String(filial || '').trim())) return true;
+  return unidadesSql.some(
+    (unidade) =>
+      String(unidade.tenantid || '').trim().toUpperCase() === tenant &&
+      !!String(unidade.filial || '').trim()
+  );
+}
 
 /**
  * Normaliza a lista de filiais (vem da nuvem quando o aparelho ainda não tem

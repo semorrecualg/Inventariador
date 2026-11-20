@@ -8,8 +8,10 @@
 //      (contrato, filial e módulo já apontados) e a entrada continua a ser um
 //      toque explícito em "Acessar o Módulo".
 //   2. O módulo INVENTARIADOR trabalha sempre dentro de uma filial: contrato
-//      sem filial na base mantém o ACESSAR desativado; o CONTROLE DE ATIVO, que
-//      não usa endereço de campo, continua liberado.
+//      sem filial na base mantém o ACESSAR desativado para o AUDITOR; quem
+//      administra a base segue para a Unidade Operacional (é lá que a filial é
+//      escolhida/cadastrada). O CONTROLE DE ATIVO, que não usa endereço de
+//      campo, continua liberado.
 // ============================================================================
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
@@ -49,6 +51,8 @@ const renderSelector = (params: {
   user?: Partial<User>;
   contexts?: Array<{ tenantid: string; filial: string }>;
   initialSelection?: WorkContextPreselection | null;
+  /** `unitsByContract` do App: catálogo vivo + lista da nuvem. */
+  availableFiliais?: Record<string, string[]>;
 }) => {
   const onSelect = vi.fn();
   const onLogout = vi.fn();
@@ -63,7 +67,8 @@ const renderSelector = (params: {
         ],
       onSelect,
       onLogout,
-      initialSelection: params.initialSelection ?? null
+      initialSelection: params.initialSelection ?? null,
+      availableFiliais: params.availableFiliais
     })
   );
   return { onSelect, onLogout };
@@ -123,8 +128,9 @@ describe('CONTRATO DE TRABALHO · pré-seleção da última escolha (Fase 1)', (
 describe('CONTRATO DE TRABALHO · INVENTARIADOR exige filial', () => {
   afterEach(() => cleanup());
 
-  it('contrato sem filial: ACESSAR desativado, aviso visível e nada é selecionado', () => {
+  it('auditor · contrato sem filial: ACESSAR desativado, aviso visível e nada é selecionado', () => {
     const { onSelect } = renderSelector({
+      role: UserRole.AUDITOR,
       user: { filial: '', units: [] },
       contexts: [{ tenantid: TENANT, filial: '' }]
     });
@@ -135,7 +141,25 @@ describe('CONTRATO DE TRABALHO · INVENTARIADOR exige filial', () => {
     fireEvent.click(accessButton());
     expect(onSelect).not.toHaveBeenCalled();
     expect(
-      screen.getByText(/Este contrato ainda não tem filial na base/i)
+      screen.getByText(/Peça ao administrador para cadastrar a unidade/i)
+    ).toBeTruthy();
+  });
+
+  it('admin · contrato sem filial: ACESSAR segue para a Unidade Operacional', () => {
+    const { onSelect } = renderSelector({
+      user: { filial: '', units: [] },
+      contexts: [{ tenantid: TENANT, filial: '' }]
+    });
+
+    chooseModule('INVENTARIADOR');
+
+    // Sem filial nenhuma na lista não há escolha a fazer: a filial é escolhida
+    // na tela seguinte (Unidade Operacional), como o aviso já prometia.
+    expect(accessButton().disabled).toBe(false);
+    fireEvent.click(accessButton());
+    expect(onSelect).toHaveBeenCalledWith({ tenantid: TENANT, filial: '' }, AppModule.INVENTORY);
+    expect(
+      screen.getByText(/Siga para a Unidade Operacional/i)
     ).toBeTruthy();
   });
 
@@ -152,6 +176,45 @@ describe('CONTRATO DE TRABALHO · INVENTARIADOR exige filial', () => {
     expect(onSelect).toHaveBeenCalledWith(
       { tenantid: TENANT, filial: '' },
       AppModule.ASSET_CONTROL
+    );
+  });
+});
+
+describe('CONTRATO DE TRABALHO · as filiais do contrato vindas da nuvem', () => {
+  afterEach(() => cleanup());
+
+  // Nomes como `fetchUnitNamesFromCloud` os devolve: só a coluna `filial` do
+  // contrato, já normalizada (UPPER/trim, sem sentinelas, ordenada).
+  const FILIAIS_DA_NUVEM = [
+    '010101 CICOPAL GO',
+    '010105 CICOPAL PA',
+    '010201 SNACKS PA',
+    '010301 FEIRA BOA BA',
+    '010401 CARPER BA'
+  ];
+
+  it('base local sem o contrato: o contrato lista as 5 filiais da nuvem e o INVENTARIADOR abre', () => {
+    const { onSelect } = renderSelector({
+      user: { filial: '', units: [] },
+      contexts: [{ tenantid: TENANT, filial: '' }],
+      availableFiliais: { [TENANT]: FILIAIS_DA_NUVEM }
+    });
+
+    // A lista não fica vazia a dizer «Nenhuma filial na base deste contrato»:
+    // as filiais do contrato chegam pelo catálogo vivo (lista da nuvem).
+    expect(screen.queryByText(/Nenhuma filial na base deste contrato/i)).toBeNull();
+    expect(screen.getByTestId('filial-options').children).toHaveLength(5);
+    FILIAIS_DA_NUVEM.forEach(filial => expect(screen.getByText(filial)).toBeTruthy());
+
+    // A primeira da lista entra como filial escolhida e é ela que abre o
+    // INVENTARIADOR.
+    expect(filialCard(FILIAIS_DA_NUVEM[0]).getAttribute('aria-pressed')).toBe('true');
+    chooseModule('INVENTARIADOR');
+    expect(accessButton().disabled).toBe(false);
+    fireEvent.click(accessButton());
+    expect(onSelect).toHaveBeenCalledWith(
+      { tenantid: TENANT, filial: FILIAIS_DA_NUVEM[0] },
+      AppModule.INVENTORY
     );
   });
 });

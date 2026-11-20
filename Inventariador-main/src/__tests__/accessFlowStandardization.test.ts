@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { shouldReturnHubToWorkContext } from '../utils/routingUtils';
 import {
   canConfirmWorkContext,
+  canConfirmWorkContextSemFiliais,
   resolveWorkContextPreselection,
   type LastWorkContext,
   type WorkContext
@@ -65,6 +66,44 @@ describe('resolveWorkContextPreselection — última escolha só como pré-sele�
   it('devolve apenas dados — a função não navega nem confirma o contrato', () => {
     // Assinatura de 3 argumentos: não recebe pushScreen nem callback de navegação.
     expect(resolveWorkContextPreselection.length).toBe(3);
+  });
+});
+
+describe('canConfirmWorkContextSemFiliais — o contrato sem filial não fecha a porta', () => {
+  it('admin com a lista vazia segue para a Unidade Operacional', () => {
+    expect(
+      canConfirmWorkContextSemFiliais(AppModule.INVENTORY, {
+        temFiliaisNaLista: false,
+        podeAdministrar: true
+      })
+    ).toBe(true);
+  });
+
+  it('auditor com a lista vazia continua bloqueado (vaivém /unit ↔ /contexto)', () => {
+    expect(
+      canConfirmWorkContextSemFiliais(AppModule.INVENTORY, {
+        temFiliaisNaLista: false,
+        podeAdministrar: false
+      })
+    ).toBe(false);
+  });
+
+  it('com filiais na lista, vale a regra normal (escolher uma)', () => {
+    expect(
+      canConfirmWorkContextSemFiliais(AppModule.INVENTORY, {
+        temFiliaisNaLista: true,
+        podeAdministrar: true
+      })
+    ).toBe(false);
+  });
+
+  it('só se aplica ao INVENTARIADOR', () => {
+    expect(
+      canConfirmWorkContextSemFiliais(AppModule.ASSET_CONTROL, {
+        temFiliaisNaLista: false,
+        podeAdministrar: true
+      })
+    ).toBe(false);
   });
 });
 
