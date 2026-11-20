@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o «Voltar» do Gestor de Base devolve ao PAINEL COMPLETO
+
+- **O que era:** a rota `/db-manager` tinha o regresso fixo em
+  `pushScreen(AppScreen.MODULE_SELECTION)`. Sair do Gestor de Base caía sempre
+  na tela legada `/modules` («Selecione o módulo de trabalho»), fora da trilha
+  única (contrato → hub → PAINEL COMPLETO) e em círculo para o auditor, cuja
+  `UNIT_SELECTION` é rebatida para o contrato pelo RouteGuard.
+- **Agora:** `onBack={popScreen}` recua um passo no histórico e devolve o hub
+  (`MAIN_MENU`), que reabre o PAINEL COMPLETO de onde se veio; sem histórico,
+  ancora no CONTRATO DE TRABALHO.
+- **Uma regra só:** `historicoAposVoltar` e `VOLTAR_SEM_HISTORICO`
+  (`src/utils/routingUtils.ts`) são a única fonte do regresso — o `popScreen`,
+  o `DatabaseManagerScreen` e o `LoadHistoryScreen` deixam de apontar para
+  `MODULE_SELECTION`. `/modules` deixa de ser destino de «Voltar».
+- **Contrato fixado** em `src/__tests__/voltarGestorBase.test.ts`.
+
 ### Adicionado — a recusa da nuvem aparece na ficha do ativo
 
 - **Selo de falha e reenvio no detalhe:** `AssetListItem` e o botão global já

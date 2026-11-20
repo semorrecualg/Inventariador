@@ -68,7 +68,7 @@ import ModuleSelector from './components/ModuleSelector';
 import AssetControlModule from './components/AssetControlModule';
 import TenantWorkSelector from './components/TenantWorkSelector';
 import WorkContextSelector from './components/WorkContextSelector';
-import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturnHubToWorkContext, SupabaseUserProfile } from './utils/routingUtils';
+import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturnHubToWorkContext, historicoAposVoltar, SupabaseUserProfile } from './utils/routingUtils';
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
@@ -5105,11 +5105,11 @@ useEffect(() => {
 
   const popScreen = useCallback(() => {
     setHistory(prev => {
-      // Sem histórico para voltar não existe hub de filial válido: sem unidade
-      // selecionada o único destino coerente é a seleção de módulos (antes caía
-      // em MAIN_MENU sem filial, estado inconsistente que disparava a guarda).
-      const fallback = selectedUnit ? AppScreen.MAIN_MENU : AppScreen.MODULE_SELECTION;
-      const newHistory = prev.length > 1 ? prev.slice(0, -1) : [fallback];
+      // Regra única (`historicoAposVoltar`): recua um passo no histórico; sem
+      // histórico, a raiz da trilha é o CONTRATO DE TRABALHO — nunca a tela
+      // legada de módulos (`/modules`), que antecede o contrato e deixaria o
+      // utilizador fora do contexto que já escolheu.
+      const newHistory = historicoAposVoltar(prev);
       const newScreen = newHistory[newHistory.length - 1];
       logger.info(`>>> [Navigation] Popping screen back to: ${newScreen}`);
       if (newScreen !== AppScreen.ASSET_DETAIL) {
@@ -5117,7 +5117,7 @@ useEffect(() => {
       }
       return newHistory;
     });
-  }, [setHistory, selectedUnit]);
+  }, [setHistory]);
 
   // VOLTAR da configuração da unidade (âncora GPS e campanha): a raiz da
   // trilha é o CONTRATO DE TRABALHO. O `popScreen` genérico devolvia a tela
@@ -7441,8 +7441,11 @@ useEffect(() => {
             campaignsCount={campaigns.length}
             currentCampaignId={inventory.currentCampaignId}
           />} />
+          {/* «Voltar» do GESTOR DE BASE: recua no histórico e devolve o hub
+              (`MAIN_MENU`), que reabre o PAINEL COMPLETO de onde se veio; sem
+              histórico ancora no CONTRATO DE TRABALHO. Nunca em `/modules`. */}
           <Route path="/db-manager" element={<DatabaseManagerScreen
-            onBack={() => pushScreen(AppScreen.MODULE_SELECTION)}
+            onBack={popScreen}
             onLocalBaseLoaded={handleLocalBaseLoaded}
           />} />
           <Route path="/dashboard" element={<Dashboard

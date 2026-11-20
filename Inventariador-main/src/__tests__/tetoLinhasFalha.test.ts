@@ -139,7 +139,12 @@ describe('teto das linhas de falha — o expurgo colapsa o histórico', () => {
 
   it('30 linhas do mesmo dia viram 1; dias distintos ficam; o resto expira', async () => {
     const assinatura = assinaturaGravada('PK-1', detalheDoCiclo(1));
-    const base = Date.now() - 30 * DIA;
+    // 30 dias atrás, à meia-noite UTC: a chave do teto é o DIA (UTC), e as 30
+    // linhas (10 min cada, 4h50) têm de caber no mesmo dia. Com a âncora
+    // relativa ao relógio, uma execução depois das 19:10 UTC empurrava as
+    // últimas para o dia seguinte — o teste passava na máquina e falhava na CI
+    // conforme a hora (29 vs 28 linhas consolidadas).
+    const base = Math.floor((Date.now() - 30 * DIA) / DIA) * DIA;
 
     // As 144/dia de antes do teto, num dia antigo.
     for (let i = 0; i < 30; i += 1) {
