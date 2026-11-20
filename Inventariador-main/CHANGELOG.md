@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o pull não regride a coordenada lida no aparelho
+
+- **O ponto voltava atrás:** o merge do pull remontava a linha do ativo a partir
+  da nuvem e a coordenada descia com ela. Um aparelho que já tinha lido o GPS no
+  campo recebia de volta o ponto antigo que a nuvem ainda guardava (envio
+  anterior, outro aparelho) e o mapa de calor voltava ao lugar errado sem
+  ninguém tocar no ativo. O delta tinha o mesmo comportamento.
+- **Decidido por tempo, nas duas grafias:** `utils/assetGps.preservarGpsMaisRecente`
+  repõe `latitude`/`longitude` e `gps_lat`/`gps_lng` quando a leitura local é
+  mais recente — pela data do próprio GPS (`_gps_at`) e, na falta dela, pela
+  leitura/toque (`_dataLeitura`, `_lastUpdated`) contra a da nuvem (`updated_at`
+  incluído). A nuvem mais recente continua a ganhar e, sem data de nenhum dos
+  lados, fica a linha da nuvem. A nuvem sem ponto não apaga a leitura local.
+- **Prova:** `src/__tests__/pullGpsMaisRecente.test.ts` (9 casos): local mais
+  nova vence, nuvem mais nova vence, nuvem sem ponto, local sem ponto válido,
+  ausência de datas, prioridade do `_gps_at` e o `updated_at` da nuvem — mais o
+  contrato de que o merge completo e o delta usam a mesma regra.
+- **Limite:** a decisão é do registo, não de um ponto por campo — se a nuvem
+  tiver uma leitura de GPS legítima mais antiga e o aparelho uma mais nova, fica a
+  do aparelho (que sobe no envio seguinte).
+
 ### Corrigido — o carimbo da falha sai sempre que o registo fica sincronizado
 
 - **Três escritas de sucesso, uma só limpeza:** `markAssetsSynced` (envio em

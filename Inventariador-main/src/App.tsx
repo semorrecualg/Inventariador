@@ -18,6 +18,7 @@ import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, deve
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
 import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
 import { marcarSincronizadoLocal } from './utils/syncFalha';
+import { preservarGpsMaisRecente } from './utils/assetGps';
 import { canAccessDatabaseManager, isAppManagedSession, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
@@ -2773,7 +2774,12 @@ useEffect(() => {
           // abaixo — substituição é segura, jamais perde dados de outro contrato.
           if (incremental && prev.assets.length > 0) {
             const byId = new Map(prev.assets.map(a => [String(a.id), a]));
-            cloudAssets.forEach(a => byId.set(String(a.id), a));
+            // O delta também não regride a coordenada: a linha da nuvem só
+            // substitui o ponto quando é mais recente que a leitura local.
+            cloudAssets.forEach(a => {
+              const local = byId.get(String(a.id));
+              byId.set(String(a.id), local ? { ...a, ...preservarGpsMaisRecente(local, a) } : a);
+            });
             const mergedAssets = Array.from(byId.values());
             const dirtyIds = Array.from(dirtyAssetsRef.current);
             if (dirtyIds.length > 0) {
@@ -2817,9 +2823,13 @@ useEffect(() => {
             // EXCLUSÃO VENCE: com a linha apagada na nuvem não se preserva a
             // pendência — preservá-la reactivava o registo no estado e o envio
             // seguinte tentava subir a cópia de um ativo apagado, em ciclo.
+            // GPS: a linha da nuvem pode trazer um ponto mais antigo do que a
+            // leitura de campo deste aparelho (envio anterior, outro aparelho).
+            // O ponto local mais recente repõe-se por cima, nas duas grafias.
+            const base = { ...cloudAsset, ...preservarGpsMaisRecente(local, cloudAsset) };
             return devePreservarPendencia(cloudAsset, local)
-              ? { ...cloudAsset, ...preservarPendenciaLocal(local, cloudAsset) }
-              : cloudAsset;
+              ? { ...base, ...preservarPendenciaLocal(local, cloudAsset) }
+              : base;
           });
           const dirtyIds = Array.from(dirtyAssetsRef.current);
           
