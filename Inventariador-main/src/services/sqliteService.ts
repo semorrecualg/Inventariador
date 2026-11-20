@@ -47,6 +47,11 @@ export interface DexieAsset {
   // de outra unidade. O registo novo fica com `sn1_recno` nulo, sem duplicar a
   // chave, e o vínculo vive aqui (`rad_` = REGISTRO ADOTADO + sequência).
   rad_recno?: string | null;
+  // Proveniência do ponto do Mapa de Calor (docs/GPS_ANCORA_E_MAPA_DE_CALOR.md
+  // §3.3): o sensor declara `sensor`; `synthetic` nunca entra no mapa.
+  _gps_accuracy?: number | null;
+  _gps_source?: 'sensor' | 'synthetic' | string | null;
+  _gps_at?: string | null;
   _is_synced: number; // 0 or 1
   _is_deleted: number; // 0 or 1
   // 0/1 nas linhas do SQLite; as escritas do Dexie gravam o booleano da
@@ -840,6 +845,13 @@ export class SqliteService {
               gps_lng: gps?.lng ?? null,
               latitude: gps?.lat ?? null,
               longitude: gps?.lng ?? null,
+              // Proveniência do ponto: sem estas três colunas no mapeamento, o
+              // lote (autosave/pull/carga) gravava a coordenada sem saber se era
+              // do sensor — e o mapa de calor não tinha como descartar sintético
+              // nem ruído (ver utils/assetGps.hasMapCoords).
+              _gps_accuracy: asset._gps_accuracy !== undefined && asset._gps_accuracy !== null ? Number(asset._gps_accuracy) : null,
+              _gps_source: asset._gps_source !== undefined && asset._gps_source !== null ? String(asset._gps_source) : null,
+              _gps_at: asset._gps_at !== undefined && asset._gps_at !== null ? String(asset._gps_at) : null,
               currentCampaignId: asset.currentCampaignId !== undefined && asset.currentCampaignId !== null ? String(asset.currentCampaignId) : null
             };
 

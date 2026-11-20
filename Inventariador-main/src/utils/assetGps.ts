@@ -11,7 +11,7 @@
  * primeiro, `gps_lat`/`gps_lng` como contingência (carga de planilha antiga).
  */
 
-import { isValidCoordinate } from './gpsCore';
+import { GPS_ACCURACY, isValidCoordinate } from './gpsCore';
 
 export interface AssetGpsPair {
   lat: number;
@@ -126,3 +126,42 @@ export const preservarGpsMaisRecente = (
   if (tNuvem !== null && tNuvem >= tLocal) return {};
   return repor();
 };
+
+/**
+ * O PONTO QUE PODE ENTRAR NO MAPA DE CALOR
+ * ============================================================================
+ * O mapa filtrava só por `isValidCoordinate` — o que já barra o par `(0,0)` e as
+ * coordenadas fora de faixa, mas deixava passar duas coisas que não são
+ * leitura de campo:
+ *
+ *   - `_gps_source = 'synthetic'` (âncora/admin/sandbox): coordenada de
+ *     contingência, nunca do sensor — plotá-la no mapa dá um ponto que ninguém
+ *     leu;
+ *   - precisão acima de `GPS_ACCURACY.DISCARD` (150 m): ruído de rede/célula.
+ *
+ * Registo legado (sem `_gps_source`, sem `_gps_accuracy`) continua a entrar se
+ * o par for válido — é o caso das cargas antigas de planilha. O ponto pode
+ * estar em `latitude`/`longitude` ou na grafia da nuvem (`gps_lat`/`gps_lng`);
+ * ambos passam por `assetGpsPair`.
+ *
+ * @see docs/GPS_ANCORA_E_MAPA_DE_CALOR.md §2 (item 8) e §3.3
+ */
+export const mapPointOf = (asset: unknown): AssetGpsPair | null => {
+  const ponto = assetGpsPair(asset);
+  if (!ponto) return null;
+  const row = asset as Record<string, unknown>;
+
+  if (String(row._gps_source ?? '').trim().toLowerCase() === 'synthetic') return null;
+
+  const precisao = row._gps_accuracy;
+  if (precisao !== null && precisao !== undefined && precisao !== '') {
+    const acc = Number(precisao);
+    // Precisão declarada e utilizável: acima do limite é ruído de rede.
+    if (Number.isFinite(acc) && acc > GPS_ACCURACY.DISCARD) return null;
+  }
+
+  return ponto;
+};
+
+/** Atalho booleano para os filtros do mapa. */
+export const hasMapCoords = (asset: unknown): boolean => mapPointOf(asset) !== null;

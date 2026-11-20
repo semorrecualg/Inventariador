@@ -5515,6 +5515,13 @@ useEffect(() => {
         // esta actualização os dois pares divergiam no mesmo registo.
         gps_lat: loc.lat,
         gps_lng: loc.lng,
+        // Proveniência do ponto (docs/GPS_ANCORA_E_MAPA_DE_CALOR.md §3.3): é o
+        // que permite ao mapa descartar coordenadas sintéticas e ruído de rede.
+        // `getCurrentLocation` só devolve leitura do sensor — o bypass é
+        // recusado antes por `persistableAssetGps`.
+        _gps_accuracy: loc.accuracy ?? null,
+        _gps_source: 'sensor',
+        _gps_at: new Date().toISOString(),
         _altitude_metros: loc.altitude || 0,
         _id_andar: andar,
         _history: history
@@ -5940,7 +5947,15 @@ useEffect(() => {
         const updates: Asset & Record<string, unknown> = { 
           ...a, 
           ...(manualUpdates || {}), 
-          ...(gpsCoords ? { latitude: gpsCoords.lat, longitude: gpsCoords.lng } : {}),
+          ...(gpsCoords
+            ? {
+                latitude: gpsCoords.lat,
+                longitude: gpsCoords.lng,
+                // `persistableAssetGps` devolve só o par; a leitura é do sensor.
+                _gps_source: 'sensor',
+                _gps_at: new Date().toISOString(),
+              }
+            : {}),
           _origemTransacao: origin // Aplica o código fixo
         };
         
