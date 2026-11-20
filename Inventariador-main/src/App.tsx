@@ -15,6 +15,7 @@ import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
 import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
+import { mesclarConflitoPorCampo } from './utils/mergePorCampo';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
 import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
 import { marcarSincronizadoLocal } from './utils/syncFalha';
@@ -2877,14 +2878,19 @@ useEffect(() => {
                     return;
                   }
 
-                  // Detecção de Conflito: Se o item na nuvem também foi alterado (versão diferente ou conferido por outro)
-                  const isConflict = isConferido(cloudAsset) && 
-                                   cloudAsset._auditor && 
-                                   cloudAsset._auditor !== (user?.email || 'unknown') &&
-                                   cloudAsset._dataLeitura !== localDirty._dataLeitura;
+                  // CONFLITO POR CAMPO (item 24b): a conferência e o ponto de
+                  // GPS decidem-se por tempo, para o trabalho de dois auditores
+                  // no mesmo ativo não se atropelar; o resto dos campos é deste
+                  // aparelho. Antes, a cópia local pendente entrava inteira e a
+                  // conferência feita por outro auditor desaparecia com ela
+                  // (ver `utils/mergePorCampo`).
+                  const porCampo = mesclarConflitoPorCampo(
+                    cloudAsset as unknown as Record<string, unknown>,
+                    localDirty as unknown as Record<string, unknown>
+                  );
 
-                  if (isConflict) {
-                    logger.warn(`>>> [Sync] CONFLITO DETECTADO no ativo ${localDirty.etiqueta}.`);
+                  if (porCampo.conflitos.length > 0) {
+                    logger.warn(`>>> [Sync] Conflito por campo no ativo ${localDirty.etiqueta || id}: ${porCampo.conflitos.join(', ')}.`);
                     logAuditEvent({
                       user_email: user?.email || 'system',
                       action: 'SYNC_CONFLICT',
@@ -2892,13 +2898,13 @@ useEffect(() => {
                       table_name: 'assets',
                       old_data: cloudAsset,
                       new_data: localDirty,
-                      details: `Conflito de sincronização: Item conferido na nuvem por ${cloudAsset._auditor} em ${cloudAsset._dataLeitura}. Prevalecendo alteração local do auditor atual.`,
+                      details: `Conflito de sincronização (${porCampo.conflitos.join(', ')}): a conferência e o ponto ficam com a leitura mais recente — a da nuvem por ${cloudAsset._auditor || 'outro auditor'} em ${cloudAsset._dataLeitura || 'sem data'}, ou a deste aparelho — e os restantes campos ficam com a alteração local pendente do ativo ${localDirty.etiqueta || id}.`,
                       tenantid: user?.tenantid || readSessionTenantId() || ''
                     });
                   }
 
-                  mergedAssets[index] = decisao.registo;
-                  decisaoLocal.push(decisao.registo);
+                  mergedAssets[index] = porCampo.registo as unknown as Asset;
+                  decisaoLocal.push(porCampo.registo as unknown as Asset);
                 } else {
                   mergedAssets.push(localDirty);
                 }
