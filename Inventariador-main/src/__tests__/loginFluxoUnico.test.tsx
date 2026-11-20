@@ -18,7 +18,7 @@
 import 'fake-indexeddb/auto'; // ANTES de qualquer módulo que crie Dexie/localforage
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { DatabaseMode } from '../types';
 import type { User } from '../types';
 
@@ -83,6 +83,21 @@ const renderLogin = (localUsers: User[] = []) => {
       onOpenPrivacyCenter: vi.fn(),
       onUpdateScreen: vi.fn(),
       onShowModal: vi.fn(),
+      isKeyboardVisible: false,
+      onUpdateDatabaseMode: vi.fn(),
+    })
+  );
+};
+
+const renderLoginWithModal = (onShowModal: (config: Record<string, unknown>) => void) => {
+  render(
+    React.createElement(LoginComponent as React.ComponentType<LoginPropsShape>, {
+      users: [],
+      databaseMode: DatabaseMode.SUPABASE,
+      onLogin,
+      onOpenPrivacyCenter: vi.fn(),
+      onUpdateScreen: vi.fn(),
+      onShowModal,
       isKeyboardVisible: false,
       onUpdateDatabaseMode: vi.fn(),
     })
@@ -261,6 +276,33 @@ describe('Login — fluxo único (autentica e entra; filial é escolhida em /con
     // a cópia persistida tem de desaparecer para não reentrar sozinha.
     await waitFor(() => expect(localStorage.getItem(PERSISTED_SESSION_KEY)).toBeNull());
     expect(onLogin).not.toHaveBeenCalled();
+  });
+
+  it('«Redefinir Acesso Local» apaga a cópia persistida e a sessão do separador', async () => {
+    const { PERSISTED_SESSION_KEY, writePersistedSession } = await import('../utils/sessionPersistence');
+    // Estado de quem está dentro e carrega em «Redefinir Acesso» para destravar.
+    writePersistedSession({ email: ADMIN_EMAIL, role: 'ADMIN', tenantid: 'CICOPAL', filial: 'TODAS' } as unknown as User);
+    sessionStorage.setItem('app_current_user', JSON.stringify({ email: ADMIN_EMAIL }));
+    localStorage.setItem('app_users', '[]');
+    localStorage.setItem('app_database_mode', 'SUPABASE');
+    expect(localStorage.getItem(PERSISTED_SESSION_KEY)).not.toBeNull();
+
+    // `location.reload()` não é substituível em jsdom; o jsdom apenas avisa que
+    // a navegação não está implementada, e a limpeza já correu antes disso.
+    const onShowModal = vi.fn();
+    renderLoginWithModal(onShowModal);
+    fireEvent.click(screen.getByText('Redefinir Acesso'));
+
+    expect(onShowModal).toHaveBeenCalledTimes(1);
+    const config = onShowModal.mock.calls[0][0] as { onConfirm: () => Promise<void> };
+    await act(async () => { await config.onConfirm(); });
+
+    expect(supabaseMock.auth.signOut).toHaveBeenCalled();
+    expect(localStorage.getItem(PERSISTED_SESSION_KEY)).toBeNull();
+    expect(sessionStorage.length).toBe(0);
+    // Base e ativos sobrevivem à redefinição.
+    expect(localStorage.getItem('app_database_mode')).toBe('SUPABASE');
+    expect(localStorage.getItem('app_users')).toBeNull();
   });
 
   it('dono global na base Dexie sem tenantid entra (nenhum contrato herdado de sessão antiga)', async () => {

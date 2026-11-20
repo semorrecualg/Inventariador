@@ -31,7 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   novo com cópia local válida → `#/contexto`, sem sessão → `#/login`.
   `src/__tests__/bootPipeline.test.ts` fixa o `InitializeBootPipeline`: sessão
   local mantida, fantasma da nuvem purgado e cópia persistida reposta antes da
-  decisão de arranque.
+  decisão de arranque. `loginFluxoUnico.test.tsx` exercita o botão «Redefinir
+  Acesso» de ponta a ponta: `signOut`, cópia apagada, separador limpo e
+  base/ativos preservados.
 
 ### Corrigido — recarregar já não devolve ao login
 
