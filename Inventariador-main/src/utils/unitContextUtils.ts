@@ -170,6 +170,77 @@ export function decideUnitListAction(input: UnitListInput): UnitListAction {
   return { type: 'fetch', tenant };
 }
 
+/**
+ * CACHE DA LISTA DE FILIAIS (`localStorage`), por escopo utilizador+contrato.
+ *
+ * A lista vivia só em memória (`useState` no `App`): depois de reiniciar sem
+ * rede, o CONTRATO abria vazio num aparelho que já tinha visto as filiais. A
+ * chave carrega o escopo de `unitListScope(email, tenantid)` e a entrada repete
+ * o escopo, para que uma lista de outra conta/contrato nunca seja servida — o
+ * mesmo cuidado que `decideUnitListAction` já aplica em memória.
+ */
+export const UNIT_NAMES_CACHE_PREFIX = 'gbr_unit_names_cache|';
+
+/** Prazo do cache: 1 dia. Depois disto a nuvem volta a ser a fonte. */
+export const UNIT_NAMES_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+export interface UnitNamesCacheEntry {
+  scope: string;
+  names: string[];
+  savedAt: number;
+}
+
+export function unitNamesCacheKey(scope: string): string {
+  return `${UNIT_NAMES_CACHE_PREFIX}${scope}`;
+}
+
+/** Serializa a entrada do cache (quem chama é que escreve no `localStorage`). */
+export function writeUnitNamesCache(
+  scope: string,
+  names: readonly string[],
+  now: number = Date.now()
+): string {
+  const entrada: UnitNamesCacheEntry = { scope, names: [...names], savedAt: now };
+  return JSON.stringify(entrada);
+}
+
+/**
+ * Lê a entrada do cache e devolve `null` quando ela não serve: escopo diferente,
+ * lixo, lista vazia/inválida, carimbo no futuro (relógio errado) ou mais velha
+ * que o prazo. Os nomes saem normalizados pela mesma `normalizeUnitNames` da
+ * nuvem, para os dois caminhos darem a mesma lista.
+ */
+export function readUnitNamesCache(
+  raw: string | null | undefined,
+  scope: string,
+  now: number = Date.now(),
+  ttl: number = UNIT_NAMES_CACHE_TTL_MS
+): UnitNamesCacheEntry | null {
+  if (!raw) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  const entrada = parsed as Partial<UnitNamesCacheEntry> | null;
+  if (!entrada || typeof entrada !== 'object') return null;
+  if (entrada.scope !== scope) return null; // outra conta/contrato no mesmo aparelho
+  if (!Array.isArray(entrada.names) || entrada.names.length === 0) return null;
+  if (!entrada.names.every((nome) => typeof nome === 'string')) return null;
+  if (typeof entrada.savedAt !== 'number' || !Number.isFinite(entrada.savedAt)) return null;
+
+  const idade = now - entrada.savedAt;
+  if (idade < 0 || idade > ttl) return null;
+
+  const names = normalizeUnitNames(entrada.names);
+  if (names.length === 0) return null;
+
+  return { scope, names, savedAt: entrada.savedAt };
+}
+
 /** Sentinelas que nunca são filial. */
 const UNIT_SENTINELS = new Set(['', 'TODAS', 'NULL', 'UNDEFINED', '0', 'DEFAULT', 'SEM FILIAL']);
 
