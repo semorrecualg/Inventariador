@@ -51,6 +51,8 @@ const renderSelector = (params: {
   user?: Partial<User>;
   contexts?: Array<{ tenantid: string; filial: string }>;
   initialSelection?: WorkContextPreselection | null;
+  /** `unitsByContract` do App: catálogo vivo + lista da nuvem. */
+  availableFiliais?: Record<string, string[]>;
 }) => {
   const onSelect = vi.fn();
   const onLogout = vi.fn();
@@ -65,7 +67,8 @@ const renderSelector = (params: {
         ],
       onSelect,
       onLogout,
-      initialSelection: params.initialSelection ?? null
+      initialSelection: params.initialSelection ?? null,
+      availableFiliais: params.availableFiliais
     })
   );
   return { onSelect, onLogout };
@@ -173,6 +176,45 @@ describe('CONTRATO DE TRABALHO · INVENTARIADOR exige filial', () => {
     expect(onSelect).toHaveBeenCalledWith(
       { tenantid: TENANT, filial: '' },
       AppModule.ASSET_CONTROL
+    );
+  });
+});
+
+describe('CONTRATO DE TRABALHO · as filiais do contrato vindas da nuvem', () => {
+  afterEach(() => cleanup());
+
+  // Nomes como `fetchUnitNamesFromCloud` os devolve: só a coluna `filial` do
+  // contrato, já normalizada (UPPER/trim, sem sentinelas, ordenada).
+  const FILIAIS_DA_NUVEM = [
+    '010101 CICOPAL GO',
+    '010105 CICOPAL PA',
+    '010201 SNACKS PA',
+    '010301 FEIRA BOA BA',
+    '010401 CARPER BA'
+  ];
+
+  it('base local sem o contrato: o contrato lista as 5 filiais da nuvem e o INVENTARIADOR abre', () => {
+    const { onSelect } = renderSelector({
+      user: { filial: '', units: [] },
+      contexts: [{ tenantid: TENANT, filial: '' }],
+      availableFiliais: { [TENANT]: FILIAIS_DA_NUVEM }
+    });
+
+    // A lista não fica vazia a dizer «Nenhuma filial na base deste contrato»:
+    // as filiais do contrato chegam pelo catálogo vivo (lista da nuvem).
+    expect(screen.queryByText(/Nenhuma filial na base deste contrato/i)).toBeNull();
+    expect(screen.getByTestId('filial-options').children).toHaveLength(5);
+    FILIAIS_DA_NUVEM.forEach(filial => expect(screen.getByText(filial)).toBeTruthy());
+
+    // A primeira da lista entra como filial escolhida e é ela que abre o
+    // INVENTARIADOR.
+    expect(filialCard(FILIAIS_DA_NUVEM[0]).getAttribute('aria-pressed')).toBe('true');
+    chooseModule('INVENTARIADOR');
+    expect(accessButton().disabled).toBe(false);
+    fireEvent.click(accessButton());
+    expect(onSelect).toHaveBeenCalledWith(
+      { tenantid: TENANT, filial: FILIAIS_DA_NUVEM[0] },
+      AppModule.INVENTORY
     );
   });
 });

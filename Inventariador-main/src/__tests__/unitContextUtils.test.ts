@@ -294,3 +294,69 @@ describe('hasFiliaisLocaisDoContrato — ter base não é ter as filiais do cont
     expect(hasFiliaisLocaisDoContrato(null, { CICOPAL: ['010101 CICOPAL GO'] }, [])).toBe(false);
   });
 });
+
+describe('CONTRATO DE TRABALHO — base local sem o contrato pede as filiais à nuvem', () => {
+  // Cenário do aparelho do dono: base local só com o contrato de demonstração
+  // e sessão no CICOPAL. As 5 filiais do CICOPAL existem apenas na nuvem — é de
+  // lá que o contrato tem de as listar. Aqui as duas peças da decisão são
+  // exercitadas juntas, na ordem em que o App as chama.
+  const scope = unitListScope('semorr@gmail.com', 'CICOPAL');
+  const baseDeOutroContrato = { DEMO_DEFAULT: ['MATRIZ'] };
+  const unidadesSqlDeOutroContrato = [{ tenantid: 'DEMO_DEFAULT', filial: 'MATRIZ' }];
+  /** Linhas de `assets?select=filial&tenantid=eq.CICOPAL` (5 unidades reais). */
+  const filiaisDaNuvem = [
+    { filial: '010101 CICOPAL GO' },
+    { filial: '010105 CICOPAL PA' },
+    { filial: '010201 SNACKS PA' },
+    { filial: '010301 FEIRA BOA BA' },
+    { filial: '010401 CARPER BA' }
+  ];
+
+  it('sem filial do contrato na base local, a decisão manda consultar a nuvem', () => {
+    const hasLocalBase = hasFiliaisLocaisDoContrato(
+      'CICOPAL',
+      baseDeOutroContrato,
+      unidadesSqlDeOutroContrato
+    );
+    expect(hasLocalBase).toBe(false);
+
+    expect(
+      decideUnitListAction({
+        storedScope: null,
+        scope,
+        tenantid: 'CICOPAL',
+        isLocalDatabase: false,
+        online: true,
+        hasLocalBase
+      })
+    ).toEqual({ type: 'fetch', tenant: 'CICOPAL' });
+  });
+
+  it('os nomes devolvidos pela nuvem são as 5 filiais reais do contrato', () => {
+    expect(normalizeUnitNames(filiaisDaNuvem)).toEqual([
+      '010101 CICOPAL GO',
+      '010105 CICOPAL PA',
+      '010201 SNACKS PA',
+      '010301 FEIRA BOA BA',
+      '010401 CARPER BA'
+    ]);
+  });
+
+  it('com as filiais do contrato já na base local, a nuvem não é consultada', () => {
+    const hasLocalBase = hasFiliaisLocaisDoContrato(
+      'CICOPAL',
+      { CICOPAL: ['010101 CICOPAL GO'] },
+      []
+    );
+    expect(
+      decideUnitListAction({
+        storedScope: null,
+        scope,
+        tenantid: 'CICOPAL',
+        isLocalDatabase: false,
+        online: true,
+        hasLocalBase
+      })
+    ).toEqual({ type: 'idle' });
+  });
+});
