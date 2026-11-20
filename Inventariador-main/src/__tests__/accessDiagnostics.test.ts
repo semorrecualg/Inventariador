@@ -9,6 +9,7 @@ import {
   decideFiliaisOrigem,
   formatHoraDaConsulta,
   minutosDesde,
+  sessaoPersistidaNasChaves,
   type AccessDiagnosticInput
 } from '../utils/accessDiagnostics';
 
@@ -60,6 +61,7 @@ describe('buildAccessDiagnostic — o texto que o dono copia', () => {
     expect(diag.origem).toBe('lista da nuvem');
     expect(diag.texto).toContain('Contrato: CICOPAL');
     expect(diag.texto).toContain('Modo: SUPABASE');
+    expect(diag.texto).toContain('Sessão: não persistida (recarregar volta ao login)');
     expect(diag.texto).toContain('Filiais: lista da nuvem (5)');
     expect(diag.texto).toContain('Nomes consultados: 13:42 (há 2 min)');
     expect(diag.texto).toContain('Último erro de rede: nenhum');
@@ -95,6 +97,22 @@ describe('buildAccessDiagnostic — o texto que o dono copia', () => {
     expect(diag.texto).toContain('Contrato: SEM CONTRATO');
     expect(diag.texto).toContain('Filiais: nenhuma (nem base local, nem nuvem, nem cache)');
     expect(diag.texto).toContain('Último erro de rede: Failed to fetch (unit_configs)');
+  });
+});
+
+describe('sessaoPersistidaNasChaves — recarregar volta ao login?', () => {
+  it('reconhece a chave do supabase-js', () => {
+    expect(
+      sessaoPersistidaNasChaves(['app_excluded_accounts', 'sb-mpulmonxbcpqjxouzvuc-auth-token'])
+    ).toBe(true);
+  });
+
+  it('sem chave sb-* (o achado da prova) diz que não há sessão persistida', () => {
+    expect(sessaoPersistidaNasChaves(['gbr_unit_names_cache|semorr@gmail.com|CICOPAL'])).toBe(false);
+  });
+
+  it('não confunde outras chaves sb- com a sessão', () => {
+    expect(sessaoPersistidaNasChaves(['sb-mpulmonxbcpqjxouzvuc-theme'])).toBe(false);
   });
 });
 

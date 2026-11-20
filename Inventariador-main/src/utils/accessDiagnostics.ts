@@ -34,6 +34,8 @@ export interface AccessDiagnosticInput {
   nomesConsultadosEm?: number | null;
   /** Última falha de rede registada (mensagem curta), se houver. */
   ultimoErroDeRede?: string | null;
+  /** Há sessão do supabase-js gravada no aparelho? Sem ela, recarregar cai no login. */
+  sessaoPersistida?: boolean;
   /** Agora (ms) — injectável para os testes. */
   agora?: number;
 }
@@ -79,6 +81,15 @@ export function minutosDesde(ms: number | null | undefined, agora: number = Date
 }
 
 /**
+ * Sessão persistida = chave do supabase-js no `localStorage`
+ * (`sb-<ref>-auth-token`). Sem ela, recarregar a app cai em `#/login` mesmo com
+ * rede — foi o que impediu a prova de arranque a frio sem nuvem.
+ */
+export function sessaoPersistidaNasChaves(chaves: readonly string[]): boolean {
+  return chaves.some((chave) => chave.startsWith('sb-') && chave.includes('auth-token'));
+}
+
+/**
  * Monta as linhas do diagnóstico e o bloco de texto copiável.
  *
  * Deliberadamente curto: contrato, modo, contextos, **origem das filiais**,
@@ -95,6 +106,10 @@ export function buildAccessDiagnostic(input: AccessDiagnosticInput): AccessDiagn
   const linhas: AccessDiagnosticLine[] = [
     { rotulo: 'Contrato', valor: contrato },
     { rotulo: 'Modo', valor: input.modo },
+    {
+      rotulo: 'Sessão',
+      valor: input.sessaoPersistida ? 'persistida' : 'não persistida (recarregar volta ao login)'
+    },
     { rotulo: 'Contextos', valor: String(input.contextos) },
     {
       rotulo: 'Filiais',
