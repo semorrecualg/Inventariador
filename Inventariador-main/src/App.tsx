@@ -5725,6 +5725,7 @@ useEffect(() => {
     const restoredAsset: Asset = {
       ...assetToRestore,
       _is_deleted: false,
+      ...marcarAlteracaoLocal(),
       _version: (assetToRestore._version || 1) + 1,
       _history: [
         ...(assetToRestore._history || []),
@@ -5742,6 +5743,11 @@ useEffect(() => {
       assets: prev.assets.map(a => String(a.id) === String(assetId) ? restoredAsset : a),
       lastUpdated: new Date().toISOString()
     }));
+
+    // O restauro também tem de sobreviver ao reinício: sem esta gravação o
+    // registo voltava `_is_deleted = 1` do disco e o ativo continuava apagado
+    // aqui, mesmo depois de restaurado na nuvem.
+    await sqliteService.bulkInsertAssets([restoredAsset]);
 
     if (databaseMode === DatabaseMode.SUPABASE) {
       await syncAssetsToCloud([restoredAsset], user?.tenantid || '');
@@ -5782,6 +5788,9 @@ useEffect(() => {
     const deletedAsset: Asset = {
       ...assetToDelete,
       _is_deleted: true,
+      // Toque deste aparelho: fica `_is_synced = 0` até a nuvem aceitar a
+      // exclusão, para a fila de fundo voltar a tentar se este envio falhar.
+      ...marcarAlteracaoLocal(),
       _version: (assetToDelete._version || 1) + 1,
       _dataLeitura: new Date().toISOString(),
       _auditor: user?.email || 'unknown'
@@ -5800,11 +5809,15 @@ useEffect(() => {
     setIsProcessing(true);
     try {
       // 1. TENTA SALVAR NO BANCO PRIMEIRO
-      if (databaseMode === DatabaseMode.INTERNAL) {
-        // No modo interno, salvamos o registro marcado como deletado no SQLite
-        await sqliteService.bulkInsertAssets([deletedAsset]);
-      } else {
-        // No modo Supabase, sincronizamos o flag _is_deleted
+      // A gravação local acontece nos DOIS modos: o `saveInventory` seguinte
+      // grava só os ativos que ficaram na lista e não apaga esta linha. Sem
+      // ela, o registo voltava `_is_deleted = 0` do disco ao reiniciar e o
+      // envio seguinte ressuscitava-o na nuvem.
+      await sqliteService.bulkInsertAssets([deletedAsset]);
+
+      if (databaseMode !== DatabaseMode.INTERNAL) {
+        // Sobe a exclusão (`is_deleted`) para os outros aparelhos a receberem
+        // no pull delta.
         await syncAssetsToCloud([deletedAsset], user?.tenantid);
         
         // Log de Auditoria Global

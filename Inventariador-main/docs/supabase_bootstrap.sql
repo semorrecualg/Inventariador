@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS public.assets (
   gps_lat           numeric,
   gps_lng           numeric,
   currentCampaignId text,
+  is_deleted        boolean NOT NULL DEFAULT false,
   created_at        timestamptz DEFAULT now(),
   updated_at        timestamptz DEFAULT now()
 );
@@ -96,6 +97,14 @@ ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS gps_lat numeric(18,10);
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS gps_lng numeric(18,10);
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS "DE_PARA" text;
 ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS "currentCampaignId" text;
+
+-- EXCLUSÃO (SOFT DELETE): a flag local `_is_deleted` viaja no payload como
+-- `is_deleted`. Sem esta coluna a exclusão nunca saía do aparelho: o pull
+-- devolvia a linha ativa e o ativo ressuscitava. Numa base que já existe, o
+-- mesmo bloco vive em scripts/assets-exclusao.sql.
+ALTER TABLE public.assets ADD COLUMN IF NOT EXISTS is_deleted boolean DEFAULT false;
+UPDATE public.assets SET is_deleted = false WHERE is_deleted IS NULL;
+ALTER TABLE public.assets ALTER COLUMN is_deleted SET DEFAULT false;
 
 -- SRE ISOLAMENTO DE CONTRATO: a unicidade da chave de origem é POR TENANT —
 -- a mesma chave primária pode existir legitimamente em contratos diferentes
