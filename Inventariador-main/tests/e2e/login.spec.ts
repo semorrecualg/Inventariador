@@ -92,8 +92,11 @@ test.describe('Login Flow', () => {
       const sessionUser = await page.evaluate(() => sessionStorage.getItem('app_current_user'));
       expect(sessionUser).not.toBeNull();
       const parsed = JSON.parse(sessionUser!);
-      expect(parsed.username).toBe('admin');
+      // O mestre local assume o perfil do dono global (VITE_ADMIN_EMAIL), por
+      // isso o username vem do email — o que importa é a sessão ser de ADMIN.
+      expect(String(parsed.username || '').length).toBeGreaterThan(0);
       expect(parsed.email).toBeTruthy();
+      expect(parsed.role).toBe('ADMIN');
     });
   });
 
