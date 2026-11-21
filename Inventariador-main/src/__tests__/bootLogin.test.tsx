@@ -31,9 +31,35 @@ const { supabaseStub } = vi.hoisted(() => ({
   }
 }));
 
+const { bootPlanSpy } = vi.hoisted(() => ({ bootPlanSpy: vi.fn() }));
+
+// O arranque decide a filial do pull por `resolveBootPullPlan`. Espiar essa
+// função dá um sinal estável de que a decisão correu — ao contrário do texto
+// de um log, que se reformula sem mudar comportamento.
+vi.mock('../utils/unitContextUtils', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    resolveBootPullPlan: (...args: unknown[]) => {
+      bootPlanSpy(...args);
+      return (actual.resolveBootPullPlan as (...a: unknown[]) => unknown)(...args);
+    }
+  };
+});
+
 vi.mock('../services/supabaseService', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, supabase: supabaseStub };
+  return {
+    ...actual,
+    supabase: supabaseStub,
+    // Sem nuvem a sério, o boot rebaixava para INTERNAL e o Boot Loader (o
+    // sítio onde o arranque podia escrever UNIT_SELECTION) nem corria.
+    getInitialDatabaseMode: () => 'SUPABASE',
+    // Calculado no import a partir das credenciais: sem `.env` (CI) vale
+    // `true` e o login forçava INTERNAL, onde o Boot Loader não corre.
+    isInternalMode: false,
+    testSupabaseConnection: async () => true
+  };
 });
 
 // jsdom não tem autenticador: a política abre o fallback explícito — é o passo
@@ -96,7 +122,9 @@ beforeEach(async () => {
   // Modo nuvem (como no browser): o Boot Loader corre no arranque.
   localStorage.setItem('app_database_mode', 'SUPABASE');
   historicoEscrito = [];
+  bootPlanSpy.mockClear();
   window.location.hash = '';
+  delete (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch;
 
   await localDb.users.clear();
   await localDb.users.add(GESTOR as never);
@@ -145,12 +173,21 @@ describe('Login novo — LOGIN → biometria → CONTRATO', () => {
       expect(window.location.hash).toBe(`#${screenToPath[AppScreen.WORK_CONTEXT_SELECTION]}`);
     }, { timeout: 8000 });
 
+    // O Boot Loader corre depois do login e é quem podia empurrar a unidade:
+    // espera pela decisão da filial e deixa a escrita assentar.
+    await waitFor(() => {
+      expect(bootPlanSpy).toHaveBeenCalled();
+    }, { timeout: 8000 });
+    await new Promise((r) => setTimeout(r, 300));
+
     const pilhas = historicoEscrito.map((valor) => JSON.parse(valor) as AppScreen[]);
     const destinos = pilhas.map((pilha) => pilha[pilha.length - 1]);
     expect(destinos).toContain(AppScreen.BIOMETRIC_REGISTRATION);
     expect(destinos).toContain(AppScreen.WORK_CONTEXT_SELECTION);
-    expect(destinos).not.toContain(AppScreen.UNIT_SELECTION);
-    expect(pilhas.map((pilha) => pilha[0])).not.toContain(AppScreen.UNIT_SELECTION);
+    // Qualquer escrita do arranque — de qualquer ecrã, em qualquer posição da
+    // pilha — não pode conter UNIT_SELECTION. É o que falha se o Boot Loader
+    // voltar a empurrar a unidade.
+    expect(pilhas.flat()).not.toContain(AppScreen.UNIT_SELECTION);
 
     // O `init` do App ainda tem promessas por resolver; sem esta pausa ele
     // chama `setIsDataLoaded` depois de o jsdom fechar (EnvironmentTeardownError).
