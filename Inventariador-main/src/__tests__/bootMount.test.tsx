@@ -6,11 +6,10 @@
 // `localStorage`; o `InitializeBootPipeline` corre DEPOIS da primeira
 // renderização. Este teste garante que:
 //   1. a primeira decisão de ecrã concorda com a sessão reposta;
-//   2. o login não chega a ser desenhado — nem por um instante.
-//
-// Nota: depois do arranque, o roteamento pós-login legado pode seguir para a
-// escolha de unidade (dados locais no jsdom); o que se fixa aqui é o arranque,
-// não esse encaminhamento.
+//   2. o login não chega a ser desenhado — nem por um instante;
+//   3. o destino não depende de ser o dono nem da base local (o `/unit`
+//      intermitente vinha da blindagem de base vazia a apanhar o percurso de
+//      entrada; ver `bootRedirects.test.ts`).
 // ============================================================================
 import 'fake-indexeddb/auto'; // Dexie precisa do IndexedDB antes do App montar
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -23,13 +22,22 @@ import { screenToPath } from '../router/routes';
 import { AppScreen } from '../types';
 import type { User } from '../types';
 
-const ADMIN = {
-  email: 'semorr@gmail.com',
-  username: 'semorr',
-  name: 'Administrador',
+// O dono global (ADMIN_EMAIL de `.env.test`) e um admin que NÃO é o dono — era
+// este último que, com base vazia, acabava em `/unit` num ambiente de teste.
+const DONO = {
+  email: 'admin@example.com',
+  username: 'admin',
+  name: 'Dono Global',
   role: 'ADMIN',
   tenantid: 'CICOPAL',
   filial: 'TODAS'
+} as User;
+
+const ADMIN_NAO_DONO = {
+  ...DONO,
+  email: 'gestor@cliente.com',
+  username: 'gestor',
+  name: 'Gestor do Contrato'
 } as User;
 
 // O cliente Supabase abre realtime assim que é criado (no import do App); em
@@ -71,7 +79,7 @@ beforeEach(() => {
   historicoEscrito = [];
   window.location.hash = '';
 
-  // Toda a escrita do histórico, para provar que nunca foi para LOGIN.
+  // Toda a escrita do histórico, para provar por onde o arranque passou.
   const setItemOriginal = Storage.prototype.setItem;
   setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
     this: Storage,
@@ -93,9 +101,12 @@ afterEach(() => {
 });
 
 describe('Arranque com cópia persistida', () => {
-  it('monta já em CONTRATO, restaura a mesma sessão e nunca desenha o login', async () => {
+  it.each([
+    ['dono global', DONO],
+    ['admin que não é o dono', ADMIN_NAO_DONO]
+  ])('%s monta já em CONTRATO, restaura a mesma sessão e nunca passa pelo login nem pela unidade', async (_nome, perfil) => {
     // Separador novo: só a cópia com prazo em localStorage.
-    writePersistedSession(ADMIN, Date.now());
+    writePersistedSession(perfil, Date.now());
     expect(sessionStorage.getItem('app_current_user')).toBeNull();
 
     observer = new MutationObserver(registarTexto);
@@ -107,28 +118,28 @@ describe('Arranque com cópia persistida', () => {
     // 1. Primeira decisão: o ecrã inicial é o CONTRATO e a sessão é a reposta.
     expect(window.location.hash).toBe(`#${screenToPath[AppScreen.WORK_CONTEXT_SELECTION]}`);
     const sessaoInicial = JSON.parse(sessionStorage.getItem('app_current_user') || '{}') as User;
-    expect(sessaoInicial.email).toBe(ADMIN.email);
-    expect(sessaoInicial.tenantid).toBe(ADMIN.tenantid);
+    expect(sessaoInicial.email).toBe(perfil.email);
+    expect(sessaoInicial.tenantid).toBe(perfil.tenantid);
     expect(sessionStorage.getItem('gbr_session_origin')).toBe('APP');
 
-    // O pipeline corre depois; nada pode desviar para o login.
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    // O pipeline e os efeitos de boot correm depois; nada pode desviar.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     registarTexto();
     observer.disconnect();
     observer = null;
 
-    expect(window.location.hash).not.toBe('#/login');
+    expect(window.location.hash).toBe(`#${screenToPath[AppScreen.WORK_CONTEXT_SELECTION]}`);
     expect(sessionStorage.getItem('app_current_user')).not.toBeNull();
     expect(localStorage.getItem(PERSISTED_SESSION_KEY)).not.toBeNull();
 
-    // 2. Nenhuma escrita do histórico ancorou no login.
+    // 2. Nenhuma escrita do histórico ancorou no login nem na unidade.
     expect(historicoEscrito.length).toBeGreaterThan(0);
-    const destinos = historicoEscrito.map((valor) => {
-      const pilha = JSON.parse(valor) as AppScreen[];
-      return pilha[pilha.length - 1];
-    });
+    const pilhas = historicoEscrito.map((valor) => JSON.parse(valor) as AppScreen[]);
+    const destinos = pilhas.map((pilha) => pilha[pilha.length - 1]);
     expect(destinos).not.toContain(AppScreen.LOGIN);
-    expect(historicoEscrito.map((valor) => (JSON.parse(valor) as AppScreen[])[0])).not.toContain(AppScreen.LOGIN);
+    expect(destinos).not.toContain(AppScreen.UNIT_SELECTION);
+    expect(pilhas.map((pilha) => pilha[0])).not.toContain(AppScreen.LOGIN);
+    expect(pilhas.map((pilha) => pilha[0])).not.toContain(AppScreen.UNIT_SELECTION);
 
     // 3. E o ecrã de entrada nunca chegou a ser desenhado.
     expect(textosVistos.some((texto) => texto.includes('ACESSAR SISTEMA'))).toBe(false);
