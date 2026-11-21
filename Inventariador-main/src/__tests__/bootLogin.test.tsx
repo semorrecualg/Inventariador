@@ -31,6 +31,22 @@ const { supabaseStub } = vi.hoisted(() => ({
   }
 }));
 
+const { bootPlanSpy } = vi.hoisted(() => ({ bootPlanSpy: vi.fn() }));
+
+// O arranque decide a filial do pull por `resolveBootPullPlan`. Espiar essa
+// função dá um sinal estável de que a decisão correu — ao contrário do texto
+// de um log, que se reformula sem mudar comportamento.
+vi.mock('../utils/unitContextUtils', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    resolveBootPullPlan: (...args: unknown[]) => {
+      bootPlanSpy(...args);
+      return (actual.resolveBootPullPlan as (...a: unknown[]) => unknown)(...args);
+    }
+  };
+});
+
 vi.mock('../services/supabaseService', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
@@ -97,7 +113,6 @@ const GESTOR = {
 let historicoEscrito: string[] = [];
 let observer: MutationObserver | null = null;
 let setItemSpy: ReturnType<typeof vi.spyOn> | null = null;
-let avisosBoot: string[] = [];
 
 beforeEach(async () => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -107,12 +122,9 @@ beforeEach(async () => {
   // Modo nuvem (como no browser): o Boot Loader corre no arranque.
   localStorage.setItem('app_database_mode', 'SUPABASE');
   historicoEscrito = [];
-  avisosBoot = [];
+  bootPlanSpy.mockClear();
   window.location.hash = '';
-  vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
-    const texto = args.map(String).join(' ');
-    if (texto.includes('[Boot Loader]')) avisosBoot.push('Boot Loader');
-  });
+  delete (window as unknown as { __isImportingBatch?: boolean }).__isImportingBatch;
 
   await localDb.users.clear();
   await localDb.users.add(GESTOR as never);
@@ -162,10 +174,9 @@ describe('Login novo — LOGIN → biometria → CONTRATO', () => {
     }, { timeout: 8000 });
 
     // O Boot Loader corre depois do login e é quem podia empurrar a unidade:
-    // espera pelo marcador que ele deixa antes de decidir e deixa a escrita
-    // assentar.
+    // espera pela decisão da filial e deixa a escrita assentar.
     await waitFor(() => {
-      expect(avisosBoot).toContain('Boot Loader');
+      expect(bootPlanSpy).toHaveBeenCalled();
     }, { timeout: 8000 });
     await new Promise((r) => setTimeout(r, 300));
 
