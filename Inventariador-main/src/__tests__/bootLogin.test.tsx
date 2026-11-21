@@ -33,7 +33,14 @@ const { supabaseStub } = vi.hoisted(() => ({
 
 vi.mock('../services/supabaseService', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, supabase: supabaseStub };
+  return {
+    ...actual,
+    supabase: supabaseStub,
+    // Sem nuvem a sério, o boot rebaixava para INTERNAL e o Boot Loader (o
+    // sítio onde o arranque podia escrever UNIT_SELECTION) nem corria.
+    getInitialDatabaseMode: () => 'SUPABASE',
+    testSupabaseConnection: async () => true
+  };
 });
 
 // jsdom não tem autenticador: a política abre o fallback explícito — é o passo
@@ -87,6 +94,7 @@ const GESTOR = {
 let historicoEscrito: string[] = [];
 let observer: MutationObserver | null = null;
 let setItemSpy: ReturnType<typeof vi.spyOn> | null = null;
+let avisosBoot: string[] = [];
 
 beforeEach(async () => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -96,7 +104,12 @@ beforeEach(async () => {
   // Modo nuvem (como no browser): o Boot Loader corre no arranque.
   localStorage.setItem('app_database_mode', 'SUPABASE');
   historicoEscrito = [];
+  avisosBoot = [];
   window.location.hash = '';
+  vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+    const texto = args.map(String).join(' ');
+    if (texto.includes('[Boot Loader]')) avisosBoot.push('Boot Loader');
+  });
 
   await localDb.users.clear();
   await localDb.users.add(GESTOR as never);
@@ -145,12 +158,22 @@ describe('Login novo — LOGIN → biometria → CONTRATO', () => {
       expect(window.location.hash).toBe(`#${screenToPath[AppScreen.WORK_CONTEXT_SELECTION]}`);
     }, { timeout: 8000 });
 
+    // O Boot Loader corre depois do login e é quem podia empurrar a unidade:
+    // espera pelo marcador que ele deixa antes de decidir e deixa a escrita
+    // assentar.
+    await waitFor(() => {
+      expect(avisosBoot).toContain('Boot Loader');
+    }, { timeout: 8000 });
+    await new Promise((r) => setTimeout(r, 300));
+
     const pilhas = historicoEscrito.map((valor) => JSON.parse(valor) as AppScreen[]);
     const destinos = pilhas.map((pilha) => pilha[pilha.length - 1]);
     expect(destinos).toContain(AppScreen.BIOMETRIC_REGISTRATION);
     expect(destinos).toContain(AppScreen.WORK_CONTEXT_SELECTION);
-    expect(destinos).not.toContain(AppScreen.UNIT_SELECTION);
-    expect(pilhas.map((pilha) => pilha[0])).not.toContain(AppScreen.UNIT_SELECTION);
+    // Qualquer escrita do arranque — de qualquer ecrã, em qualquer posição da
+    // pilha — não pode conter UNIT_SELECTION. É o que falha se o Boot Loader
+    // voltar a empurrar a unidade.
+    expect(pilhas.flat()).not.toContain(AppScreen.UNIT_SELECTION);
 
     // O `init` do App ainda tem promessas por resolver; sem esta pausa ele
     // chama `setIsDataLoaded` depois de o jsdom fechar (EnvironmentTeardownError).

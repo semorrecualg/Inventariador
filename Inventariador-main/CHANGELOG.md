@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sem autenticador → dispensa explícita) e confirma que o perfil sem filial e
   sem `app_last_work_context` aterra no CONTRATO: o histórico escrito só tem
   `BIOMETRIC_REGISTRATION` e `WORK_CONTEXT_SELECTION`, nunca `UNIT_SELECTION`.
+  O teste força o modo nuvem (sem ele o boot rebaixa para INTERNAL e o Boot
+  Loader não corre), espera que o Boot Loader decida e falha se **qualquer**
+  escrita do arranque contiver `UNIT_SELECTION` — é a rede contra o regresso do
+  `/unit`.
 - **Saídas do Login:** «Redefinir Acesso Local» e o bloqueio de perfil sem
   contrato passam pelo mesmo `resetLocalAccessStorage()`, que apaga a cópia
   persistida — antes quem saía por ali voltava a entrar sozinho. Só perfis de
