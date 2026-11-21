@@ -85,6 +85,7 @@ import {
 import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato, unitNamesCacheKey, readUnitNamesCache, writeUnitNamesCache } from './utils/unitContextUtils';
 import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
 import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
+import { shouldForceUnitOnEmptyBase } from './utils/bootRedirects';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -3527,9 +3528,14 @@ useEffect(() => {
           try {
           const bootFilial = resolveBootPullPlan(user?.filial, readLastWorkContext(), user?.tenantid).unit;
           if (!bootFilial) {
-            logger.warn('>>> [Boot Loader] Sem filial no perfil e sem última escolha: contrato inteiro NÃO é baixado. Exigindo a escolha da filial.');
+            // A filial é escolhida no CONTRATO DE TRABALHO (fluxo único de
+            // acesso). Empurrar a UNIDADE OPERACIONAL aqui fazia o arranque
+            // depender de haver (ou não) uma última escolha guardada: com
+            // `app_last_work_context` o pull corria e o ecrã ficava no
+            // contrato; sem ela, o mesmo arranque desviava para `/unit`.
+            logger.warn('>>> [Boot Loader] Sem filial no perfil e sem última escolha: contrato inteiro NÃO é baixado. A filial é escolhida no contrato de trabalho.');
             setHistoryRef.current(prev => (
-              prev.includes(AppScreen.UNIT_SELECTION) ? prev : [...prev, AppScreen.UNIT_SELECTION]
+              prev[prev.length - 1] === AppScreen.WORK_CONTEXT_SELECTION ? prev : [...prev, AppScreen.WORK_CONTEXT_SELECTION]
             ));
             return;
           }
@@ -4268,32 +4274,9 @@ useEffect(() => {
         setIsDatabaseEmpty(isReallyEmpty);
         
         const isBypass = user?.email?.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase();
-        if (isReallyEmpty && !isBypass) {
-          const exemptScreens = [
-            AppScreen.LOGIN, 
-            AppScreen.REGISTER, 
-            AppScreen.CHANGE_PASSWORD,
-            AppScreen.DATABASE_MANAGER,
-            AppScreen.UNIT_SELECTION,
-            AppScreen.UNIT_CONFIGURATOR,
-            AppScreen.CAMPAIGN_MANAGEMENT,
-            AppScreen.MODULE_SELECTION,
-            AppScreen.ASSET_CONTROL_HOME,
-            AppScreen.TENANT_WORK_SELECTION,
-            // Gestão de acessos NÃO depende de base carregada — é justamente o
-            // passo anterior à primeira carga (criar o auditor do contrato).
-            // Sem esta exceção, o dono era expulso da tela com a base vazia.
-            AppScreen.USER_MANAGEMENT,
-            // Telas do fluxo pós-login (Etapa 3/4): base vazia aqui é resolvida
-            // pelo próprio fluxo (seletor/sync/carga), nunca por redirect forçado.
-            AppScreen.MAIN_MENU,
-            AppScreen.WORK_CONTEXT_SELECTION
-          ];
-          
-          if (!exemptScreens.includes(screen)) {
-            logger.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Seleção de Unidade.");
-            pushScreen(AppScreen.UNIT_SELECTION);
-          }
+        if (shouldForceUnitOnEmptyBase(screen, { vazio: isReallyEmpty, dono: isBypass })) {
+          logger.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Seleção de Unidade.");
+          pushScreen(AppScreen.UNIT_SELECTION);
         }
       } catch (e) {
         logger.error(">>> [BLINDAGEM] Erro ao checar integridade de carga na inicialização:", e);

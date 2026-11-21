@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   monta o `App` com só a cópia em `localStorage` e prova que a primeira rota é
   `#/contexto`, que a sessão reposta é a mesma e que o login nunca é escrito
   nem desenhado.
+- **Arranque determinístico:** o Boot Loader, quando o perfil não fixa filial e
+  não há última escolha guardada, empurrava a UNIDADE OPERACIONAL sobre o
+  CONTRATO — o mesmo arranque acabava em `/contexto` ou `/unit` conforme
+  existisse `app_last_work_context` e filiais na base. Passa a manter/levar ao
+  CONTRATO, onde a filial é escolhida. A «blindagem de base vazia» virou regra
+  explícita (`shouldForceUnitOnEmptyBase`) e deixa de apanhar o passo
+  biométrico do pós-login. Testes: `bootRedirects.test.ts` (regra) e
+  `bootMount.test.tsx` (dono e não-dono: rota final CONTRATO, sem `/unit` nem
+  login no histórico).
 - **Saídas do Login:** «Redefinir Acesso Local» e o bloqueio de perfil sem
   contrato passam pelo mesmo `resetLocalAccessStorage()`, que apaga a cópia
   persistida — antes quem saía por ali voltava a entrar sozinho. Só perfis de
