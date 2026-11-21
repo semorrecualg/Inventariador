@@ -61,6 +61,10 @@ const registarTexto = () => {
 };
 
 beforeEach(() => {
+  // O App continua a registar depois do unmount e o worker do Vitest morre a
+  // meio desse log (EnvironmentTeardownError). Silencia só o ruído informativo.
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'info').mockImplementation(() => {});
   localStorage.clear();
   sessionStorage.clear();
   textosVistos = [];
@@ -84,6 +88,7 @@ afterEach(() => {
   observer = null;
   setItemSpy?.mockRestore();
   setItemSpy = null;
+  vi.restoreAllMocks();
   cleanup();
 });
 
