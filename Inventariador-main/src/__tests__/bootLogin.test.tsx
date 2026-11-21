@@ -94,6 +94,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { HashRouter } from 'react-router-dom';
 import App from '../App';
+import { assentarEAntesDoTeardown, silenciarConsoleDoArranque } from './helpers/teardownBlindado';
 import { localDb } from '../services/localDbService';
 import { screenToPath } from '../router/routes';
 import { AppScreen } from '../types';
@@ -115,10 +116,7 @@ let observer: MutationObserver | null = null;
 let setItemSpy: ReturnType<typeof vi.spyOn> | null = null;
 
 beforeEach(async () => {
-  vi.spyOn(console, 'log').mockImplementation(() => {});
-  vi.spyOn(console, 'info').mockImplementation(() => {});
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
-  vi.spyOn(console, 'error').mockImplementation(() => {});
+  silenciarConsoleDoArranque();
   localStorage.clear();
   sessionStorage.clear();
   // Modo nuvem (como no browser): o Boot Loader corre no arranque.
@@ -147,15 +145,7 @@ afterEach(async () => {
   observer = null;
   setItemSpy?.mockRestore();
   setItemSpy = null;
-  cleanup();
-
-  // Mesma blindagem do `bootMount`: o App continua a registar depois do
-  // unmount e o worker do Vitest fechava a meio do `console`, deixando o CI
-  // vermelho com todos os testes verdes. Enquanto o jsdom está vivo e o
-  // console está stubado, esses logs não passam pelo RPC; os mocks só voltam
-  // depois desta pausa.
-  await new Promise((resolve) => setTimeout(resolve, 1200));
-  vi.restoreAllMocks();
+  await assentarEAntesDoTeardown(cleanup);
 });
 
 describe('Login novo — LOGIN → biometria → CONTRATO', () => {

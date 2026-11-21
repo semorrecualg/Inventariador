@@ -17,6 +17,7 @@ import React from 'react';
 import { render, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import App from '../App';
+import { assentarEAntesDoTeardown, silenciarConsoleDoArranque } from './helpers/teardownBlindado';
 import { writePersistedSession, PERSISTED_SESSION_KEY } from '../utils/sessionPersistence';
 import { screenToPath } from '../router/routes';
 import { AppScreen } from '../types';
@@ -71,10 +72,7 @@ const registarTexto = () => {
 beforeEach(() => {
   // O App continua a registar depois do unmount e o worker do Vitest morre a
   // meio desse log (EnvironmentTeardownError). Silencia só o ruído informativo.
-  vi.spyOn(console, 'log').mockImplementation(() => {});
-  vi.spyOn(console, 'info').mockImplementation(() => {});
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
-  vi.spyOn(console, 'error').mockImplementation(() => {});
+  silenciarConsoleDoArranque();
   localStorage.clear();
   sessionStorage.clear();
   textosVistos = [];
@@ -98,15 +96,7 @@ afterEach(async () => {
   observer = null;
   setItemSpy?.mockRestore();
   setItemSpy = null;
-  cleanup();
-
-  // O arranque continua a registar depois do unmount. Enquanto o jsdom está
-  // vivo e o console está stubado, esses logs não passam pelo RPC do Vitest;
-  // devolver os mocks só depois desta pausa evita o EnvironmentTeardownError
-  // ("Closing rpc while onUserConsoleLog was pending") que deixava o CI
-  // vermelho com todos os testes verdes.
-  await new Promise((resolve) => setTimeout(resolve, 1200));
-  vi.restoreAllMocks();
+  await assentarEAntesDoTeardown(cleanup);
 });
 
 describe('Arranque com cópia persistida', () => {

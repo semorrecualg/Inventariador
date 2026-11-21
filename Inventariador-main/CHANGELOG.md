@@ -43,8 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `resolveBootPullPlan` (a decisão da filial, espiada no teste), não o texto do
   log: reformular a mensagem do Boot Loader não quebra o teste. Como no
   `bootMount`, o `bootLogin` deixa os logs do arranque assentarem antes do
-  teardown (console stubado, mocks devolvidos depois da pausa), e o job e2e
-  guarda o Chromium do Playwright em cache por lockfile. O fixture e2e
+  teardown, e o job e2e guarda o Chromium do Playwright em cache por lockfile.
+  A blindagem vive num só sítio — `src/__tests__/helpers/teardownBlindado.ts`
+  (`silenciarConsoleDoArranque` + `assentarEAntesDoTeardown`) — para os dois
+  testes não voltarem a divergir. O fixture e2e
   (`tests/e2e/fixtures.ts`) e o smoke de login exigem, depois de autenticar, a
   saída para o CONTRATO (`#/contexto`, base carregada) ou para o Gestor de Base
   (`#/db-manager`, aparelho novo com base vazia) — antes aceitavam `/menu`,
