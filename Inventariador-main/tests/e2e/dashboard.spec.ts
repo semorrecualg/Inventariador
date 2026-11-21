@@ -8,6 +8,12 @@ import { test, expect } from './fixtures';
  * para `#/dashboard`. Abas e cartões abaixo existem em
  * `src/components/Dashboard.tsx`.
  */
+import type { Page } from '@playwright/test';
+
+/** A aba «Unidades» — o último botão com esse nome acessível (o topo tem outro). */
+const abaUnidades = (page: Page) =>
+  page.getByRole('button', { name: 'Unidades', exact: true }).last();
+
 test.describe('Dashboard', () => {
   test.beforeEach(async ({ page, loginAsAdmin }) => {
     await loginAsAdmin();
@@ -18,14 +24,16 @@ test.describe('Dashboard', () => {
   test('should show dashboard tabs', async ({ page }) => {
     await expect(page.getByRole('button', { name: /Visão Geral/i })).toBeVisible();
     await expect(page.getByRole('button', { name: /Financeiro/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Unidades', exact: true })).toBeVisible();
+    // Há dois botões com o nome «Unidades»: o chip do topo (antes, no DOM) e a
+    // aba (depois). A aba é a última.
+    await expect(abaUnidades(page)).toBeVisible();
   });
 
   test('should switch between tabs', async ({ page }) => {
     await page.getByRole('button', { name: /Financeiro/i }).click();
     await expect(page.getByText('Valor Total')).toBeVisible({ timeout: 5000 });
 
-    await page.getByRole('button', { name: 'Unidades', exact: true }).click();
+    await abaUnidades(page).click();
     await expect(page.getByText(/Progresso por Unidade/)).toBeVisible({ timeout: 5000 });
 
     await page.getByRole('button', { name: /Visão Geral/i }).click();
