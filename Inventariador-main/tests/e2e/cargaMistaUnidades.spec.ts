@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import type { Page } from '@playwright/test';
 
 /**
  * Carga mista no Gestor de Base → Unidade Operacional.
@@ -10,7 +11,9 @@ import { test, expect } from './fixtures';
  * O que se confirma:
  *  - a Unidade Operacional mostra UM cartão por filial (não um por linha, nem
  *    um «SEM CONTRATO» a mais por causa das linhas sem tenantid);
- *  - o total do cabeçalho («N Ativos») é igual ao número de linhas da planilha.
+ *  - o total do cabeçalho («N Ativos») é igual ao número de linhas;
+ *  - reimportar a MESMA planilha não cria cópias: continuam 2 cartões e N
+ *    ativos.
  */
 
 const CABECALHO = [
@@ -38,55 +41,82 @@ const TOTAL_DE_LINHAS = LINHAS.length;
 const planilhaCsv = () =>
   [CABECALHO, ...LINHAS].map((linha) => linha.join(',')).join('\n');
 
+/** Abre um ecrã da app pelo mesmo `pushScreen` que os botões usam. */
+const abrirEcra = async (page: Page, ecra: string) => {
+  await page.evaluate((destino) => {
+    (window as unknown as { pushScreen: (screen: string) => void }).pushScreen(destino);
+  }, ecra);
+};
+
+/** Carrega a planilha mista pelo input do botão «SELECIONAR E CARREGAR PLANILHA». */
+const carregarPlanilha = async (page: Page) => {
+  await expect(page.locator('#file-loader')).toBeAttached({ timeout: 20000 });
+  await page.setInputFiles('#file-loader', {
+    name: 'carga-mista.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(planilhaCsv(), 'utf-8')
+  });
+
+  // O log do Gestor de Base fecha a carga; só depois disto a base local tem
+  // as linhas e a Unidade Operacional pode ser lida com confiança.
+  await expect(
+    page.getByText(new RegExp(`${TOTAL_DE_LINHAS} ativos injetados com sucesso`))
+  ).toBeVisible({ timeout: 60000 });
+
+  // Aviso de mudança para BASE LOCAL (só aparece quando o modo muda).
+  const confirmar = page.getByRole('button', { name: 'OK', exact: true });
+  if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
+};
+
+/** Abre a Unidade Operacional e confere cartões e total (sem cópias). */
+const confirmarUnidadeSemCopias = async (page: Page) => {
+  await abrirEcra(page, 'UNIT_SELECTION');
+  await page.waitForURL(/#\/unit$/, { timeout: 15000 });
+
+  // Um cartão por filial — as linhas sem tenantid não criam uma unidade extra.
+  await expect(page.locator('.unit-row-item')).toHaveCount(2, { timeout: 20000 });
+  await expect(page.getByText(FILIAL_GO, { exact: true })).toHaveCount(1);
+  await expect(page.getByText(FILIAL_PA, { exact: true })).toHaveCount(1);
+
+  // 3 linhas em cada filial, ainda que só algumas tragam tenantid.
+  await expect(page.getByText(/3 ATIVOS/)).toHaveCount(2);
+
+  // Cabeçalho: o total é o número de linhas da planilha.
+  await expect(page.getByText(`${TOTAL_DE_LINHAS} Ativos`, { exact: true })).toBeVisible();
+};
+
+/** Login do mestre local e entrada no Gestor de Base. */
+const entrarNoGestorDeBase = async (page: Page) => {
+  await page.goto('/#/login');
+  await page.getByPlaceholder(/Digite seu usuário/).fill('admin');
+  await page.getByPlaceholder('••••••••').fill('admin');
+  await page.getByRole('button', { name: /Acessar Sistema/i }).click();
+
+  // Aparelho novo (base vazia) → Gestor de Base. Se o pós-login parar no
+  // contrato, o caminho para o Gestor é o mesmo `pushScreen` da app.
+  await page.waitForURL(/\/(contexto|db-manager)/, { timeout: 20000 });
+  if (!page.url().includes('/db-manager')) await abrirEcra(page, 'DATABASE_MANAGER');
+};
+
 test.describe('Carga mista — um cartão por filial e total do cabeçalho', () => {
   test('planilha com e sem tenantid mantém 2 cartões e o total igual às linhas', async ({ page }) => {
-    await page.goto('/#/login');
-    await page.getByPlaceholder(/Digite seu usuário/).fill('admin');
-    await page.getByPlaceholder('••••••••').fill('admin');
-    await page.getByRole('button', { name: /Acessar Sistema/i }).click();
+    await entrarNoGestorDeBase(page);
+    await carregarPlanilha(page);
+    await confirmarUnidadeSemCopias(page);
+  });
 
-    // Aparelho novo (base vazia) → Gestor de Base. Se o pós-login parar no
-    // contrato, o caminho para o Gestor é o mesmo `pushScreen` da app.
-    await page.waitForURL(/\/(contexto|db-manager)/, { timeout: 20000 });
-    if (!page.url().includes('/db-manager')) {
-      await page.evaluate(() => {
-        (window as unknown as { pushScreen: (screen: string) => void }).pushScreen('DATABASE_MANAGER');
-      });
-    }
-    await expect(page.locator('#file-loader')).toBeAttached({ timeout: 20000 });
+  test('reimportar a mesma planilha não duplica cartões nem ativos', async ({ page }) => {
+    await entrarNoGestorDeBase(page);
+    await carregarPlanilha(page);
+    await confirmarUnidadeSemCopias(page);
 
-    // Carga pelo mesmo input do botão «SELECIONAR E CARREGAR PLANILHA».
-    await page.setInputFiles('#file-loader', {
-      name: 'carga-mista.csv',
-      mimeType: 'text/csv',
-      buffer: Buffer.from(planilhaCsv(), 'utf-8')
-    });
+    // Volta ao Gestor de Base e carrega o MESMO ficheiro outra vez.
+    await abrirEcra(page, 'DATABASE_MANAGER');
+    await page.waitForURL(/#\/db-manager$/, { timeout: 15000 });
+    await carregarPlanilha(page);
 
-    // O log do Gestor de Base fecha a carga; só depois disto a base local tem
-    // as linhas e a Unidade Operacional pode ser lida com confiança.
-    await expect(
-      page.getByText(new RegExp(`${TOTAL_DE_LINHAS} ativos injetados com sucesso`))
-    ).toBeVisible({ timeout: 60000 });
-
-    // Aviso de mudança para BASE LOCAL (só aparece quando o modo muda).
-    const confirmar = page.getByRole('button', { name: 'OK', exact: true });
-    if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
-
-    await page.evaluate(() => {
-      (window as unknown as { pushScreen: (screen: string) => void }).pushScreen('UNIT_SELECTION');
-    });
-    await page.waitForURL(/#\/unit$/, { timeout: 15000 });
-
-    // Um cartão por filial — as linhas sem tenantid não criam uma unidade extra.
-    const cartoes = page.locator('.unit-row-item');
-    await expect(cartoes).toHaveCount(2, { timeout: 20000 });
-    await expect(page.getByText(FILIAL_GO, { exact: true })).toHaveCount(1);
-    await expect(page.getByText(FILIAL_PA, { exact: true })).toHaveCount(1);
-
-    // 3 linhas em cada filial, ainda que só algumas tragam tenantid.
-    await expect(page.getByText(/3 ATIVOS/)).toHaveCount(2);
-
-    // Cabeçalho: o total é o número de linhas da planilha.
-    await expect(page.getByText(`${TOTAL_DE_LINHAS} Ativos`, { exact: true })).toBeVisible();
+    // A carga é idempotente: um cartão por filial e o total da planilha, sem
+    // uma segunda cópia de cada ativo.
+    await confirmarUnidadeSemCopias(page);
   });
 });

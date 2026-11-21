@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Agora:** `tests/e2e/cargaMistaUnidades.spec.ts` carrega pelo
   `#file-loader` uma planilha de 6 linhas (2 filiais, com e sem `tenantid`) e
   confirma na Unidade Operacional um único cartão por filial e o total do
-  cabeçalho igual ao número de linhas. Corre no job `E2E — Login no contrato`.
+  cabeçalho igual ao número de linhas. Um segundo caso reimporta o mesmo
+  ficheiro e prova que continuam 2 cartões e 6 ativos — sem cópias. Corre no
+  job `E2E — Login no contrato`.
 
 ### Adicionado — a sessão sobrevive a fechar o separador
 
