@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   log: reformular a mensagem do Boot Loader não quebra o teste. O fixture e2e
   (`tests/e2e/fixtures.ts`) e o smoke de login exigem `#/contexto` depois de
   autenticar — antes aceitavam `/menu`, `/dashboard` ou `/unit` como sucesso.
+  `@playwright/test` entra nas devDependencies e o CI ganha o job `e2e-login`
+  (Chromium + build servido por `vite preview`) que corre
+  `tests/e2e/loginContrato.spec.ts`: entrada com o formulário e `admin`/`admin`
+  a aterrar no CONTRATO, com guarda explícita contra `/unit`.
 - **Saídas do Login:** «Redefinir Acesso Local» e o bloqueio de perfil sem
   contrato passam pelo mesmo `resetLocalAccessStorage()`, que apaga a cópia
   persistida — antes quem saía por ali voltava a entrar sozinho. Só perfis de

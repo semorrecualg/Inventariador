@@ -106,3 +106,53 @@ jobs:
           # silenciosamente em modo INTERNAL.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+  # E2E de login: o pós-login tem de aterrar no CONTRATO DE TRABALHO (#/contexto).
+  # Job próprio porque precisa do Chromium do Playwright e do build de produção
+  # servido por `vite preview` (o webServer do playwright.config.ts usa preview
+  # quando process.env.CI está definido).
+  e2e-login:
+    name: E2E — Login no contrato
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: Inventariador-main
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js (.nvmrc → 22.22.2)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: Inventariador-main/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci --legacy-peer-deps
+
+      - name: Instalar Chromium do Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Build de produção
+        run: npm run build
+        env:
+          VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: E2E de login (Chromium)
+        run: npx playwright test --project=chromium tests/e2e/loginContrato.spec.ts
+        env:
+          VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
+
+      - name: Guardar relatório em caso de falha
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-login-report
+          path: |
+            Inventariador-main/test-results
+          retention-days: 7
