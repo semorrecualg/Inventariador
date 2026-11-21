@@ -73,6 +73,8 @@ beforeEach(() => {
   // meio desse log (EnvironmentTeardownError). Silencia só o ruído informativo.
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'info').mockImplementation(() => {});
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
   localStorage.clear();
   sessionStorage.clear();
   textosVistos = [];
@@ -91,13 +93,20 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   observer?.disconnect();
   observer = null;
   setItemSpy?.mockRestore();
   setItemSpy = null;
-  vi.restoreAllMocks();
   cleanup();
+
+  // O arranque continua a registar depois do unmount. Enquanto o jsdom está
+  // vivo e o console está stubado, esses logs não passam pelo RPC do Vitest;
+  // devolver os mocks só depois desta pausa evita o EnvironmentTeardownError
+  // ("Closing rpc while onUserConsoleLog was pending") que deixava o CI
+  // vermelho com todos os testes verdes.
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  vi.restoreAllMocks();
 });
 
 describe('Arranque com cópia persistida', () => {

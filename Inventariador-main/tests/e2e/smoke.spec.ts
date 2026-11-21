@@ -66,14 +66,16 @@ test.describe('App Smoke Tests', () => {
       await expect(page.locator('#root')).not.toBeEmpty({ timeout: 10000 });
     });
 
-    test('login flow completes to the work contract', async ({ page }) => {
+    test('login flow leaves the login screen for the base manager or the contract', async ({ page }) => {
       await page.goto('/#/login');
       await page.getByPlaceholder(/Digite seu usuário/).fill('admin');
       await page.getByPlaceholder('••••••••').fill('admin');
       await page.getByRole('button', { name: /Acessar Sistema/i }).click();
 
-      // O pós-login aterra no CONTRATO DE TRABALHO — nunca na unidade.
-      await expect(page).toHaveURL(/\/contexto/, { timeout: 15000 });
+      // Aparelho novo (base vazia) → Gestor de Base; base carregada → CONTRATO.
+      // O que o login nunca pode fazer é desviar para a unidade.
+      await expect(page).toHaveURL(/\/(contexto|db-manager)/, { timeout: 15000 });
+      expect(new URL(page.url()).hash).not.toContain('/unit');
     });
   });
 

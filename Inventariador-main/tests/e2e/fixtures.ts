@@ -5,12 +5,13 @@ import { test as base, expect } from '@playwright/test';
  *
  * This SPA uses React Router v6 with HashRouter, with routes:
  *   /login  — Login page
- *   /menu   — Main menu (requires auth)
- *   /dashboard — Dashboard (requires auth)
+ *   /contexto — Contrato de trabalho (escolha da filial)
+ *   /db-manager — Gestor de Base (SRE; aparelho novo, base vazia)
  *   *       — Catch-all (renders BiometricRegistration, Register, or fallback)
  *
  * Helpers:
- * - loginAsAdmin() — logs in with default admin credentials, waits for /contexto
+ * - loginAsAdmin() — logs in with default admin credentials, waits for the
+ *   post-login screen: /contexto with a loaded base, /db-manager on a new device
  * - waitForAppReady() — waits for React SPA to mount in #root
  */
 export const test = base.extend<{
@@ -26,9 +27,11 @@ export const test = base.extend<{
     await page.getByPlaceholder('••••••••').fill('admin');
     await page.getByRole('button', { name: /Acessar Sistema/i }).click();
 
-    // O pós-login aterra no CONTRATO DE TRABALHO (#/contexto), onde a filial é
-    // escolhida. Aceitar `/unit` aqui mascarava o desvio do arranque.
-    await page.waitForURL(/\/contexto/, { timeout: 15000 });
+    // O pós-login depende do estado da base local: carregada → CONTRATO
+    // DE TRABALHO (#/contexto); aparelho novo, base vazia → o SRE abre o
+    // Gestor de Base (#/db-manager). O que nunca acontece é cair em /unit.
+    await page.waitForURL(/\/(contexto|db-manager)/, { timeout: 15000 });
+    expect(new URL(page.url()).hash).not.toContain('/unit');
     await use(async () => {});
   },
 
