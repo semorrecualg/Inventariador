@@ -164,7 +164,8 @@ jobs:
             tests/e2e/login.spec.ts \
             tests/e2e/loginContrato.spec.ts \
             tests/e2e/navigation.spec.ts \
-            tests/e2e/dashboard.spec.ts
+            tests/e2e/dashboard.spec.ts \
+            tests/e2e/cargaMistaUnidades.spec.ts
 
       - name: Guardar relatório em caso de falha
         if: failure()

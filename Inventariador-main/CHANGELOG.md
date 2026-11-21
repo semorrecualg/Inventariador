@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — carga mista no Gestor de Base confirmada no e2e
+
+- **O que era:** nenhum teste e2e cobria a importação real de uma planilha e o
+  efeito dela na Unidade Operacional.
+- **Agora:** `tests/e2e/cargaMistaUnidades.spec.ts` carrega pelo
+  `#file-loader` uma planilha de 6 linhas (2 filiais, com e sem `tenantid`) e
+  confirma na Unidade Operacional um único cartão por filial e o total do
+  cabeçalho igual ao número de linhas. Corre no job `E2E — Login no contrato`.
+
 ### Adicionado — a sessão sobrevive a fechar o separador
 
 - **O que era:** o login vivia só em `sessionStorage`, que morre com o separador;
