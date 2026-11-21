@@ -66,14 +66,14 @@ test.describe('App Smoke Tests', () => {
       await expect(page.locator('#root')).not.toBeEmpty({ timeout: 10000 });
     });
 
-    test('login flow completes to menu navigation', async ({ page }) => {
+    test('login flow completes to the work contract', async ({ page }) => {
       await page.goto('/#/login');
       await page.getByPlaceholder(/Digite seu usuário/).fill('admin');
       await page.getByPlaceholder('••••••••').fill('admin');
       await page.getByRole('button', { name: /Acessar Sistema/i }).click();
 
-      // After login, the app should navigate away from /login
-      await expect(page).not.toHaveURL(/\/login/, { timeout: 15000 });
+      // O pós-login aterra no CONTRATO DE TRABALHO — nunca na unidade.
+      await expect(page).toHaveURL(/\/contexto/, { timeout: 15000 });
     });
   });
 
