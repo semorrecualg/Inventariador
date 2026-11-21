@@ -8,23 +8,26 @@ import { test, expect } from './fixtures';
  * para `#/dashboard`. Abas e cartões abaixo existem em
  * `src/components/Dashboard.tsx`.
  */
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /** A aba «Unidades» — o último botão com esse nome acessível (o topo tem outro). */
 const abaUnidades = (page: Page) =>
   page.getByRole('button', { name: 'Unidades', exact: true }).last();
 
 /**
- * Cartão de ação rápida. O overlay de reconexão da nuvem (`z-[20000]`) pode
- * ficar por cima do ecrã no CI e o `click()` do Playwright espera que ele saia;
- * o evento é despachado no próprio cartão, como o toque do utilizador faria.
- * A navegação continua a ser verificada pelo URL.
+ * O overlay de reconexão da nuvem (`z-[20000]`) pode ficar por cima do ecrã no
+ * CI e o `click()` do Playwright espera que ele saia; o evento é despachado no
+ * próprio elemento, como o toque do utilizador faria. As asserções seguintes
+ * continuam a verificar o efeito (URL, painel).
  */
-const clicarNoCartao = async (page: Page, titulo: string) => {
-  const tituloDoCartao = page.getByText(titulo, { exact: true }).first();
-  await expect(tituloDoCartao).toBeVisible({ timeout: 10000 });
-  await tituloDoCartao.evaluate((elemento) => (elemento as HTMLElement).click());
+const clicarNoElemento = async (alvo: Locator) => {
+  await expect(alvo).toBeVisible({ timeout: 10000 });
+  await alvo.evaluate((elemento) => (elemento as HTMLElement).click());
 };
+
+/** Cartão de ação rápida pelo título. */
+const clicarNoCartao = async (page: Page, titulo: string) =>
+  clicarNoElemento(page.getByText(titulo, { exact: true }).first());
 
 test.describe('Dashboard', () => {
   test.beforeEach(async ({ page, loginAsAdmin }) => {
@@ -42,10 +45,10 @@ test.describe('Dashboard', () => {
   });
 
   test('should switch between tabs', async ({ page }) => {
-    await page.getByRole('button', { name: /Financeiro/i }).click();
+    await clicarNoElemento(page.getByRole('button', { name: /Financeiro/i }));
     await expect(page.getByText('Valor Total')).toBeVisible({ timeout: 5000 });
 
-    await abaUnidades(page).click();
+    await clicarNoElemento(abaUnidades(page));
     await expect(page.getByText(/Progresso por Unidade/)).toBeVisible({ timeout: 5000 });
 
     await page.getByRole('button', { name: /Visão Geral/i }).click();
