@@ -51,7 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/e2e/loginContrato.spec.ts`: entrada com o formulário e `admin`/`admin`
   sem aterrar na unidade (num aparelho novo a base vazia abre o Gestor de Base;
   com base carregada, o login fica no CONTRATO), com guarda explícita contra
-  `/unit`.
+  `/unit`. Os specs legados `login.spec.ts`, `navigation.spec.ts` e
+  `dashboard.spec.ts` acompanham o estado real (selo de ambiente, versão vinda
+  do `package.json`, abas do dashboard, entrada sem sessão) e correm no mesmo
+  job.
 - **Saídas do Login:** «Redefinir Acesso Local» e o bloqueio de perfil sem
   contrato passam pelo mesmo `resetLocalAccessStorage()`, que apaga a cópia
   persistida — antes quem saía por ali voltava a entrar sozinho. Só perfis de
