@@ -42,8 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UNIT_SELECTION` — é a rede contra o regresso do `/unit`. A espera é a chamada
   a `resolveBootPullPlan` (a decisão da filial, espiada no teste), não o texto do
   log: reformular a mensagem do Boot Loader não quebra o teste. O fixture e2e
-  (`tests/e2e/fixtures.ts`) e o smoke de login exigem `#/contexto` depois de
-  autenticar — antes aceitavam `/menu`, `/dashboard` ou `/unit` como sucesso.
+  (`tests/e2e/fixtures.ts`) e o smoke de login exigem, depois de autenticar, a
+  saída para o CONTRATO (`#/contexto`, base carregada) ou para o Gestor de Base
+  (`#/db-manager`, aparelho novo com base vazia) — antes aceitavam `/menu`,
+  `/dashboard` ou `/unit` como sucesso.
   `@playwright/test` entra nas devDependencies e o CI ganha o job `e2e-login`
   (Chromium + build servido por `vite preview`) que corre
   `tests/e2e/loginContrato.spec.ts`: entrada com o formulário e `admin`/`admin`

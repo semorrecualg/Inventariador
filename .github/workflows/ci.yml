@@ -107,13 +107,17 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-  # E2E de login: o pós-login tem de aterrar no CONTRATO DE TRABALHO (#/contexto).
+  # E2E de login: num aparelho novo a base vazia abre o Gestor de Base
+  # (#/db-manager); com base carregada o pós-login fica no CONTRATO (#/contexto).
+  # Em nenhum caso pode cair em /unit.
   # Job próprio porque precisa do Chromium do Playwright e do build de produção
   # servido por `vite preview` (o webServer do playwright.config.ts usa preview
   # quando process.env.CI está definido).
   e2e-login:
     name: E2E — Login no contrato
     runs-on: ubuntu-latest
+    # Instala Chromium, constrói e corre a spec: 15 min é teto de segurança.
+    timeout-minutes: 15
 
     defaults:
       run:
@@ -145,8 +149,6 @@ jobs:
 
       - name: E2E de login (Chromium)
         run: npx playwright test --project=chromium tests/e2e/loginContrato.spec.ts
-        env:
-          VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL || 'semorr@gmail.com' }}
 
       - name: Guardar relatório em caso de falha
         if: failure()
@@ -155,4 +157,5 @@ jobs:
           name: e2e-login-report
           path: |
             Inventariador-main/test-results
+          if-no-files-found: ignore
           retention-days: 7
