@@ -151,5 +151,9 @@ describe('Login novo — LOGIN → biometria → CONTRATO', () => {
     expect(destinos).toContain(AppScreen.WORK_CONTEXT_SELECTION);
     expect(destinos).not.toContain(AppScreen.UNIT_SELECTION);
     expect(pilhas.map((pilha) => pilha[0])).not.toContain(AppScreen.UNIT_SELECTION);
+
+    // O `init` do App ainda tem promessas por resolver; sem esta pausa ele
+    // chama `setIsDataLoaded` depois de o jsdom fechar (EnvironmentTeardownError).
+    await new Promise((r) => setTimeout(r, 1600));
   }, 30_000);
 });
