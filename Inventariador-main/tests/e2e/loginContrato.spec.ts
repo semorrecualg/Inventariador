@@ -16,14 +16,16 @@ test.describe('Login no contrato de trabalho', () => {
     await expect(page.getByRole('button', { name: /Acessar Sistema/i })).toBeVisible();
   });
 
-  test('admin autenticado aterra no CONTRATO e nunca na unidade', async ({ page }) => {
+  test('admin autenticado nunca aterra na unidade', async ({ page }) => {
     await page.goto('/#/login');
     await page.getByPlaceholder(/Digite seu usuário/).fill('admin');
     await page.getByPlaceholder('••••••••').fill('admin');
     await page.getByRole('button', { name: /Acessar Sistema/i }).click();
 
-    await page.waitForURL(/\/contexto/, { timeout: 20000 });
+    // Num aparelho novo a base local está vazia: o SRE abre o Gestor de Base
+    // para vincular/importar; com base carregada, o login aterra no CONTRATO.
+    // O que o login nunca pode fazer é desviar para a UNIDADE.
+    await page.waitForURL(/(db-manager|contexto)/, { timeout: 20000 });
     expect(new URL(page.url()).hash).not.toContain('/unit');
-    await expect(page.getByText(/Contrato de Trabalho/i).first()).toBeVisible({ timeout: 10000 });
   });
 });
