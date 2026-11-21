@@ -32,7 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explícita (`shouldForceUnitOnEmptyBase`) e deixa de apanhar o passo
   biométrico do pós-login. Testes: `bootRedirects.test.ts` (regra) e
   `bootMount.test.tsx` (dono e não-dono: rota final CONTRATO, sem `/unit` nem
-  login no histórico).
+  login no histórico). **Login novo:** `bootLogin.test.tsx` autentica pela
+  credencial local no formulário real, passa pelo passo biométrico (casco nativo
+  sem autenticador → dispensa explícita) e confirma que o perfil sem filial e
+  sem `app_last_work_context` aterra no CONTRATO: o histórico escrito só tem
+  `BIOMETRIC_REGISTRATION` e `WORK_CONTEXT_SELECTION`, nunca `UNIT_SELECTION`.
 - **Saídas do Login:** «Redefinir Acesso Local» e o bloqueio de perfil sem
   contrato passam pelo mesmo `resetLocalAccessStorage()`, que apaga a cópia
   persistida — antes quem saía por ali voltava a entrar sozinho. Só perfis de
