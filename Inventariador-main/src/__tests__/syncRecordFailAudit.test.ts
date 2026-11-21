@@ -137,7 +137,9 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
     // A janela das falhas preservadas é o DIA (item 14): no mesmo dia, mesmo que
     // a linha tenha horas, a recusa é a mesma e não ganha outra linha.
     await db.audit_logs.update(String(log.id), {
-      updated_at: new Date(Date.now() - 11 * 60 * 1000).toISOString()
+      // Meia-noite UTC: «agora - 11 min» cairia no dia anterior. A janela é o
+      // DIA, por isso a prova fica em 00:01 de hoje — independe da hora do run.
+      updated_at: new Date(Date.parse(inicioDoDiaDaFalha()) + 60_000).toISOString()
     });
     await processDataSyncQueue();
     expect(await failureLogs()).toHaveLength(1);
@@ -192,7 +194,9 @@ describe('SYNC_RECORD_FAIL — uma linha por registo e por janela', () => {
     const [log] = await exceptionLogs();
     expect(log).toBeTruthy();
     await db.audit_logs.update(String(log.id), {
-      updated_at: new Date(Date.now() - 11 * 60 * 1000).toISOString()
+      // Meia-noite UTC: «agora - 11 min» cairia no dia anterior. A janela é o
+      // DIA, por isso a prova fica em 00:01 de hoje — independe da hora do run.
+      updated_at: new Date(Date.parse(inicioDoDiaDaFalha()) + 60_000).toISOString()
     });
 
     await processDataSyncQueue();

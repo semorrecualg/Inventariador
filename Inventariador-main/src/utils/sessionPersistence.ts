@@ -105,21 +105,26 @@ export function restorePersistedSession(
 }
 
 /**
- * Regra de arranque do ecrã inicial: com sessão local no cache do separador
- * (incluindo a reposta de uma cópia persistida) começa no CONTRATO DE TRABALHO;
- * sem sessão, no login. É esta decisão que impede um separador novo de parar no
- * ecrã de entrada.
+ * `true` quando o cache do separador tem um perfil de sessão local válido
+ * (incluindo um reposto a partir da cópia persistida). Usado pelos pontos de
+ * boot para não ancorarem no login nem limparem uma sessão legítima.
  */
-export function resolveInitialScreenHistory(): AppScreen[] {
+export function hasLocalSessionInCache(): boolean {
   try {
     const guardado = sessionStorage.getItem(SESSION_CACHE_KEY);
-    if (guardado && guardado !== 'null' && isLocalSessionProfile(JSON.parse(guardado))) {
-      return [AppScreen.WORK_CONTEXT_SELECTION];
-    }
+    return !!guardado && guardado !== 'null' && isLocalSessionProfile(JSON.parse(guardado));
   } catch {
-    /* cache ilegível — segue para o login */
+    return false;
   }
-  return [AppScreen.LOGIN];
+}
+
+/**
+ * Regra de arranque do ecrã inicial: com sessão local no cache começa no
+ * CONTRATO DE TRABALHO; sem sessão, no login. É esta decisão que impede um
+ * separador novo de parar no ecrã de entrada.
+ */
+export function resolveInitialScreenHistory(): AppScreen[] {
+  return hasLocalSessionInCache() ? [AppScreen.WORK_CONTEXT_SELECTION] : [AppScreen.LOGIN];
 }
 
 /** Logout explícito: o próximo arranque tem de pedir credenciais. */
