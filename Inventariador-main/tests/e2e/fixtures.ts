@@ -10,7 +10,7 @@ import { test as base, expect } from '@playwright/test';
  *   *       — Catch-all (renders BiometricRegistration, Register, or fallback)
  *
  * Helpers:
- * - loginAsAdmin() — logs in with default admin credentials, waits for /menu
+ * - loginAsAdmin() — logs in with default admin credentials, waits for /contexto
  * - waitForAppReady() — waits for React SPA to mount in #root
  */
 export const test = base.extend<{
@@ -26,8 +26,9 @@ export const test = base.extend<{
     await page.getByPlaceholder('••••••••').fill('admin');
     await page.getByRole('button', { name: /Acessar Sistema/i }).click();
 
-    // Wait for navigation away from login — the app may navigate to /menu or another auth route
-    await page.waitForURL(/\/(menu|dashboard|unit)/, { timeout: 15000 });
+    // O pós-login aterra no CONTRATO DE TRABALHO (#/contexto), onde a filial é
+    // escolhida. Aceitar `/unit` aqui mascarava o desvio do arranque.
+    await page.waitForURL(/\/contexto/, { timeout: 15000 });
     await use(async () => {});
   },
 
