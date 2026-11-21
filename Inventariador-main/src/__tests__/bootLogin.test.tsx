@@ -117,6 +117,8 @@ let setItemSpy: ReturnType<typeof vi.spyOn> | null = null;
 beforeEach(async () => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'info').mockImplementation(() => {});
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
   localStorage.clear();
   sessionStorage.clear();
   // Modo nuvem (como no browser): o Boot Loader corre no arranque.
@@ -140,13 +142,20 @@ beforeEach(async () => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   observer?.disconnect();
   observer = null;
   setItemSpy?.mockRestore();
   setItemSpy = null;
-  vi.restoreAllMocks();
   cleanup();
+
+  // Mesma blindagem do `bootMount`: o App continua a registar depois do
+  // unmount e o worker do Vitest fechava a meio do `console`, deixando o CI
+  // vermelho com todos os testes verdes. Enquanto o jsdom está vivo e o
+  // console está stubado, esses logs não passam pelo RPC; os mocks só voltam
+  // depois desta pausa.
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  vi.restoreAllMocks();
 });
 
 describe('Login novo — LOGIN → biometria → CONTRATO', () => {

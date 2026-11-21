@@ -137,6 +137,17 @@ jobs:
       - name: Instalar dependências
         run: npm ci --legacy-peer-deps
 
+      # O browser raramente muda; a chave acompanha o lockfile (versão do
+      # @playwright/test). `--with-deps` continua a correr para as libs do
+      # sistema, mas o download de ~130 MB deixa de acontecer a cada PR.
+      - name: Cache do Chromium do Playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('Inventariador-main/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
       - name: Instalar Chromium do Playwright
         run: npx playwright install --with-deps chromium
 
