@@ -39,6 +39,9 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
     // Sem nuvem a sério, o boot rebaixava para INTERNAL e o Boot Loader (o
     // sítio onde o arranque podia escrever UNIT_SELECTION) nem corria.
     getInitialDatabaseMode: () => 'SUPABASE',
+    // Calculado no import a partir das credenciais: sem `.env` (CI) vale
+    // `true` e o login forçava INTERNAL, onde o Boot Loader não corre.
+    isInternalMode: false,
     testSupabaseConnection: async () => true
   };
 });
