@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nada pendente.
+
+## [3.0.0] — 2026-11-21
+
+### Notas da versão
+
+Marco 3.0.0: o arranque deixou de ser «às vezes» e passou a ser determinístico e
+coberto, e a carga de planilhas no Gestor de Base tem prova e2e ponta a ponta —
+incluindo a reimportação idempotente.
+
+- **Arranque:** sessão persistida (7 dias, sem senha nem token), Boot Loader
+  ancorado no CONTRATO e `bootMount`/`bootLogin` a espiar sinais de comportamento
+  em vez de texto de log.
+- **Teardown:** o `EnvironmentTeardownError` do Vitest desapareceu com o
+  utilitário partilhado `src/__tests__/helpers/teardownBlindado.ts`.
+- **e2e:** `login`, `loginContrato`, `navigation`, `dashboard` e
+  `cargaMistaUnidades` no job `E2E — Login no contrato` (33 testes); a carga
+  mista prova um cartão por filial, total do cabeçalho igual às linhas e
+  reimportação sem cópias.
+- **Versão:** `package.json` 2.9.0 → 3.0.0; o `versionCode` do APK passa a
+  30000, derivado da versão pelo workflow `Build Android APK`.
+
 ### Adicionado — carga mista no Gestor de Base confirmada no e2e
 
 - **O que era:** nenhum teste e2e cobria a importação real de uma planilha e o
