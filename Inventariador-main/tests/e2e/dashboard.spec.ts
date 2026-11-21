@@ -14,6 +14,18 @@ import type { Page } from '@playwright/test';
 const abaUnidades = (page: Page) =>
   page.getByRole('button', { name: 'Unidades', exact: true }).last();
 
+/**
+ * Cartão de ação rápida. O overlay de reconexão da nuvem (`z-[20000]`) pode
+ * ficar por cima do ecrã no CI e o `click()` do Playwright espera que ele saia;
+ * o evento é despachado no próprio cartão, como o toque do utilizador faria.
+ * A navegação continua a ser verificada pelo URL.
+ */
+const clicarNoCartao = async (page: Page, titulo: string) => {
+  const tituloDoCartao = page.getByText(titulo, { exact: true }).first();
+  await expect(tituloDoCartao).toBeVisible({ timeout: 10000 });
+  await tituloDoCartao.evaluate((elemento) => (elemento as HTMLElement).click());
+};
+
 test.describe('Dashboard', () => {
   test.beforeEach(async ({ page, loginAsAdmin }) => {
     await loginAsAdmin();
@@ -53,12 +65,12 @@ test.describe('Dashboard', () => {
   test('should navigate to inventory from quick action', async ({ page }) => {
     // Sem filial escolhida, o cartão INVENTÁRIO leva à escolha de unidade —
     // com filial escolhida, ao endereço físico.
-    await page.getByText('INVENTÁRIO', { exact: true }).first().click();
+    await clicarNoCartao(page, 'INVENTÁRIO');
     await page.waitForURL(/\/(unit|address)/, { timeout: 10000 });
   });
 
   test('should leave the dashboard from the labeling quick action', async ({ page }) => {
-    await page.getByText('ETIQUETAR', { exact: true }).first().click();
+    await clicarNoCartao(page, 'ETIQUETAR');
     await page.waitForURL(/\/(labeling|address|unit|contexto)/, { timeout: 10000 });
   });
 
