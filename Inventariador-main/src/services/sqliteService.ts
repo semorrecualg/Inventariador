@@ -165,6 +165,18 @@ export interface DexieCampaignSnapshot {
   tenantid: string;
 }
 
+export interface DexieAssetCleanupBackup {
+  seq?: number;
+  /** Limpeza a que o registo pertence («DESFAZER» restaura por este id). */
+  cleanup_id: string;
+  /** `meta` = resumo; `rows` = bloco de linhas removidas (JSON). */
+  kind: 'meta' | 'rows';
+  table: string;
+  chunk: number;
+  rows: string;
+  created_at: string;
+}
+
 export interface DexieAddress {
   id?: number;
   tenantid: string;
@@ -188,6 +200,12 @@ class InventoryDexieDatabase extends Dexie {
   unit_configs!: Dexie.Table<DexieUnitConfig, string>;
   campaign_snapshots!: Dexie.Table<DexieCampaignSnapshot, string>;
   addresses!: Dexie.Table<DexieAddress, number>;
+  /**
+   * Cópia de segurança das cópias exatas removidas pela limpeza do Gestor de
+   * Base (`services/assetMirrorCleanupService`). Vive na MESMA base para o
+   * «DESFAZER» funcionar sem rede e sem ficheiro externo.
+   */
+  asset_cleanup_backups!: Dexie.Table<DexieAssetCleanupBackup, number>;
 
   constructor() {
     super('InventoryLocalStore');
@@ -340,6 +358,11 @@ class InventoryDexieDatabase extends Dexie {
         await tx.table(dst).bulkAdd(normalized as never[]);
         logger.info(`[MigrationV7] ${dst}: ${rows.length} registros restaurados com chave composta [tenantid+primarykey].`);
       }
+    });
+    // v8 — backup da limpeza de cópias EXATAS (mesma `primarykey` e conteúdo
+    // idêntico). Tabela nova, sem tocar nas existentes: o «DESFAZER» lê daqui.
+    this.version(8).stores({
+      asset_cleanup_backups: '++seq, cleanup_id, kind'
     });
   }
 }

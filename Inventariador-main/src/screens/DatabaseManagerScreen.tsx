@@ -8,6 +8,7 @@ import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets } fr
 import { isAdminUser } from '../utils/authUtils';
 import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
+import { previewExactCopyCleanup, cleanExactAssetCopies, restoreExactCopyCleanup, latestExactCopyBackup, formatExactCopyReport, type ExactCopyReport, type ExactCopyBackupInfo } from '../services/assetMirrorCleanupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { logger } from '../utils/logger';
 import { APP_VERSION } from '../utils/appVersion';
@@ -536,6 +537,16 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const [dedupRunning, setDedupRunning] = useState<boolean>(false);
   const [dedupLines, setDedupLines] = useState<string[]>([]);
 
+  // ── Limpeza de cópias EXATAS (mesma primarykey + conteúdo idêntico) ──
+  // Só remove a linha que é literalmente a mesma linha gravada duas vezes;
+  // `primarykey`s diferentes (bens distintos) nunca são tocadas.
+  const [cleanupPlan, setCleanupPlan] = useState<ExactCopyReport | null>(null);
+  const [cleanupRunning, setCleanupRunning] = useState<boolean>(false);
+  const [cleanupRestoring, setCleanupRestoring] = useState<boolean>(false);
+  const [showCleanupModal, setShowCleanupModal] = useState<boolean>(false);
+  const [cleanupLines, setCleanupLines] = useState<string[]>([]);
+  const [lastCleanup, setLastCleanup] = useState<ExactCopyBackupInfo | null>(null);
+
   // ── Guardião suave de duplicidade por recno (tenantid + filial + sn1_recno) ──
   const [recnoRunning, setRecnoRunning] = useState<boolean>(false);
   const [recnoLines, setRecnoLines] = useState<string[]>([]);
@@ -597,6 +608,94 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   useEffect(() => {
     addLog("[SRE BOOT] Inicializando painel de gestão de base de dados...");
   }, [addLog]);
+
+  const carregarUltimaLimpeza = useCallback(async () => {
+    try {
+      setLastCleanup(await latestExactCopyBackup());
+    } catch (err) {
+      logger.warn('[SRE_DEDUP] Falha ao ler o backup da última limpeza:', err);
+      setLastCleanup(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void carregarUltimaLimpeza();
+  }, [carregarUltimaLimpeza]);
+
+  /** Mede as cópias exatas e abre a confirmação — nada é escrito aqui. */
+  const handleCleanupPreview = async () => {
+    if (cleanupRunning) return;
+    setCleanupRunning(true);
+    addLog('[SRE_DEDUP] Medindo cópias exatas (mesma primarykey + mesmo conteúdo) — nada é alterado...');
+    try {
+      const plan = await previewExactCopyCleanup(activeTenantid || null);
+      const lines = formatExactCopyReport(plan);
+      lines.forEach(addLog);
+      setCleanupLines(lines);
+      setCleanupPlan(plan);
+      if (plan.removedTotal === 0) {
+        showRecoveryToast('Nenhuma cópia exata encontrada — base intacta.', 'blue');
+        return;
+      }
+      setShowCleanupModal(true);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      addLog(`[SRE_DEDUP ERROR] ${errMsg}`);
+      showRecoveryToast('Falha ao medir as cópias — nada foi alterado.', 'red');
+    } finally {
+      setCleanupRunning(false);
+    }
+  };
+
+  /** Backup e remoção na MESMA transação: ou fica tudo, ou nada. */
+  const handleCleanupConfirm = async () => {
+    setShowCleanupModal(false);
+    if (cleanupRunning) return;
+    setCleanupRunning(true);
+    addLog('[SRE_DEDUP] Limpando cópias exatas (backup gravado na mesma transação)...');
+    try {
+      const report = await cleanExactAssetCopies(activeTenantid || null);
+      const lines = formatExactCopyReport(report);
+      lines.forEach(addLog);
+      setCleanupLines(lines);
+      setCleanupPlan(report);
+      await loadStats();
+      await carregarUltimaLimpeza();
+      showRecoveryToast(
+        report.removedTotal > 0
+          ? `✓ ${report.removedTotal} cópia(s) exata(s) removida(s) — ${report.distinctAfter} ativo(s) preservado(s).`
+          : 'Nenhuma cópia exata — base intacta.',
+        'blue'
+      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      addLog(`[SRE_DEDUP ERROR] ${errMsg} — transação abortada, nada foi apagado.`);
+      showRecoveryToast('❌ Limpeza abortada — nenhuma linha foi apagada.', 'red');
+    } finally {
+      setCleanupRunning(false);
+    }
+  };
+
+  /** Reversão com um clique: devolve as linhas do backup aos três espelhos. */
+  const handleCleanupRestore = async () => {
+    if (!lastCleanup || cleanupRestoring) return;
+    setCleanupRestoring(true);
+    addLog(`[SRE_DEDUP] Desfazendo a limpeza ${lastCleanup.id}...`);
+    try {
+      const { restored } = await restoreExactCopyCleanup(lastCleanup.id);
+      const linhas = [`[DEDUP] Desfazer ${lastCleanup.id}: ${restored} linha(s) devolvida(s) aos três espelhos.`];
+      linhas.forEach(addLog);
+      setCleanupLines(linhas);
+      await loadStats();
+      showRecoveryToast(`✓ ${restored} linha(s) restaurada(s).`, 'blue');
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      addLog(`[SRE_DEDUP ERROR] Falha ao desfazer: ${errMsg}`);
+      showRecoveryToast('❌ Falha ao desfazer — veja o log.', 'red');
+    } finally {
+      setCleanupRestoring(false);
+    }
+  };
 
   // Carga central de planilha (usada pelo input de arquivo E pela listagem de
   // planilhas da pasta vinculada). O parser XLSX (SheetJS) suporta .xls/.xlsx/.csv.
@@ -1067,7 +1166,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         </div>
 
         {/* Diagnóstico de cópias repetidas: mesmo tenantid + filial + etiqueta.
-            A limpeza foi removida — nenhuma linha da base é apagada pelo app. */}
+            A limpeza por etiqueta foi removida. A limpeza que resta é a de
+            cópias EXATAS (mesma primarykey + conteúdo idêntico), com backup. */}
         <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col space-y-3">
           <div className="flex items-center space-x-3">
             <div className="p-3 bg-amber-950/40 text-amber-400 rounded-full border border-amber-900/30">
@@ -1076,7 +1176,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <div className="flex-1">
               <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Diagnóstico de Cópias</h3>
               <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
-                Mesmo contrato + filial + etiqueta gravados mais de uma vez. Nenhum registo é apagado.
+                Diagnóstico por etiqueta não apaga nada. A limpeza remove só a MESMA primarykey com conteúdo idêntico — bens distintos ficam.
               </p>
             </div>
           </div>
@@ -1090,11 +1190,43 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
               <Database size={14} />
               <span>{dedupRunning ? '...' : 'DIAGNOSTICAR'}</span>
             </button>
+            <button
+              type="button"
+              disabled={cleanupRunning}
+              onClick={() => { void handleCleanupPreview(); }}
+              className="flex items-center justify-center space-x-2 px-4 py-3 bg-amber-700 hover:bg-amber-600 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-amber-600/30"
+            >
+              <Trash2 size={14} />
+              <span>{cleanupRunning ? '...' : 'LIMPAR CÓPIAS EXATAS'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={!lastCleanup || cleanupRestoring || cleanupRunning}
+              onClick={() => { void handleCleanupRestore(); }}
+              title={lastCleanup ? `Limpeza ${lastCleanup.id} · ${lastCleanup.removedTotal} linha(s)` : 'Sem limpeza para desfazer'}
+              className="flex items-center justify-center space-x-2 px-4 py-3 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 text-slate-100 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-slate-700/50"
+            >
+              <RefreshCw size={14} />
+              <span>
+                {cleanupRestoring
+                  ? '...'
+                  : lastCleanup
+                    ? `DESFAZER LIMPEZA (${lastCleanup.removedTotal})`
+                    : 'DESFAZER LIMPEZA'}
+              </span>
+            </button>
           </div>
           {dedupLines.length > 0 && (
             <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">
               {dedupLines.map((line, index) => (
                 <p key={`dedup-${index}`} className="text-[9px] font-mono text-slate-300 break-words">{line}</p>
+              ))}
+            </div>
+          )}
+          {cleanupLines.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">
+              {cleanupLines.map((line, index) => (
+                <p key={`cleanup-${index}`} className="text-[9px] font-mono text-amber-200 break-words">{line}</p>
               ))}
             </div>
           )}
@@ -1334,6 +1466,65 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
                 className="flex-1 py-3 bg-red-650 hover:bg-red-700 text-white rounded-xl font-bold text-[9px] uppercase tracking-wider transition-all border border-red-500 active:scale-95 cursor-pointer"
               >
                 Confirmar Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmação da limpeza de cópias EXATAS (mesma primarykey + conteúdo) */}
+      {showCleanupModal && cleanupPlan && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-amber-800/60 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-5">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-amber-950 text-amber-400 rounded-xl border border-amber-900/50">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xs font-black uppercase text-slate-100 tracking-wider">Limpar cópias exatas</h3>
+                <p className="text-[8px] text-slate-500 uppercase font-bold tracking-widest">
+                  {cleanupPlan.tenantid || 'TODOS OS CONTRATOS (sem cruzar contratos)'}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 font-mono text-[10px] text-slate-300">
+              {cleanupPlan.tables.map((table) => (
+                <p key={`cleanup-plan-${table.table}`}>
+                  {table.table}: {table.before} → <span className="text-emerald-300">{table.after}</span> · {table.removed} cópia(s)
+                </p>
+              ))}
+              <p className="pt-1 text-emerald-300">
+                Ativos distintos preservados: {cleanupPlan.distinctBefore} → {cleanupPlan.distinctAfter}
+              </p>
+              {cleanupPlan.skippedDifferentContent > 0 && (
+                <p className="text-amber-300">
+                  Intocados (conteúdo diferente): {cleanupPlan.skippedDifferentContent} grupo(s)
+                </p>
+              )}
+            </div>
+
+            <p className="text-[10px] text-slate-300 leading-relaxed font-bold uppercase">
+              Remove só a MESMA <span className="text-amber-300">primarykey</span> com conteúdo idêntico. O backup é gravado na mesma transação e o botão <span className="text-amber-300">DESFAZER LIMPEZA</span> devolve as linhas.
+            </p>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCleanupModal(false);
+                  addLog('[SRE_DEDUP] Limpeza de cópias exatas cancelada pelo operador.');
+                }}
+                className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold text-[9px] uppercase tracking-wider transition-all border border-slate-700 active:scale-95 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleCleanupConfirm(); }}
+                className="flex-1 py-3 bg-amber-700 hover:bg-amber-600 text-white rounded-xl font-bold text-[9px] uppercase tracking-wider transition-all border border-amber-500 active:scale-95 cursor-pointer"
+              >
+                Confirmar Limpeza
               </button>
             </div>
           </div>

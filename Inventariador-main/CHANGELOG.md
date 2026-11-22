@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — limpeza de cópias exatas, com backup e desfazer
+
+- **O que era:** a base local podia guardar a MESMA linha duas vezes (a chave
+  local é composta `[tenantid+primarykey]`, e a carga antiga gravava também sem
+  contrato) — 25.272 linhas para 12.636 ativos. O ecrã já mostrava o ativo uma
+  vez, mas as linhas continuavam no aparelho.
+- **Agora:** o Gestor de Base tem «LIMPAR CÓPIAS EXATAS», que remove só linhas
+  com a **mesma `primarykey` normalizada e conteúdo idêntico** — compara todos
+  os campos do bem e ignora apenas escopo (`tenantid`/chave), proveniência da
+  carga e carimbos de envio. `primarykey`s diferentes nunca são fundidas (os
+  bens distintos que partilham etiqueta ficam intactos) e o mesmo `primarykey`
+  noutro contrato é preservado, porque é multi-tenant por desenho. Fica sempre a
+  linha do contrato ativo e a grafia canónica da chave; a conferência
+  (`_conferido`, `_auditor`, `_data_leitura`) faz parte do conteúdo, por isso
+  nenhuma auditoria se perde — um grupo que divirja em conteúdo não é tocado.
+- **Contagens:** a confirmação e o log mostram ANTES → DEPOIS por espelho
+  (`local_assets` · `ativos` · `assets`), cópias removidas, grupos e chaves
+  distintas antes/depois (têm de ser iguais; caso contrário a transação aborta
+  sem apagar nada).
+- **Reverter:** o backup é gravado na **mesma transação** das remoções, na
+  tabela `asset_cleanup_backups` (schema v8). «DESFAZER LIMPEZA» devolve as
+  linhas com as chaves exatas, inclusive `tenantid` vazio. O JSON de backup do
+  Gestor («RECONECTAR BACKUP FÍSICO») restaura a base inteira como segunda via.
+  Procedimento em `docs/LIMPEZA_COPIAS_EXATAS.md`. Testes:
+  `assetMirrorCleanupService`.
+
 ### Alterado
 
 - **Unidade Operacional fundida no contrato de trabalho.** A rota `/unit` foi
