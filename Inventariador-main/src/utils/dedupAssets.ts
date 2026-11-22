@@ -259,6 +259,73 @@ export function summarizeDuplicateAssetKeys<T extends AtivoDeEcra>(
   };
 }
 
+/** Chaves distintas no aparelho e de onde vêm — a origem do excedente sobre a
+ *  nuvem (o contrato do perfil só conhece as chaves que existem com ele). */
+export interface ChavesDistintas {
+  /** Chaves distintas com `primarykey` utilizável (é o «Ativos no aparelho»). */
+  distintas: number;
+  /** Chaves que existem pelo menos uma vez com o contrato ativo. */
+  noContrato: number;
+  /** Chaves que só existem sem contrato (`tenantid` vazio): carga antiga. */
+  soSemContrato: number;
+  /** Chaves que só existem noutro contrato e ficam fora da lista. */
+  outrosContratos: number;
+  /** Linhas sem `primarykey`: aparecem no ecrã, mas não são chave. */
+  semChave: number;
+}
+
+/**
+ * Responde «de onde vem o excedente acima da nuvem?». A `primarykey` é a
+ * identidade do ativo; cada chave é classificada pelo escopo em que existe —
+ * com o contrato ativo, só sem contrato (resíduo de carga antiga) ou só noutro
+ * contrato. `distintas` bate com `uniqueAssetsForDisplay` (uma linha por
+ * chave); as linhas sem chave somam-se à parte em `semChave`.
+ */
+export function summarizeDistinctKeys<T extends AtivoDeEcra>(
+  rows: T[],
+  contratoAtivo?: string | null
+): ChavesDistintas {
+  const contrato = String(contratoAtivo || '').trim().toUpperCase();
+  const escoposPorChave = new Map<string, Set<string>>();
+  let semChave = 0;
+
+  for (const row of rows) {
+    const chave = chavePrimariaDe(row);
+    if (!chave) {
+      semChave += 1;
+      continue;
+    }
+    const escopo = contratoDe(row);
+    const escopos = escoposPorChave.get(chave);
+    if (escopos) escopos.add(escopo);
+    else escoposPorChave.set(chave, new Set([escopo]));
+  }
+
+  let noContrato = 0;
+  let soSemContrato = 0;
+  let outrosContratos = 0;
+
+  escoposPorChave.forEach((escopos) => {
+    if (contrato && escopos.has(contrato)) {
+      noContrato += 1;
+      return;
+    }
+    if (escopos.has('')) {
+      soSemContrato += 1;
+      return;
+    }
+    outrosContratos += 1;
+  });
+
+  return {
+    distintas: escoposPorChave.size,
+    noContrato,
+    soSemContrato,
+    outrosContratos,
+    semChave
+  };
+}
+
 export function buildDedupPlan(rows: DedupRow[]): DedupPlan {
   const byKey = new Map<string, DedupRow[]>();
   let withoutIdentity = 0;

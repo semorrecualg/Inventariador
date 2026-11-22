@@ -3,6 +3,7 @@ import {
   buildDedupPlan,
   assetIdentityKey,
   pickKeeper,
+  summarizeDistinctKeys,
   summarizeDuplicateAssetKeys,
   uniqueAssetsForDisplay,
   type DedupRow
@@ -255,5 +256,55 @@ describe('summarizeDuplicateAssetKeys — mesma primarykey ou chaves diferentes'
     ];
 
     expect(summarizeDuplicateAssetKeys(rows).grupos).toBe(0);
+  });
+});
+
+describe('summarizeDistinctKeys — chaves distintas e a origem do excedente', () => {
+  it('separa chaves do contrato, só sem contrato e de outro contrato', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: 'CICOPAL' }),
+      row({ primarykey: 'A', tenantid: '' }), // mesma chave nos dois escopos
+      row({ primarykey: 'B', tenantid: 'CICOPAL' }),
+      row({ primarykey: 'C', tenantid: '' }), // só sem contrato: excedente local
+      row({ primarykey: 'D', tenantid: 'OUTRO' }),
+      row({ primarykey: '', tenantid: 'CICOPAL' })
+    ];
+
+    expect(summarizeDistinctKeys(rows, 'cicopal')).toEqual({
+      distintas: 4,
+      noContrato: 2,
+      soSemContrato: 1,
+      outrosContratos: 1,
+      semChave: 1
+    });
+  });
+
+  it('bate com o ecrã: uma linha por chave distintas + as linhas sem chave', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: 'CICOPAL' }),
+      row({ primarykey: 'A', tenantid: '' }),
+      row({ primarykey: 'B', tenantid: 'OUTRO' }),
+      row({ primarykey: '', tenantid: 'CICOPAL' })
+    ];
+
+    const resumo = summarizeDistinctKeys(rows, 'CICOPAL');
+    expect(resumo.distintas + resumo.semChave).toBe(
+      uniqueAssetsForDisplay(rows, 'CICOPAL').length
+    );
+  });
+
+  it('sem contrato ativo, tudo o que não é sem tenant fica em «noutro contrato»', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: '' }),
+      row({ primarykey: 'B', tenantid: 'CICOPAL' })
+    ];
+
+    expect(summarizeDistinctKeys(rows, '')).toEqual({
+      distintas: 2,
+      noContrato: 0,
+      soSemContrato: 1,
+      outrosContratos: 1,
+      semChave: 0
+    });
   });
 });

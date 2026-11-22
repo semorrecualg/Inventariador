@@ -8,6 +8,8 @@
  * nenhum lado?»).
  */
 
+import type { ChavesDistintas } from './dedupAssets';
+
 /** De onde vêm as filiais que o CONTRATO está a mostrar. */
 export type FiliaisOrigem = 'base local' | 'lista da nuvem' | 'cache' | 'nenhuma';
 
@@ -46,6 +48,8 @@ export interface AccessDiagnosticInput {
   linhasNoAparelho?: number;
   /** Grupos de ativos repetidos (filial + etiqueta com mais de uma linha). */
   ativosRepetidos?: AtivosRepetidos | null;
+  /** Chaves distintas e o escopo de cada uma (origem do excedente local). */
+  chavesDistintas?: ChavesDistintas | null;
   /** Hora (ms) da última consulta de nomes à nuvem; null = nunca nesta sessão. */
   nomesConsultadosEm?: number | null;
   /** Última falha de rede registada (mensagem curta), se houver. */
@@ -142,6 +146,25 @@ export function buildAccessDiagnostic(input: AccessDiagnosticInput): AccessDiagn
           rotulo: 'Linhas lidas',
           valor: `${input.linhasNoAparelho} (${input.linhasNoAparelho - input.ativosLocais} a mais que os ativos)`
         }]
+      : []),
+    ...(input.chavesDistintas
+      ? [
+          {
+            rotulo: 'Chaves distintas',
+            valor:
+              `${input.chavesDistintas.distintas} (no contrato: ${input.chavesDistintas.noContrato} · ` +
+              `só sem contrato: ${input.chavesDistintas.soSemContrato}` +
+              `${
+                input.chavesDistintas.outrosContratos > 0
+                  ? ` · noutro contrato: ${input.chavesDistintas.outrosContratos}`
+                  : ''
+              }${
+                input.chavesDistintas.semChave > 0
+                  ? ` · sem chave: ${input.chavesDistintas.semChave}`
+                  : ''
+              })`
+          }
+        ]
       : []),
     ...(input.ativosRepetidos && input.ativosRepetidos.grupos > 0
       ? [

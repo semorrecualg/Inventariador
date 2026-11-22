@@ -14,7 +14,11 @@ import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } 
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
-import { summarizeDuplicateAssetKeys, uniqueAssetsForDisplay } from './utils/dedupAssets';
+import {
+  summarizeDistinctKeys,
+  summarizeDuplicateAssetKeys,
+  uniqueAssetsForDisplay
+} from './utils/dedupAssets';
 import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
 import { mesclarConflitoPorCampo } from './utils/mergePorCampo';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
@@ -7054,6 +7058,9 @@ useEffect(() => {
       ativosLocais: uniqueAssetsForDisplay(inventory.assets, activeTenant).length,
       linhasNoAparelho: inventory.assets.length,
       ativosRepetidos: summarizeDuplicateAssetKeys(inventory.assets),
+      // De onde vem o excedente acima da nuvem: chaves com o contrato ativo ×
+      // chaves que só existem sem contrato (carga antiga) × outro contrato.
+      chavesDistintas: summarizeDistinctKeys(inventory.assets, activeTenant),
       nomesConsultadosEm: unitNamesConsultadosEm,
       ultimoErroDeRede: unitNamesErroDeRede,
       sessaoPersistida

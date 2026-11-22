@@ -35,11 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ativo e a conferida. É usada na lista da unidade (`App`), na contagem por
   filial (`getOperationalUnitsWithStats`) e em «Ativos no aparelho»; linhas de
   outro contrato não entram — nada é apagado da base. O Diagnóstico de Acesso
-  passa a mostrar «Linhas lidas» (linhas a mais) e
-  «Ativos repetidos» com a divisão **mesma primarykey × primarykeys diferentes**
-  e até 3 exemplos (filial · etiqueta · chaves), para confirmar o caso no
-  aparelho. Testes: `dedupAssets` (8) · `countAtivosByTenant` (3) ·
-  `accessDiagnostics` (1) · e2e do contrato fecha o aviso «Sincronização
+  passa a mostrar «Linhas lidas» (linhas a mais), «Ativos repetidos» com a
+  divisão **mesma primarykey × primarykeys diferentes** e «Chaves distintas»
+  com a origem de cada uma (`no contrato` · `só sem contrato` · `noutro
+  contrato` · `sem chave`) — a resposta a «de onde vem o excedente acima da
+  nuvem?». Os exemplos (filial · etiqueta · chaves, até 3) confirmam o caso no
+  aparelho. Testes: `dedupAssets` · `countAtivosByTenant` ·
+  `accessDiagnostics` · e2e do contrato fecha o aviso «Sincronização
   Concluída» quando ele aparece por cima do ecrã.
 - **Arranque:** a verificação da sessão na nuvem corre em paralelo com o login
   local e podia terminar depois dele. Como o utilizador em cache era lido antes

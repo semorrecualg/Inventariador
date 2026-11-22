@@ -108,6 +108,42 @@ describe('buildAccessDiagnostic — o texto que o dono copia', () => {
     expect(diag.texto).toContain('Repetido · 010101 CICOPAL GO · 005046: 2 linha(s) · 0000002345, 005046');
   });
 
+  it('mostra as chaves distintas e de onde vem o excedente sobre a nuvem', () => {
+    const diag = buildAccessDiagnostic({
+      ...BASE,
+      ativosLocais: 13226,
+      linhasNoAparelho: 25272,
+      chavesDistintas: {
+        distintas: 13226,
+        noContrato: 12636,
+        soSemContrato: 590,
+        outrosContratos: 0,
+        semChave: 0
+      }
+    });
+
+    expect(diag.texto).toContain(
+      'Chaves distintas: 13226 (no contrato: 12636 · só sem contrato: 590)'
+    );
+  });
+
+  it('acrescenta «noutro contrato» e «sem chave» só quando existem', () => {
+    const diag = buildAccessDiagnostic({
+      ...BASE,
+      chavesDistintas: {
+        distintas: 10,
+        noContrato: 5,
+        soSemContrato: 2,
+        outrosContratos: 3,
+        semChave: 4
+      }
+    });
+
+    expect(diag.texto).toContain(
+      'Chaves distintas: 10 (no contrato: 5 · só sem contrato: 2 · noutro contrato: 3 · sem chave: 4)'
+    );
+  });
+
   it('sem contrato, sem filiais e com erro de rede: mostra os três sinais', () => {
     const diag = buildAccessDiagnostic({
       ...BASE,
