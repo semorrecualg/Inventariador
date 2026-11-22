@@ -2,6 +2,7 @@ import { UserRole, type User } from '../types';
 import { validateStrongPassword } from '../utils/passwordPolicy';
 import { provisionUserInAuth } from './supabaseService';
 import { localDb } from './localDbService';
+import { withPasswordVerifier } from '../utils/passwordHash';
 
 /**
  * PROVISIONAMENTO DE LICENÇA — GBR KARDEK
@@ -219,9 +220,10 @@ export const provisionLicense = async (
     );
   }
 
-  // 2. Reflexo local: usuário MASTER + registro de licença
+  // 2. Reflexo local: usuário MASTER + registro de licença. A senha em texto
+  // fica só na chamada à nuvem acima; o registo local leva o verificador.
   try {
-    await localDb.users.add(master);
+    await localDb.users.add(withPasswordVerifier(master) as User);
   } catch (err) {
     warnings.push(
       `Falha ao persistir o MASTER no armazenamento local: ${

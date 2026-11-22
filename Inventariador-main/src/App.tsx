@@ -22,6 +22,7 @@ import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { preservarGpsMaisRecente } from './utils/assetGps';
 import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, resolveProfileUnitId } from './utils/authUtils';
+import { createPasswordVerifier, sanitizeUsersForStorage, withPasswordVerifier } from './utils/passwordHash';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, userHasPermission } from './services/rbacService';
@@ -912,7 +913,9 @@ useEffect(() => {
   const [users, setUsers] = useState<User[]>(() => {
     try {
       const saved = localStorage.getItem('app_users');
-      const userList: User[] = saved ? JSON.parse(saved) : [];
+      // Registos antigos vinham com `password` em claro: são convertidos em
+      // verificador (hash + sal) ao entrar na memória e nunca voltam a sair em texto.
+      const userList: User[] = saved ? (sanitizeUsersForStorage(JSON.parse(saved)) as User[]) : [];
       
       // Admin Padrão
       const adminIndex = userList.findIndex(u => (u.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase());
@@ -921,7 +924,7 @@ useEffect(() => {
           username: "ADMINISTRADOR", 
           name: "ADMINISTRADOR GLOBAL",
           email: ADMIN_EMAIL, 
-          password: "admin", 
+          ...createPasswordVerifier('admin'),
           role: UserRole.ADMIN,
           is_admin: true,
           isAdmin: true, 
@@ -3942,7 +3945,7 @@ useEffect(() => {
 
   // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
-    localStorage.setItem('app_users', JSON.stringify(users));
+    localStorage.setItem('app_users', JSON.stringify(sanitizeUsersForStorage(users)));
     
     if (users.length > 0 && databaseMode === DatabaseMode.SUPABASE && hasFetchedUsers) {
       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
@@ -3978,7 +3981,8 @@ useEffect(() => {
                   // Mas a nuvem deve ser a verdade eventual. 
                   // Para evitar o "revert" imediato, poderíamos preferir o local se for diferente.
                   // No entanto, syncUsersToCloud já deve ter enviado o local para a nuvem.
-                  password: local.password, 
+                  passwordHash: local.passwordHash,
+                  passwordSalt: local.passwordSalt,
                   mustChangePassword: local.mustChangePassword
                 };
               }
@@ -4221,7 +4225,7 @@ useEffect(() => {
         if (user) {
           sessionStorage.setItem('app_current_user', safeStringify(user));
         }
-        localStorage.setItem('app_users', safeStringify(users));
+        localStorage.setItem('app_users', safeStringify(sanitizeUsersForStorage(users)));
         localStorage.setItem('app_selected_unit', selectedUnit || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
         localStorage.setItem('app_is_inventorying', String(isInventorying));
@@ -7249,7 +7253,7 @@ useEffect(() => {
                     setUser(updatedUser);
                     sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
                     // Salva no SQLite local
-                    localDb.users.add(updatedUser);
+                    localDb.users.add(withPasswordVerifier(updatedUser) as User);
                   }
                 });
               }}
@@ -7663,16 +7667,16 @@ useEffect(() => {
           {screen === AppScreen.CHANGE_PASSWORD && (
             <ChangePassword 
               onPasswordChanged={async (p) => { 
-                const upd = users.map(u => u.email === user?.email ? { ...u, password: p, mustChangePassword: false } : u); 
+                const upd = users.map(u => u.email === user?.email ? { ...withPasswordVerifier(u), password: undefined, ...createPasswordVerifier(p), mustChangePassword: false } : u); 
                 setUsers(upd); 
                 // Persiste a nova senha na tabela local (localforage/Dexie). Sem
                 // isto o perfil trocava a senha na tela, mas o login local
                 // continuava exigindo a senha antiga (e o acesso ficava travado).
                 if (user) {
-                  const updatedUser: User = { ...user, password: p, mustChangePassword: false };
+                  const updatedUser: User = { ...user, password: undefined, ...createPasswordVerifier(p), mustChangePassword: false };
                   sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
                   try {
-                    await localDb.users.add(updatedUser);
+                    await localDb.users.add(withPasswordVerifier(updatedUser) as User);
                   } catch (persistErr) {
                     logger.warn('[ChangePassword] Falha ao persistir a nova senha localmente:', persistErr);
                   }

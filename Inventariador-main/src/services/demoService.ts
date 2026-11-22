@@ -2,6 +2,7 @@ import { getDemoSeedAssets } from './demoSeed';
 import { localDb } from './localDbService';
 import { User, UserRole } from '../types';
 import { logger } from '../utils/logger';
+import { createPasswordVerifier } from '../utils/passwordHash';
 
 const DEMO_START_KEY = 'gbr_kardex_demo_start';
 const DEMO_AUDIT_COUNT_KEY = 'gbr_kardex_demo_audits';
@@ -13,7 +14,6 @@ export const demoService = {
       username: 'usuario_demo',
       name: 'Auditor Demo (Play Store)',
       email: 'demo@gbrauditoria.com.br',
-      password: '',
       role: 'DEMO' as unknown as UserRole, // Role DEMO
       is_admin: false,
       isAdmin: false,
@@ -57,7 +57,7 @@ export const demoService = {
         username: 'admin',
         name: 'Backup Administrator',
         email: 'admin@gbrauditoria.com.br',
-        password: '123456',
+        ...createPasswordVerifier('123456'),
         role: 'ADMIN' as unknown as UserRole,
         is_admin: true,
         isAdmin: true,

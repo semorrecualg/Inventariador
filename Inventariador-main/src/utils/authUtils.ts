@@ -9,6 +9,7 @@
  * For production cloud deployments, authorization must also be enforced
  * server-side via Supabase Row-Level Security policies.
  */
+import { verifyUserPassword } from './passwordHash';
 
 import { User, UserRole } from '../types';
 import { canonicalRole } from './roles';
@@ -241,8 +242,7 @@ export const authenticateLocalUser = async (
       return { error: 'Usuário não encontrado' };
     }
 
-    const storedPassword = user.password as string | undefined;
-    if (storedPassword !== password) {
+    if (!verifyUserPassword(user as { password?: string; passwordHash?: string; passwordSalt?: string }, password)) {
       return { error: 'Senha incorreta' };
     }
 

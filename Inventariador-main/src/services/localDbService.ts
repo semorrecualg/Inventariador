@@ -1,5 +1,6 @@
 import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
+import { verifyUserPassword } from '../utils/passwordHash';
 import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
 import { pickAssetAddress } from '../utils/assetAddress';
 import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
@@ -1098,7 +1099,7 @@ export const localDb = {
       }
       return dbUsers.some(u => 
         (u!.email.toLowerCase() === normUser || u!.username.toLowerCase() === normUser) && 
-        u!.password === password
+        verifyUserPassword(u, password || '')
       );
     } catch {
       return false;

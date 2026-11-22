@@ -11,6 +11,7 @@
 // segredos, só evita que o utilizador tenha de repetir o login a cada sessão.
 // ============================================================================
 import { isLocalSessionProfile } from './authUtils';
+import { withPasswordVerifier } from './passwordHash';
 import { AppScreen } from '../types';
 import type { User } from '../types';
 
@@ -38,7 +39,11 @@ export function writePersistedSession(user: User | null | undefined, now: number
   if (String(user.role || '').toUpperCase() === 'DEMO') return;
   if (!isLocalSessionProfile(user)) return;
   try {
-    localStorage.setItem(PERSISTED_SESSION_KEY, JSON.stringify({ user, savedAt: now }));
+    // O perfil nunca leva senha: a cópia persistida é lida como credencial.
+    localStorage.setItem(
+      PERSISTED_SESSION_KEY,
+      JSON.stringify({ user: withPasswordVerifier(user), savedAt: now })
+    );
   } catch {
     /* sem cota: a sessão do separador continua a valer */
   }
@@ -74,7 +79,8 @@ export function readPersistedSession(
 
   const user = parsed.user as User | undefined;
   if (!user || typeof user.email !== 'string' || !user.email.trim()) return null;
-  return user;
+  // Cópias antigas podem ter `password` em claro: sai já sem ela.
+  return withPasswordVerifier(user) as User;
 }
 
 /**

@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { isAdminEmail, markAppManagedSession, ADMIN_EMAIL } from '../utils/authUtils';
+import { verifyUserPassword } from '../utils/passwordHash';
 import { useLocalAuth } from '../hooks/useLocalAuth';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode } from '../services/supabaseService';
 import { authenticateBiometric, checkNativeBiometry, hasBiometricRegistered, isBiometricSupported, isNativeAppShell } from '../services/biometricService';
@@ -397,20 +398,26 @@ const Login: React.FC<LoginProps> = ({
                             password === 'admin') ||
                             (normalizedUsername === 'admin' && password === '123456');
       
-      let matchedLocalUser = users.find(u => 
-        (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && 
-        u.password === password
+      // Registo local pela identidade e, só depois, a senha pelo verificador
+      // (hash + sal). `password` em texto só existe em registos antigos.
+      const candidateLocalUser = users.find(u =>
+        u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername
       );
+      let matchedLocalUser = candidateLocalUser && verifyUserPassword(candidateLocalUser, password)
+        ? candidateLocalUser
+        : undefined;
 
       // BUSCA DIRETA NO SQlite SE O ARRAY DE PROPS ESTIVER VAZIO OU STALE
       if (!matchedLocalUser) {
         try {
           logger.info('[Login] [CHECK 1] Buscando usuário local na tabela física "users" do SQLite/localforage...');
           const dbUsers = await localDb.users.toArray();
-          matchedLocalUser = dbUsers.find(u => 
-            (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && 
-            u.password === password
+          const candidateDbUser = dbUsers.find(u =>
+            u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername
           );
+          matchedLocalUser = candidateDbUser && verifyUserPassword(candidateDbUser, password)
+            ? candidateDbUser
+            : undefined;
         } catch (sqliteErr) {
           logger.warn('[Login] Erro ao ler tabela de usuários local diretamente do SQLite:', sqliteErr);
         }
@@ -536,10 +543,13 @@ const Login: React.FC<LoginProps> = ({
 
       const doLocalAuthFallback = (): User => {
         logger.info('[Login] Autenticando via Banco Interno (Mobile Puro - Fallback)...');
-        const localUser = users.find(u => 
-          (u.email.toLowerCase() === username.trim().toLowerCase() || u.username.toLowerCase() === username.trim().toLowerCase()) && 
-          u.password === password
+        const localIdentifier = username.trim().toLowerCase();
+        const candidateFallback = users.find(u =>
+          u.email.toLowerCase() === localIdentifier || u.username.toLowerCase() === localIdentifier
         );
+        const localUser = candidateFallback && verifyUserPassword(candidateFallback, password)
+          ? candidateFallback
+          : undefined;
 
         if (!localUser) {
           const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || isAdminEmail(username.trim()) || username.trim().toLowerCase() === 'admin') && 

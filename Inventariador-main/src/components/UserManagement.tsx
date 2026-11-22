@@ -31,6 +31,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { isAdminEmail } from '../utils/authUtils';
 import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
 import { validateStrongPassword, validateQuickLoginPassword, STRONG_PASSWORD_RULE_LABELS } from '../utils/passwordPolicy';
+import { createPasswordVerifier, sanitizeUsersForStorage, withPasswordVerifier } from '../utils/passwordHash';
 import { provisionUserInAuth, resetPassword, deleteUserFromCloud, fetchUnitNamesFromCloud, isInternalMode, ProvisionResult } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { logger } from '../utils/logger';
@@ -360,7 +361,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       username,
       name: newName.trim(),
       email,
-      password,
+      // Senha local por verificador: o texto em claro não vai para o aparelho.
+      ...createPasswordVerifier(password),
       role: newRole,
       is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || isAdminEmail(email),
       isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || isAdminEmail(email),
@@ -375,7 +377,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
     setUsers(prev => {
       const updated = [...prev, newUser];
-      localStorage.setItem('app_users', safeStringify(updated));
+      localStorage.setItem('app_users', safeStringify(sanitizeUsersForStorage(updated)));
       return updated;
     });
 
@@ -475,7 +477,11 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
     const email = editEmail.toLowerCase().trim();
     const username = editUsername.trim() || email.split('@')[0];
-    const password = editPassword.trim() || selectedUser.password;
+    const newPassword = editPassword.trim();
+    // Em branco = manter o verificador actual; nova senha = gerar outro.
+    const credentials = newPassword
+      ? createPasswordVerifier(newPassword)
+      : withPasswordVerifier(selectedUser);
     const name = editName.trim();
 
     logger.info(`[UserManagement] Salvando edição para ${selectedUser.email}:`, { name, username, email, editRole });
@@ -507,7 +513,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       username, 
       name,
       email, 
-      password, 
+      password: undefined,
+      ...credentials,
       role: editRole, 
       is_admin, 
       isAdmin: is_admin, 
@@ -520,7 +527,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     setUsers(prev => {
       const updated = prev.map(u => u.email === selectedUser.email ? updatedUser : u);
       logger.info('[UserManagement] Lista de usuários atualizada localmente.');
-      localStorage.setItem('app_users', safeStringify(updated));
+      localStorage.setItem('app_users', safeStringify(sanitizeUsersForStorage(updated)));
       return updated;
     });
 
@@ -569,7 +576,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           // 2. Remove Localmente
           setUsers(prev => {
             const updated = prev.filter(u => u.email !== email);
-            localStorage.setItem('app_users', safeStringify(updated));
+            localStorage.setItem('app_users', safeStringify(sanitizeUsersForStorage(updated)));
             return updated;
           });
           try {
