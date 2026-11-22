@@ -11,7 +11,7 @@
 // segredos, só evita que o utilizador tenha de repetir o login a cada sessão.
 // ============================================================================
 import { isLocalSessionProfile } from './authUtils';
-import { withPasswordVerifier } from './passwordHash';
+import { stripUserSecrets } from './passwordHash';
 import { AppScreen } from '../types';
 import type { User } from '../types';
 
@@ -42,7 +42,7 @@ export function writePersistedSession(user: User | null | undefined, now: number
     // O perfil nunca leva senha: a cópia persistida é lida como credencial.
     localStorage.setItem(
       PERSISTED_SESSION_KEY,
-      JSON.stringify({ user: withPasswordVerifier(user), savedAt: now })
+      JSON.stringify({ user: stripUserSecrets(user), savedAt: now })
     );
   } catch {
     /* sem cota: a sessão do separador continua a valer */
@@ -80,7 +80,7 @@ export function readPersistedSession(
   const user = parsed.user as User | undefined;
   if (!user || typeof user.email !== 'string' || !user.email.trim()) return null;
   // Cópias antigas podem ter `password` em claro: sai já sem ela.
-  return withPasswordVerifier(user) as User;
+  return stripUserSecrets(user) as User;
 }
 
 /**
@@ -131,6 +131,26 @@ export function hasLocalSessionInCache(): boolean {
  */
 export function resolveInitialScreenHistory(): AppScreen[] {
   return hasLocalSessionInCache() ? [AppScreen.WORK_CONTEXT_SELECTION] : [AppScreen.LOGIN];
+}
+
+/**
+ * Limpa a senha antiga do cache de sessão do separador (`app_current_user`).
+ * Versões anteriores gravavam o perfil inteiro, com `password` em texto, e esse
+ * valor sobrevive ao login até alguém o reescrever. Devolve `true` se limpou.
+ */
+export function sanitizeSessionUserCache(): boolean {
+  try {
+    const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
+    if (!raw || raw === 'null') return false;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || !('password' in (parsed as Record<string, unknown>))) {
+      return false;
+    }
+    sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(stripUserSecrets(parsed as User)));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Logout explícito: o próximo arranque tem de pedir credenciais. */

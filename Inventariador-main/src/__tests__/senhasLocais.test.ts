@@ -4,22 +4,28 @@
 //
 // `app_users` (e a cópia persistida da sessão) guardava `password` em claro:
 // qualquer backup do telemóvel ou acesso ao browser lia credenciais de
-// administrador. O registo passa a levar um verificador (sal + SHA-256
-// iterado) e o texto é descartado antes de qualquer escrita; registos antigos
-// são convertidos na leitura, e o login continua a funcionar.
+// administrador. O registo passa a levar um verificador PBKDF2-HMAC-SHA256
+// (WebCrypto, sal aleatório por registo) e o texto é descartado antes de
+// qualquer escrita.
+//
+// Cobre também a dívida que sobra no aparelho de quem já usava a versão antiga:
+// a senha em `sessionStorage` (`app_current_user`) e os registos de
+// `localDb.users` com texto, que são convertidos no arranque.
 // ============================================================================
 import 'fake-indexeddb/auto'; // ANTES de qualquer módulo que crie Dexie/localforage
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import {
-  sha256Hex,
   createPasswordVerifier,
   verifyUserPassword,
   withPasswordVerifier,
-  sanitizeUsersForStorage
+  sanitizeUsersForStorage,
+  stripUserSecrets
 } from '../utils/passwordHash';
 import { authenticateLocalUser } from '../utils/authUtils';
+import { sanitizeSessionUserCache } from '../utils/sessionPersistence';
+import { localDb } from '../services/localDbService';
 import { demoService } from '../services/demoService';
 import { DatabaseMode, UserRole } from '../types';
 import type { User } from '../types';
@@ -41,18 +47,19 @@ vi.mock('../services/supabaseService', () => ({
   isInternalMode: false
 }));
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   localStorage.clear();
   sessionStorage.clear();
+  await localDb.users.clear();
 });
 
-const auditorComSenha = (): User =>
+const auditorComSenha = async (): Promise<User> =>
   ({
     username: 'auditor',
     name: 'Auditor',
     email: 'auditor@example.com',
-    ...createPasswordVerifier('senha123'),
+    ...(await createPasswordVerifier('senha123')),
     role: UserRole.AUDITOR,
     is_admin: false,
     isAdmin: false,
@@ -61,69 +68,59 @@ const auditorComSenha = (): User =>
     units: ['FILIAL A']
   }) as User;
 
-describe('sha256Hex — base do verificador', () => {
-  it('bate nos vectores conhecidos do SHA-256', () => {
-    expect(sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
-    expect(sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
-  });
-});
-
-describe('verificador de senha local', () => {
-  it('não guarda a senha e confere só a senha certa', () => {
-    const verifier = createPasswordVerifier('admin');
+describe('verificador PBKDF2 do WebCrypto', () => {
+  it('não guarda a senha e confere só a senha certa', async () => {
+    const verifier = await createPasswordVerifier('admin');
     expect(verifier.passwordHash).not.toBe('admin');
-    expect(verifier.passwordHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(verifyUserPassword(verifier, 'admin')).toBe(true);
-    expect(verifyUserPassword(verifier, 'admin ')).toBe(false);
-    expect(verifyUserPassword(verifier, '')).toBe(false);
+    expect(verifier.passwordHash).toMatch(/^[A-Za-z0-9+/]{43}=$/); // 32 bytes em base64
+    await expect(verifyUserPassword(verifier, 'admin')).resolves.toBe(true);
+    await expect(verifyUserPassword(verifier, 'admin ')).resolves.toBe(false);
+    await expect(verifyUserPassword(verifier, '')).resolves.toBe(false);
   });
 
-  it('a mesma senha em dois registos dá hashes diferentes (sal por registo)', () => {
-    const a = createPasswordVerifier('123456');
-    const b = createPasswordVerifier('123456');
+  it('a mesma senha em dois registos dá hashes diferentes (sal por registo)', async () => {
+    const a = await createPasswordVerifier('123456');
+    const b = await createPasswordVerifier('123456');
     expect(a.passwordSalt).not.toBe(b.passwordSalt);
     expect(a.passwordHash).not.toBe(b.passwordHash);
   });
 
-  it('registo antigo com texto continua a entrar uma vez (migração)', () => {
+  it('registo antigo com texto continua a entrar e sai sem a senha', async () => {
     const antigo: { email: string; password?: string; passwordHash?: string; passwordSalt?: string } = {
       email: 'velho@example.com',
       password: 'admin123'
     };
-    expect(verifyUserPassword(antigo, 'admin123')).toBe(true);
-    expect(verifyUserPassword(antigo, 'outra')).toBe(false);
-    // Ao passar por qualquer gravação, o texto desaparece.
-    const migrado = withPasswordVerifier(antigo);
+    await expect(verifyUserPassword(antigo, 'admin123')).resolves.toBe(true);
+    await expect(verifyUserPassword(antigo, 'outra')).resolves.toBe(false);
+
+    const migrado = await withPasswordVerifier(antigo);
     expect(migrado).not.toHaveProperty('password');
-    expect(verifyUserPassword(migrado, 'admin123')).toBe(true);
+    await expect(verifyUserPassword(migrado, 'admin123')).resolves.toBe(true);
   });
 });
 
 describe('app_users — nenhuma senha em claro', () => {
-  it('a lista gravada não tem a chave password nem o texto da senha', () => {
+  it('a lista gravada não tem a chave password nem o texto da senha', async () => {
     const users = [
-      auditorComSenha(),
-      { username: 'velho', email: 'velho@example.com', password: 'admin123', role: UserRole.AUDITOR, tenantid: 'CICOPAL' } as User
+      await auditorComSenha(),
+      {
+        username: 'velho',
+        email: 'velho@example.com',
+        password: 'admin123',
+        role: UserRole.AUDITOR,
+        tenantid: 'CICOPAL'
+      } as User
     ];
 
-    const stored = JSON.stringify(sanitizeUsersForStorage(users));
+    const stored = JSON.stringify(await sanitizeUsersForStorage(users));
     localStorage.setItem('app_users', stored);
 
     expect(stored).not.toContain('"password"');
     expect(stored).not.toContain('senha123');
     expect(stored).not.toContain('admin123');
-    expect(localStorage.getItem('app_users')).not.toContain('senha123');
-    // O verificador viaja no registo: o login continua possível.
     const roundTrip = JSON.parse(localStorage.getItem('app_users') as string) as User[];
-    expect(verifyUserPassword(roundTrip[0], 'senha123')).toBe(true);
-    expect(verifyUserPassword(roundTrip[1], 'admin123')).toBe(true);
-  });
-
-  it('a cópia persistida da sessão não leva senha', () => {
-    const user = auditorComSenha();
-    const persistido = JSON.stringify({ user: withPasswordVerifier(user), savedAt: Date.now() });
-    expect(persistido).not.toContain('"password"');
-    expect(persistido).not.toContain('senha123');
+    await expect(verifyUserPassword(roundTrip[0], 'senha123')).resolves.toBe(true);
+    await expect(verifyUserPassword(roundTrip[1], 'admin123')).resolves.toBe(true);
   });
 
   it('o utilizador de demonstração não traz senha', () => {
@@ -131,9 +128,56 @@ describe('app_users — nenhuma senha em claro', () => {
   });
 });
 
+describe('senhas antigas que já estão no aparelho', () => {
+  it('limpa a senha do cache de sessão do separador (`app_current_user`)', () => {
+    sessionStorage.setItem(
+      'app_current_user',
+      JSON.stringify({ email: 'auditor@example.com', role: 'AUDITOR', password: 'segredo123' })
+    );
+
+    expect(sanitizeSessionUserCache()).toBe(true);
+
+    const cache = sessionStorage.getItem('app_current_user') as string;
+    expect(cache).not.toContain('"password"');
+    expect(cache).not.toContain('segredo123');
+    expect(JSON.parse(cache)).toMatchObject({ email: 'auditor@example.com' });
+    // Já limpo: segunda passagem não tem nada para fazer.
+    expect(sanitizeSessionUserCache()).toBe(false);
+  });
+
+  it('converte os registos de localDb.users com texto para verificador', async () => {
+    await localDb.users.add({
+      username: 'legado',
+      name: 'Legado',
+      email: 'legado@example.com',
+      password: 'antiga123',
+      role: UserRole.AUDITOR,
+      tenantid: 'CICOPAL',
+      filial: 'FILIAL A',
+      units: ['FILIAL A']
+    } as User);
+
+    await expect(localDb.users.migrateLocalUserPasswords()).resolves.toBe(1);
+
+    const [registro] = await localDb.users.toArray();
+    expect(registro).not.toHaveProperty('password');
+    expect(JSON.stringify(registro)).not.toContain('antiga123');
+    // O login local continua a funcionar com a mesma senha.
+    await expect(verifyUserPassword(registro, 'antiga123')).resolves.toBe(true);
+    await expect(verifyUserPassword(registro, 'errada')).resolves.toBe(false);
+    // Idempotente: uma segunda passagem não mexe em nada.
+    await expect(localDb.users.migrateLocalUserPasswords()).resolves.toBe(0);
+  });
+
+  it('stripUserSecrets remove a chave sem derivar nada', async () => {
+    const limpo = stripUserSecrets({ email: 'a@b.c', password: 'segredo' } as User);
+    expect(limpo).not.toHaveProperty('password');
+  });
+});
+
 describe('login com verificador', () => {
   it('authenticateLocalUser aceita a senha certa do registo com hash e recusa a errada', async () => {
-    const user = auditorComSenha();
+    const user = await auditorComSenha();
     const findByEmail = async () => user as unknown as Record<string, unknown>;
 
     await expect(authenticateLocalUser(findByEmail, 'auditor@example.com', 'senha123')).resolves.toHaveProperty('user');
@@ -142,13 +186,13 @@ describe('login com verificador', () => {
     });
   });
 
-  it('a tela de login autentica o auditor com a senha guardada em hash', async () => {
+  it('a tela de login autentica o auditor com a senha guardada em PBKDF2', async () => {
     const onLogin = vi.fn();
     const { default: Login } = await import('../components/Login');
 
     render(
       React.createElement(Login as unknown as React.ComponentType<Record<string, unknown>>, {
-        users: [auditorComSenha()],
+        users: [await auditorComSenha()],
         databaseMode: DatabaseMode.SUPABASE,
         onLogin,
         onOpenPrivacyCenter: vi.fn(),

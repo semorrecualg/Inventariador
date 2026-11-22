@@ -57,7 +57,7 @@ export const demoService = {
         username: 'admin',
         name: 'Backup Administrator',
         email: 'admin@gbrauditoria.com.br',
-        ...createPasswordVerifier('123456'),
+        ...(await createPasswordVerifier('123456')),
         role: 'ADMIN' as unknown as UserRole,
         is_admin: true,
         isAdmin: true,

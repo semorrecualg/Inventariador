@@ -223,7 +223,7 @@ export const provisionLicense = async (
   // 2. Reflexo local: usuário MASTER + registro de licença. A senha em texto
   // fica só na chamada à nuvem acima; o registo local leva o verificador.
   try {
-    await localDb.users.add(withPasswordVerifier(master) as User);
+    await localDb.users.add((await withPasswordVerifier(master)) as User);
   } catch (err) {
     warnings.push(
       `Falha ao persistir o MASTER no armazenamento local: ${

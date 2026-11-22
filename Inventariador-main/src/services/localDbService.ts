@@ -1,6 +1,6 @@
 import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
 import { isAdminEmail } from '../utils/authUtils';
-import { verifyUserPassword } from '../utils/passwordHash';
+import { createPasswordVerifier, stripUserSecrets, verifyUserPassword } from '../utils/passwordHash';
 import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
 import { pickAssetAddress } from '../utils/assetAddress';
 import { isConferido, type MarcaDeConferencia } from '../utils/conferencia';
@@ -1042,6 +1042,23 @@ export const localDb = {
       if (emailClean) {
         await usersStore.removeItem(emailClean);
       }
+    },
+
+    /**
+     * Migra os registos que ainda guardam a senha em texto: gera o verificador
+     * (PBKDF2) e regrava o registo sem `password`. Idempotente — as próximas
+     * chamadas não encontram texto. Devolve quantos registos mudaram.
+     */
+    migrateLocalUserPasswords: async (): Promise<number> => {
+      const rows = await localDb.users.toArray();
+      let migrated = 0;
+      for (const row of rows) {
+        if (typeof row.password !== 'string' || row.password === '') continue;
+        const verifier = await createPasswordVerifier(row.password);
+        await localDb.users.add({ ...stripUserSecrets(row), ...verifier } as User);
+        migrated += 1;
+      }
+      return migrated;
     }
   },
 
@@ -1097,10 +1114,11 @@ export const localDb = {
       if (normUser === 'admin' && password === '123456') {
         return true;
       }
-      return dbUsers.some(u => 
-        (u!.email.toLowerCase() === normUser || u!.username.toLowerCase() === normUser) && 
-        verifyUserPassword(u, password || '')
-      );
+      for (const u of dbUsers) {
+        const sameIdentity = u.email.toLowerCase() === normUser || u.username.toLowerCase() === normUser;
+        if (sameIdentity && (await verifyUserPassword(u, password || ''))) return true;
+      }
+      return false;
     } catch {
       return false;
     }

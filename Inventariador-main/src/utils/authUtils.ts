@@ -242,7 +242,7 @@ export const authenticateLocalUser = async (
       return { error: 'Usuário não encontrado' };
     }
 
-    if (!verifyUserPassword(user as { password?: string; passwordHash?: string; passwordSalt?: string }, password)) {
+    if (!(await verifyUserPassword(user as { password?: string; passwordHash?: string; passwordSalt?: string }, password))) {
       return { error: 'Senha incorreta' };
     }
 

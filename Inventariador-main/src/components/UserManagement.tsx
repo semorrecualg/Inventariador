@@ -31,7 +31,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { isAdminEmail } from '../utils/authUtils';
 import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
 import { validateStrongPassword, validateQuickLoginPassword, STRONG_PASSWORD_RULE_LABELS } from '../utils/passwordPolicy';
-import { createPasswordVerifier, sanitizeUsersForStorage, withPasswordVerifier } from '../utils/passwordHash';
+import { createPasswordVerifier, sanitizeUsersForStorage, stripUserSecrets } from '../utils/passwordHash';
 import { provisionUserInAuth, resetPassword, deleteUserFromCloud, fetchUnitNamesFromCloud, isInternalMode, ProvisionResult } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { logger } from '../utils/logger';
@@ -362,7 +362,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       name: newName.trim(),
       email,
       // Senha local por verificador: o texto em claro não vai para o aparelho.
-      ...createPasswordVerifier(password),
+      ...(await createPasswordVerifier(password)),
       role: newRole,
       is_admin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || isAdminEmail(email),
       isAdmin: newRole === UserRole.ADMIN || newRole === UserRole.MASTER || isAdminEmail(email),
@@ -375,11 +375,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       quickLogin: quickLoginMode ? true : undefined
     };
 
-    setUsers(prev => {
-      const updated = [...prev, newUser];
-      localStorage.setItem('app_users', safeStringify(sanitizeUsersForStorage(updated)));
-      return updated;
-    });
+    const updatedWithNewUser = [...users, newUser];
+    setUsers(updatedWithNewUser);
+    localStorage.setItem('app_users', safeStringify(await sanitizeUsersForStorage(updatedWithNewUser)));
 
     // Reflexo local: persiste no armazenamento físico (localforage/Dexie) para
     // que o usuário sobreviva a reloads e fique disponível no modo offline/INTERNAL.
@@ -480,8 +478,8 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     const newPassword = editPassword.trim();
     // Em branco = manter o verificador actual; nova senha = gerar outro.
     const credentials = newPassword
-      ? createPasswordVerifier(newPassword)
-      : withPasswordVerifier(selectedUser);
+      ? await createPasswordVerifier(newPassword)
+      : stripUserSecrets(selectedUser);
     const name = editName.trim();
 
     logger.info(`[UserManagement] Salvando edição para ${selectedUser.email}:`, { name, username, email, editRole });
@@ -524,12 +522,10 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
       units: normUnits
     };
 
-    setUsers(prev => {
-      const updated = prev.map(u => u.email === selectedUser.email ? updatedUser : u);
-      logger.info('[UserManagement] Lista de usuários atualizada localmente.');
-      localStorage.setItem('app_users', safeStringify(sanitizeUsersForStorage(updated)));
-      return updated;
-    });
+    const updatedWithEdit = users.map(u => u.email === selectedUser.email ? updatedUser : u);
+    setUsers(updatedWithEdit);
+    logger.info('[UserManagement] Lista de usuários atualizada localmente.');
+    localStorage.setItem('app_users', safeStringify(await sanitizeUsersForStorage(updatedWithEdit)));
 
     // Reflexo local: atualiza o registro no armazenamento físico (upsert por e-mail).
     try {
@@ -574,11 +570,9 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           await deleteUserFromCloud(email);
           
           // 2. Remove Localmente
-          setUsers(prev => {
-            const updated = prev.filter(u => u.email !== email);
-            localStorage.setItem('app_users', safeStringify(sanitizeUsersForStorage(updated)));
-            return updated;
-          });
+          const updatedWithoutUser = users.filter(u => u.email !== email);
+          setUsers(updatedWithoutUser);
+          localStorage.setItem('app_users', safeStringify(await sanitizeUsersForStorage(updatedWithoutUser)));
           try {
             await localDb.users.remove(email);
             logger.info(`[UserManagement] Acesso de ${email} removido do armazenamento local.`);

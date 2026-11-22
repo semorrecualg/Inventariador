@@ -22,7 +22,7 @@ import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { preservarGpsMaisRecente } from './utils/assetGps';
 import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, resolveProfileUnitId } from './utils/authUtils';
-import { createPasswordVerifier, sanitizeUsersForStorage, withPasswordVerifier } from './utils/passwordHash';
+import { ADMIN_SEED_VERIFIER, createPasswordVerifier, sanitizeUsersForStorage, stripUserSecrets } from './utils/passwordHash';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, userHasPermission } from './services/rbacService';
@@ -84,7 +84,7 @@ import {
 } from './utils/syncCheckpoint';
 import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato, unitNamesCacheKey, readUnitNamesCache, writeUnitNamesCache } from './utils/unitContextUtils';
 import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
-import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
+import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, restorePersistedSession, sanitizeSessionUserCache, writePersistedSession } from './utils/sessionPersistence';
 import { shouldForceUnitOnEmptyBase } from './utils/bootRedirects';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
@@ -913,9 +913,10 @@ useEffect(() => {
   const [users, setUsers] = useState<User[]>(() => {
     try {
       const saved = localStorage.getItem('app_users');
-      // Registos antigos vinham com `password` em claro: são convertidos em
-      // verificador (hash + sal) ao entrar na memória e nunca voltam a sair em texto.
-      const userList: User[] = saved ? (sanitizeUsersForStorage(JSON.parse(saved)) as User[]) : [];
+      // Lido cru: registos antigos ainda podem ter `password` em texto. A
+      // conversão para verificador (PBKDF2) é assíncrona e corre no efeito de
+      // persistência — que grava primeiro, para nenhum utilizador perder a senha.
+      const userList: User[] = saved ? (JSON.parse(saved) as User[]) : [];
       
       // Admin Padrão
       const adminIndex = userList.findIndex(u => (u.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase());
@@ -924,7 +925,7 @@ useEffect(() => {
           username: "ADMINISTRADOR", 
           name: "ADMINISTRADOR GLOBAL",
           email: ADMIN_EMAIL, 
-          ...createPasswordVerifier('admin'),
+          ...ADMIN_SEED_VERIFIER,
           role: UserRole.ADMIN,
           is_admin: true,
           isAdmin: true, 
@@ -3943,9 +3944,35 @@ useEffect(() => {
     setBiometricRequirement(null);
   }, [user?.email]);
 
+  // Senhas antigas em texto que ficaram no aparelho: a sessão do separador é
+  // limpa já e os registos de `localDb.users` são convertidos para verificador
+  // (PBKDF2) no arranque — o login local deixa de aceitar o texto guardado.
+  useEffect(() => {
+    sanitizeSessionUserCache();
+    void localDb.users
+      .migrateLocalUserPasswords()
+      .then((migrated) => {
+        if (migrated > 0) {
+          logger.info(`[Acessos] ${migrated} senha(s) local(is) convertida(s) para verificador.`);
+        }
+      })
+      .catch((err) => logger.warn('[Acessos] Falha ao migrar senhas locais:', err));
+  }, []);
+
   // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
-    localStorage.setItem('app_users', JSON.stringify(sanitizeUsersForStorage(users)));
+    // Nunca escreve senha em texto: converte em verificador (PBKDF2) antes de
+    // gravar. Quando havia texto antigo, a memória passa também a ter o hash.
+    void sanitizeUsersForStorage(users)
+      .then((stored) => {
+        localStorage.setItem('app_users', safeStringify(stored));
+        if (users.some((u) => typeof u.password === 'string' && u.password !== '')) {
+          setUsers(stored as User[]);
+        }
+      })
+      .catch((err) => {
+        logger.warn('[Acessos] Falha ao converter senhas locais:', err);
+      });
     
     if (users.length > 0 && databaseMode === DatabaseMode.SUPABASE && hasFetchedUsers) {
       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
@@ -4225,7 +4252,9 @@ useEffect(() => {
         if (user) {
           sessionStorage.setItem('app_current_user', safeStringify(user));
         }
-        localStorage.setItem('app_users', safeStringify(sanitizeUsersForStorage(users)));
+        void sanitizeUsersForStorage(users)
+          .then((stored) => localStorage.setItem('app_users', safeStringify(stored)))
+          .catch((err) => logger.warn('[Acessos] Falha ao converter senhas locais:', err));
         localStorage.setItem('app_selected_unit', selectedUnit || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
         localStorage.setItem('app_is_inventorying', String(isInventorying));
@@ -7253,7 +7282,7 @@ useEffect(() => {
                     setUser(updatedUser);
                     sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
                     // Salva no SQLite local
-                    localDb.users.add(withPasswordVerifier(updatedUser) as User);
+                    localDb.users.add(stripUserSecrets(updatedUser) as User);
                   }
                 });
               }}
@@ -7667,16 +7696,17 @@ useEffect(() => {
           {screen === AppScreen.CHANGE_PASSWORD && (
             <ChangePassword 
               onPasswordChanged={async (p) => { 
-                const upd = users.map(u => u.email === user?.email ? { ...withPasswordVerifier(u), password: undefined, ...createPasswordVerifier(p), mustChangePassword: false } : u); 
+                const credentials = await createPasswordVerifier(p);
+                const upd = users.map(u => u.email === user?.email ? { ...stripUserSecrets(u), ...credentials, mustChangePassword: false } : u); 
                 setUsers(upd); 
                 // Persiste a nova senha na tabela local (localforage/Dexie). Sem
                 // isto o perfil trocava a senha na tela, mas o login local
                 // continuava exigindo a senha antiga (e o acesso ficava travado).
                 if (user) {
-                  const updatedUser: User = { ...user, password: undefined, ...createPasswordVerifier(p), mustChangePassword: false };
+                  const updatedUser: User = { ...stripUserSecrets(user), ...credentials, mustChangePassword: false };
                   sessionStorage.setItem('app_current_user', safeStringify(updatedUser));
                   try {
-                    await localDb.users.add(withPasswordVerifier(updatedUser) as User);
+                    await localDb.users.add(stripUserSecrets(updatedUser) as User);
                   } catch (persistErr) {
                     logger.warn('[ChangePassword] Falha ao persistir a nova senha localmente:', persistErr);
                   }
