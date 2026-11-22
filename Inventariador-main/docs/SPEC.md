@@ -65,14 +65,16 @@ cria sub-usuários "login rápido" amarrados ao seu `tenantid` (`tenantProvision
 ### 3.2 Esteira operacional de campo (fluxo de telas)
 
 ```
-LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTORY
-        (Gestor de Base /        (unidade operacional)   (endereço físico)
-         Inventariador /
-         Controle de Ativo)
+LOGIN → CONTRATO DE TRABALHO (/contexto) → ADDRESS_SELECTION → INVENTORY
+        (contrato + filial + módulo)          (endereço físico)
 ```
 
+A antiga UNIDADE OPERACIONAL (`/unit`) foi fundida no CONTRATO DE TRABALHO: a
+contagem por filial, a geocerca, a carga de base e a sincronização vivem em
+`/contexto` (`WorkContextSelector`).
+
 - **Guardião atômico:** `DASHBOARD`, `ADDRESS_SELECTION` e `INVENTORY` exigem `selectedUnit`
-  (sem unidade → recuo forçado para `UNIT_SELECTION`).
+  (sem unidade → recuo forçado para `WORK_CONTEXT_SELECTION`).
 - **Inventory** executa filtro estrito por endereço selecionado
   (`current_selected_address` em sessionStorage) e renderiza com Virtuoso (virtualizado).
 - **Scanner / Labeling / Signature:** captura de código de barras/QR, etiquetagem de
@@ -154,7 +156,7 @@ Duas fontes de verdade que devem andar juntas:
 | base vazia + auditor | `/auditor/aguardando-carga` | MODULE_SELECTION |
 | base cheia + admin | `/saas/painel-global` | MODULE_SELECTION |
 | base cheia + MASTER | `/admin/painel-controle` | MODULE_SELECTION |
-| base cheia + auditor | `/auditor/selecionar-filial` | UNIT_SELECTION |
+| base cheia + auditor | `/auditor/selecionar-filial` | WORK_CONTEXT_SELECTION |
 
 ---
 

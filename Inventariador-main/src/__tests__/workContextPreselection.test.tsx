@@ -145,7 +145,7 @@ describe('CONTRATO DE TRABALHO · INVENTARIADOR exige filial', () => {
     ).toBeTruthy();
   });
 
-  it('admin · contrato sem filial: ACESSAR segue para a Unidade Operacional', () => {
+  it('admin · contrato sem filial: ACESSAR segue com o contrato escolhido', () => {
     const { onSelect } = renderSelector({
       user: { filial: '', units: [] },
       contexts: [{ tenantid: TENANT, filial: '' }]
@@ -153,13 +153,14 @@ describe('CONTRATO DE TRABALHO · INVENTARIADOR exige filial', () => {
 
     chooseModule('INVENTARIADOR');
 
-    // Sem filial nenhuma na lista não há escolha a fazer: a filial é escolhida
-    // na tela seguinte (Unidade Operacional), como o aviso já prometia.
+    // Sem filial nenhuma na lista não há escolha a fazer: o aviso manda
+    // carregar a base na própria tela (a antiga Unidade Operacional foi
+    // fundida no contrato).
     expect(accessButton().disabled).toBe(false);
     fireEvent.click(accessButton());
     expect(onSelect).toHaveBeenCalledWith({ tenantid: TENANT, filial: '' }, AppModule.INVENTORY);
     expect(
-      screen.getByText(/Siga para a Unidade Operacional/i)
+      screen.getByText(/Sem filial na base deste contrato/i)
     ).toBeTruthy();
   });
 

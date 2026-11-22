@@ -2,16 +2,18 @@ import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 
 /**
- * Carga mista no Gestor de Base → Unidade Operacional.
+ * Carga mista no Gestor de Base → CONTRATO DE TRABALHO (unidade fundida).
  *
  * A planilha mistura linhas COM e SEM `tenantid` nas mesmas filiais. O
  * contrato SRE só exige que a coluna exista no índice 0 e que ao menos uma
  * linha traga valor — o resto pode vir vazio.
  *
- * O que se confirma:
- *  - a Unidade Operacional mostra UM cartão por filial (não um por linha, nem
- *    um «SEM CONTRATO» a mais por causa das linhas sem tenantid);
- *  - o total do cabeçalho («N Ativos») é igual ao número de linhas;
+ * O que se confirma no CONTRATO DE TRABALHO (`/contexto`), que herdou a
+ * contagem por filial da antiga Unidade Operacional (`/unit`):
+ *  - UM cartão por filial (não um por linha, nem um «SEM CONTRATO» a mais por
+ *    causa das linhas sem tenantid);
+ *  - a contagem por filial («N ATIVOS») e o total da secção são iguais ao
+ *    número de linhas da planilha;
  *  - reimportar a MESMA planilha não cria cópias: continuam 2 cartões e N
  *    ativos.
  */
@@ -68,21 +70,21 @@ const carregarPlanilha = async (page: Page) => {
   if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
 };
 
-/** Abre a Unidade Operacional e confere cartões e total (sem cópias). */
+/** Abre o CONTRATO DE TRABALHO e confere filiais, contagens e total. */
 const confirmarUnidadeSemCopias = async (page: Page) => {
-  await abrirEcra(page, 'UNIT_SELECTION');
-  await page.waitForURL(/#\/unit$/, { timeout: 15000 });
+  await abrirEcra(page, 'WORK_CONTEXT_SELECTION');
+  await page.waitForURL(/#\/contexto$/, { timeout: 15000 });
 
   // Um cartão por filial — as linhas sem tenantid não criam uma unidade extra.
-  await expect(page.locator('.unit-row-item')).toHaveCount(2, { timeout: 20000 });
+  await expect(page.locator('[data-testid="filial-options"] > button')).toHaveCount(2, { timeout: 20000 });
   await expect(page.getByText(FILIAL_GO, { exact: true })).toHaveCount(1);
   await expect(page.getByText(FILIAL_PA, { exact: true })).toHaveCount(1);
 
   // 3 linhas em cada filial, ainda que só algumas tragam tenantid.
   await expect(page.getByText(/3 ATIVOS/)).toHaveCount(2);
 
-  // Cabeçalho: o total é o número de linhas da planilha.
-  await expect(page.getByText(`${TOTAL_DE_LINHAS} Ativos`, { exact: true })).toBeVisible();
+  // Resumo da secção: o total é o número de linhas da planilha.
+  await expect(page.getByTestId('filial-summary')).toContainText(`${TOTAL_DE_LINHAS} ativos`);
 };
 
 /** Login do mestre local e entrada no Gestor de Base. */

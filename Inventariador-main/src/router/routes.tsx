@@ -16,7 +16,6 @@ export const screenToPath: Record<AppScreen, string> = {
   [AppScreen.INVENTORY]: '/inventory',
   [AppScreen.LABELING]: '/labeling',
   [AppScreen.CONSULTATION]: '/consultation',
-  [AppScreen.UNIT_SELECTION]: '/unit',
   [AppScreen.ADDRESS_SELECTION]: '/address',
   [AppScreen.USER_MANAGEMENT]: '/users',
   [AppScreen.CHANGE_PASSWORD]: '/change-password',

@@ -51,7 +51,7 @@ test.describe('Dashboard', () => {
     await clicarNoElemento(abaUnidades(page));
     await expect(page.getByText(/Progresso por Unidade/)).toBeVisible({ timeout: 5000 });
 
-    await page.getByRole('button', { name: /Visão Geral/i }).click();
+    await clicarNoElemento(page.getByRole('button', { name: /Visão Geral/i }));
     await expect(page.getByText('Eficiência de Inventário')).toBeVisible({ timeout: 5000 });
   });
 
@@ -66,10 +66,11 @@ test.describe('Dashboard', () => {
   });
 
   test('should navigate to inventory from quick action', async ({ page }) => {
-    // Sem filial escolhida, o cartão INVENTÁRIO leva à escolha de unidade —
-    // com filial escolhida, ao endereço físico.
+    // Sem filial escolhida, o cartão INVENTÁRIO leva à escolha de unidade no
+    // CONTRATO DE TRABALHO (a antiga `/unit` foi fundida nele); com filial
+    // escolhida, ao endereço físico.
     await clicarNoCartao(page, 'INVENTÁRIO');
-    await page.waitForURL(/\/(unit|address)/, { timeout: 10000 });
+    await page.waitForURL(/\/(contexto|address)/, { timeout: 10000 });
   });
 
   test('should leave the dashboard from the labeling quick action', async ({ page }) => {

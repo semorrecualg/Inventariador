@@ -1,16 +1,13 @@
 // @vitest-environment jsdom
 // src/__tests__/painelCompletoHub.test.tsx
-// A tool grid da Unidade Operacional ficou só com AJUSTES · PAINEL: os painéis
-// «Gestão e Manutenção» e «Auditoria e Concordância» passam a abrir por dentro
-// do PAINEL COMPLETO. Este teste fixa as duas metades do contrato — a grelha
-// não volta a oferecer DADOS/AUDITORIA e o hub continua a abrir os dois painéis.
+// O PAINEL COMPLETO do hub abre «Gestão e Manutenção» e «Auditoria e
+// Concordância». Com o fim da tela /unit, o hub é o único ponto de entrada das
+// liberações administrativas.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
-import UnitSelector from '../components/UnitSelector';
 import MainMenu from '../components/MainMenu';
 import {
-  AppScreen,
   DatabaseMode,
   ScanFeedbackMode,
   ScannerMode,
@@ -38,47 +35,6 @@ afterEach(cleanup);
 
 const ADMIN = { id: '1', name: 'Admin', email: 'admin@gbr.com.br', role: 'MASTER' } as User;
 const AUDITOR = { id: '2', name: 'Auditor', email: 'auditor@gbr.com.br', role: 'AUDITOR' } as User;
-
-const renderGrelha = (perfil: 'ADMIN' | 'AUDITOR') => {
-  const onNavigate = vi.fn();
-  render(
-    <UnitSelector
-      units={[{ filial: '010101 CICOPAL GO', hasData: true }]}
-      onSelect={vi.fn()}
-      onBack={vi.fn()}
-      onNavigate={onNavigate}
-      isAdmin={perfil === 'ADMIN'}
-      isAuditor={perfil === 'AUDITOR'}
-      databaseMode={DatabaseMode.SUPABASE}
-    />
-  );
-  return onNavigate;
-};
-
-describe('UNIDADE OPERACIONAL — a grelha só oferece Ajustes e Painel', () => {
-  it('admin vê AJUSTES · PAINEL e não vê DADOS nem AUDITORIA', () => {
-    const onNavigate = renderGrelha('ADMIN');
-
-    // O `title` identifica o botão da grelha: o cartão da unidade também tem um
-    // selo «Dados», por isso o texto solto não serve de prova.
-    expect(screen.getByTitle('Ajustes de Campo')).toBeTruthy();
-    expect(screen.getByTitle('Painel Completo')).toBeTruthy();
-    expect(screen.queryByTitle('Gestão de Dados')).toBeNull();
-    expect(screen.queryByTitle('Trilha de Auditoria')).toBeNull();
-
-    fireEvent.click(screen.getByTitle('Painel Completo'));
-    expect(onNavigate).toHaveBeenCalledWith(AppScreen.MAIN_MENU, { openPanel: 'ADMIN' });
-  });
-
-  it('auditor chega ao Painel Completo pela mesma grelha, sem botão AUDITORIA', () => {
-    renderGrelha('AUDITOR');
-
-    expect(screen.getByTitle('Ajustes de Campo')).toBeTruthy();
-    expect(screen.getByTitle('Painel Completo')).toBeTruthy();
-    expect(screen.queryByTitle('Gestão de Dados')).toBeNull();
-    expect(screen.queryByTitle('Trilha de Auditoria')).toBeNull();
-  });
-});
 
 const renderPainelCompleto = (user: User) => {
   render(

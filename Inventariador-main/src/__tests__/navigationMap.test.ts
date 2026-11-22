@@ -25,7 +25,6 @@ const GRAPH_NODES: string[] = [
   'STRESS_TEST',
   'MODULE_SELECTION',
   'ASSET_CONTROL_HOME',
-  'UNIT_SELECTION',
   'DATABASE_MANAGER',
   'DASHBOARD',
   'MAIN_MENU',
@@ -80,10 +79,12 @@ describe('Contrato de navegação (docs/FLOW_GRAPH.md)', () => {
     expect(qrConfigPaths).toHaveLength(1);
   });
 
-  it('o RouteGuard de inicialização não rebate a trilha para /unit', () => {
-    // Bug real: /contexto (contrato) não estava na lista de telas liberadas e o
-    // guard (que exige `selectedUnit`) mandava todo mundo para a Unidade
-    // Operacional logo após o login — e de novo a cada "trocar filial".
+  it('a rota /unit foi retirada — a Unidade Operacional vive no contrato', () => {
+    // A tela administrativa da unidade foi fundida em /contexto: não existe
+    // mais caminho para `/unit`, e a rota do contrato é a única a escolher a
+    // filial (inclusive para o auditor, que lá vê apenas as liberadas).
+    expect(Object.values(screenToPath)).not.toContain('/unit');
+    expect(screenToPath[AppScreen.WORK_CONTEXT_SELECTION]).toBe('/contexto');
     const block = APP_TSX.match(/const publicScreens = \[([\s\S]*?)\];/);
     expect(block).toBeTruthy();
     expect(block![1]).toContain('AppScreen.WORK_CONTEXT_SELECTION');

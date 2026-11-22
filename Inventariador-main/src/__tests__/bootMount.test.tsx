@@ -131,14 +131,12 @@ describe('Arranque com cópia persistida', () => {
     expect(sessionStorage.getItem('app_current_user')).not.toBeNull();
     expect(localStorage.getItem(PERSISTED_SESSION_KEY)).not.toBeNull();
 
-    // 2. Nenhuma escrita do histórico ancorou no login nem na unidade.
+    // 2. Nenhuma escrita do histórico ancorou no login.
     expect(historicoEscrito.length).toBeGreaterThan(0);
     const pilhas = historicoEscrito.map((valor) => JSON.parse(valor) as AppScreen[]);
     const destinos = pilhas.map((pilha) => pilha[pilha.length - 1]);
     expect(destinos).not.toContain(AppScreen.LOGIN);
-    expect(destinos).not.toContain(AppScreen.UNIT_SELECTION);
     expect(pilhas.map((pilha) => pilha[0])).not.toContain(AppScreen.LOGIN);
-    expect(pilhas.map((pilha) => pilha[0])).not.toContain(AppScreen.UNIT_SELECTION);
 
     // 3. E o ecrã de entrada nunca chegou a ser desenhado.
     expect(textosVistos.some((texto) => texto.includes('ACESSAR SISTEMA'))).toBe(false);

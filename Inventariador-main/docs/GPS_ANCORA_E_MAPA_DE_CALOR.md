@@ -25,7 +25,7 @@ Complementa `docs/ARCHITECTURE.md`.
 |---|---|
 | `src/utils/gpsAnchors.ts` | `hasRealAnchor()` (guarda defensiva de âncora real), `collectGpsAnchorsFromStorage()` (varre `kardek_gps_ancora_*` e `gps_lat_/gps_lng_`), `mergeUnitConfigIntoList()`. |
 | `src/components/UnitConfigurator.tsx` | Tela de configuração: mapa MapLibre, círculo de geocerca (`turf.circle`), botão **FIXAR ÂNCORA GPS**, grava âncora em `unit_configs` + `kardek_gps_ancora_<unidade>`; rascunho em `kardek_temp_gps_*`. |
-| `src/components/UnitSelector.tsx` | Mostra o status de geocerca por unidade usando `turf.distance` contra a âncora. |
+| `src/components/WorkContextSelector.tsx` | Mostra o status de geocerca por unidade usando `turf.distance` contra a âncora. |
 | `src/components/GPSComplianceGuard.tsx` | Guarda de conformidade: mede a distância do aparelho até a âncora e libera/bloqueia o inventário; `watchPosition` contínuo. |
 | `src/services/supabaseService.ts` | `saveUnitConfig()` → âncora em `inventory_config`, política/flags em `unit_configs`; `fetchUnitConfigs()` faz merge local + nuvem + âncoras de storage. |
 | `src/utils/unitConfigFlags.ts` / `unitRelease.ts` | `hasGps` derivado da âncora real; liberação da unidade = âncora **e** campanha. |

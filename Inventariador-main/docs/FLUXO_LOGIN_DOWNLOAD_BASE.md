@@ -62,7 +62,7 @@ graph TD
         R8[Auditor · base vazia<br/>/auditor/aguardando-carga<br/><b>ModuleSelector.tsx</b>]
         R9[Admin global<br/>/saas/painel-global<br/><b>ModuleSelector.tsx</b>]
         R10[Master<br/>/admin/painel-controle<br/><b>ModuleSelector.tsx</b>]
-        R11[Auditor · base pronta<br/>/auditor/selecionar-filial<br/><b>UnitSelector.tsx</b>]
+        R11[Auditor · base pronta<br/>/auditor/selecionar-filial<br/><b>WorkContextSelector.tsx</b>]
         R12[Selecionar unidade → MAIN_MENU<br/><b>MainMenu.tsx</b>]
     end
 
@@ -123,7 +123,7 @@ graph TD
 | 17 | Decisão por base local | `countAtivosByTenant(tenantid)` | `src/services/sqliteService.ts` |
 | 18 | Destino — base vazia (admin/master) | `/load-database` → `DatabaseManagerScreen` | `src/screens/DatabaseManagerScreen.tsx` |
 | 19 | Destino — base vazia (auditor) | `/auditor/aguardando-carga` → `ModuleSelector` | `src/components/ModuleSelector.tsx` |
-| 20 | Destino — base pronta (auditor) | `/auditor/selecionar-filial` → `UnitSelector` | `src/components/UnitSelector.tsx` |
+| 20 | Destino — base pronta (auditor) | `/auditor/selecionar-filial` → `WorkContextSelector` | `src/components/WorkContextSelector.tsx` |
 | 21 | Multi-contrato | `TenantWorkSelector` → `resolvePostSelectionScreen` | `src/components/TenantWorkSelector.tsx` · `src/utils/routingUtils.ts` |
 | 22 | Auto-login / F5 | Boot `initApp` → `processSession` | `src/App.tsx` |
 

@@ -279,7 +279,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
         localStorage.setItem('filial', selectedUnit);
         onNavigate(targetScreen);
       } else {
-        onNavigate(AppScreen.UNIT_SELECTION);
+        onNavigate(AppScreen.WORK_CONTEXT_SELECTION);
       }
     } catch (e) {
       logger.error(">>> [SessionStorage Error] Falha técnica de persistência:", e);

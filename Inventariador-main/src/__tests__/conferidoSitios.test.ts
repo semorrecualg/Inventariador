@@ -107,7 +107,8 @@ describe('sítios migrados — ninguém repete a comparação à mão', () => {
   });
 
   it('o contador de unidades recebe o ativo inteiro, não a flag isolada', () => {
-    const fonte = readFileSync(join(srcRoot, 'components/UnitSelector.tsx'), 'utf8');
+    // A contagem por filial foi fundida no CONTRATO DE TRABALHO (/contexto).
+    const fonte = readFileSync(join(srcRoot, 'components/WorkContextSelector.tsx'), 'utf8');
     expect(fonte).toContain('counter.count(rawFilial, asset)');
     expect(COMPARACAO_CRUA.test(semComentarios(fonte))).toBe(false);
   });

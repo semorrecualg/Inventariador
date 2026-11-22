@@ -1,7 +1,7 @@
 # FLUXO DE ACESSO INICIAL — Script Atual, Diagnóstico e Proposta de Melhoria
 
 > **Data:** 2026-08-13 · **Escopo:** telas iniciais (Login → seletor → módulos → Unidade Operacional)
-> **Fonte:** código real (`src/App.tsx`, `src/components/Login.tsx`, `TenantWorkSelector.tsx`, `ModuleSelector.tsx`, `UnitSelector.tsx`, `src/services/supabaseService.ts`)
+> **Fonte:** código real (`src/App.tsx`, `src/components/Login.tsx`, `TenantWorkSelector.tsx`, `ModuleSelector.tsx`, `WorkContextSelector.tsx`, `src/services/supabaseService.ts`)
 
 ---
 
@@ -34,18 +34,20 @@ Regra de bloqueio SRE: admin/master **sem tenantid** é impedido de logar (não 
      **carga nº 2** (baixa o contrato inteiro de novo via `fetchFullInventory`).
 3. Roteia por perfil/base (`resolvePostSelectionScreen`):
    - base vazia + admin/master → `DATABASE_MANAGER` (Primeira Carga);
-   - auditor com base → `UNIT_SELECTION`; demais → `MODULE_SELECTION`.
+   - auditor com base → `WORK_CONTEXT_SELECTION`; demais → `MODULE_SELECTION`.
 
 ### Etapa 3 — Seleção de módulo (`ModuleSelector.tsx`, `#/modules`)
 1. Gate de "Primeira Carga" (se o tenant não tem dados, não-admin é bloqueado).
 2. Dois cards grandes: **INVENTARIADOR** e **CONTROLE DE ATIVO** (oculto p/ auditor).
-3. `onSelect(module)` → persiste `app_current_module` → `UNIT_SELECTION`.
+3. `onSelect(module)` → persiste `app_current_module` → `WORK_CONTEXT_SELECTION`.
 
-### Etapa 4 — Unidade Operacional (`UnitSelector.tsx`, `#/unit`)
-1. Lista as **filiais** do contrato com contagens (`getOperationalUnitsWithStats`,
-   agrupado por `[tenantid+filial]` — muro multi-tenant, homônimos distinguidos com badge).
-2. Header mostra **total geral de ativos da base local** + tool grid
-   (AJUSTES · DADOS · PAINEL · AUDITORIA).
+### Etapa 4 — Unidade no Contrato de Trabalho (`WorkContextSelector.tsx`, `#/contexto`)
+1. Lista as **filiais** do contrato com a contagem por filial (`createUnitCounter`
+   sobre `db.local_assets`, agrupada por `[tenantid+filial]` — muro multi-tenant,
+   homônimos distinguidos com badge).
+2. Cada cartão mostra também a **geocerca** (distância real até a âncora, via
+   `turf.distance`); o header tem a **sincronização** e a secção vazia oferece a
+   **carga de base**. A antiga tela `/unit` foi fundida aqui.
 3. `onSelect(filial)` → grava `selectedUnit`/`filial`/`tenantid` (sessão+local) →
    **`MAIN_MENU`** (hub operacional da filial). **Não há nova carga aqui** — os dados
    já estão em memória (baixados nas etapas 0/2).
@@ -284,7 +286,7 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   não mostra filiais do contrato anterior.
 
 - **Lista de filiais sem base local (2026-11-13):** com o boot a exigir a
-  filial, um aparelho novo (base vazia) abria `UNIT_SELECTION` sem nenhuma
+  filial, um aparelho novo (base vazia) abria `WORK_CONTEXT_SELECTION` sem nenhuma
   unidade para escolher, porque a lista vinha dos dados locais. Agora
   `fetchUnitNamesFromCloud(tenantid)` consulta **só a coluna `filial`**
   (paginada, `Range`), normaliza (`normalizeUnitNames`: trim/UPPER, sem
@@ -298,7 +300,7 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
   marcando todos como sincronizados. Agora `resolveBootPullPlan(filial,
   lastCtx, tenant)` devolve `{ unit }` só quando há filial resolvida; caso
   contrário devolve `{ requiresUnitSelection: true }` e o Boot Loader **aborta a
-  carga** e abre `UNIT_SELECTION`. A verificação secundária pós-boot (que também
+  carga** e abre `WORK_CONTEXT_SELECTION`. A verificação secundária pós-boot (que também
   chamava `fetchFullInventory` sem unidade) passou a exigir a mesma filial.
   Um pull do contrato só acontece em ação explícita de administrador
   (backup/espelhamento no gestor de base).
@@ -350,10 +352,10 @@ Fluxo-alvo (unifica o que o usuário pediu, sem backdoor, preservando o muro SRE
 - **Fix do roteamento do boot (2026-08-14):** o `checkDatabaseEmptiness` rodava
   NO MEIO do sync do boot (base vazia momentânea, `isDataLoaded=false`) e, com o
   e-mail do usuário ainda não resolvido na janela do auto-aplicar (`isBypass` falso),
-  empurrava `UNIT_SELECTION` por cima do hub da filial/do seletor. Correção: o check
+  empurrava `WORK_CONTEXT_SELECTION` por cima do hub da filial/do seletor. Correção: o check
   só roda depois do load (`!isDataLoaded → return`), e `MAIN_MENU`/
   `WORK_CONTEXT_SELECTION` entraram na lista de isenção da BLINDAGEM. Reproduzido
-  com histórico poluído + sessão do dono: antes `#/unit` (hijack), depois `#/menu`
+  com histórico poluído + sessão do dono: antes `#/unit` (hijack), depois `#/contexto`
   estável em reloads consecutivos.
 
 ---

@@ -56,11 +56,11 @@ O app tem **duas fontes de verdade** de "onde estou" que precisam andar juntas:
   `localStorage['gbr_kardek_history']` / `app_screen_history`, e aplica guardas:
   - **SYNC_MANAGER** bloqueado em modo INTERNAL (abre modal "Recurso Indisponível").
   - **Barreira Canônica** (`validateAndPushRoute`): telas de inventário exigem
-    `selectedUnit`; sem unidade, recua para `UNIT_SELECTION`.
+    `selectedUnit`; sem unidade, recua para `WORK_CONTEXT_SELECTION`.
   - `screen === LOGIN || MAIN_MENU` reseta o histórico (`setHistory([s])`).
 - `AppScreen` (enum em `src/types.ts`) + mapa **`screenToPath`** (`router/routes.tsx`):
   `LOGIN→/login`, `MODULE_SELECTION→/modules`, `DATABASE_MANAGER→/db-manager`,
-  `UNIT_SELECTION→/unit`, `INVENTORY→/inventory`, `DASHBOARD→/dashboard`, etc.
+  `WORK_CONTEXT_SELECTION→/contexto`, `INVENTORY→/inventory`, `DASHBOARD→/dashboard`, etc.
 
 ### 3.2 URL (HashRouter)
 - Rotas explícitas: `/login` (renderiza `<Login/>`), `/menu` (renderiza `<MainMenu/>`).
@@ -147,7 +147,7 @@ validada por `passwordPolicy`).
 | base vazia + auditor | `/auditor/aguardando-carga` | MODULE_SELECTION |
 | base cheia + admin | `/saas/painel-global` | **MODULE_SELECTION** |
 | base cheia + MASTER | `/admin/painel-controle` | MODULE_SELECTION |
-| base cheia + auditor | `/auditor/selecionar-filial` | UNIT_SELECTION |
+| base cheia + auditor | `/auditor/selecionar-filial` | WORK_CONTEXT_SELECTION |
 
 `customNavigate` (App.tsx) converte path → `AppScreen` e chama `pushScreen`.
 Guarda: `DATABASE_MANAGER` só para `isSuperAdmin` ou `semorr@gmail.com`.
@@ -365,11 +365,11 @@ numérico ou `<= 0` devolve chave vazia e sai da verificação.
 ## 8. Mapa de telas — esteira operacional de campo
 
 ```
-LOGIN → MODULE_SELECTION → UNIT_SELECTION → ADDRESS_SELECTION → INVENTORY
+LOGIN → MODULE_SELECTION → WORK_CONTEXT_SELECTION → ADDRESS_SELECTION → INVENTORY
         (Gestor de Base / Inventariador / Controle de Ativo)   (Scanner/Labeling/Signature)
 ```
 - **Guardião atômico:** `DASHBOARD`, `ADDRESS_SELECTION`, `INVENTORY` exigem `selectedUnit`
-  (não nulo) — interceptação na mutação do histórico força recuo para `UNIT_SELECTION`.
+  (não nulo) — interceptação na mutação do histórico força recuo para `WORK_CONTEXT_SELECTION`.
 - `MODULE_SELECTION` limpa `selectedUnit` e suspende syncs ao retornar.
 
 ---
@@ -514,7 +514,7 @@ emissão posterior à rotação), sem revelar o valor.
 
 1. **Leia** este documento + `docs/COMPONENTS_MAP.md` + `SYSTEM_INSTRUCTIONS.md` (governança do repo).
 2. **Entenda o fluxo afetado**: suba pela cadeia
-   `LOGIN → MODULE_SELECTION → UNIT_SELECTION → DASHBOARD/ADDRESS → INVENTORY`.
+   `LOGIN → MODULE_SELECTION → WORK_CONTEXT_SELECTION → DASHBOARD/ADDRESS → INVENTORY`.
 3. **Navegação**: confira se a mudança passa por `pushScreen`/`setHistory` e se a URL
    (`screenToPath`) é sincronizada (efeito em `App.tsx`).
 4. **Dados**: use sempre a API Dexie (`localDb`/`sqliteService`) — sem SQL raw; respeite
@@ -549,7 +549,7 @@ emissão posterior à rotação), sem revelar o valor.
    negócio mapeados para `AppScreen`; removidas 2 telas órfãs (`SETTINGS`, `QR_CONFIGURATOR`)
    que colidiam com rotas vivas (`/sync`, `/qr-config`). Decisões de transição registradas:
    ONBOARDING → `MODULE_SELECTION` (não `DASHBOARD` — guarda da Barreira Canônica),
-   CHANGE_PWD → `UNIT_SELECTION` com desvio para `MAIN_MENU` em base vazia + admin.
+   CHANGE_PWD → `WORK_CONTEXT_SELECTION` com desvio para `MAIN_MENU` em base vazia + admin.
    Novo teste de contrato `navigationMap.test.ts` garante rota única por tela e zero órfãs.
 6. **Configuração do contrato nunca chegava a `config_<TENANT>`** — o pull entregava ao
    estado o `id`/`tenantid` da linha de origem (`global_config`/`default`) e o

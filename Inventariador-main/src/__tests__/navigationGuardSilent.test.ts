@@ -15,9 +15,9 @@ describe('validateAndPushRoute (guarda silenciosa)', () => {
     registerToastCallback(toastSpy);
   });
 
-  it('bloqueia telas restritas sem filial e recua para UNIT_SELECTION', () => {
+  it('bloqueia telas restritas sem filial e recua para WORK_CONTEXT_SELECTION', () => {
     [AppScreen.DASHBOARD, AppScreen.ADDRESS_SELECTION, AppScreen.INVENTORY].forEach((screen) => {
-      expect(validateAndPushRoute(screen, null)).toBe(AppScreen.UNIT_SELECTION);
+      expect(validateAndPushRoute(screen, null)).toBe(AppScreen.WORK_CONTEXT_SELECTION);
     });
   });
 

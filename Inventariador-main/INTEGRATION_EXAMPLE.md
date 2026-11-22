@@ -55,7 +55,7 @@ const handleLogin = (user: User) => {
   setUser(user);
   
   // Navegar para próxima tela
-  setAppScreen(AppScreen.UNIT_SELECTION);
+  setAppScreen(AppScreen.WORK_CONTEXT_SELECTION);
 };
 ```
 
@@ -261,7 +261,7 @@ const handleDemoMode = async () => {
                  ▼
         ┌─────────────────┐
         │ setAppScreen()  │
-        │ UNIT_SELECTION  │
+        │ WORK_CONTEXT_SELECTION  │
         └────────┬────────┘
                  ▼
         ┌─────────────────┐
@@ -341,7 +341,7 @@ const CustomLoginFlow: React.FC<LoginFlowProps> = (props) => {
 4. Clicar "Próximo"
 5. Digitar senha
 6. Clicar "Acessar"
-7. Verificar se navegou para UNIT_SELECTION
+7. Verificar se navegou para WORK_CONTEXT_SELECTION
 8. Verificar se sessão foi salva
 ```
 
