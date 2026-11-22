@@ -24,7 +24,7 @@ import type { NavigationParams, UnitConfig, User } from '../types';
 import { AppModule, AppScreen, DatabaseMode } from '../types';
 import { isAdminUser } from '../services/rbacService';
 import { canonicalRole, isFieldAuditorRole } from '../utils/roles';
-import { localDb, readVirtualSnapshot } from '../services/localDbService';
+import { readVirtualSnapshot } from '../services/localDbService';
 import { db, type DexieAsset } from '../services/sqliteService';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { normalizeKey } from '../utils/schema';
@@ -277,10 +277,17 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   const [deviceCoords, setDeviceCoords] = useState<{ lat: number; lng: number } | null>(null);
   useEffect(() => {
     let active = true;
-    localDb.unitConfigs
-      .toArray()
+    // Linhas CRUAS da tabela: o espelho `localDb.unitConfigs.toArray()`
+    // normaliza lat/lng para 0 e a geocerca nunca teria âncora para medir.
+    const tabela = (db as { unit_configs?: { toArray?: () => Promise<unknown[]> } }).unit_configs;
+    if (!tabela?.toArray) return;
+    // `Promise.resolve().then(...)`: a tabela pode lançar de forma SÍNCRONA
+    // (Dexie sem IndexedDB, como no jsdom); assim o erro vira rejeição e cai
+    // no `catch` em vez de derrubar a renderização.
+    Promise.resolve()
+      .then(() => tabela.toArray!())
       .then((configs) => {
-        if (active) setActiveUnitConfigs(configs || []);
+        if (active) setActiveUnitConfigs((configs || []) as unknown as UnitConfig[]);
       })
       .catch((err: unknown) => {
         const errMsg = err instanceof Error ? err.message : String(err);
