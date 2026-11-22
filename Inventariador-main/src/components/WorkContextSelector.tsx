@@ -213,7 +213,9 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
         const keepRow = (item: unknown) => {
           const asset = item as DexieAsset;
           const rowTenant = String(resolveTenantId(asset) || '').trim().toUpperCase();
-          if (rowTenant !== tenantForStats) return;
+          // Linha sem contrato pertence à base carregada (a planilha mista tem
+          // linhas com e sem `tenantid`); linha de OUTRO contrato fica de fora.
+          if (tenantForStats && rowTenant && rowTenant !== tenantForStats) return;
           matched += 1;
           if (asset._is_deleted !== 0) return;
           const rawFilial = (asset as { filial_raw?: string }).filial_raw || asset.filial;
