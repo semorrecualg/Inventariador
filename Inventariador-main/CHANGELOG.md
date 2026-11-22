@@ -43,6 +43,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   aparelho. Testes: `dedupAssets` · `countAtivosByTenant` ·
   `accessDiagnostics` · e2e do contrato fecha o aviso «Sincronização
   Concluída» quando ele aparece por cima do ecrã.
+- **Contrato na linha:** `normalizeAssetContract` (`utils/schema.ts`) não lia
+  a coluna canónica `tenantid` e gravava `''` por cima dela. Um ativo que só
+  trazia a coluna canónica ficava sem contrato em memória — e era re-gravado
+  assim. Era isso que fazia o Diagnóstico dizer «no contrato: 0 · só sem
+  contrato: 12636» com a base do contrato carregada, e é o mesmo mecanismo que
+  esvaziava o contrato na ficha e nos filtros por contrato. O canónico passa a
+  ser o primeiro da cadeia e vence as grafias legadas (`tenantId`,
+  `_tenantid`, `tenant_id`, `group_id`, `GRUPO_EMPRESARIAL`). Testes:
+  `schemaTenantid`.
+- **Cartão da filial:** a contagem por filial do CONTRATO DE TRABALHO somava
+  linhas — 14.122 em `010101 CICOPAL GO` e 25.272 no cabeçalho, onde o contrato
+  tem 12.636 ativos. `countUnitAssets` (`utils/unitAssetStats.ts`) aplica a
+  mesma regra do resto do ecrã (uma linha por `primarykey`, preferindo a cópia
+  do contrato ativo) antes de alimentar o contador. Testes:
+  `unitAssetStats`.
 - **Arranque:** a verificação da sessão na nuvem corre em paralelo com o login
   local e podia terminar depois dele. Como o utilizador em cache era lido antes
   do `getSession` (e do arranque do SQLite), a purga apagava o login

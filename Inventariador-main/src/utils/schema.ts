@@ -135,7 +135,13 @@ export function normalizeAssetContract(asset: Asset | Record<string, unknown> | 
   const originalAsset = asset as Record<string, unknown>;
   
   // UNIFIED SIGNATURE ASSIGNMENTS:
+  // O CANÓNICO vem primeiro: a coluna `tenantid` é a grafia gravada na base
+  // (Dexie/SQLite/Supabase). Sem ele na cadeia, um ativo que só trazia a coluna
+  // canónica era normalizado para `tenantid = ''` — o contrato desaparecia da
+  // linha em memória e voltava a ser gravado assim (o Diagnóstico mostrava
+  // «no contrato: 0» com a base inteira do contrato carregada).
   const tenantid = (
+    originalAsset.tenantid ||
     originalAsset.tenantId ||
     originalAsset._tenantid ||
     originalAsset.GRUPO_EMPRESARIAL ||

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createUnitCounter } from '../utils/unitAssetStats';
+import { countUnitAssets, createUnitCounter } from '../utils/unitAssetStats';
 
 /** Recorte de ativo: o contador só lê os campos de conferência. */
 const ativo = (over: Record<string, unknown> = {}) => ({ _conferido: 0, ...over });
@@ -57,6 +57,49 @@ describe('unitAssetStats — contagem por unidade em uma passagem', () => {
       { label: '010103 CICOPAL GO', total: 0, checked: 0 },
       { label: '010101 CICOPAL GO', total: 1, checked: 0 }
     ]);
+  });
+
+  it('o cartão da filial conta ATIVOS: colapsa a cópia sem contrato', () => {
+    const counter = createUnitCounter();
+    const rows = [
+      { primarykey: 'PK-1', tenantid: 'CICOPAL', filial: '010101 CICOPAL GO', _conferido: 0 },
+      { primarykey: 'PK-1', tenantid: '', filial: '010101 CICOPAL GO', _conferido: 0 },
+      { primarykey: 'PK-2', tenantid: 'CICOPAL', filial: '010101 CICOPAL GO', _conferido: 1 }
+    ];
+
+    countUnitAssets(rows, 'CICOPAL', counter);
+
+    expect(counter.entries()).toEqual([{ label: '010101 CICOPAL GO', total: 2, checked: 1 }]);
+  });
+
+  it('prefere a cópia do contrato ativo (a conferida do resíduo não conta)', () => {
+    const counter = createUnitCounter();
+
+    countUnitAssets(
+      [
+        { primarykey: 'PK-1', tenantid: '', filial: 'U1', _conferido: 1 },
+        { primarykey: 'PK-1', tenantid: 'CICOPAL', filial: 'U1', _conferido: 0 }
+      ],
+      'CICOPAL',
+      counter
+    );
+
+    expect(counter.entries()).toEqual([{ label: 'U1', total: 1, checked: 0 }]);
+  });
+
+  it('conta uma vez as linhas sem primarykey (não são cópia)', () => {
+    const counter = createUnitCounter();
+
+    countUnitAssets(
+      [
+        { primarykey: '', tenantid: 'CICOPAL', filial: 'U1', _conferido: 0 },
+        { primarykey: '', tenantid: '', filial: 'U1', _conferido: 0 }
+      ],
+      'CICOPAL',
+      counter
+    );
+
+    expect(counter.entries()).toEqual([{ label: 'U1', total: 2, checked: 0 }]);
   });
 
   it('ignora rótulos vazios ou nulos', () => {

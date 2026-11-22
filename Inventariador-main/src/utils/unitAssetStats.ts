@@ -1,5 +1,6 @@
 import { normalizeKey } from './schema';
 import { isConferido, type CamposDeConferencia } from './conferencia';
+import { uniqueAssetsForDisplay } from './dedupAssets';
 
 /**
  * Contagem de ativos por Unidade Operacional em UMA passagem.
@@ -29,6 +30,31 @@ export interface UnitCounter {
 }
 
 const toLabel = (raw: unknown): string => (raw === null || raw === undefined ? '' : String(raw));
+
+/** Campos de uma linha que o contador lê (Dexie, espelho ou recorte de teste). */
+type LinhaContavel = {
+  primarykey?: unknown;
+  tenantid?: unknown;
+  filial?: unknown;
+  filial_raw?: unknown;
+};
+
+/**
+ * Alimenta o contador com UMA linha por ativo. A `primarykey` é a identidade do
+ * bem: a mesma linha pode estar gravada com o contrato do perfil e sem contrato
+ * (carga antiga) e o cartão da filial somava as duas cópias — 12.636 ativos
+ * apareciam como 25.272. As linhas sem `primarykey` continuam a contar uma a
+ * uma. Nada é apagado da base: a cópia só deixa de contar duas vezes.
+ */
+export function countUnitAssets<T extends LinhaContavel>(
+  rows: T[],
+  tenant: string | null | undefined,
+  counter: UnitCounter
+): void {
+  for (const row of uniqueAssetsForDisplay(rows, tenant)) {
+    counter.count(row.filial_raw || row.filial, row as unknown as CamposDeConferencia);
+  }
+}
 
 export function createUnitCounter(): UnitCounter {
   const counts = new Map<string, UnitAssetCount>();

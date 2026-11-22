@@ -28,7 +28,7 @@ import { readVirtualSnapshot } from '../services/localDbService';
 import { db, type DexieAsset } from '../services/sqliteService';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { normalizeKey } from '../utils/schema';
-import { createUnitCounter } from '../utils/unitAssetStats';
+import { countUnitAssets, createUnitCounter } from '../utils/unitAssetStats';
 import { isConferido } from '../utils/conferencia';
 import { logger } from '../utils/logger';
 import {
@@ -210,6 +210,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
       try {
         const counter = createUnitCounter();
         let matched = 0;
+        const assets: DexieAsset[] = [];
         const keepRow = (item: unknown) => {
           const asset = item as DexieAsset;
           const rowTenant = String(resolveTenantId(asset) || '').trim().toUpperCase();
@@ -218,8 +219,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
           if (tenantForStats && rowTenant && rowTenant !== tenantForStats) return;
           matched += 1;
           if (asset._is_deleted !== 0) return;
-          const rawFilial = (asset as { filial_raw?: string }).filial_raw || asset.filial;
-          counter.count(rawFilial, asset);
+          assets.push(asset);
         };
 
         await db.local_assets.each(keepRow);
@@ -243,6 +243,11 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
             });
           });
         }
+
+        // UMA linha por ativo antes de contar: a mesma `primarykey` pode estar
+        // gravada com o contrato e sem ele (carga antiga) e o cartão somava as
+        // duas cópias (12.636 viravam 25.272). A base não é tocada.
+        countUnitAssets(assets, tenantForStats, counter);
 
         if (!alive) return;
         const stats: Record<string, { total: number; checked: number }> = {};
