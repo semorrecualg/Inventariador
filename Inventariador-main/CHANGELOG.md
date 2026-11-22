@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   aparelho. Testes: `dedupAssets` (8) · `countAtivosByTenant` (3) ·
   `accessDiagnostics` (1) · e2e do contrato fecha o aviso «Sincronização
   Concluída» quando ele aparece por cima do ecrã.
+- **Arranque:** a verificação da sessão na nuvem corre em paralelo com o login
+  local e podia terminar depois dele. Como o utilizador em cache era lido antes
+  do `getSession` (e do arranque do SQLite), a purga apagava o login
+  recém-concluído e o contrato ficava sem `user` — ecrã vazio em `/contexto`.
+  A purga volta a ler `app_current_user` no momento em que decide e usa
+  `isLocalSessionProfile`, pelo que um login local nunca é confundido com uma
+  sessão fantasma.
 
 ## [3.0.0] — 2026-11-21
 

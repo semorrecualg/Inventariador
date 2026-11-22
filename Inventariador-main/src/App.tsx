@@ -1556,12 +1556,16 @@ useEffect(() => {
                       // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
                       // Sessão gerida pelo app (login com credencial local) não tem
                       // token do Supabase por definição — não é fantasma.
+                      //
+                      // A verificação da nuvem pode terminar DEPOIS do login local
+                      // (getSession lento, SQLite a inicializar). `currentUserStr` foi
+                      // lido antes desse await; reler agora evita apagar um login
+                      // recém-concluído e deixar o contrato sem utilizador (ecrã vazio).
+                      const sessaoAtual = sessionStorage.getItem('app_current_user') || currentUserStr;
                       let isLocal = isAppManagedSession();
-                      if (currentUserStr) {
+                      if (sessaoAtual) {
                         try {
-                          const parsed = JSON.parse(currentUserStr);
-                          const lowerEmail = (parsed.email || '').toLowerCase();
-                                                    if (parsed.role === 'DEMO' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE' || lowerEmail === ADMIN_EMAIL.toLowerCase()) {
+                          if (isLocalSessionProfile(JSON.parse(sessaoAtual), ADMIN_EMAIL)) {
                             isLocal = true;
                           }
                         } catch { /* ignore */ }
@@ -1570,9 +1574,9 @@ useEffect(() => {
                       if (isLocal) {
                         logger.info("[Boot - Supabase JWT Check] Mantendo usuário local offline soberano (bypass Supabase login check).");
                         setIsSessionValid(true);
-                        if (currentUserStr) {
+                        if (sessaoAtual) {
                           try {
-                            const parsed = JSON.parse(currentUserStr);
+                            const parsed = JSON.parse(sessaoAtual);
                             setUser(parsed);
                           } catch (e) {
                             logger.warn("Erro ao fazer parse de currentUserStr:", e);
@@ -1594,12 +1598,13 @@ useEffect(() => {
                     const errMsg = String(jwtErr instanceof Error ? jwtErr.message : jwtErr);
                     const isNetworkError = errMsg.includes('Failed to fetch') || errMsg.includes('fetch') || errMsg.includes('network') || !navigator.onLine;
 
+                    // Mesma releitura do ramo acima: o login local pode ter
+                    // concluído enquanto a verificação da nuvem estava em voo.
+                    const sessaoAtual = sessionStorage.getItem('app_current_user') || currentUserStr;
                     let isLocal = isAppManagedSession();
-                    if (currentUserStr) {
+                    if (sessaoAtual) {
                       try {
-                        const parsed = JSON.parse(currentUserStr);
-                        const lowerEmail = (parsed.email || '').toLowerCase();
-                                                if (parsed.role === 'DEMO' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE' || lowerEmail === ADMIN_EMAIL.toLowerCase()) {
+                        if (isLocalSessionProfile(JSON.parse(sessaoAtual), ADMIN_EMAIL)) {
                           isLocal = true;
                         }
                       } catch { /* ignore */ }
@@ -1607,9 +1612,9 @@ useEffect(() => {
 
                     if (isLocal || isNetworkError) {
                       logger.info("[Boot - Supabase JWT Check] Reteve sessão local ativa após falha de rede/Supabase.");
-                      if (currentUserStr) {
+                      if (sessaoAtual) {
                         try {
-                          const parsed = JSON.parse(currentUserStr);
+                          const parsed = JSON.parse(sessaoAtual);
                           setUser(parsed);
                         } catch (e) {
                           logger.warn("Falha no parse ao reter sessão local:", e);
