@@ -10,9 +10,57 @@
 // token. O perfil já vivia no aparelho em `app_users`; isto não acrescenta
 // segredos, só evita que o utilizador tenha de repetir o login a cada sessão.
 // ============================================================================
-import { isLocalSessionProfile } from './authUtils';
+import { ADMIN_EMAIL, isAppManagedSession, isLocalSessionProfile } from './authUtils';
 import { AppScreen } from '../types';
 import type { User } from '../types';
+
+/**
+ * Fim da verificação da nuvem no arranque: a sessão do aparelho fica ou é
+ * purgada?
+ *
+ * `sessaoLidaAntesDoAwait` é o que o boot leu ANTES de esperar pelo
+ * `getSession()`. Essa verificação pode terminar DEPOIS de um login local
+ * (SQLite a inicializar, rede lenta): o cache já tem então um perfil novo.
+ * Reler o cache aqui é o que impede apagar um login recém-concluído e deixar o
+ * contrato sem utilizador (ecrã em branco).
+ *
+ * Purga (remove `app_current_user`) só quando não há sessão local: um perfil da
+ * nuvem sem token válido é fantasma. `falhaDeRede` preserva o comportamento do
+ * ramo de erro — sem nuvem, a sessão lida mantém-se.
+ */
+export function resolveSessionAfterCloudCheck(
+  sessaoLidaAntesDoAwait: string | null,
+  opcoes: { adminEmail?: string; falhaDeRede?: boolean } = {}
+): { manter: boolean; sessao: string | null } {
+  const adminEmail = opcoes.adminEmail ?? ADMIN_EMAIL;
+
+  let sessao = sessaoLidaAntesDoAwait;
+  try {
+    sessao = sessionStorage.getItem(SESSION_CACHE_KEY) || sessaoLidaAntesDoAwait;
+  } catch {
+    /* storage indisponível: vale o que o boot leu */
+  }
+
+  let isLocal = isAppManagedSession();
+  if (sessao) {
+    try {
+      if (isLocalSessionProfile(JSON.parse(sessao), adminEmail)) isLocal = true;
+    } catch {
+      /* perfil ilegível não vale como sessão */
+    }
+  }
+
+  if (!isLocal && !opcoes.falhaDeRede) {
+    try {
+      sessionStorage.removeItem(SESSION_CACHE_KEY);
+    } catch {
+      /* nada a purgar */
+    }
+    return { manter: false, sessao };
+  }
+
+  return { manter: true, sessao };
+}
 
 export const PERSISTED_SESSION_KEY = 'gbr_persisted_session';
 

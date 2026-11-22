@@ -99,6 +99,233 @@ export interface DedupPlan {
   withoutIdentity: number;
 }
 
+/** Campos de um ativo que o ecrã lê para decidir se duas linhas são o MESMO bem. */
+type AtivoDeEcra = {
+  primarykey?: unknown;
+  tenantid?: unknown;
+  etiqueta?: unknown;
+  filial?: unknown;
+  filial_raw?: unknown;
+  descricaodoativo?: unknown;
+  serial?: unknown;
+  dataaqusic?: unknown;
+  qt?: unknown;
+  _conferido?: unknown;
+  _is_synced?: unknown;
+};
+
+const chavePrimariaDe = (row: AtivoDeEcra): string => String(row.primarykey ?? '').trim().toUpperCase();
+const contratoDe = (row: AtivoDeEcra): string => String(row.tenantid ?? '').trim().toUpperCase();
+
+/**
+ * Identidade visível do ativo, SEM o contrato: `FILIAL|ETIQUETA`. É a mesma
+ * identidade de conteúdo de `assetIdentityKey`, mas sem o `tenantid` — serve para
+ * reconhecer a MESMA linha gravada em escopos de contrato diferentes (o caso da
+ * carga antiga sem contrato).
+ */
+export const assetDisplayIdentityKey = (
+  row: Pick<AtivoDeEcra, 'filial' | 'filial_raw' | 'etiqueta'>
+): string => {
+  if (!hasUsableTag(row.etiqueta)) return '';
+  return `${normalizeKey(row.filial_raw || row.filial)}|${normalizeKey(row.etiqueta)}`;
+};
+
+/**
+ * UMA LINHA POR ATIVO PARA ECRÃ (contagem e lista) — sem apagar nada.
+ *
+ * A `primarykey` é a identidade do ativo e a chave local é composta
+ * `[tenantid + primarykey]`: o MESMO registo pode viver no aparelho duas vezes,
+ * com o contrato do perfil e com `tenantid` vazio (resíduo de carga antiga).
+ * As duas cópias convivem, o ecrã lia as duas e a contagem do contrato somava
+ * as duas listas (12.636 viravam 25.272). Aqui fica uma linha por `primarykey`
+ * — a cópia do contrato ativo (`preferredTenant`) e, entre iguais, a conferida.
+ *
+ * `primarykey`s DIFERENTES nunca são fundidas, nem com a mesma filial, etiqueta
+ * e descrição do bem. No aparelho a etiqueta `008488 CCPL` tem 18 linhas e 9
+ * chaves (`010101CMDECRPRCX01` a `…09`), e `010691` tem 9 itens de uma nota:
+ * são bens distintos que partilham a etiqueta, e fundi-los escondia ativos do
+ * auditor (o contrato contava 12.618 em vez de 12.636). Cópia é a mesma chave
+ * noutro escopo; chave diferente é outro bem.
+ *
+ * Linhas sem `primarykey` ficam na lista. Nada é apagado da base.
+ */
+export function uniqueAssetsForDisplay<T extends AtivoDeEcra>(
+  rows: T[],
+  preferredTenant?: string | null
+): T[] {
+  const tenant = String(preferredTenant || '').trim().toUpperCase();
+
+  const escolher = (bucket: T[]): T => {
+    const doContrato = tenant ? bucket.filter((row) => contratoDe(row) === tenant) : [];
+    const candidatos = doContrato.length > 0 ? doContrato : bucket;
+    return pickKeeper(candidatos as unknown as DedupRow[]) as unknown as T;
+  };
+
+  const colapsar = (lista: T[], chave: (row: T) => string): T[] => {
+    const buckets = new Map<string, T[]>();
+    for (const row of lista) {
+      const key = chave(row);
+      if (!key) continue;
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(row);
+      else buckets.set(key, [row]);
+    }
+    const keeperByKey = new Map<string, T>();
+    buckets.forEach((bucket, key) => keeperByKey.set(key, escolher(bucket)));
+
+    const emitted = new Set<string>();
+    const out: T[] = [];
+    for (const row of lista) {
+      const key = chave(row);
+      if (!key) {
+        out.push(row);
+        continue;
+      }
+      if (emitted.has(key)) continue;
+      emitted.add(key);
+      out.push(keeperByKey.get(key) as T);
+    }
+    return out;
+  };
+
+  return colapsar(rows, chavePrimariaDe);
+}
+
+/** Um grupo de linhas que representam o MESMO ativo (filial + etiqueta). */
+export interface GrupoRepetido {
+  /** Rótulo legível: `FILIAL · ETIQUETA`. */
+  identidade: string;
+  linhas: number;
+  /** `primarykey`s distintas encontradas no grupo. */
+  chaves: string[];
+  /** `true` quando todas as linhas do grupo partilham a mesma primarykey. */
+  mesmaChave: boolean;
+}
+
+export interface ResumoRepetidos {
+  /** Identidades (filial + etiqueta) com mais de uma linha no aparelho. */
+  grupos: number;
+  /** Grupos em que todas as linhas têm a MESMA primarykey (cópia por contrato). */
+  mesmaChave: number;
+  /** Grupos com primarykeys DIFERENTES (registos distintos ou importação repetida). */
+  chavesDiferentes: number;
+  /** Até `maxExemplos` grupos, para o dono reconhecer a etiqueta no aparelho. */
+  exemplos: GrupoRepetido[];
+}
+
+/**
+ * DIAGNÓSTICO: mede os ativos repetidos sem tocar em nada. A pergunta que
+ * responde («as duas linhas do 005046 têm a mesma primarykey ou chaves
+ * diferentes?») decide a correção: mesma chave é cópia por contrato; chaves
+ * diferentes com o mesmo bem é importação repetida.
+ */
+export function summarizeDuplicateAssetKeys<T extends AtivoDeEcra>(
+  rows: T[],
+  maxExemplos = 5
+): ResumoRepetidos {
+  const porIdentidade = new Map<string, { identidade: string; chaves: Set<string>; linhas: number }>();
+
+  for (const row of rows) {
+    const key = assetDisplayIdentityKey(row);
+    if (!key) continue;
+    const entrada = porIdentidade.get(key) || {
+      identidade: `${String(row.filial_raw || row.filial || '').trim() || '(sem filial)'} · ${String(row.etiqueta || '').trim()}`,
+      chaves: new Set<string>(),
+      linhas: 0
+    };
+    entrada.linhas += 1;
+    entrada.chaves.add(chavePrimariaDe(row) || '(sem chave)');
+    porIdentidade.set(key, entrada);
+  }
+
+  const grupos: GrupoRepetido[] = [];
+  porIdentidade.forEach((entrada) => {
+    if (entrada.linhas < 2) return;
+    const chaves = Array.from(entrada.chaves).sort();
+    grupos.push({
+      identidade: entrada.identidade,
+      linhas: entrada.linhas,
+      chaves,
+      mesmaChave: chaves.length === 1
+    });
+  });
+  grupos.sort((a, b) => b.linhas - a.linhas || a.identidade.localeCompare(b.identidade));
+
+  return {
+    grupos: grupos.length,
+    mesmaChave: grupos.filter((grupo) => grupo.mesmaChave).length,
+    chavesDiferentes: grupos.filter((grupo) => !grupo.mesmaChave).length,
+    exemplos: grupos.slice(0, maxExemplos)
+  };
+}
+
+/** Chaves distintas no aparelho e de onde vêm — a origem do excedente sobre a
+ *  nuvem (o contrato do perfil só conhece as chaves que existem com ele). */
+export interface ChavesDistintas {
+  /** Chaves distintas com `primarykey` utilizável (é o «Ativos no aparelho»). */
+  distintas: number;
+  /** Chaves que existem pelo menos uma vez com o contrato ativo. */
+  noContrato: number;
+  /** Chaves que só existem sem contrato (`tenantid` vazio): carga antiga. */
+  soSemContrato: number;
+  /** Chaves que só existem noutro contrato e ficam fora da lista. */
+  outrosContratos: number;
+  /** Linhas sem `primarykey`: aparecem no ecrã, mas não são chave. */
+  semChave: number;
+}
+
+/**
+ * Responde «de onde vem o excedente acima da nuvem?». A `primarykey` é a
+ * identidade do ativo; cada chave é classificada pelo escopo em que existe —
+ * com o contrato ativo, só sem contrato (resíduo de carga antiga) ou só noutro
+ * contrato. `distintas` bate com `uniqueAssetsForDisplay` (uma linha por
+ * chave); as linhas sem chave somam-se à parte em `semChave`.
+ */
+export function summarizeDistinctKeys<T extends AtivoDeEcra>(
+  rows: T[],
+  contratoAtivo?: string | null
+): ChavesDistintas {
+  const contrato = String(contratoAtivo || '').trim().toUpperCase();
+  const escoposPorChave = new Map<string, Set<string>>();
+  let semChave = 0;
+
+  for (const row of rows) {
+    const chave = chavePrimariaDe(row);
+    if (!chave) {
+      semChave += 1;
+      continue;
+    }
+    const escopo = contratoDe(row);
+    const escopos = escoposPorChave.get(chave);
+    if (escopos) escopos.add(escopo);
+    else escoposPorChave.set(chave, new Set([escopo]));
+  }
+
+  let noContrato = 0;
+  let soSemContrato = 0;
+  let outrosContratos = 0;
+
+  escoposPorChave.forEach((escopos) => {
+    if (contrato && escopos.has(contrato)) {
+      noContrato += 1;
+      return;
+    }
+    if (escopos.has('')) {
+      soSemContrato += 1;
+      return;
+    }
+    outrosContratos += 1;
+  });
+
+  return {
+    distintas: escoposPorChave.size,
+    noContrato,
+    soSemContrato,
+    outrosContratos,
+    semChave
+  };
+}
+
 export function buildDedupPlan(rows: DedupRow[]): DedupPlan {
   const byKey = new Map<string, DedupRow[]>();
   let withoutIdentity = 0;

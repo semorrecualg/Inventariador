@@ -1,7 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { buildDedupPlan, assetIdentityKey, pickKeeper, type DedupRow } from '../utils/dedupAssets';
+import {
+  buildDedupPlan,
+  assetIdentityKey,
+  pickKeeper,
+  summarizeDistinctKeys,
+  summarizeDuplicateAssetKeys,
+  uniqueAssetsForDisplay,
+  type DedupRow
+} from '../utils/dedupAssets';
 
-const row = (over: Partial<DedupRow> & { primarykey: string }): DedupRow => ({
+/** Linha de teste: os campos do plano de cópias + os campos do BEM que o ecrã lê. */
+type LinhaDeTeste = DedupRow & {
+  descricaodoativo?: string;
+  serial?: string;
+  dataaqusic?: string;
+  qt?: number;
+};
+
+const row = (over: Partial<LinhaDeTeste> & { primarykey: string }): LinhaDeTeste => ({
   tenantid: 'CICOPAL',
   filial: '010101 CICOPAL GO',
   etiqueta: '01010100000049670018',
@@ -124,5 +140,171 @@ describe('dedupAssets — plano de limpeza de cópias', () => {
     expect(plan.duplicates).toBe(0);
     expect(plan.groups).toHaveLength(0);
     expect(plan.total).toBe(2);
+  });
+});
+
+/**
+ * O ecrã conta e lista ATIVOS, não linhas: a mesma `primarykey` pode estar
+ * gravada com o contrato do perfil e com `tenantid` vazio (carga antiga), e as
+ * duas cópias convivem na chave composta [tenantid+primarykey]. `primarykey`s
+ * diferentes são bens diferentes — mesmo quando a etiqueta e a descrição
+ * coincidem.
+ */
+describe('uniqueAssetsForDisplay — o ativo aparece uma vez', () => {
+  it('colapsa a mesma primarykey e prefere a linha do contrato ativo', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: '', etiqueta: 'E1' }),
+      row({ primarykey: 'A', tenantid: 'CICOPAL', etiqueta: 'E1' })
+    ];
+
+    const unicos = uniqueAssetsForDisplay(rows, 'CICOPAL');
+    expect(unicos).toHaveLength(1);
+    expect(unicos[0].tenantid).toBe('CICOPAL');
+  });
+
+  it('mantém identidades e linhas sem chave diferentes', () => {
+    const rows = [
+      row({ primarykey: 'A', etiqueta: 'E1' }),
+      row({ primarykey: 'B', etiqueta: 'E2' }),
+      row({ primarykey: '', etiqueta: 'E3' })
+    ];
+
+    expect(uniqueAssetsForDisplay(rows, 'CICOPAL')).toHaveLength(3);
+  });
+
+  it('não funde primarykeys diferentes com a mesma etiqueta e descrição (são bens distintos)', () => {
+    // Caso real do aparelho (Diagnóstico de Acesso): etiqueta «008488 CCPL» com
+    // 18 linhas — 9 bens (`…CX01` a `…CX09`) gravados nos dois escopos de
+    // contrato. A fusão por descrição mostrava 1 cartão e escondia 8 ativos.
+    const bem = {
+      descricaodoativo: 'ESTANTE ESC PES CANT AC 6P CZA 90X30X180',
+      serial: 'S/N',
+      dataaqusic: '2013-03-01',
+      qt: 1
+    };
+    const rows = Array.from({ length: 9 }, (_, i) => {
+      const chave = `010101CMDECRPRCX0${i + 1}`;
+      return [
+        row({ primarykey: chave, etiqueta: '008488 CCPL', tenantid: 'CICOPAL', ...bem }),
+        row({ primarykey: chave, etiqueta: '008488 CCPL', tenantid: '', ...bem })
+      ];
+    }).flat();
+
+    const unicos = uniqueAssetsForDisplay(rows, 'CICOPAL');
+    expect(rows).toHaveLength(18);
+    expect(unicos).toHaveLength(9);
+    expect(unicos.every((ativo) => ativo.tenantid === 'CICOPAL')).toBe(true);
+  });
+
+  it('mantém registos com a mesma etiqueta que descrevem bens diferentes', () => {
+    const rows = [
+      row({ primarykey: 'A', etiqueta: '005046', descricaodoativo: 'ESTANTE' }),
+      row({ primarykey: 'B', etiqueta: '005046', descricaodoativo: 'CADEIRA' })
+    ];
+
+    expect(uniqueAssetsForDisplay(rows, 'CICOPAL')).toHaveLength(2);
+  });
+
+  it('preserva a ordem e fica com a cópia conferida', () => {
+    const rows = [
+      row({ primarykey: 'A', etiqueta: 'E1', _conferido: 0 }),
+      row({ primarykey: 'B', etiqueta: 'E2', _conferido: 0 }),
+      row({ primarykey: 'B', etiqueta: 'E2', _conferido: 1 })
+    ];
+
+    const unicos = uniqueAssetsForDisplay(rows, 'CICOPAL');
+    expect(unicos.map((r) => r.primarykey)).toEqual(['A', 'B']);
+    expect(unicos[1]._conferido).toBe(1);
+  });
+});
+
+describe('summarizeDuplicateAssetKeys — mesma primarykey ou chaves diferentes', () => {
+  it('conta como mesma chave quando a cópia só muda de contrato', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: '', etiqueta: '005046' }),
+      row({ primarykey: 'A', tenantid: 'CICOPAL', etiqueta: '005046' })
+    ];
+
+    const resumo = summarizeDuplicateAssetKeys(rows);
+    expect(resumo.grupos).toBe(1);
+    expect(resumo.mesmaChave).toBe(1);
+    expect(resumo.chavesDiferentes).toBe(0);
+    expect(resumo.exemplos[0].chaves).toEqual(['A']);
+  });
+
+  it('conta como chaves diferentes e mostra as chaves do grupo', () => {
+    const rows = [
+      row({ primarykey: '0000002345', etiqueta: '005046' }),
+      row({ primarykey: '005046', etiqueta: '005046' })
+    ];
+
+    const resumo = summarizeDuplicateAssetKeys(rows);
+    expect(resumo.grupos).toBe(1);
+    expect(resumo.mesmaChave).toBe(0);
+    expect(resumo.chavesDiferentes).toBe(1);
+    expect(resumo.exemplos[0]).toMatchObject({
+      identidade: '010101 CICOPAL GO · 005046',
+      linhas: 2,
+      chaves: ['0000002345', '005046']
+    });
+  });
+
+  it('ignora etiquetas-placeholder (não são identidade de ativo)', () => {
+    const rows = [
+      row({ primarykey: 'A', etiqueta: 'ETIQUETAR' }),
+      row({ primarykey: 'B', etiqueta: 'ETIQUETAR' })
+    ];
+
+    expect(summarizeDuplicateAssetKeys(rows).grupos).toBe(0);
+  });
+});
+
+describe('summarizeDistinctKeys — chaves distintas e a origem do excedente', () => {
+  it('separa chaves do contrato, só sem contrato e de outro contrato', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: 'CICOPAL' }),
+      row({ primarykey: 'A', tenantid: '' }), // mesma chave nos dois escopos
+      row({ primarykey: 'B', tenantid: 'CICOPAL' }),
+      row({ primarykey: 'C', tenantid: '' }), // só sem contrato: excedente local
+      row({ primarykey: 'D', tenantid: 'OUTRO' }),
+      row({ primarykey: '', tenantid: 'CICOPAL' })
+    ];
+
+    expect(summarizeDistinctKeys(rows, 'cicopal')).toEqual({
+      distintas: 4,
+      noContrato: 2,
+      soSemContrato: 1,
+      outrosContratos: 1,
+      semChave: 1
+    });
+  });
+
+  it('bate com o ecrã: uma linha por chave distintas + as linhas sem chave', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: 'CICOPAL' }),
+      row({ primarykey: 'A', tenantid: '' }),
+      row({ primarykey: 'B', tenantid: 'OUTRO' }),
+      row({ primarykey: '', tenantid: 'CICOPAL' })
+    ];
+
+    const resumo = summarizeDistinctKeys(rows, 'CICOPAL');
+    expect(resumo.distintas + resumo.semChave).toBe(
+      uniqueAssetsForDisplay(rows, 'CICOPAL').length
+    );
+  });
+
+  it('sem contrato ativo, tudo o que não é sem tenant fica em «noutro contrato»', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: '' }),
+      row({ primarykey: 'B', tenantid: 'CICOPAL' })
+    ];
+
+    expect(summarizeDistinctKeys(rows, '')).toEqual({
+      distintas: 2,
+      noContrato: 0,
+      soSemContrato: 1,
+      outrosContratos: 1,
+      semChave: 0
+    });
   });
 });

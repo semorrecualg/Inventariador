@@ -8,6 +8,7 @@ import { carimbarFalhaEnvio } from '../utils/syncFalha';
 import { isConferido, normalizarMarcaConferencia, type MarcaDeConferencia } from '../utils/conferencia';
 import { assetGpsPair } from '../utils/assetGps';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
+import { uniqueAssetsForDisplay } from '../utils/dedupAssets';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
@@ -551,7 +552,17 @@ export class SqliteService {
         logger.info(">>> [SqliteService] getOperationalUnitsWithStats requested for tenant:", tenantid);
       }
       const list = await db.local_assets.toArray();
-      const nonDeleted = list.filter(a => a._is_deleted === 0);
+      const tenantScope = String(tenantid || '').trim().toUpperCase();
+      // SRE ISOLAMENTO + CÓPIA POR CONTRATO: a MESMA linha pode existir com o
+      // contrato do perfil e com `tenantid` vazio (carga antiga). As duas cópias
+      // convivem na chave composta e a contagem somava as duas no cartão da
+      // filial (12.636 viravam 25.272). Linhas de OUTRO contrato não entram; a
+      // linha sem contrato fica (uma base sem tenantid não pode sumir) e a
+      // `primarykey` decide a cópia que permanece na contagem.
+      const scoped = list
+        .filter(a => a._is_deleted === 0)
+        .filter(a => !tenantScope || !String(a.tenantid || '').trim() || String(a.tenantid || '').trim().toUpperCase() === tenantScope);
+      const nonDeleted = tenantScope ? uniqueAssetsForDisplay(scoped, tenantScope) : scoped;
 
       // Muro multi-tenant: unidade identificada pela chave composta [tenantid+filial].
       // Filiais homônimas de contratos diferentes viram entradas DISTINTAS.

@@ -14,6 +14,11 @@ import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } 
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
+import {
+  summarizeDistinctKeys,
+  summarizeDuplicateAssetKeys,
+  uniqueAssetsForDisplay
+} from './utils/dedupAssets';
 import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
 import { mesclarConflitoPorCampo } from './utils/mergePorCampo';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
@@ -83,7 +88,7 @@ import {
 } from './utils/syncCheckpoint';
 import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato, unitNamesCacheKey, readUnitNamesCache, writeUnitNamesCache } from './utils/unitContextUtils';
 import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
-import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
+import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, resolveSessionAfterCloudCheck, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
 import { shouldForceUnitOnEmptyBase } from './utils/bootRedirects';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
@@ -1555,23 +1560,20 @@ useEffect(() => {
                       // SOBERANIA OFFLINE: Se o usuário logou local/offline anteriormente, mantém logado!
                       // Sessão gerida pelo app (login com credencial local) não tem
                       // token do Supabase por definição — não é fantasma.
-                      let isLocal = isAppManagedSession();
-                      if (currentUserStr) {
-                        try {
-                          const parsed = JSON.parse(currentUserStr);
-                          const lowerEmail = (parsed.email || '').toLowerCase();
-                                                    if (parsed.role === 'DEMO' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE' || lowerEmail === ADMIN_EMAIL.toLowerCase()) {
-                            isLocal = true;
-                          }
-                        } catch { /* ignore */ }
-                      }
+                      //
+                      // A verificação da nuvem pode terminar DEPOIS do login local
+                      // (getSession lento, SQLite a inicializar). O helper relê o
+                      // cache e só purga quando não há sessão local — sem isso, um
+                      // login recém-concluído era apagado e o contrato ficava sem
+                      // utilizador (ecrã vazio).
+                      const { manter, sessao } = resolveSessionAfterCloudCheck(currentUserStr, { adminEmail: ADMIN_EMAIL });
 
-                      if (isLocal) {
+                      if (manter) {
                         logger.info("[Boot - Supabase JWT Check] Mantendo usuário local offline soberano (bypass Supabase login check).");
                         setIsSessionValid(true);
-                        if (currentUserStr) {
+                        if (sessao) {
                           try {
-                            const parsed = JSON.parse(currentUserStr);
+                            const parsed = JSON.parse(sessao);
                             setUser(parsed);
                           } catch (e) {
                             logger.warn("Erro ao fazer parse de currentUserStr:", e);
@@ -1582,7 +1584,6 @@ useEffect(() => {
                         removerLoaderEstatico();
                         setIsDataLoaded(true);
                         setUser(null);
-                        sessionStorage.removeItem('app_current_user');
                         setHistory([AppScreen.LOGIN]);
                       }
                     } else {
@@ -1593,22 +1594,18 @@ useEffect(() => {
                     const errMsg = String(jwtErr instanceof Error ? jwtErr.message : jwtErr);
                     const isNetworkError = errMsg.includes('Failed to fetch') || errMsg.includes('fetch') || errMsg.includes('network') || !navigator.onLine;
 
-                    let isLocal = isAppManagedSession();
-                    if (currentUserStr) {
-                      try {
-                        const parsed = JSON.parse(currentUserStr);
-                        const lowerEmail = (parsed.email || '').toLowerCase();
-                                                if (parsed.role === 'DEMO' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE' || lowerEmail === ADMIN_EMAIL.toLowerCase()) {
-                          isLocal = true;
-                        }
-                      } catch { /* ignore */ }
-                    }
+                    // Mesma releitura do ramo acima: o login local pode ter
+                    // concluído enquanto a verificação da nuvem estava em voo.
+                    const { manter, sessao } = resolveSessionAfterCloudCheck(currentUserStr, {
+                      adminEmail: ADMIN_EMAIL,
+                      falhaDeRede: isNetworkError
+                    });
 
-                    if (isLocal || isNetworkError) {
+                    if (manter) {
                       logger.info("[Boot - Supabase JWT Check] Reteve sessão local ativa após falha de rede/Supabase.");
-                      if (currentUserStr) {
+                      if (sessao) {
                         try {
-                          const parsed = JSON.parse(currentUserStr);
+                          const parsed = JSON.parse(sessao);
                           setUser(parsed);
                         } catch (e) {
                           logger.warn("Falha no parse ao reter sessão local:", e);
@@ -1621,7 +1618,6 @@ useEffect(() => {
                       setIsDataLoaded(true);
                       setIsSessionValid(false);
                       setUser(null);
-                      sessionStorage.removeItem('app_current_user');
                       setHistory([AppScreen.LOGIN]);
                     }
                   }
@@ -2046,8 +2042,23 @@ useEffect(() => {
         const currentAddr = sessionStorage.getItem('current_selected_address') || selectedAddress;
 
         const allAssets = await db.local_assets.toArray();
-        
-        const results = allAssets.filter(item => {
+        // CÓPIA POR CONTRATO: a mesma linha pode estar gravada com o contrato do
+        // perfil e com `tenantid` vazio (carga antiga); a chave local composta
+        // guarda as duas e a consulta mostrava o ativo duas vezes. Fica uma
+        // linha por `primarykey` (a do contrato ativo) e linhas de OUTRO
+        // contrato não aparecem. Nada é apagado da base.
+        const contractTenant = String(user?.tenantid || readSessionTenantId() || '').trim().toUpperCase();
+        const contractAssets = contractTenant
+          ? uniqueAssetsForDisplay(
+              allAssets.filter(item => {
+                const itemTenant = String(item.tenantid || '').trim().toUpperCase();
+                return !itemTenant || itemTenant === contractTenant;
+              }),
+              contractTenant
+            )
+          : allAssets;
+
+        const results = contractAssets.filter(item => {
           if (normalizeFlag(item._is_deleted)) return false;
           
           // Só isola campanhas quando o ativo TEM campanha gravada. Base recém-carregada
@@ -7038,12 +7049,23 @@ useEffect(() => {
       filiaisDaCache: unitNamesOrigem === 'cache' ? nomesEmMemoria : nomesDaCacheGuardada,
       unidadesComAncora: fullCompaniesWithStatus.filter((unidade) => unidade.hasGps).length,
       unidadesComCampanha: fullCompaniesWithStatus.filter((unidade) => unidade.hasCampaign).length,
-      ativosLocais: inventory.assets.length,
+      // O mesmo ativo pode ter duas linhas (contrato do perfil + resíduo sem
+      // contrato): a `primarykey` é a identidade do bem e chaves diferentes são
+      // ativos diferentes. O número do ecrã é de ATIVOS, não de linhas. As
+      // linhas a mais e a divisão
+      // «mesma primarykey × primarykeys diferentes» vão também para o
+      // diagnóstico, para o dono confirmar o caso no aparelho.
+      ativosLocais: uniqueAssetsForDisplay(inventory.assets, activeTenant).length,
+      linhasNoAparelho: inventory.assets.length,
+      ativosRepetidos: summarizeDuplicateAssetKeys(inventory.assets),
+      // De onde vem o excedente acima da nuvem: chaves com o contrato ativo ×
+      // chaves que só existem sem contrato (carga antiga) × outro contrato.
+      chavesDistintas: summarizeDistinctKeys(inventory.assets, activeTenant),
       nomesConsultadosEm: unitNamesConsultadosEm,
       ultimoErroDeRede: unitNamesErroDeRede,
       sessaoPersistida
     });
-  }, [activeTenant, currentTenantid, databaseMode, fullCompaniesWithStatus, temFiliaisLocaisDoContrato, cloudUnitNames, cloudUnitNamesScope, unitNamesOrigem, appManagedSession, inventory.assets.length, unitNamesConsultadosEm, unitNamesErroDeRede]);
+  }, [activeTenant, currentTenantid, databaseMode, fullCompaniesWithStatus, temFiliaisLocaisDoContrato, cloudUnitNames, cloudUnitNamesScope, unitNamesOrigem, appManagedSession, inventory.assets, unitNamesConsultadosEm, unitNamesErroDeRede]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref

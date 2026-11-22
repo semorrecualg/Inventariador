@@ -107,9 +107,17 @@ describe('sítios migrados — ninguém repete a comparação à mão', () => {
   });
 
   it('o contador de unidades recebe o ativo inteiro, não a flag isolada', () => {
-    // A contagem por filial foi fundida no CONTRATO DE TRABALHO (/contexto).
-    const fonte = readFileSync(join(srcRoot, 'components/WorkContextSelector.tsx'), 'utf8');
-    expect(fonte).toContain('counter.count(rawFilial, asset)');
-    expect(COMPARACAO_CRUA.test(semComentarios(fonte))).toBe(false);
+    // A contagem por filial foi fundida no CONTRATO DE TRABALHO (/contexto) e
+    // a regra vive em `countUnitAssets`: o contador recebe a LINHA (o
+    // `isConferido` lê `_conferido` e a coluna de auditoria), nunca a flag
+    // isolada — e uma linha por ativo.
+    const tela = readFileSync(join(srcRoot, 'components/WorkContextSelector.tsx'), 'utf8');
+    const regra = readFileSync(join(srcRoot, 'utils/unitAssetStats.ts'), 'utf8');
+
+    expect(tela).toContain('countUnitAssets(assets, tenantForStats, counter)');
+    expect(regra).toContain('counter.count(row.filial_raw || row.filial, row');
+    expect(regra).toContain('uniqueAssetsForDisplay(rows, tenant)');
+    expect(COMPARACAO_CRUA.test(semComentarios(tela))).toBe(false);
+    expect(COMPARACAO_CRUA.test(semComentarios(regra))).toBe(false);
   });
 });

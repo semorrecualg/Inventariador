@@ -19,6 +19,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `contextoUnidade` fixa a retirada de `/unit` e a escolha da unidade em
   `/contexto`.
 
+### Corrigido — contagem e consulta mostram o ativo uma vez
+
+- **O que era:** a mesma linha podia viver em `local_assets` com o contrato do
+  perfil e com `tenantid` vazio (resíduo de carga antiga) — a chave local é
+  composta `[tenantid+primarykey]`, por isso as duas cópias convivem. A consulta
+  mostrava o ativo duas vezes e a soma por filial dava 25.272 onde o contrato tem
+  12.636 (o SRE, escopado ao contrato, já dizia 12.636).
+- **Agora:** `uniqueAssetsForDisplay` (`utils/dedupAssets.ts`) deixa uma linha
+  por ativo para ecrã — colapsa a mesma `primarykey` (o mesmo registo gravado
+  noutro contrato). `primarykey`s diferentes nunca são fundidas: no aparelho a
+  etiqueta `008488 CCPL` tem 18 linhas e 9 chaves (`…CX01` a `…CX09`) e
+  `010691` tem 9 itens de uma nota — bens distintos que partilham a etiqueta, e
+  a fusão por descrição escondia-os do auditor. Prefere a cópia do contrato
+  ativo e a conferida. É usada na lista da unidade (`App`), na contagem por
+  filial (`getOperationalUnitsWithStats`) e em «Ativos no aparelho»; linhas de
+  outro contrato não entram — nada é apagado da base. O Diagnóstico de Acesso
+  passa a mostrar «Linhas lidas» (linhas a mais), «Ativos repetidos» com a
+  divisão **mesma primarykey × primarykeys diferentes** e «Chaves distintas»
+  com a origem de cada uma (`no contrato` · `só sem contrato` · `noutro
+  contrato` · `sem chave`) — a resposta a «de onde vem o excedente acima da
+  nuvem?». Os exemplos (filial · etiqueta · chaves, até 3) confirmam o caso no
+  aparelho. Testes: `dedupAssets` · `countAtivosByTenant` ·
+  `accessDiagnostics` · e2e do contrato fecha o aviso «Sincronização
+  Concluída» quando ele aparece por cima do ecrã.
+- **Contrato na linha:** `normalizeAssetContract` (`utils/schema.ts`) não lia
+  a coluna canónica `tenantid` e gravava `''` por cima dela. Um ativo que só
+  trazia a coluna canónica ficava sem contrato em memória — e era re-gravado
+  assim. Era isso que fazia o Diagnóstico dizer «no contrato: 0 · só sem
+  contrato: 12636» com a base do contrato carregada, e é o mesmo mecanismo que
+  esvaziava o contrato na ficha e nos filtros por contrato. O canónico passa a
+  ser o primeiro da cadeia e vence as grafias legadas (`tenantId`,
+  `_tenantid`, `tenant_id`, `group_id`, `GRUPO_EMPRESARIAL`). Testes:
+  `schemaTenantid`.
+- **Cartão da filial:** a contagem por filial do CONTRATO DE TRABALHO somava
+  linhas — 14.122 em `010101 CICOPAL GO` e 25.272 no cabeçalho, onde o contrato
+  tem 12.636 ativos. `countUnitAssets` (`utils/unitAssetStats.ts`) aplica a
+  mesma regra do resto do ecrã (uma linha por `primarykey`, preferindo a cópia
+  do contrato ativo) antes de alimentar o contador. Testes:
+  `unitAssetStats`.
+- **Arranque:** a verificação da sessão na nuvem corre em paralelo com o login
+  local e podia terminar depois dele. Como o utilizador em cache era lido antes
+  do `getSession` (e do arranque do SQLite), a purga apagava o login
+  recém-concluído e o contrato ficava sem `user` — ecrã vazio em `/contexto`.
+  A purga volta a ler `app_current_user` no momento em que decide e usa
+  `isLocalSessionProfile`, pelo que um login local nunca é confundido com uma
+  sessão fantasma. A decisão vive em `resolveSessionAfterCloudCheck`, com teste
+  de regressão (nuvem a responder sem sessão depois do login local) em
+  `bootCloudCheck`.
+
 ## [3.0.0] — 2026-11-21
 
 ### Notas da versão
