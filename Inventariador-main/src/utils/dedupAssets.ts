@@ -1,7 +1,6 @@
 import { normalizeKey } from './schema';
 import { hasUsableTag } from './etiquetaGroup';
 import { isConferido, type MarcaDeConferencia } from './conferencia';
-import { sanitizeAssetKey } from './assetKey';
 
 /**
  * Identidade de um ativo para efeitos de limpeza de cópias:
@@ -131,36 +130,24 @@ export const assetDisplayIdentityKey = (
   return `${normalizeKey(row.filial_raw || row.filial)}|${normalizeKey(row.etiqueta)}`;
 };
 
-/** Campos que descrevem o BEM (não a cópia): duas linhas só são o mesmo ativo
- *  com chave diferente se descreverem o mesmo bem. Campos de auditoria/sincronia
- *  (`_conferido`, `registro`, endereço, selo) ficam de fora de propósito. */
-const CAMPOS_DO_BEM = ['descricaodoativo', 'serial', 'dataaqusic', 'qt'] as const;
-
-const chaveDoBem = (row: AtivoDeEcra): string => {
-  const identidade = assetDisplayIdentityKey(row);
-  if (!identidade) return '';
-  const bem = CAMPOS_DO_BEM.map((campo) => sanitizeAssetKey((row as Record<string, unknown>)[campo])).join('|');
-  return `${identidade}#${bem}`;
-};
-
 /**
  * UMA LINHA POR ATIVO PARA ECRÃ (contagem e lista) — sem apagar nada.
  *
- * A chave local é composta `[tenantid + primarykey]`, e a mesma linha pode viver
- * no aparelho mais de uma vez:
+ * A `primarykey` é a identidade do ativo e a chave local é composta
+ * `[tenantid + primarykey]`: o MESMO registo pode viver no aparelho duas vezes,
+ * com o contrato do perfil e com `tenantid` vazio (resíduo de carga antiga).
+ * As duas cópias convivem, o ecrã lia as duas e a contagem do contrato somava
+ * as duas listas (12.636 viravam 25.272). Aqui fica uma linha por `primarykey`
+ * — a cópia do contrato ativo (`preferredTenant`) e, entre iguais, a conferida.
  *
- *  1. com dois `tenantid` (resíduo de carga antiga sem contrato + carga
- *     canónica) → mesma `primarykey`;
- *  2. com `primarykey` diferentes, mas a MESMA filial, etiqueta e descrição do
- *     bem → a mesma linha importada duas vezes.
+ * `primarykey`s DIFERENTES nunca são fundidas, nem com a mesma filial, etiqueta
+ * e descrição do bem. No aparelho a etiqueta `008488 CCPL` tem 18 linhas e 9
+ * chaves (`010101CMDECRPRCX01` a `…09`), e `010691` tem 9 itens de uma nota:
+ * são bens distintos que partilham a etiqueta, e fundi-los escondia ativos do
+ * auditor (o contrato contava 12.618 em vez de 12.636). Cópia é a mesma chave
+ * noutro escopo; chave diferente é outro bem.
  *
- * Os espelhos ficam corretos, mas o ecrã lia as duas cópias: a consulta mostrava
- * o ativo duas vezes e a contagem do contrato somava as duas listas (12.636
- * viravam 25.272). Aqui fica uma linha por `primarykey` e, depois, uma por
- * `FILIAL|ETIQUETA` + descrição/série/data/quantidade. A cópia do contrato
- * ativo (`preferredTenant`) e a conferida são as que ficam; registos que
- * descrevem bens diferentes continuam todos, e linhas sem chave ficam na lista.
- * Nada é apagado da base.
+ * Linhas sem `primarykey` ficam na lista. Nada é apagado da base.
  */
 export function uniqueAssetsForDisplay<T extends AtivoDeEcra>(
   rows: T[],
@@ -201,7 +188,7 @@ export function uniqueAssetsForDisplay<T extends AtivoDeEcra>(
     return out;
   };
 
-  return colapsar(colapsar(rows, chavePrimariaDe), chaveDoBem);
+  return colapsar(rows, chavePrimariaDe);
 }
 
 /** Um grupo de linhas que representam o MESMO ativo (filial + etiqueta). */

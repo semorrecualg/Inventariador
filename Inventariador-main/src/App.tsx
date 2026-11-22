@@ -7046,8 +7046,9 @@ useEffect(() => {
       unidadesComAncora: fullCompaniesWithStatus.filter((unidade) => unidade.hasGps).length,
       unidadesComCampanha: fullCompaniesWithStatus.filter((unidade) => unidade.hasCampaign).length,
       // O mesmo ativo pode ter duas linhas (contrato do perfil + resíduo sem
-      // contrato, ou a mesma linha importada com outra primarykey). O número do
-      // ecrã é de ATIVOS, não de linhas. As linhas a mais e a divisão
+      // contrato): a `primarykey` é a identidade do bem e chaves diferentes são
+      // ativos diferentes. O número do ecrã é de ATIVOS, não de linhas. As
+      // linhas a mais e a divisão
       // «mesma primarykey × primarykeys diferentes» vão também para o
       // diagnóstico, para o dono confirmar o caso no aparelho.
       ativosLocais: uniqueAssetsForDisplay(inventory.assets, activeTenant).length,

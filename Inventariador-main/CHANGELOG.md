@@ -27,13 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mostrava o ativo duas vezes e a soma por filial dava 25.272 onde o contrato tem
   12.636 (o SRE, escopado ao contrato, já dizia 12.636).
 - **Agora:** `uniqueAssetsForDisplay` (`utils/dedupAssets.ts`) deixa uma linha
-  por ativo para ecrã — colapsa a mesma `primarykey` (cópia noutro contrato) e,
-  com chaves diferentes, a mesma filial+etiqueta com a mesma descrição/série/
-  data/quantidade do bem. Prefere a cópia do contrato ativo e a conferida. É
-  usada na lista da unidade (`App`), na contagem por filial
-  (`getOperationalUnitsWithStats`) e em «Ativos no aparelho»; linhas de outro
-  contrato não entram e bens diferentes continuam todos — nada é apagado da
-  base. O Diagnóstico de Acesso passa a mostrar «Linhas lidas» (linhas a mais) e
+  por ativo para ecrã — colapsa a mesma `primarykey` (o mesmo registo gravado
+  noutro contrato). `primarykey`s diferentes nunca são fundidas: no aparelho a
+  etiqueta `008488 CCPL` tem 18 linhas e 9 chaves (`…CX01` a `…CX09`) e
+  `010691` tem 9 itens de uma nota — bens distintos que partilham a etiqueta, e
+  a fusão por descrição escondia-os do auditor. Prefere a cópia do contrato
+  ativo e a conferida. É usada na lista da unidade (`App`), na contagem por
+  filial (`getOperationalUnitsWithStats`) e em «Ativos no aparelho»; linhas de
+  outro contrato não entram — nada é apagado da base. O Diagnóstico de Acesso
+  passa a mostrar «Linhas lidas» (linhas a mais) e
   «Ativos repetidos» com a divisão **mesma primarykey × primarykeys diferentes**
   e até 3 exemplos (filial · etiqueta · chaves), para confirmar o caso no
   aparelho. Testes: `dedupAssets` (8) · `countAtivosByTenant` (3) ·

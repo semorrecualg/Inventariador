@@ -145,9 +145,9 @@ describe('dedupAssets — plano de limpeza de cópias', () => {
 /**
  * O ecrã conta e lista ATIVOS, não linhas: a mesma `primarykey` pode estar
  * gravada com o contrato do perfil e com `tenantid` vazio (carga antiga), e as
- * duas cópias convivem na chave composta [tenantid+primarykey]. Com chaves
- * diferentes, a mesma filial+etiqueta+descrição também é a mesma linha
- * importada duas vezes.
+ * duas cópias convivem na chave composta [tenantid+primarykey]. `primarykey`s
+ * diferentes são bens diferentes — mesmo quando a etiqueta e a descrição
+ * coincidem.
  */
 describe('uniqueAssetsForDisplay — o ativo aparece uma vez', () => {
   it('colapsa a mesma primarykey e prefere a linha do contrato ativo', () => {
@@ -171,14 +171,28 @@ describe('uniqueAssetsForDisplay — o ativo aparece uma vez', () => {
     expect(uniqueAssetsForDisplay(rows, 'CICOPAL')).toHaveLength(3);
   });
 
-  it('colapsa primarykeys diferentes com a mesma filial, etiqueta e descrição do bem', () => {
-    const bem = { descricaodoativo: 'ESTANTE ESC PES CANT AC 6P CZA', serial: '90X30X180', dataaqusic: '2013-03-01', qt: 1 };
-    const rows = [
-      row({ primarykey: 'A', etiqueta: '005046', ...bem }),
-      row({ primarykey: 'B', etiqueta: '005046', ...bem })
-    ];
+  it('não funde primarykeys diferentes com a mesma etiqueta e descrição (são bens distintos)', () => {
+    // Caso real do aparelho (Diagnóstico de Acesso): etiqueta «008488 CCPL» com
+    // 18 linhas — 9 bens (`…CX01` a `…CX09`) gravados nos dois escopos de
+    // contrato. A fusão por descrição mostrava 1 cartão e escondia 8 ativos.
+    const bem = {
+      descricaodoativo: 'ESTANTE ESC PES CANT AC 6P CZA 90X30X180',
+      serial: 'S/N',
+      dataaqusic: '2013-03-01',
+      qt: 1
+    };
+    const rows = Array.from({ length: 9 }, (_, i) => {
+      const chave = `010101CMDECRPRCX0${i + 1}`;
+      return [
+        row({ primarykey: chave, etiqueta: '008488 CCPL', tenantid: 'CICOPAL', ...bem }),
+        row({ primarykey: chave, etiqueta: '008488 CCPL', tenantid: '', ...bem })
+      ];
+    }).flat();
 
-    expect(uniqueAssetsForDisplay(rows, 'CICOPAL')).toHaveLength(1);
+    const unicos = uniqueAssetsForDisplay(rows, 'CICOPAL');
+    expect(rows).toHaveLength(18);
+    expect(unicos).toHaveLength(9);
+    expect(unicos.every((ativo) => ativo.tenantid === 'CICOPAL')).toBe(true);
   });
 
   it('mantém registos com a mesma etiqueta que descrevem bens diferentes', () => {
