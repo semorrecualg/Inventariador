@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { isAdminEmail, markAppManagedSession, ADMIN_EMAIL } from '../utils/authUtils';
+import { stripUserSecrets, verifyUserPassword } from '../utils/passwordHash';
 import { useLocalAuth } from '../hooks/useLocalAuth';
 import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode } from '../services/supabaseService';
 import { authenticateBiometric, checkNativeBiometry, hasBiometricRegistered, isBiometricSupported, isNativeAppShell } from '../services/biometricService';
@@ -166,7 +167,7 @@ const Login: React.FC<LoginProps> = ({
   const completeBiometricLogin = (localUser: User, details: string) => {
     // Credencial local do app: não existe token do Supabase para validar.
     markAppManagedSession();
-    sessionStorage.setItem('app_current_user', safeStringify(localUser));
+    sessionStorage.setItem('app_current_user', safeStringify(stripUserSecrets(localUser)));
 
     logAuditEvent({
       user_email: localUser.email,
@@ -376,7 +377,7 @@ const Login: React.FC<LoginProps> = ({
         }
 
         const dexieUser = dexieAuthResult.user as unknown as User;
-        sessionStorage.setItem('app_current_user', safeStringify(dexieUser));
+        sessionStorage.setItem('app_current_user', safeStringify(stripUserSecrets(dexieUser)));
 
         // FLUXO ÚNICO: autenticado, entra direto — contrato, filial e módulo
         // são escolhidos na tela de contrato de trabalho (/contexto). O login
@@ -397,20 +398,26 @@ const Login: React.FC<LoginProps> = ({
                             password === 'admin') ||
                             (normalizedUsername === 'admin' && password === '123456');
       
-      let matchedLocalUser = users.find(u => 
-        (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && 
-        u.password === password
+      // Registo local pela identidade e, só depois, a senha pelo verificador
+      // (hash + sal). `password` em texto só existe em registos antigos.
+      const candidateLocalUser = users.find(u =>
+        u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername
       );
+      let matchedLocalUser = candidateLocalUser && (await verifyUserPassword(candidateLocalUser, password))
+        ? candidateLocalUser
+        : undefined;
 
       // BUSCA DIRETA NO SQlite SE O ARRAY DE PROPS ESTIVER VAZIO OU STALE
       if (!matchedLocalUser) {
         try {
           logger.info('[Login] [CHECK 1] Buscando usuário local na tabela física "users" do SQLite/localforage...');
           const dbUsers = await localDb.users.toArray();
-          matchedLocalUser = dbUsers.find(u => 
-            (u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername) && 
-            u.password === password
+          const candidateDbUser = dbUsers.find(u =>
+            u.email.toLowerCase() === normalizedUsername || u.username.toLowerCase() === normalizedUsername
           );
+          matchedLocalUser = candidateDbUser && (await verifyUserPassword(candidateDbUser, password))
+            ? candidateDbUser
+            : undefined;
         } catch (sqliteErr) {
           logger.warn('[Login] Erro ao ler tabela de usuários local diretamente do SQLite:', sqliteErr);
         }
@@ -494,7 +501,7 @@ const Login: React.FC<LoginProps> = ({
           }
 
           logger.info('[Login] Sucesso via Barreira Local! Sessão gerada:', loggedUser.email);
-          sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
+          sessionStorage.setItem('app_current_user', safeStringify(stripUserSecrets(loggedUser)));
 
           // FLUXO ÚNICO: autenticado na Barreira Local, entra direto; contrato,
           // filial e módulo são escolhidos na tela de contrato de trabalho.
@@ -534,12 +541,15 @@ const Login: React.FC<LoginProps> = ({
       let loggedUser: User | null = null;
       const isOnline = navigator.onLine;
 
-      const doLocalAuthFallback = (): User => {
+      const doLocalAuthFallback = async (): Promise<User> => {
         logger.info('[Login] Autenticando via Banco Interno (Mobile Puro - Fallback)...');
-        const localUser = users.find(u => 
-          (u.email.toLowerCase() === username.trim().toLowerCase() || u.username.toLowerCase() === username.trim().toLowerCase()) && 
-          u.password === password
+        const localIdentifier = username.trim().toLowerCase();
+        const candidateFallback = users.find(u =>
+          u.email.toLowerCase() === localIdentifier || u.username.toLowerCase() === localIdentifier
         );
+        const localUser = candidateFallback && (await verifyUserPassword(candidateFallback, password))
+          ? candidateFallback
+          : undefined;
 
         if (!localUser) {
           const isAdminFallback = (username.trim().toLowerCase() === 'admin gbr' || isAdminEmail(username.trim()) || username.trim().toLowerCase() === 'admin') && 
@@ -732,7 +742,7 @@ const Login: React.FC<LoginProps> = ({
 
           if (isNetError) {
             logger.info('[Login] Erro de rede legítimo detectado. Executando login via SQLite local.');
-            loggedUser = doLocalAuthFallback();
+            loggedUser = await doLocalAuthFallback();
           } else {
             // Se for erro de credenciais (ou qualquer coisa diferente de timeout/falha de rede), NÃO mascara com o SQLite!
             const isInvalidCreds = errorMsg.includes('invalid credentials') || 
@@ -754,7 +764,7 @@ const Login: React.FC<LoginProps> = ({
         }
       } else {
         // Sem internet ou modo local puro
-        loggedUser = doLocalAuthFallback();
+        loggedUser = await doLocalAuthFallback();
       }
 
 
@@ -762,7 +772,7 @@ const Login: React.FC<LoginProps> = ({
         logger.info('[Login] Sucesso! Sessão local gerada para:', loggedUser.email);
         
         // Salva no sessionStorage para persistência (Token Local)
-        sessionStorage.setItem('app_current_user', safeStringify(loggedUser));
+        sessionStorage.setItem('app_current_user', safeStringify(stripUserSecrets(loggedUser)));
 
         // FLUXO ÚNICO: segue para o log de auditoria e para o app; contrato,
         // filial e módulo são escolhidos na tela de contrato de trabalho.

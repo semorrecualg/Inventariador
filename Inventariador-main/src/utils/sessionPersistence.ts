@@ -11,6 +11,7 @@
 // segredos, só evita que o utilizador tenha de repetir o login a cada sessão.
 // ============================================================================
 import { isLocalSessionProfile } from './authUtils';
+import { stripUserSecrets } from './passwordHash';
 import { AppScreen } from '../types';
 import type { User } from '../types';
 
@@ -38,7 +39,11 @@ export function writePersistedSession(user: User | null | undefined, now: number
   if (String(user.role || '').toUpperCase() === 'DEMO') return;
   if (!isLocalSessionProfile(user)) return;
   try {
-    localStorage.setItem(PERSISTED_SESSION_KEY, JSON.stringify({ user, savedAt: now }));
+    // O perfil nunca leva senha: a cópia persistida é lida como credencial.
+    localStorage.setItem(
+      PERSISTED_SESSION_KEY,
+      JSON.stringify({ user: stripUserSecrets(user), savedAt: now })
+    );
   } catch {
     /* sem cota: a sessão do separador continua a valer */
   }
@@ -74,7 +79,8 @@ export function readPersistedSession(
 
   const user = parsed.user as User | undefined;
   if (!user || typeof user.email !== 'string' || !user.email.trim()) return null;
-  return user;
+  // Cópias antigas podem ter `password` em claro: sai já sem ela.
+  return stripUserSecrets(user) as User;
 }
 
 /**
@@ -86,6 +92,9 @@ export function restorePersistedSession(
   now: number = Date.now(),
   ttl: number = PERSISTED_SESSION_TTL_MS
 ): User | null {
+  // Repor a sessão passa por aqui: a cópia que estiver no disco fica limpa
+  // antes de ser usada.
+  sanitizePersistedSession();
   const user = readPersistedSession(now, ttl);
   // Cópia de perfil da nuvem (versão anterior) não vale como sessão local.
   if (!user || !isLocalSessionProfile(user)) return null;
@@ -125,6 +134,65 @@ export function hasLocalSessionInCache(): boolean {
  */
 export function resolveInitialScreenHistory(): AppScreen[] {
   return hasLocalSessionInCache() ? [AppScreen.WORK_CONTEXT_SELECTION] : [AppScreen.LOGIN];
+}
+
+/**
+ * Limpa a senha antiga do cache de sessão do separador (`app_current_user`).
+ * Versões anteriores gravavam o perfil inteiro, com `password` em texto, e esse
+ * valor sobrevive ao login até alguém o reescrever. Devolve `true` se limpou.
+ */
+export function sanitizeSessionUserCache(): boolean {
+  try {
+    const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
+    if (!raw || raw === 'null') return false;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || !('password' in (parsed as Record<string, unknown>))) {
+      return false;
+    }
+    sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(stripUserSecrets(parsed as User)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Limpa e REGRAVA a cópia persistida sem a senha.
+ *
+ * `readPersistedSession` já devolve o perfil limpo, mas o valor antigo — com
+ * `password` em texto — continuava no disco até alguém gravar por cima: um
+ * backup do telemóvel lia-o. Aqui a entrada é reescrita no lugar, mantendo o
+ * `savedAt` (o prazo da sessão não muda). Devolve `true` se reescreveu.
+ */
+export function sanitizePersistedSession(): boolean {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(PERSISTED_SESSION_KEY);
+  } catch {
+    return false;
+  }
+  if (!raw) return false;
+
+  let parsed: Partial<PersistedSession> | null = null;
+  try {
+    parsed = JSON.parse(raw) as Partial<PersistedSession> | null;
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== 'object') return false;
+
+  const user = parsed.user as User | undefined;
+  if (!user || typeof user !== 'object' || !('password' in user)) return false;
+
+  try {
+    localStorage.setItem(
+      PERSISTED_SESSION_KEY,
+      JSON.stringify({ ...parsed, user: stripUserSecrets(user) })
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Logout explícito: o próximo arranque tem de pedir credenciais. */

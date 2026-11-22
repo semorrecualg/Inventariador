@@ -14,6 +14,9 @@ export interface User {
   name?: string; // Nome completo para exibição
   email: string;
   password?: string;
+  /** Verificador da senha local — o texto em claro nunca é guardado no aparelho. */
+  passwordHash?: string;
+  passwordSalt?: string;
   role: UserRole;
   is_admin?: boolean; // Novo padrão unificado
   isAdmin?: boolean; // Deprecated: use is_admin
