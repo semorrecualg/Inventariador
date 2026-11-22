@@ -125,7 +125,7 @@ function checkSelectedUnitGuard() {
     const content = lines.join('\n');
     const hasGuard =
       content.includes('selectedUnit') &&
-      (content.includes('UNIT_SELECTION') || content.includes('pushScreen'));
+      (content.includes('WORK_CONTEXT_SELECTION') || content.includes('pushScreen'));
 
     if (!hasGuard) {
       console.log(`  ⚠️  ${filePath} — possível falta de guardião selectedUnit`);
@@ -213,7 +213,7 @@ function checkCanonicalRoutes() {
     'AppScreen.LOGIN',
     'AppScreen.LOAD_DATABASE',
     'AppScreen.MODULE_SELECTION',
-    'AppScreen.UNIT_SELECTION',
+    'AppScreen.WORK_CONTEXT_SELECTION',
     'AppScreen.DASHBOARD',
     'AppScreen.ADDRESS_SELECTION',
     'AppScreen.INVENTORY',
@@ -229,7 +229,7 @@ function checkCanonicalRoutes() {
   }
 
   // Verificar guardião atômico (selectedUnit check)
-  if (content.includes('selectedUnit') && content.includes('UNIT_SELECTION')) {
+  if (content.includes('selectedUnit') && content.includes('WORK_CONTEXT_SELECTION')) {
     console.log('  ✅ Guardião atômico selectedUnit — presente');
   } else {
     console.log('  ❌ Guardião atômico selectedUnit — ausente ou incompleto');

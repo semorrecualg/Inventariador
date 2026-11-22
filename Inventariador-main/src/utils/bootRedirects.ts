@@ -2,7 +2,7 @@
 // bootRedirects.ts — «Blindagem de base vazia».
 //
 // Com a base local vazia a app empurra o utilizador para a UNIDADE OPERACIONAL
-// (onde a filial é cadastrada/carregada). Essa decisão vivia num `useEffect` do
+// (o CONTRATO DE TRABALHO, onde a filial é cadastrada/carregada). Essa decisão vivia num `useEffect` do
 // `App` como «tudo excepto esta lista», o que apanhava também ecrãs do percurso
 // de entrada — o passo biométrico, por exemplo — e tornava o pós-login
 // dependente do que corria primeiro: no browser o dono faz bypass e a base tem
@@ -12,7 +12,7 @@
 import { AppScreen } from '../types';
 
 /**
- * Ecrãs em que a ausência de dados NÃO justifica saltar para a unidade:
+ * Ecrãs em que a ausência de dados NÃO justifica saltar para o contrato:
  * entrada, onboarding e o próprio seletor de contrato (onde a filial é
  * escolhida) resolvem a base vazia pelo fluxo, não por redireccionamento.
  */
@@ -23,7 +23,6 @@ export const EMPTY_BASE_EXEMPT_SCREENS: ReadonlySet<AppScreen> = new Set([
   AppScreen.BIOMETRIC_REGISTRATION,
   AppScreen.DATABASE_MANAGER,
   AppScreen.LOAD_HISTORY,
-  AppScreen.UNIT_SELECTION,
   AppScreen.UNIT_CONFIGURATOR,
   AppScreen.CAMPAIGN_MANAGEMENT,
   AppScreen.MODULE_SELECTION,

@@ -183,11 +183,6 @@ describe('Login novo — LOGIN → biometria → CONTRATO', () => {
     const destinos = pilhas.map((pilha) => pilha[pilha.length - 1]);
     expect(destinos).toContain(AppScreen.BIOMETRIC_REGISTRATION);
     expect(destinos).toContain(AppScreen.WORK_CONTEXT_SELECTION);
-    // Qualquer escrita do arranque — de qualquer ecrã, em qualquer posição da
-    // pilha — não pode conter UNIT_SELECTION. É o que falha se o Boot Loader
-    // voltar a empurrar a unidade.
-    expect(pilhas.flat()).not.toContain(AppScreen.UNIT_SELECTION);
-
     // O `init` do App ainda tem promessas por resolver; sem esta pausa ele
     // chama `setIsDataLoaded` depois de o jsdom fechar (EnvironmentTeardownError).
     await new Promise((r) => setTimeout(r, 1600));

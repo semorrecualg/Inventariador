@@ -113,14 +113,15 @@ export async function resolvePostSelectionScreen(
  * - ASSET_CONTROL  → hub de controle de ativo (sem endereço de campo)
  * - INVENTORY      → hub operacional da filial (Menu Principal), cujo primeiro
  *                    item é o ENDEREÇO FÍSICO
- * - INVENTORY sem filial → seleção de unidade (a base ainda não tem unidade)
+ * - INVENTORY sem filial → CONTRATO DE TRABALHO (é lá que a unidade é escolhida
+ *                    e a base é carregada; a antiga /unit foi fundida nele)
  */
 export function resolveModuleEntryScreen(
   module: AppModule | null | undefined,
   filial: string | null | undefined
 ): AppScreen {
   if (module === AppModule.ASSET_CONTROL) return AppScreen.ASSET_CONTROL_HOME;
-  return String(filial || '').trim() ? AppScreen.MAIN_MENU : AppScreen.UNIT_SELECTION;
+  return String(filial || '').trim() ? AppScreen.MAIN_MENU : AppScreen.WORK_CONTEXT_SELECTION;
 }
 
 /**

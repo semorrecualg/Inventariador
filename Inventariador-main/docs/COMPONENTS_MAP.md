@@ -29,10 +29,9 @@ Este mapa documenta a topologia e as conexões físicas dos mais de 35 component
                                          |
                                          v
 +---------------------------------------------------------------------------------+
-|                      SELETOR DE UNIDADE OPERACIONAL  (UnitSelector.tsx)         |
-|   - Tool grid (AJUSTES · PAINEL) + contador de ativos                          |
-|   - Botões abrem o MAIN_MENU com o painel já aberto (openPanel:               |
-|     PREFERENCES/ADMIN)                                                         |
+|         CONTRATO DE TRABALHO · UNIDADE OPERACIONAL  (WorkContextSelector.tsx)  |
+|   - Contrato + filial + módulo, com contagem de ativos por filial             |
+|   - Geocerca (âncora × posição), carga de base e sincronização                |
 +---------------------------------------------------------------------------------+
                                          |
                                          v
@@ -67,8 +66,8 @@ Este mapa documenta a topologia e as conexões físicas dos mais de 35 component
 - **`Login.tsx`**: Ponto inicial de controle de acesso — **login por contrato** (usuário × `tenantid`): o perfil vem do `user_permissions` na nuvem; a Barreira Local bloqueia admin/master sem contrato (nunca "GLOBAL"). O backdoor MASTER DRIVE foi **removido**.
 - **`TenantWorkSelector.tsx`**: Seletor de contrato/filial pós-login (multi-contrato) — persiste o contexto e sincroniza apenas o contrato escolhido.
 - **`ModuleSelector.tsx`**: Roteador de módulos (Gestor de Base / Inventariador / Controle de Ativo) baseado nos privilégios do operador.
-- **`MainMenu.tsx`**: Hub operacional do auditor — o **Painel Completo** concentra os painéis **Gestão e Manutenção** (ADMIN) e **Auditoria e Concordância** (TRILHA B), além dos itens administrativos (RBAC via `rbacService`/`PermissionGate`); a tool grid foi transferida para o `UnitSelector`.
-- **`UnitSelector.tsx`**: Carrega unidades/filiais da base local; exibe a **tool grid** (AJUSTES · PAINEL) + contador de ativos, navegando ao `MAIN_MENU` com o painel aberto (`openPanel`).
+- **`MainMenu.tsx`**: Hub operacional do auditor — o **Painel Completo** concentra os painéis **Gestão e Manutenção** (ADMIN) e **Auditoria e Concordância** (TRILHA B), além dos itens administrativos (RBAC via `rbacService`/`PermissionGate`); a tool grid que vivia na antiga Unidade Operacional deixou de existir com a fusão no contrato.
+- **`WorkContextSelector.tsx`**: Tela única pós-login (contrato + filial + módulo). Herdou da Unidade Operacional a **contagem de ativos por filial**, a **geocerca**, a **carga de base** e a **sincronização**; os botões de cada cartão abrem a âncora e a campanha da filial.
 - **`AddressSelector.tsx` [Novo Componente v2.60]**: Nova âncora de roteamento que isola os inventários por seu endereço nativo coletado do Excel parser.
 - **`LoadHistoryScreen.tsx`** (`src/screens/`): Histórico de cargas/sincronizações por contrato (lê `audit_logs` — IMPORT/SYNC_PULL), gate `manage_database`.
 - **`LicenseProvisioning.tsx`**: Provisionamento de novo cliente — cria MASTER amarrado ao `tenantid` com senha forte (`passwordPolicy`), sem backdoor.
@@ -89,7 +88,7 @@ Este mapa documenta a topologia e as conexões físicas dos mais de 35 component
 
 O `AddressSelector.tsx` impede o carregamento indiscriminado da base inteira operando sob uma barreira de proteção de I/O em runtime. O fluxo de dados opera da seguinte forma:
 
-1. O operador escolhe a unidade filial no `UnitSelector.tsx`.
+1. O operador escolhe a unidade filial no `WorkContextSelector.tsx`.
 2. O sistema direciona para o `AddressSelector.tsx`, que consulta o SQLite nativo aplicando `getLocationsWithStats` para computar a quantidade física de ativos associada àquela filial agrupados por endereço de emplaquetamento.
 3. Ao selecionar um Endereço Físico (ex: `CORREDOR A`, `GALPÃO CENTRAL`):
    - O identificador de endereço é salvo em cache de sessão sob a chave `current_selected_address`.

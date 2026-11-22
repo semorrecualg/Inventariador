@@ -12,13 +12,25 @@ import {
   Check,
   Lock,
   MapPin,
-  Megaphone
+  Megaphone,
+  Cloud,
+  Database,
+  Navigation as NavigationIcon,
+  RefreshCw
 } from 'lucide-react';
+import * as turf from '@turf/turf';
 import BackButton from './BackButton';
-import type { NavigationParams, User } from '../types';
-import { AppModule, AppScreen } from '../types';
+import type { NavigationParams, UnitConfig, User } from '../types';
+import { AppModule, AppScreen, DatabaseMode } from '../types';
 import { isAdminUser } from '../services/rbacService';
-import { isFieldAuditorRole } from '../utils/roles';
+import { canonicalRole, isFieldAuditorRole } from '../utils/roles';
+import { localDb, readVirtualSnapshot } from '../services/localDbService';
+import { db, type DexieAsset } from '../services/sqliteService';
+import { resolveTenantId } from '../utils/tenantUtils';
+import { normalizeKey } from '../utils/schema';
+import { createUnitCounter } from '../utils/unitAssetStats';
+import { isConferido } from '../utils/conferencia';
+import { logger } from '../utils/logger';
 import {
   WorkContext,
   type FilialOption,
@@ -30,7 +42,7 @@ import {
   normalizeWorkTenant,
   normalizeWorkFilial
 } from '../utils/workContextUtils';
-import { canAccessDatabaseManager } from '../utils/authUtils';
+import { canAccessDatabaseManager, isAdminEmail } from '../utils/authUtils';
 import {
   describeUnitReleaseMissing,
   readUnitRelease,
@@ -81,6 +93,18 @@ interface WorkContextSelectorProps {
    * estado de cada unidade nunca divirjam.
    */
   availableFiliais?: Record<string, string[]>;
+  /**
+   * SINCRONIZAÇÃO (fundida da antiga Unidade Operacional): puxa da nuvem o
+   * contrato/filial escolhidos. Sem callback ou em modo BASE LOCAL, o botão
+   * de sincronizar não aparece.
+   */
+  onSync?: (tenantid?: string, filial?: string) => void;
+  isSyncing?: boolean;
+  /** CARGA DE BASE: abre o Gestor de Base quando a unidade ainda não existe. */
+  onLoadDatabase?: () => void;
+  /** Carga em lote a decorrer — o seletor não lê a base a meio da escrita. */
+  isImportingBatch?: boolean;
+  databaseMode?: DatabaseMode;
 }
 
 /**
@@ -104,7 +128,12 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   unitRelease,
   onOpenAdmin,
   initialSelection,
-  availableFiliais
+  availableFiliais,
+  onSync,
+  isSyncing = false,
+  onLoadDatabase,
+  isImportingBatch = false,
+  databaseMode
 }) => {
   const groups = groupContextsByTenant(contexts);
 
@@ -156,6 +185,187 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
   // Contrato escolhido pelo utilizador (pré-seleção da última escolha ou toque
   // num cartão) sobrepõe-se ao contrato do perfil.
   const selectedTenant = manualTenant || selectedTenantBaseline;
+
+  // ── CONTAGEM DE ATIVOS POR FILIAL (fundida da Unidade Operacional) ──────
+  // UMA passagem pela base local do contrato escolhido, com o mesmo contador
+  // da tela retirada: identidade = chave normalizada da filial, conferência
+  // pela regra única (`isConferido`). O evento de escrita da base força a
+  // releitura (carga nova, limpeza de cópias, restauro de backup).
+  const [unitStats, setUnitStats] = useState<Record<string, { total: number; checked: number }>>({});
+  const [statsRevision, setStatsRevision] = useState(0);
+  useEffect(() => {
+    const reload = () => setStatsRevision((value) => value + 1);
+    window.addEventListener('gbr_local_assets_changed', reload);
+    return () => window.removeEventListener('gbr_local_assets_changed', reload);
+  }, []);
+
+  const tenantForStats = normalizeWorkTenant(selectedTenant);
+  useEffect(() => {
+    if (!tenantForStats) {
+      setUnitStats({});
+      return;
+    }
+    let alive = true;
+    const loadStats = async () => {
+      try {
+        const counter = createUnitCounter();
+        let matched = 0;
+        const keepRow = (item: unknown) => {
+          const asset = item as DexieAsset;
+          const rowTenant = String(resolveTenantId(asset) || '').trim().toUpperCase();
+          if (rowTenant !== tenantForStats) return;
+          matched += 1;
+          if (asset._is_deleted !== 0) return;
+          const rawFilial = (asset as { filial_raw?: string }).filial_raw || asset.filial;
+          counter.count(rawFilial, asset);
+        };
+
+        await db.local_assets.each(keepRow);
+
+        // Snapshot virtual (preview/iframe sem base carregada): só quando a
+        // base local não entregou nenhuma linha do contrato.
+        const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+        if (matched === 0 && isIframe) {
+          const virtualData = await readVirtualSnapshot();
+          (virtualData || []).forEach((row: unknown) => {
+            const r = row as Record<string, unknown>;
+            keepRow({
+              id: String(r.primarykey || r.id || ''),
+              primarykey: String(r.primarykey || r.id || ''),
+              tenantid: String(resolveTenantId(r) || 'GBR_DEFAULT'),
+              filial: String(r.filial || r._unitid || 'FILIAL_DEFAULT'),
+              status: String(r.status || 'Pendente'),
+              _conferido: isConferido(r) ? 1 : 0,
+              AUDITOR_STATUS_CONFERENCIA: r.AUDITOR_STATUS_CONFERENCIA,
+              _is_deleted: Number(r._is_deleted ?? 0)
+            });
+          });
+        }
+
+        if (!alive) return;
+        const stats: Record<string, { total: number; checked: number }> = {};
+        for (const entry of counter.entries()) {
+          const key = normalizeKey(entry.label);
+          if (!key) continue;
+          stats[key] = { total: entry.total, checked: entry.checked };
+        }
+        setUnitStats(stats);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.warn('[Contrato] Contagem por filial indisponível:', errMsg);
+        if (alive) setUnitStats({});
+      }
+    };
+    loadStats();
+    return () => {
+      alive = false;
+    };
+  }, [tenantForStats, statsRevision]);
+
+  const totalAssets = useMemo(
+    () => Object.values(unitStats).reduce((acc, stat) => acc + stat.total, 0),
+    [unitStats]
+  );
+
+  // ── GEOCERCA (fundida da Unidade Operacional) ──────────────────────────
+  // Âncora gravada em `unit_configs` × posição real do terminal (turf), com a
+  // mesma tolerância de raio. A distância só aparece para unidades com âncora:
+  // sem ela, o que falta já é dito pelo estado de liberação.
+  const [activeUnitConfigs, setActiveUnitConfigs] = useState<UnitConfig[]>([]);
+  const [deviceCoords, setDeviceCoords] = useState<{ lat: number; lng: number } | null>(null);
+  useEffect(() => {
+    let active = true;
+    localDb.unitConfigs
+      .toArray()
+      .then((configs) => {
+        if (active) setActiveUnitConfigs(configs || []);
+      })
+      .catch((err: unknown) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.warn('[Contrato] Configurações de GPS indisponíveis:', errMsg);
+      });
+    return () => {
+      active = false;
+    };
+  }, [statsRevision]);
+
+  useEffect(() => {
+    // Isolamento de sandbox: em iframe não há GPS de hardware real.
+    if (typeof window !== 'undefined' && window.self !== window.top) return;
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    let watchId: number | undefined;
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setDeviceCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => {
+          /* sem posição: a unidade com âncora mostra o ponto zero de calibração */
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => setDeviceCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => {
+          /* segue o último ponto conhecido */
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn('[Contrato] GPS indisponível:', errMsg);
+    }
+    return () => {
+      if (watchId) {
+        try {
+          navigator.geolocation.clearWatch(watchId);
+        } catch {
+          /* sem watch ativo */
+        }
+      }
+    };
+  }, []);
+
+  const geofenceStatus = (
+    filialName: string
+  ): { hasGps: boolean; message: string; isInside: boolean } | null => {
+    const key = String(filialName || '').toUpperCase().trim();
+    if (!key) return null;
+    const config =
+      activeUnitConfigs.find((c) => {
+        const unitId = String(c._unitid || c.unit_id || c.filial || '').toUpperCase().trim();
+        return unitId === key || unitId.replace(/_/g, ' ') === key.replace(/_/g, ' ');
+      }) || null;
+    // Sem âncora gravada não há perímetro a medir.
+    if (!config || !config.lat || !config.lng) return null;
+
+    const allowedRadius = Number(config.radius_meters || 500);
+    const isBypass =
+      isAdminEmail(user.email || '') || ['ADMIN', 'MASTER'].includes(canonicalRole(user.role));
+    if (isBypass) return { hasGps: true, message: 'PERÍMETRO LIBERADO (ADMIN)', isInside: true };
+    if (!deviceCoords) {
+      return { hasGps: true, message: 'DENTRO DO PERÍMETRO (Ponto Zero de Calibração)', isInside: true };
+    }
+    try {
+      const distanceM =
+        turf.distance(
+          turf.point([deviceCoords.lng, deviceCoords.lat]),
+          turf.point([Number(config.lng), Number(config.lat)]),
+          { units: 'kilometers' }
+        ) * 1000;
+      const rounded = Math.round(distanceM);
+      const distanceLabel = rounded >= 1000 ? `${(rounded / 1000).toFixed(1)}km` : `${rounded}m`;
+      return rounded <= allowedRadius
+        ? { hasGps: true, message: `DENTRO DO PERÍMETRO (${distanceLabel})`, isInside: true }
+        : {
+            hasGps: true,
+            message: `FORA DO PERÍMETRO SRE (${distanceLabel}/max ${allowedRadius}m)`,
+            isInside: false
+          };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error('[Contrato] Geocerca: coordenada inválida:', errMsg);
+      return { hasGps: true, message: 'ERRO DE COORDENADA', isInside: false };
+    }
+  };
 
   const isAuditor = isFieldAuditorRole(user.role);
   // AUDITOR DE CAMPO: quem não administra a unidade. O admin/master configura a
@@ -310,8 +520,27 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
             </p>
           </div>
 
-          <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center text-white shadow-md flex-shrink-0">
-            <Briefcase size={16} />
+          <div className="flex items-center space-x-2 flex-shrink-0">
+            {onSync && databaseMode !== DatabaseMode.INTERNAL && (
+              <button
+                type="button"
+                onClick={() => onSync(selectedTenant, chosenFilial || undefined)}
+                disabled={isSyncing}
+                title="Sincronizar com a Nuvem"
+                aria-label="Sincronizar com a Nuvem"
+                data-testid="contexto-sync"
+                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-sm cursor-pointer ${
+                  isSyncing
+                    ? 'bg-blue-50 text-blue-500'
+                    : 'bg-white text-accent border border-accent/10 active:scale-95 hover:bg-accent-soft'
+                }`}
+              >
+                {isSyncing ? <RefreshCw size={16} className="animate-spin" /> : <Cloud size={16} />}
+              </button>
+            )}
+            <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center text-white shadow-md flex-shrink-0">
+              <Briefcase size={16} />
+            </div>
           </div>
         </div>
 
@@ -421,6 +650,16 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
           )
         ) : (
           <>
+            {isImportingBatch && (
+              <div
+                className="bg-blue-50 border border-blue-100 rounded-2xl p-4 text-center"
+                data-testid="contexto-importing"
+              >
+                <p className="text-[9px] font-extrabold text-blue-700 uppercase tracking-widest leading-relaxed">
+                  Modo importação ativo · persistindo a base no dispositivo
+                </p>
+              </div>
+            )}
             {isGlobalAdmin && baseContracts.length > 0 && (
               <div>
                 <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted mb-2">
@@ -480,17 +719,51 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                 <p className="text-[9px] font-bold uppercase tracking-widest text-ink-muted">
                   Filial · Unidade Operacional
                 </p>
-                {filialOptionsView.length > 1 && (
-                  <span className="text-[8px] font-black uppercase tracking-widest text-ink-muted/50">
+                {(filialOptionsView.length > 1 || totalAssets > 0) && (
+                  <span
+                    className="text-[8px] font-black uppercase tracking-widest text-ink-muted/50"
+                    data-testid="filial-summary"
+                  >
                     {filialOptionsView.length} opções
+                    {totalAssets > 0 ? ` · ${totalAssets.toLocaleString('pt-BR')} ativos` : ''}
                   </span>
                 )}
               </div>
               {filialOptionsView.length === 0 ? (
-                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3.5">
-                  <p className="text-[9px] font-extrabold text-amber-700 uppercase tracking-widest leading-relaxed text-center">
-                    Nenhuma filial na base deste contrato — a unidade será escolhida na próxima tela.
-                  </p>
+                <div className="space-y-2" data-testid="contexto-empty-units">
+                  <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3.5">
+                    <p className="text-[9px] font-extrabold text-amber-700 uppercase tracking-widest leading-relaxed text-center">
+                      Nenhuma filial na base deste contrato. Carregue a base para escolher a unidade.
+                    </p>
+                  </div>
+                  {podeAdministrar && onLoadDatabase && (
+                    <button
+                      type="button"
+                      onClick={onLoadDatabase}
+                      data-testid="contexto-load-database"
+                      className="w-full py-3.5 rounded-xl bg-accent text-white font-extrabold uppercase text-[9px] tracking-[0.15em] shadow-md active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Database size={15} />
+                      Iniciar Carga de Dados (Expert)
+                    </button>
+                  )}
+                  {onSync && databaseMode !== DatabaseMode.INTERNAL && (
+                    <button
+                      type="button"
+                      onClick={() => onSync(selectedTenant, chosenFilial || undefined)}
+                      disabled={isSyncing}
+                      data-testid="contexto-sync-empty"
+                      className="w-full py-3.5 bg-white border border-accent/20 text-accent rounded-xl font-extrabold uppercase text-[9px] tracking-[0.15em] active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <RefreshCw size={15} className={isSyncing ? 'animate-spin' : ''} />
+                      Tentar Sincronizar da Nuvem
+                    </button>
+                  )}
+                  {!podeAdministrar && (
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest max-w-[220px] leading-relaxed mx-auto text-center">
+                      Solicite ao administrador a carga da base de dados para iniciar o inventário.
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-2" data-testid="filial-options">
@@ -574,6 +847,39 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                                   ? 'LIBERADA PARA INVENTÁRIO'
                                   : `FILIAL · ${normalizeWorkTenant(selectedTenant)}`}
                             </p>
+                            {/* Contagem da base local + perímetro da âncora (as
+                                duas leituras que viviam na Unidade Operacional). */}
+                            {(() => {
+                              const stat = unitStats[normalizeKey(opt.filial)];
+                              const geo = geofenceStatus(opt.filial);
+                              if (!stat && !geo?.hasGps) return null;
+                              return (
+                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                  {stat && (
+                                    <span
+                                      className="text-[8px] font-black uppercase tracking-wider text-ink-muted"
+                                      data-testid={`filial-asset-count-${opt.filial}`}
+                                    >
+                                      {stat.total.toLocaleString('pt-BR')} ATIVOS
+                                      {stat.checked > 0
+                                        ? ` · ${stat.checked.toLocaleString('pt-BR')} CONF.`
+                                        : ''}
+                                    </span>
+                                  )}
+                                  {geo?.hasGps && (
+                                    <span
+                                      className={`inline-flex items-center gap-1 text-[8px] font-black uppercase tracking-wider ${
+                                        geo.isInside ? 'text-emerald-600' : 'text-amber-600'
+                                      }`}
+                                      data-testid={`filial-geofence-${opt.filial}`}
+                                    >
+                                      <NavigationIcon size={9} />
+                                      {geo.message}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                         {isAdmin ? (
@@ -660,7 +966,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
                   <p className="text-[8px] font-bold text-amber-600 uppercase tracking-wider leading-relaxed text-center mt-1">
                     {isAdmin
                       ? 'Toque na filial ou nos botões para resolver o que falta.'
-                      : 'O administrador define âncora e campanha na Unidade Operacional.'}
+                      : 'O administrador define âncora e campanha no cartão desta filial.'}
                   </p>
                 </div>
               )}
@@ -778,7 +1084,7 @@ const WorkContextSelector: React.FC<WorkContextSelectorProps> = ({
           <p className="text-[9px] font-extrabold uppercase tracking-wider text-amber-600 text-center leading-relaxed">
             {filialOptionsView.length === 0
               ? (podeAdministrar
-                  ? 'Sem filial na base deste contrato: siga para a Unidade Operacional para escolher ou cadastrar a unidade.'
+                  ? 'Sem filial na base deste contrato: carregue a base (ou cadastre a unidade) para escolher a filial.'
                   : 'Este contrato ainda não tem filial na base. Peça ao administrador para cadastrar a unidade (ou use CONTROLE DE ATIVO, que não exige endereço de campo).')
               : 'Escolha a filial para entrar no INVENTARIADOR.'}
           </p>

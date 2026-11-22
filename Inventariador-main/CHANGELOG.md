@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nada pendente.
+### Alterado
+
+- **Unidade Operacional fundida no contrato de trabalho.** A rota `/unit` foi
+  retirada e a tela `WorkContextSelector` (`/contexto`) passou a concentrar a
+  contagem de ativos e conferidos por filial, a geocerca (âncora × posição real),
+  a carga de base e a sincronização. As sete entradas que empurravam para
+  `/unit` e o recuo do guarda de filial passam a apontar para o contrato; o
+  auditor deixa de ter uma tela administrativa fora da trilha.
+- **e2e:** `cargaMistaUnidades` confere a contagem por filial no contrato e
+  `contextoUnidade` fixa a retirada de `/unit` e a escolha da unidade em
+  `/contexto`.
 
 ## [3.0.0] — 2026-11-21
 

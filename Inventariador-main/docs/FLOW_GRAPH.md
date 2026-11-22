@@ -24,7 +24,7 @@ graph TD
     %% Módulos e Seleção de Unidade
     MODULE_SEL[Seleção de Módulo]
     ASSET_CONTROL[Controle de Ativos e Movimentações]
-    UNIT_SEL[Seleção de Unidade Operacional]
+    UNIT_SEL[Unidade Operacional (no contrato)]
     DB_MGR[Gerenciador de Banco de Dados]
 
     %% Hub Principal
@@ -171,7 +171,7 @@ e `LOAD_HISTORY` (histórico de cargas por contrato — `LoadHistoryScreen.tsx`)
 | STRESS | `STRESS_TEST` | `/stress-test` | ✅ |
 | MODULE_SEL | `MODULE_SELECTION` | `/modules` | ✅ |
 | ASSET_CONTROL | `ASSET_CONTROL_HOME` | `/asset-control` | ✅ |
-| UNIT_SEL | `UNIT_SELECTION` | `/unit` | ✅ |
+| UNIT_SEL | — (fundido em `WORK_CONTEXT_SELECTION`) | ~~`/unit`~~ | ❌ retirada — unidade, contagem, geocerca, carga e sync em `/contexto` |
 | DB_MGR | `DATABASE_MANAGER` | `/db-manager` | ✅ (Route `/db-manager`) |
 | DASHBOARD | `DASHBOARD` | `/dashboard` | ✅ (Route `/dashboard`) |
 | MAIN_MENU | `MAIN_MENU` | `/menu` | ✅ (Route `/menu`) |
@@ -206,11 +206,11 @@ literal do grafo, a decisão registrada é a seguinte:
 
 | # | Transição | Grafo (literal) | Implementado | Decisão |
 |---|---|---|---|---|
-| 1 | ONBOARDING → | `DASHBOARD` | `MODULE_SELECTION` | **Manter `MODULE_SELECTION`.** `DASHBOARD` exige `selectedUnit` (Barreira Canônica — guarda em `App.tsx`); no pós-login/primeiro acesso o usuário ainda não escolheu unidade, e navegar para `DASHBOARD` causaria recuo forçado para `UNIT_SELECTION`. O grafo será atualizado para refletir o destino correto. |
-| 2 | CHANGE_PWD → | `UNIT_SEL` | `UNIT_SELECTION`, **exceto** base vazia + admin → `MAIN_MENU` | **Manter o desvio.** Com base vazia, não há unidades para selecionar; o admin vai ao menu de dados (`startWithDataMenu`) para forçar a carga. Consistente com o roteamento "base vazia + admin → Gestor de Base" (ARCHITECTURE §6). |
+| 1 | ONBOARDING → | `DASHBOARD` | `MODULE_SELECTION` | **Manter `MODULE_SELECTION`.** `DASHBOARD` exige `selectedUnit` (Barreira Canônica — guarda em `App.tsx`); no pós-login/primeiro acesso o usuário ainda não escolheu unidade, e navegar para `DASHBOARD` causaria recuo forçado para `WORK_CONTEXT_SELECTION`. O grafo será atualizado para refletir o destino correto. |
+| 2 | CHANGE_PWD → | `UNIT_SEL` | `WORK_CONTEXT_SELECTION`, **exceto** base vazia + admin → `MAIN_MENU` | **Manter o desvio.** Com base vazia, não há unidades para selecionar; o admin vai ao menu de dados (`startWithDataMenu`) para forçar a carga. Consistente com o roteamento "base vazia + admin → Gestor de Base" (ARCHITECTURE §6). |
 | 3 | LOGIN → BIOMETRIC | acionado na tela de login | pós-login automático (`pushScreen(BIOMETRIC_REGISTRATION)` após auth, com `popScreen` ao concluir/ignorar) | **Manter.** Resultado equivalente ao grafo: usuário cai em `MODULE_SELECTION` após concluir/ignorar (o `pop` retorna à tela abaixo, que é o destino pós-login). |
 | 4 | STRESS → | `LOGIN` | `setHistory([LOGIN])` ao voltar | ✅ Conforme o grafo. Sem mudança. |
-| 5 | LOGIN → TENANT_WORK | `MODULE_SEL` (grafo antigo) | `TENANT_WORK_SELECTION` quando `buildWorkContexts(user) > 1` (multi-contrato/filial) | **Manter o seletor.** Com autorização em mais de um contrato/filial, o usuário escolhe onde vai operar antes de qualquer carga; ao escolher, `handleSelectWorkContext` persiste o contexto, sincroniza SÓ o contrato e roteia por perfil/base (`resolvePostSelectionScreen`: base vazia → `DATABASE_MANAGER`; auditor com base → `UNIT_SELECTION`; demais → `MODULE_SELECTION`). |
+| 5 | LOGIN → TENANT_WORK | `MODULE_SEL` (grafo antigo) | `TENANT_WORK_SELECTION` quando `buildWorkContexts(user) > 1` (multi-contrato/filial) | **Manter o seletor.** Com autorização em mais de um contrato/filial, o usuário escolhe onde vai operar antes de qualquer carga; ao escolher, `handleSelectWorkContext` persiste o contexto, sincroniza SÓ o contrato e roteia por perfil/base (`resolvePostSelectionScreen`: base vazia → `DATABASE_MANAGER`; auditor com base → `WORK_CONTEXT_SELECTION`; demais → `MODULE_SELECTION`). |
 | 6 | DB_MGR → | `MODULE_SEL` (grafo antigo) | `popScreen` → `MAIN_MENU` (PAINEL COMPLETO de onde se veio); sem histórico → `WORK_CONTEXT_SELECTION` | **Corrigido.** O regresso fixo em `ModuleSelector` saía da trilha única e, para o auditor, era rebatido ao contrato pelo RouteGuard (ida e volta sem destino). `historicoAposVoltar` é a regra única (também nos fallbacks de `DatabaseManagerScreen`/`LoadHistoryScreen`); `/modules` deixa de ser destino de «Voltar». |
 | 7 | MAIN_MENU → LOAD_HISTORY | — (tela nova) | Submenu Admin → `onNavigate(LOAD_HISTORY)` com gate `manage_database` | **Manter.** A tela lê o `audit_logs` (IMPORT/SYNC_PULL) por contrato e só aparece para quem gerencia a base; `onBack` retorna ao menu via `popScreen`. |
 

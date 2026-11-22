@@ -78,8 +78,8 @@ describe('resolveModuleEntryScreen — trilha única após o contrato (todos os 
   });
 
   it('INVENTARIADOR sem filial → seleção de unidade (base sem unidade conhecida)', () => {
-    expect(resolveModuleEntryScreen(AppModule.INVENTORY, '')).toBe(AppScreen.UNIT_SELECTION);
-    expect(resolveModuleEntryScreen(AppModule.INVENTORY, null)).toBe(AppScreen.UNIT_SELECTION);
+    expect(resolveModuleEntryScreen(AppModule.INVENTORY, '')).toBe(AppScreen.WORK_CONTEXT_SELECTION);
+    expect(resolveModuleEntryScreen(AppModule.INVENTORY, null)).toBe(AppScreen.WORK_CONTEXT_SELECTION);
   });
 
   it('a entrada NÃO depende do papel: mesma assinatura, mesma tela', () => {

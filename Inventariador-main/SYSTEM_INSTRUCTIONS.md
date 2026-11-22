@@ -10,18 +10,18 @@ A renderização e o roteamento seguem rigidamente o topo do histórico (history
 * AppScreen.LOGIN -> Rota zero absoluta do ecossistema. Limpa caches residuais de sessões anteriores no boot.
 * AppScreen.LOAD_DATABASE -> Carga atômica e higienização via DatabaseLoaderService para o IndexedDB.
 * AppScreen.MODULE_SELECTION -> Divisor de escopo. Retornar aqui obrigatoriamente limpa dados voláteis de unidade (selectedUnit) e suspende syncs em background.
-* AppScreen.UNIT_SELECTION -> Soberania da Filial. Exibe contagem de ativos com marcador neutro • e proteção Math.max(0, val).
+* AppScreen.WORK_CONTEXT_SELECTION -> Soberania da Filial. Exibe contagem de ativos com marcador neutro • e proteção Math.max(0, val).
 * AppScreen.DASHBOARD -> Painel Interno (Opções: Inventariar, Etiquetar/TAGs, Conciliador).
 * AppScreen.ADDRESS_SELECTION -> Triagem e busca reativa de endereços baseada na tabela indexada do Dexie.js com Debounce de 300ms.
 * AppScreen.INVENTORY -> Execução da auditoria física activa via InventoryCard (Verde: Sucesso, Amarelo: Divergência, Laranja: Sobra).
-REGRA DO GUARDIÃO ATÔMICO: É terminantemente PROIBIDO permitir navegação para DASHBOARD, ADDRESS_SELECTION ou INVENTORY se selectedUnit for nulo/ausente. O manipulador deve interceptar na mutação do histórico e forçar o recuo para UNIT_SELECTION.
+REGRA DO GUARDIÃO ATÔMICO: É terminantemente PROIBIDO permitir navegação para DASHBOARD, ADDRESS_SELECTION ou INVENTORY se selectedUnit for nulo/ausente. O manipulador deve interceptar na mutação do histórico e forçar o recuo para WORK_CONTEXT_SELECTION.
 
 3. DIRECTRIZ SUPREMA DE INFRAESTRUTURA — VINCULAÇÃO DE CONTEXTO LOCAL
 Antes de analisar, gerar, alterar ou sugerir qualquer linha de código, refatoração, arquitetura ou resposta textual neste chat, você DEVE ler, absorver e alinhar sua inferência estritamente com o arquivo `SYSTEM_INSTRUCTIONS.md` contido no File Explorer do projeto. O conteúdo deste arquivo local sobrepõe qualquer suposição genérica.
 TRAVA DE VALIDAÇÃO: É terminantemente PROIBIDO ignorar as regras do `SYSTEM_INSTRUCTIONS.md`. Toda resposta gerada deve incluir a tag de validação: "[✓] Alinhado com SYSTEM_INSTRUCTIONS.md".
 
 4. DIRECTRIZ DE IMPACTO EM CASCATA E INTEGRIDADE DE FLUXO (ANTI-QUEBRA)
-PROIBIÇÃO DE ALTERAÇÃO ISOLADA: É terminantemente PROIBIDO atuar de forma estritamente local em um componente. Sempre que houver uma alteração em uma tela ou estado, realize uma análise de impacto a montante (Upstream) e a jusante (Downstream: MODULE_SELECTION -> UNIT_SELECTION -> DASHBOARD -> ADDRESS_SELECTION -> INVENTORY).
+PROIBIÇÃO DE ALTERAÇÃO ISOLADA: É terminantemente PROIBIDO atuar de forma estritamente local em um componente. Sempre que houver uma alteração em uma tela ou estado, realize uma análise de impacto a montante (Upstream) e a jusante (Downstream: MODULE_SELECTION -> WORK_CONTEXT_SELECTION -> DASHBOARD -> ADDRESS_SELECTION -> INVENTORY).
 AUTO-CORREÇÃO OBRIGATÓRIA: Se uma modificação alterar contratos de dados ou rotas, você DEVE gerar simultaneamente os patches de correção para todas as telas subsequentes que dependem dessa lógica, evitando a quebra do compilador ou regressões em produção.
 
 5. COMPORTAMENTO ANTI-SESSÃO FANTASMA E F5 RESILIENTE (BOOT INSTANTÂNEO)

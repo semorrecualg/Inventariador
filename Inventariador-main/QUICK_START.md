@@ -42,7 +42,7 @@ import { LoginFlow } from './components/LoginFlow';
 ```tsx
 const handleLogin = (user: User) => {
   sessionStorage.setItem('app_current_user', JSON.stringify(user));
-  setAppScreen(AppScreen.UNIT_SELECTION);
+  setAppScreen(AppScreen.WORK_CONTEXT_SELECTION);
 };
 ```
 

@@ -22,7 +22,7 @@ graph TD
     %% ===== Hub Principal / Módulos =====
     MODULE_SEL[MODULE_SELECTION · ModuleSelector.tsx]
     ASSET_CONTROL[ASSET_CONTROL_HOME · AssetControlModule.tsx]
-    UNIT_SEL[UNIT_SELECTION · UnitSelector.tsx]  %% tool grid: AJUSTES · DADOS · PAINEL · AUDITORIA
+    UNIT_SEL[WORK_CONTEXT_SELECTION · WorkContextSelector.tsx]  %% filial + contagem + geocerca + carga + sync
     DB_MGR[DATABASE_MANAGER · DatabaseManagerScreen.tsx]
     LOAD_HISTORY[LOAD_HISTORY · LoadHistoryScreen.tsx]
     LICENSES[LICENSE_PROVISIONING · LicenseProvisioning.tsx]
@@ -160,7 +160,7 @@ LOGIN · Login.tsx
   → (valida credenciais)
 MODULE_SELECTION · ModuleSelector.tsx
   → (selecionar módulo "Inventário")
-UNIT_SELECTION · UnitSelector.tsx
+WORK_CONTEXT_SELECTION · WorkContextSelector.tsx
   → (selecionar unidade operacional)
 MAIN_MENU · MainMenu.tsx            ← Hub operacional do auditor (DASHBOARD fora do fluxo)
   ├─ INVENTÁRIO · AddressSelector.tsx → Inventory.tsx
@@ -219,11 +219,12 @@ MAIN_MENU · MainMenu.tsx            ← entrada após a seleção de unidade (t
   → LICENSE_PROVISIONING · LicenseProvisioning.tsx    (submenu Admin: Licenças → tenant + MASTER)
 ```
 
-**Tool grid na Unidade Operacional (2026-08-12):** o `UnitSelector.tsx` agora exibe a
-fileira **AJUSTES · PAINEL** (transferida do MainMenu) + contador
-"X Ativos · Base Local". Cada botão abre o `MAIN_MENU` com o painel correspondente já
-aberto via `NavigationParams.openPanel`: AJUSTES → `PREFERENCES`, PAINEL → `ADMIN`.
-O MainMenu **não** exibe mais a tool grid.
+**Fusão da Unidade Operacional (2026-11-22):** a tela `/unit` (`UnitSelector`) foi
+retirada. A contagem de ativos por filial, a geocerca, a carga de base e a
+sincronização passaram para o `WorkContextSelector.tsx` (`/contexto`), que é a
+única porta de escolha da filial. A tool grid **AJUSTES · PAINEL** que vivia
+naquela tela deixou de existir; o **Painel Completo** continua a ser aberto
+pelo hub (`MAIN_MENU`).
 
 **Painel Completo como hub único (2026-11-20):** os antigos botões **DADOS** e
 **AUDITORIA** saíram da tool grid. Os painéis **Gestão e Manutenção**
@@ -245,7 +246,7 @@ administrativos do hub ficam ocultos para quem não é administrador.
 | `STRESS_TEST` | `StressTestManager.tsx` | `/stress-test` |
 | `MODULE_SELECTION` | `ModuleSelector.tsx` | `/modules` |
 | `ASSET_CONTROL_HOME` | `AssetControlModule.tsx` (+ `InventoryCard.tsx`) | `/asset-control` |
-| `UNIT_SELECTION` | `UnitSelector.tsx` | `/unit` |
+| `WORK_CONTEXT_SELECTION` | `WorkContextSelector.tsx` | `/contexto` |
 | `DATABASE_MANAGER` | `DatabaseManagerScreen.tsx` (`src/screens/`) | `/db-manager` |
 | `DASHBOARD` | `Dashboard.tsx` | `/dashboard` |
 | `MAIN_MENU` | `MainMenu.tsx` | `/menu` |
@@ -280,14 +281,14 @@ administrativos do hub ficam ocultos para quem não é administrador.
 > (`ASSET_CONTROL_HOME`), conforme `docs/CORRECAO_INVENTORYCARD_MODULO_ATIVO.md`.
 
 > **Nota de fluxo (2026-08-06):** o fluxo principal do auditor passa por **`MAIN_MENU`**
-> (`MainMenu.tsx`) após `UNIT_SELECTION` — o componente já ativa as 5 funcionalidades:
+> (`MainMenu.tsx`) após `WORK_CONTEXT_SELECTION` — o componente já ativa as 5 funcionalidades:
 > **INVENTÁRIO · FICHA DO ATIVO · ETIQUETAR ATIVOS · CONCILIAÇÃO POR CONTAS ·
 > ASSINATURA DIGITAL**. O `DASHBOARD` (`Dashboard.tsx`) fica
 > **fora do fluxo principal** (mantido como acesso legado no grafo).
 >
-> **Sincronização com o código (2026-08-06):** o `onSelect` do `UnitSelector` em `App.tsx`
+> **Sincronização com o código (2026-08-06):** o `onSelect` do seletor de unidade em `App.tsx`
 > agora navega para `AppScreen.MAIN_MENU` (antes `DASHBOARD`) — o preview segue o fluxo do
-> roteiro: `LOGIN → MODULE_SELECTION → UNIT_SELECTION → MAIN_MENU`. Os relatórios
+> roteiro: `LOGIN → MODULE_SELECTION → WORK_CONTEXT_SELECTION → MAIN_MENU`. Os relatórios
 > (`AuditLogs`, `GlobalPerformance`, `ImpairmentReport`) também voltam **apenas ao
 > `MAIN_MENU`** (`setHistory([AppScreen.MAIN_MENU])`), sem passar pelo `DASHBOARD` legado.
 >

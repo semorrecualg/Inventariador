@@ -144,7 +144,7 @@ describe('shouldReturnHubToWorkContext — hub sem contexto ativo volta ao contr
 
   it('só o hub é afetado', () => {
     expect(shouldReturnHubToWorkContext(AppScreen.DASHBOARD, null)).toBe(false);
-    expect(shouldReturnHubToWorkContext(AppScreen.UNIT_SELECTION, null)).toBe(false);
+    expect(shouldReturnHubToWorkContext(AppScreen.MODULE_SELECTION, null)).toBe(false);
     expect(shouldReturnHubToWorkContext(AppScreen.WORK_CONTEXT_SELECTION, null)).toBe(false);
   });
 });

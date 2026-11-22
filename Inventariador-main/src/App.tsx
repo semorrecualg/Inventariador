@@ -24,7 +24,7 @@ import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
-import { isAdminUser, isAuditorUser, userHasPermission } from './services/rbacService';
+import { isAdminUser, userHasPermission } from './services/rbacService';
 import { canonicalRole, isFieldAuditorRole } from './utils/roles';
 
 // Extend Window interface for pushScreen
@@ -51,7 +51,6 @@ import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
 import localforage from 'localforage';
 import { getCurrentLocation, persistableAssetGps, shouldAttemptAssetGpsCapture, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
-import UnitSelector from './components/UnitSelector';
 import AddressSelector from './components/AddressSelector';
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
 import UserManagement from './components/UserManagement';
@@ -772,7 +771,7 @@ useEffect(() => {
         const validatedScreen = validateAndPushRoute(s, selectedUnit);
         if (validatedScreen !== s) {
           logger.warn(`>>> [SRE-GUARD] Interceptação: Tentativa de acessar ${s} sem selectedUnit.`);
-          const fallback = prev.includes(AppScreen.UNIT_SELECTION) ? prev : [...prev, AppScreen.UNIT_SELECTION];
+          const fallback = prev.includes(AppScreen.WORK_CONTEXT_SELECTION) ? prev : [...prev, AppScreen.WORK_CONTEXT_SELECTION];
           localStorage.setItem('gbr_kardek_history', JSON.stringify(fallback));
           return fallback;
         }
@@ -1503,7 +1502,7 @@ useEffect(() => {
                       setHistory([AppScreen.MAIN_MENU]);
                     } else if (parsedUser) {
                       logger.info(`>>> [Boot] Sessão incompleta no banco. Direcionando para seleção de unidade.`);
-                      setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+                      setHistory([AppScreen.LOGIN, AppScreen.WORK_CONTEXT_SELECTION]);
                     }
                     */
                     setHistory([AppScreen.LOGIN]);
@@ -1511,7 +1510,7 @@ useEffect(() => {
                     /*
                     if (parsedUser) {
                       logger.info(`>>> [Boot] Sem unidade ativa no banco. Direcionando para seleção de unidade.`);
-                      setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+                      setHistory([AppScreen.LOGIN, AppScreen.WORK_CONTEXT_SELECTION]);
                     }
                     */
                     setHistory([AppScreen.LOGIN]);
@@ -2403,7 +2402,7 @@ useEffect(() => {
   useEffect(() => {
     const criticalScreens = [
       AppScreen.MAIN_MENU, 
-      AppScreen.UNIT_SELECTION, 
+      AppScreen.WORK_CONTEXT_SELECTION, 
       AppScreen.CAMPAIGN_MANAGEMENT,
       // O contrato de trabalho mostra o chip CAMPANHA: ao voltar de GESTÃO DE
       // CAMPANHAS a releitura é obrigatória, senão o cartão fica preso no estado
@@ -2485,7 +2484,7 @@ useEffect(() => {
       AppScreen.LOGIN,
       AppScreen.REGISTER,
       AppScreen.ONBOARDING,
-      AppScreen.UNIT_SELECTION,
+      AppScreen.WORK_CONTEXT_SELECTION,
       AppScreen.UNIT_CONFIGURATOR,
       AppScreen.CAMPAIGN_MANAGEMENT,
       AppScreen.MODULE_SELECTION,
@@ -2516,18 +2515,10 @@ useEffect(() => {
       AppScreen.AUDIT_LOGS
     ];
 
-    // UNIDADE OPERACIONAL (/unit) NÃO faz parte da trilha do auditor: é a tela
-    // ADMINISTRATIVA onde o admin/master cadastra a unidade e configura âncora
-    // GPS + campanha para liberá-la ao inventário. Qualquer tentativa do
-    // auditor (hub sem unidade, tela legada de módulos, rota direta) volta ao
-    // contrato de trabalho — a filial dele é escolhida lá, entre as liberadas.
-    if (screen === AppScreen.UNIT_SELECTION && isAuditorUser(user) && !isAdminUser(user)) {
-      logger.warn('>>> [RouteGuard] UNIDADE OPERACIONAL fora da trilha do auditor: retornando ao contrato de trabalho.');
-      pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
-      return;
-    }
-    
-    // HUB ("Auditoria Inteligente", #/menu) exige CONTEXTO ATIVO — Fase 1 da
+    // A antiga UNIDADE OPERACIONAL (/unit) foi fundida no CONTRATO DE TRABALHO:
+    // não há mais tela administrativa a proibir para o auditor — a filial dele
+    // é escolhida em /contexto, entre as liberadas.
+        // HUB ("Auditoria Inteligente", #/menu) exige CONTEXTO ATIVO — Fase 1 da
     // padronização do acesso. O hub era a única tela isenta da trava de unidade
     // e virava destino de qualquer atalho sem filial (URL directa, reentrada,
     // pós-troca de senha). Os PAINÉIS DE GOVERNAÇA abertos a partir do contrato
@@ -2542,12 +2533,12 @@ useEffect(() => {
     if (user && !publicScreens.includes(screen) && screen !== AppScreen.MAIN_MENU) {
       const campaignId = inventory.currentCampaignId;
       // Alinhado à regra de Soberania Admin, se a unidade física ou string literal existir e for compatível com a filial ativa,
-      // o RouteGuard libere a navegação e suspenda o redirecionamento imperativo para 'UNIT_SELECTION'.
+      // o RouteGuard libere a navegação e suspenda o redirecionamento imperativo para o CONTRATO.
       const isConfigValid = !!selectedUnit;
       if (!isConfigValid) {
-        logger.warn(`>>> [RouteGuard] Bloqueio técnico: Sem unidade (${selectedUnit}) ou campanha (${campaignId}) selecionada. Redirecionando para UNIT_SELECTION.`);
+        logger.warn(`>>> [RouteGuard] Bloqueio técnico: Sem unidade (${selectedUnit}) ou campanha (${campaignId}) selecionada. Redirecionando para o CONTRATO DE TRABALHO.`);
         setScreenParams(null);
-        setHistory([AppScreen.LOGIN, AppScreen.UNIT_SELECTION]);
+        setHistory([AppScreen.LOGIN, AppScreen.WORK_CONTEXT_SELECTION]);
       }
     }
   }, [screen, selectedUnit, inventory.currentCampaignId, user, databaseMode, setHistory, pushScreen, menuPanelToOpen]);
@@ -3295,7 +3286,7 @@ useEffect(() => {
         const saved = savedInventory;
         
         // Se não houver dados locais e estivermos em modo nuvem, não sincronizamos automaticamente no init
-        // Deixamos que a navegação para UNIT_SELECTION ou MODULE_SELECTION trate disso
+        // Deixamos que a navegação para WORK_CONTEXT_SELECTION ou MODULE_SELECTION trate disso
         // if ((!saved || !saved.assets || saved.assets.length === 0) && databaseMode !== DatabaseMode.INTERNAL && user) {
         //   await syncFromCloud();
         //   return;
@@ -3769,7 +3760,7 @@ useEffect(() => {
     /*
     if (user && (currentScreen === AppScreen.LOGIN || currentScreen === AppScreen.REGISTER)) {
       const isAdmin = user.role === UserRole.ADMIN || user.role === UserRole.MASTER || user.isAdmin || (user.email && user.email.toLowerCase() === ADMIN_EMAIL);
-      setHistory([isAdmin ? AppScreen.MODULE_SELECTION : AppScreen.UNIT_SELECTION]);
+      setHistory([isAdmin ? AppScreen.MODULE_SELECTION : AppScreen.WORK_CONTEXT_SELECTION]);
       return;
     }
     */
@@ -3787,7 +3778,7 @@ useEffect(() => {
       AppScreen.INVENTORY
     ];
     if (user && !selectedUnit && companyRequiredScreens.includes(currentScreen)) {
-      pushScreen(AppScreen.UNIT_SELECTION);
+      pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
     }
 
     // 3.1 ENDEREÇO FÍSICO sem unidade ativa: a tela some do DOM (render
@@ -4276,7 +4267,7 @@ useEffect(() => {
         const isBypass = user?.email?.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase();
         if (shouldForceUnitOnEmptyBase(screen, { vazio: isReallyEmpty, dono: isBypass })) {
           logger.warn(">>> [BLINDAGEM] Banco vazio detectado pós-init. Redirecionando forçadamente para Seleção de Unidade.");
-          pushScreen(AppScreen.UNIT_SELECTION);
+          pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
         }
       } catch (e) {
         logger.error(">>> [BLINDAGEM] Erro ao checar integridade de carga na inicialização:", e);
@@ -4361,7 +4352,7 @@ useEffect(() => {
           isOpen: true,
           title: 'Unidade aguardando liberação',
           message: isAdminUser(user)
-            ? `A unidade ${newFilial} ainda não foi liberada para inventário. Falta ${pending} — resolva na Unidade Operacional ou pelo cartão da filial.`
+            ? `A unidade ${newFilial} ainda não foi liberada para inventário. Falta ${pending} — resolva pelo cartão da filial no CONTRATO DE TRABALHO.`
             : `A unidade ${newFilial} ainda não foi liberada para inventário. O administrador precisa resolver: ${pending}.`,
           type: 'error',
           onConfirm: () => {}
@@ -4442,7 +4433,7 @@ useEffect(() => {
           isOpen: true,
           title: 'Unidade aguardando liberação',
           message: isAdminUser(user)
-            ? `A unidade ${selectedUnit} ainda não foi liberada para inventário. Falta ${pending} — resolva na Unidade Operacional ou pelo cartão da filial.`
+            ? `A unidade ${selectedUnit} ainda não foi liberada para inventário. Falta ${pending} — resolva pelo cartão da filial no CONTRATO DE TRABALHO.`
             : `A unidade ${selectedUnit} ainda não foi liberada para inventário. O administrador precisa resolver: ${pending}.`,
           type: 'error',
           onConfirm: () => {}
@@ -7545,7 +7536,7 @@ useEffect(() => {
             onOpenHelp={() => setIsHelpMenuOpen(true)}
             onNavigate={handleHubNavigate}
             onLogout={() => { setSelectedUnit(null); setStartWithDataMenu(false); pushScreen(AppScreen.WORK_CONTEXT_SELECTION); }}
-            onChangeUnit={() => { setSelectedUnit(null); pushScreen(AppScreen.UNIT_SELECTION); }}
+            onChangeUnit={() => { setSelectedUnit(null); pushScreen(AppScreen.WORK_CONTEXT_SELECTION); }}
             onExport={handleExport}
             onBackup={handleBackup}
             onDownloadCloudData={handleDownloadCloudData}
@@ -7614,8 +7605,8 @@ useEffect(() => {
             allAssets={inventory.assets}
             currentCampaignId={inventory.currentCampaignId}
             onBack={popScreen}
-            onChangeUnit={() => { setSelectedUnit(null); pushScreen(AppScreen.UNIT_SELECTION); }}
-            onOpenInventory={() => selectedUnit ? pushScreen(AppScreen.ADDRESS_SELECTION) : pushScreen(AppScreen.UNIT_SELECTION)}
+            onChangeUnit={() => { setSelectedUnit(null); pushScreen(AppScreen.WORK_CONTEXT_SELECTION); }}
+            onOpenInventory={() => selectedUnit ? pushScreen(AppScreen.ADDRESS_SELECTION) : pushScreen(AppScreen.WORK_CONTEXT_SELECTION)}
             onOpenLabeling={() => pushScreen(AppScreen.LABELING)}
             onOpenActiveSearch={() => pushScreen(AppScreen.ACTIVE_SEARCH)}
             user={user}
@@ -7693,7 +7684,7 @@ useEffect(() => {
                   setStartWithDataMenu(true);
                   pushScreen(AppScreen.MAIN_MENU);
                 } else {
-                  pushScreen(AppScreen.UNIT_SELECTION); 
+                  pushScreen(AppScreen.WORK_CONTEXT_SELECTION); 
                 }
               }} 
             />
@@ -7859,122 +7850,6 @@ useEffect(() => {
               unitName={selectedUnit || ''}
             />
           ) : <div className="flex items-center justify-center h-full"><p className="text-ink-muted uppercase font-bold tracking-widest">Acesso Restrito</p></div>)}
-          {screen === AppScreen.UNIT_SELECTION && (
-            <UnitSelector 
-              isAdmin={isAdminUser(user) || canAccessDatabaseManager(user)}
-              isAuditor={!!(isFieldAuditorRole(user?.role) || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL))}
-              onNavigate={pushScreen}
-   onLoadDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
-   databaseMode={databaseMode}
-   initialUnit={screenParams?.unitName || ''}
-   units={fullCompaniesWithStatus
-     .filter(c => {
-       // Regra de Visualização: Admin e Audidtor veem as unidades autorizadas
-       // Se estiver no modo nuvem, mostramos todas para permitir o primeiro sync
-       // No modo local, mostramos todas as unidades encontradas na base
-       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.is_admin || user?.isAdmin || (user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
-                  const isAuditor = isFieldAuditorRole(user?.role);
-                  
-                  if (isAdmin) return true; // Admin vê tudo que foi detectado
-                  
-                  if (isAuditor) {
-                    const authorizedUnits = user?.units || (user?.unitid ? [user.unitid] : []);
-                    const normCName = normalizeKey(c.name);
-                    return authorizedUnits.some(au => normalizeKey(au) === normCName);
-                  }
-
-                  return true;
-                })
-                .map(c => ({ 
-                  filial: c.name,
-                  // Muro multi-tenant: cada unidade carrega o contrato dela (chave composta)
-                  tenantid: (c as { tenantid?: string }).tenantid || '',
-                  // No modo nuvem, permitimos selecionar mesmo se não houver dados locais ainda
-                  hasData: databaseMode !== DatabaseMode.INTERNAL ? true : c.hasActiveAssets,
-                  isDownloaded: false,
-                  hasCampaign: c.hasCampaign,
-                  hasGps: c.hasGps,
-                  assetCount: (c as { assetCount?: number }).assetCount
-                }))
-              } 
-              onSelect={(u, t) => { 
-                // Escopo do perfil: a mesma trava da lista vale para a escolha, nos
-                // dois modos de base (impede abrir filial que não é do auditor).
-                if (!isUnitInScope(user, u, user?.tenantid || '')) {
-                  setModalConfig({
-                    isOpen: true,
-                    title: "Unidade fora do escopo",
-                    message: `A filial ${u} não está entre as unidades autorizadas para este perfil.`,
-                    type: "error"
-                  });
-                  return;
-                }
-                // Muro multi-tenant: o contrato de trabalho é o da UNIDADE selecionada
-                // (chave composta [tenantid+filial]); se a unidade não carregar contrato,
-                // cai para o tenantid do perfil do usuário.
-                const unitTenant = (t || '').trim().toUpperCase();
-                const profileTenant = user?.tenantid ? String(user.tenantid).trim().toUpperCase() : '';
-                const tid = unitTenant || profileTenant;
-                // SOBERANIA DO PROPRIETÁRIO: o admin global (sem tenantid fixo) é
-                // superusuário e pode operar em qualquer unidade — o contrato é
-                // resolvido pela filial/unidade selecionada (tenant vazio = todos).
-                const isOwnerOrGlobalAdmin = (user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase())
-                  || ((user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin) && !profileTenant);
-                if (!tid && !isOwnerOrGlobalAdmin) {
-                  setModalConfig({
-                    isOpen: true,
-                    title: "Erro de Segurança",
-                    message: "Contrato (tenantid) não identificado no perfil do usuário logado. Contate o Administrador do sistema.",
-                    type: "error"
-                  });
-                  return;
-                }
-                const validatedTenant = tid.trim().toUpperCase();
-
-                // 1º: Persistir o objeto da unidade selecionada no sessionStorage para isolamento de contexto.
-                sessionStorage.setItem('selectedUnit', u);
-                sessionStorage.setItem('app_selected_unit', u);
-                localStorage.setItem('app_selected_unit', u);
-                
-                // Unified GBR v2.6 Keys
-                sessionStorage.setItem('filial', u);
-                localStorage.setItem('filial', u);
-                
-                sessionStorage.setItem('tenantid', validatedTenant);
-                localStorage.setItem('tenantid', validatedTenant);
-
-                setSelectedUnit(u);
-                setIsInventorying(false);
-                setInventoryLocation(null);
-                sessionStorage.removeItem('app_just_finished_load');
-
-                // Passo 4: Menu Principal da Filial (MAIN_MENU) - Hub operacional do auditor (2026-08-06)
-                // Fluxo: LOGIN → MODULE_SELECTION → UNIT_SELECTION → MAIN_MENU (DASHBOARD fora do fluxo principal)
-                pushScreen(AppScreen.MAIN_MENU);
-              }} 
-              onBack={async () => { 
-                setCurrentModule(null);
-                localStorage.removeItem('app_current_module');
-                // Passo anterior da trilha é o CONTRATO DE TRABALHO — não o
-                // passeio legado Módulos → Unidade.
-                pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
-              }} 
-              onSync={syncFromCloud}
-              isSyncing={isSyncing}
-              lastSyncTime={lastSyncTime}
-              onConfigGPS={(u) => {
-                setSelectedUnit(u);
-                // A unidade viaja em `unitName`: a tela de GPS abre escopada nela.
-                pushScreen(AppScreen.UNIT_CONFIGURATOR, { unitName: u });
-              }}
-              onCampaigns={(u) => {
-                setSelectedUnit(u);
-                // Idem para a campanha: escopo estrito da filial clicada.
-                pushScreen(AppScreen.CAMPAIGN_MANAGEMENT, { unitName: u });
-              }}
-              isImportingBatch={isImportingBatchState}
-            />
-          )}
           {screen === AppScreen.TENANT_WORK_SELECTION && user && (
             <TenantWorkSelector
               user={user}
@@ -8009,6 +7884,15 @@ useEffect(() => {
               onSelect={handleWorkContextModuleSelect}
               onOpenAdmin={(target, params) => pushScreen(target, params)}
               onOpenDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
+              onLoadDatabase={() => pushScreen(AppScreen.DATABASE_MANAGER)}
+              databaseMode={databaseMode}
+              isSyncing={isSyncing}
+              isImportingBatch={isImportingBatchState}
+              onSync={(tenantid, filial) => {
+                syncFromCloud(tenantid, DatabaseMode.SUPABASE, filial).catch((err) => {
+                  logger.warn('[Sync] Sincronização do contrato escolhido falhou:', err);
+                });
+              }}
               onLogout={async () => {
                 if (supabase) {
                   await logAuditEvent({
@@ -8115,7 +7999,7 @@ useEffect(() => {
                 setCurrentModule(module);
                 localStorage.setItem('app_current_module', module);
                 if (module === AppModule.INVENTORY) {
-                  pushScreen(AppScreen.UNIT_SELECTION);
+                  pushScreen(AppScreen.WORK_CONTEXT_SELECTION);
                 } else {
                   pushScreen(AppScreen.ASSET_CONTROL_HOME);
                 }

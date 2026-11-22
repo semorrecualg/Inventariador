@@ -38,7 +38,7 @@ Antes de propor, gerar ou alterar qualquer código, **leia integralmente**:
   tela deve passar por `pushScreen`/`setHistory` e a URL deve refletir `screenToPath[screen]`**
   (efeito de sync em `App.tsx`). Nunca navegar só por URL ou só por estado.
 - **Guardas**: "Barreira Canônica" — `DASHBOARD`, `ADDRESS_SELECTION`, `INVENTORY` exigem
-  `selectedUnit` (recuo forçado para `UNIT_SELECTION`); `DATABASE_MANAGER` só para super admin.
+  `selectedUnit` (recuo forçado para `WORK_CONTEXT_SELECTION`); `DATABASE_MANAGER` só para super admin.
 - **Schema multi-tenant canônico**: colunas canônicas **`tenantid`** (minúsculo, sempre vinda
   da planilha — nunca valor fixo em código) e **`filial`**. `_unitid`, `tenantId`, `tenant_id`
   são **legadas**: leitura permitida apenas como fallback via `utils/tenantUtils.ts`
@@ -67,7 +67,8 @@ Antes de propor, gerar ou alterar qualquer código, **leia integralmente**:
 - **Modos**: `INTERNAL` = sem rede (`isInternalMode=true`). **Supabase ativo** com schema
   padronizado no modo `SUPABASE_PLUS`, porém desligado por padrão. Gemini é opcional.
 - **Impacto em cascata**: mudanças em telas/estado exigem análise upstream e downstream
-  (`MODULE_SELECTION → UNIT_SELECTION → DASHBOARD → ADDRESS_SELECTION → INVENTORY`).
+  (`WORK_CONTEXT_SELECTION → DASHBOARD → ADDRESS_SELECTION → INVENTORY`). A antiga
+  `/unit` (`UNIT_SELECTION`) foi fundida no contrato de trabalho.
 
 ## 3. Portões de validação (antes de dar por concluído)
 
