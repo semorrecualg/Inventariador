@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildDedupPlan, assetIdentityKey, pickKeeper, type DedupRow } from '../utils/dedupAssets';
+import { buildDedupPlan, assetIdentityKey, pickKeeper, uniqueAssetsByPrimaryKey, type DedupRow } from '../utils/dedupAssets';
 
 const row = (over: Partial<DedupRow> & { primarykey: string }): DedupRow => ({
   tenantid: 'CICOPAL',
@@ -124,5 +124,43 @@ describe('dedupAssets — plano de limpeza de cópias', () => {
     expect(plan.duplicates).toBe(0);
     expect(plan.groups).toHaveLength(0);
     expect(plan.total).toBe(2);
+  });
+});
+
+/**
+ * O ecrã conta e lista ATIVOS, não linhas: a mesma `primarykey` pode estar
+ * gravada com o contrato do perfil e com `tenantid` vazio (carga antiga), e as
+ * duas cópias convivem na chave composta [tenantid+primarykey].
+ */
+describe('uniqueAssetsByPrimaryKey — o ativo aparece uma vez', () => {
+  it('colapsa a mesma primarykey e prefere a linha do contrato ativo', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: '', etiqueta: 'E1' }),
+      row({ primarykey: 'A', tenantid: 'CICOPAL', etiqueta: 'E1' })
+    ];
+
+    const unicos = uniqueAssetsByPrimaryKey(rows, 'CICOPAL');
+    expect(unicos).toHaveLength(1);
+    expect(unicos[0].tenantid).toBe('CICOPAL');
+  });
+
+  it('mantém registos distintos e linhas sem chave', () => {
+    const rows = [
+      row({ primarykey: 'A', etiqueta: 'E1' }),
+      row({ primarykey: 'B', etiqueta: 'E2' }),
+      row({ primarykey: '', etiqueta: 'E3' })
+    ];
+
+    expect(uniqueAssetsByPrimaryKey(rows, 'CICOPAL')).toHaveLength(3);
+  });
+
+  it('preserva a ordem do primeiro aparecimento do ativo', () => {
+    const rows = [
+      row({ primarykey: 'A', tenantid: '' }),
+      row({ primarykey: 'B', tenantid: 'CICOPAL' }),
+      row({ primarykey: 'A', tenantid: 'CICOPAL' })
+    ];
+
+    expect(uniqueAssetsByPrimaryKey(rows, 'CICOPAL').map((r) => r.primarykey)).toEqual(['A', 'B']);
   });
 });

@@ -79,6 +79,42 @@ describe('sqliteService.countAssetMirrors (contra-prova do Gestor de Base)', () 
   });
 });
 
+describe('sqliteService.getOperationalUnitsWithStats (contagem por filial sem cópias)', () => {
+  beforeEach(async () => {
+    await db.local_assets.clear();
+    await db.unit_configs.clear();
+  });
+
+  it('conta o mesmo ativo uma vez quando existe com contrato e sem contrato', async () => {
+    await putMirror('local_assets', 'CICOPAL', 'PK-001');
+    await putMirror('local_assets', '', 'PK-001');
+
+    const stats = await sqliteService.getOperationalUnitsWithStats('CICOPAL');
+    expect(stats).toHaveLength(1);
+    expect(stats[0].tenantid).toBe('CICOPAL');
+    expect(stats[0].total).toBe(1);
+  });
+
+  it('não mistura ativos de outro contrato', async () => {
+    await putMirror('local_assets', 'CICOPAL', 'PK-001');
+    await putMirror('local_assets', 'CLIENTETESTE', 'PK-002');
+
+    const stats = await sqliteService.getOperationalUnitsWithStats('CICOPAL');
+    expect(stats).toHaveLength(1);
+    expect(stats[0].tenantid).toBe('CICOPAL');
+    expect(stats[0].total).toBe(1);
+  });
+
+  it('mantém registos distintos da mesma filial (primarykeys diferentes)', async () => {
+    await putMirror('local_assets', 'CICOPAL', 'PK-001');
+    await putMirror('local_assets', 'CICOPAL', 'PK-002');
+
+    const stats = await sqliteService.getOperationalUnitsWithStats('CICOPAL');
+    expect(stats).toHaveLength(1);
+    expect(stats[0].total).toBe(2);
+  });
+});
+
 describe('sqliteService.countAtivosByTenant (isolamento por tenant)', () => {
   beforeEach(async () => {
     await db.ativos.clear();

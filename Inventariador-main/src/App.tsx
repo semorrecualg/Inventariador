@@ -14,6 +14,7 @@ import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } 
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
+import { uniqueAssetsByPrimaryKey } from './utils/dedupAssets';
 import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
 import { mesclarConflitoPorCampo } from './utils/mergePorCampo';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
@@ -2046,8 +2047,23 @@ useEffect(() => {
         const currentAddr = sessionStorage.getItem('current_selected_address') || selectedAddress;
 
         const allAssets = await db.local_assets.toArray();
-        
-        const results = allAssets.filter(item => {
+        // CÓPIA POR CONTRATO: a mesma linha pode estar gravada com o contrato do
+        // perfil e com `tenantid` vazio (carga antiga); a chave local composta
+        // guarda as duas e a consulta mostrava o ativo duas vezes. Fica uma
+        // linha por `primarykey` (a do contrato ativo) e linhas de OUTRO
+        // contrato não aparecem. Nada é apagado da base.
+        const contractTenant = String(user?.tenantid || readSessionTenantId() || '').trim().toUpperCase();
+        const contractAssets = contractTenant
+          ? uniqueAssetsByPrimaryKey(
+              allAssets.filter(item => {
+                const itemTenant = String(item.tenantid || '').trim().toUpperCase();
+                return !itemTenant || itemTenant === contractTenant;
+              }),
+              contractTenant
+            )
+          : allAssets;
+
+        const results = contractAssets.filter(item => {
           if (normalizeFlag(item._is_deleted)) return false;
           
           // Só isola campanhas quando o ativo TEM campanha gravada. Base recém-carregada
@@ -7038,12 +7054,15 @@ useEffect(() => {
       filiaisDaCache: unitNamesOrigem === 'cache' ? nomesEmMemoria : nomesDaCacheGuardada,
       unidadesComAncora: fullCompaniesWithStatus.filter((unidade) => unidade.hasGps).length,
       unidadesComCampanha: fullCompaniesWithStatus.filter((unidade) => unidade.hasCampaign).length,
-      ativosLocais: inventory.assets.length,
+      // O mesmo ativo pode ter duas linhas (contrato do perfil + resíduo sem
+      // contrato). O número do ecrã é de ATIVOS, não de linhas: uma por
+      // `primarykey`, para «Ativos no aparelho» dizer 12.636 e não 25.272.
+      ativosLocais: uniqueAssetsByPrimaryKey(inventory.assets, activeTenant).length,
       nomesConsultadosEm: unitNamesConsultadosEm,
       ultimoErroDeRede: unitNamesErroDeRede,
       sessaoPersistida
     });
-  }, [activeTenant, currentTenantid, databaseMode, fullCompaniesWithStatus, temFiliaisLocaisDoContrato, cloudUnitNames, cloudUnitNamesScope, unitNamesOrigem, appManagedSession, inventory.assets.length, unitNamesConsultadosEm, unitNamesErroDeRede]);
+  }, [activeTenant, currentTenantid, databaseMode, fullCompaniesWithStatus, temFiliaisLocaisDoContrato, cloudUnitNames, cloudUnitNamesScope, unitNamesOrigem, appManagedSession, inventory.assets, unitNamesConsultadosEm, unitNamesErroDeRede]);
 
   // LIBERAÇÃO DA UNIDADE OPERACIONAL: âncora GPS + campanha configuradas pelo
   // admin/master liberam a unidade para o inventário do auditor. Vive em ref

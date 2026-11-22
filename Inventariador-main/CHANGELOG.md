@@ -19,6 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `contextoUnidade` fixa a retirada de `/unit` e a escolha da unidade em
   `/contexto`.
 
+### Corrigido — contagem e consulta mostram o ativo uma vez
+
+- **O que era:** a mesma linha podia viver em `local_assets` com o contrato do
+  perfil e com `tenantid` vazio (resíduo de carga antiga) — a chave local é
+  composta `[tenantid+primarykey]`, por isso as duas cópias convivem. A consulta
+  mostrava o ativo duas vezes e a soma por filial dava 25.272 onde o contrato tem
+  12.636 (o SRE, escopado ao contrato, já dizia 12.636).
+- **Agora:** `uniqueAssetsByPrimaryKey` (`utils/dedupAssets.ts`) deixa uma linha
+  por `primarykey` para ecrã, preferindo a do contrato ativo, e é usada na lista
+  da unidade (`App`), na contagem por filial
+  (`getOperationalUnitsWithStats`) e em «Ativos no aparelho» (diagnóstico de
+  acesso). Linhas de outro contrato não entram; registos com `primarykey`
+  diferente continuam todos — nada é apagado da base. Testes: `dedupAssets` (3)
+  e `countAtivosByTenant` (3).
+
 ## [3.0.0] — 2026-11-21
 
 ### Notas da versão

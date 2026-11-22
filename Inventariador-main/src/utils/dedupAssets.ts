@@ -99,6 +99,58 @@ export interface DedupPlan {
   withoutIdentity: number;
 }
 
+/**
+ * UMA LINHA POR ATIVO PARA ECRÃ (contagem e lista) — sem apagar nada.
+ *
+ * A chave local é composta `[tenantid + primarykey]`: a MESMA linha pode viver
+ * no aparelho com dois `tenantid` (resíduo de uma carga antiga sem contrato e a
+ * carga canónica do contrato). Os espelhos ficam corretos, mas o ecrã lia as
+ * duas cópias: a consulta mostrava o ativo duas vezes e a contagem do contrato
+ * somava as duas listas (12.636 viravam 25.272).
+ *
+ * A identidade aqui é a `primarykey` — é a mesma chave que a nuvem usa por
+ * registo, portanto duas linhas com a mesma `primarykey` são o MESMO ativo. A
+ * cópia do contrato ativo (`preferredTenant`) é a que fica; sem contrato
+ * preferido fica a primeira. Registos diferentes (primarykey diferente) e
+ * linhas sem chave continuam todos na lista: nada é apagado da base.
+ */
+export function uniqueAssetsByPrimaryKey<T extends { primarykey?: unknown; tenantid?: unknown }>(
+  rows: T[],
+  preferredTenant?: string | null
+): T[] {
+  const tenant = String(preferredTenant || '').trim().toUpperCase();
+  const keyOf = (row: T): string => String(row.primarykey ?? '').trim().toUpperCase();
+  const tenantOf = (row: T): string => String(row.tenantid ?? '').trim().toUpperCase();
+
+  const keeperByKey = new Map<string, T>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (!key) continue;
+    const current = keeperByKey.get(key);
+    if (!current) {
+      keeperByKey.set(key, row);
+      continue;
+    }
+    if (tenant && tenantOf(row) === tenant && tenantOf(current) !== tenant) {
+      keeperByKey.set(key, row);
+    }
+  }
+
+  const emitted = new Set<string>();
+  const out: T[] = [];
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (!key) {
+      out.push(row);
+      continue;
+    }
+    if (emitted.has(key)) continue;
+    emitted.add(key);
+    out.push(keeperByKey.get(key) as T);
+  }
+  return out;
+}
+
 export function buildDedupPlan(rows: DedupRow[]): DedupPlan {
   const byKey = new Map<string, DedupRow[]>();
   let withoutIdentity = 0;
