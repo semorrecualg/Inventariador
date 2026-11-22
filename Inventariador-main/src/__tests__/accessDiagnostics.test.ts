@@ -83,6 +83,31 @@ describe('buildAccessDiagnostic — o texto que o dono copia', () => {
     expect(diag.texto).toContain('Nomes consultados: nunca nesta sessão');
   });
 
+  it('mostra as linhas a mais e separa mesma primarykey de primarykeys diferentes', () => {
+    const diag = buildAccessDiagnostic({
+      ...BASE,
+      ativosLocais: 12636,
+      linhasNoAparelho: 25272,
+      ativosRepetidos: {
+        grupos: 1,
+        mesmaChave: 0,
+        chavesDiferentes: 1,
+        exemplos: [
+          {
+            identidade: '010101 CICOPAL GO · 005046',
+            linhas: 2,
+            chaves: ['0000002345', '005046']
+          }
+        ]
+      }
+    });
+
+    expect(diag.texto).toContain('Ativos no aparelho: 12636');
+    expect(diag.texto).toContain('Linhas lidas: 25272 (12636 a mais que os ativos)');
+    expect(diag.texto).toContain('Ativos repetidos: 1 grupo(s) · mesma primarykey: 0 · primarykeys diferentes: 1');
+    expect(diag.texto).toContain('Repetido · 010101 CICOPAL GO · 005046: 2 linha(s) · 0000002345, 005046');
+  });
+
   it('sem contrato, sem filiais e com erro de rede: mostra os três sinais', () => {
     const diag = buildAccessDiagnostic({
       ...BASE,

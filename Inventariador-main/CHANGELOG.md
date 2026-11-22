@@ -26,13 +26,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   composta `[tenantid+primarykey]`, por isso as duas cópias convivem. A consulta
   mostrava o ativo duas vezes e a soma por filial dava 25.272 onde o contrato tem
   12.636 (o SRE, escopado ao contrato, já dizia 12.636).
-- **Agora:** `uniqueAssetsByPrimaryKey` (`utils/dedupAssets.ts`) deixa uma linha
-  por `primarykey` para ecrã, preferindo a do contrato ativo, e é usada na lista
-  da unidade (`App`), na contagem por filial
-  (`getOperationalUnitsWithStats`) e em «Ativos no aparelho» (diagnóstico de
-  acesso). Linhas de outro contrato não entram; registos com `primarykey`
-  diferente continuam todos — nada é apagado da base. Testes: `dedupAssets` (3)
-  e `countAtivosByTenant` (3).
+- **Agora:** `uniqueAssetsForDisplay` (`utils/dedupAssets.ts`) deixa uma linha
+  por ativo para ecrã — colapsa a mesma `primarykey` (cópia noutro contrato) e,
+  com chaves diferentes, a mesma filial+etiqueta com a mesma descrição/série/
+  data/quantidade do bem. Prefere a cópia do contrato ativo e a conferida. É
+  usada na lista da unidade (`App`), na contagem por filial
+  (`getOperationalUnitsWithStats`) e em «Ativos no aparelho»; linhas de outro
+  contrato não entram e bens diferentes continuam todos — nada é apagado da
+  base. O Diagnóstico de Acesso passa a mostrar «Linhas lidas» (linhas a mais) e
+  «Ativos repetidos» com a divisão **mesma primarykey × primarykeys diferentes**
+  e até 3 exemplos (filial · etiqueta · chaves), para confirmar o caso no
+  aparelho. Testes: `dedupAssets` (8) · `countAtivosByTenant` (3) ·
+  `accessDiagnostics` (1) · e2e do contrato fecha o aviso «Sincronização
+  Concluída» quando ele aparece por cima do ecrã.
 
 ## [3.0.0] — 2026-11-21
 

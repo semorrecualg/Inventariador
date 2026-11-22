@@ -11,6 +11,18 @@
 /** De onde vêm as filiais que o CONTRATO está a mostrar. */
 export type FiliaisOrigem = 'base local' | 'lista da nuvem' | 'cache' | 'nenhuma';
 
+/**
+ * Ativos repetidos no aparelho: grupos com a mesma filial + etiqueta. A divisão
+ * «mesma primarykey × primarykeys diferentes» é a pergunta que decide se a
+ * segunda linha é uma cópia por contrato ou outro registo com a mesma etiqueta.
+ */
+export interface AtivosRepetidos {
+  grupos: number;
+  mesmaChave: number;
+  chavesDiferentes: number;
+  exemplos?: Array<{ identidade: string; linhas: number; chaves: string[] }>;
+}
+
 export interface AccessDiagnosticInput {
   /** Contrato resolvido (tenantid); vazio quando o perfil não fixa um. */
   contrato?: string | null;
@@ -28,8 +40,12 @@ export interface AccessDiagnosticInput {
   unidadesComAncora: number;
   /** Unidades com campanha ativa. */
   unidadesComCampanha: number;
-  /** Ativos guardados no aparelho (base local). */
+  /** Ativos guardados no aparelho (base local), contados uma vez cada. */
   ativosLocais: number;
+  /** Linhas físicas lidas (só aparece quando difere de `ativosLocais`). */
+  linhasNoAparelho?: number;
+  /** Grupos de ativos repetidos (filial + etiqueta com mais de uma linha). */
+  ativosRepetidos?: AtivosRepetidos | null;
   /** Hora (ms) da última consulta de nomes à nuvem; null = nunca nesta sessão. */
   nomesConsultadosEm?: number | null;
   /** Última falha de rede registada (mensagem curta), se houver. */
@@ -121,6 +137,27 @@ export function buildAccessDiagnostic(input: AccessDiagnosticInput): AccessDiagn
     { rotulo: 'Âncoras configuradas', valor: `${input.unidadesComAncora}` },
     { rotulo: 'Campanhas ativas', valor: `${input.unidadesComCampanha}` },
     { rotulo: 'Ativos no aparelho', valor: String(input.ativosLocais) },
+    ...(typeof input.linhasNoAparelho === 'number' && input.linhasNoAparelho !== input.ativosLocais
+      ? [{
+          rotulo: 'Linhas lidas',
+          valor: `${input.linhasNoAparelho} (${input.linhasNoAparelho - input.ativosLocais} a mais que os ativos)`
+        }]
+      : []),
+    ...(input.ativosRepetidos && input.ativosRepetidos.grupos > 0
+      ? [
+          {
+            rotulo: 'Ativos repetidos',
+            valor:
+              `${input.ativosRepetidos.grupos} grupo(s) · mesma primarykey: ` +
+              `${input.ativosRepetidos.mesmaChave} · primarykeys diferentes: ` +
+              `${input.ativosRepetidos.chavesDiferentes}`
+          },
+          ...(input.ativosRepetidos.exemplos || []).slice(0, 3).map((exemplo) => ({
+            rotulo: `Repetido · ${exemplo.identidade}`,
+            valor: `${exemplo.linhas} linha(s) · ${exemplo.chaves.join(', ')}`
+          }))
+        ]
+      : []),
     {
       rotulo: 'Nomes consultados',
       valor: hora === '—' ? 'nunca nesta sessão' : `${hora}${minutos !== null ? ` (há ${minutos} min)` : ''}`

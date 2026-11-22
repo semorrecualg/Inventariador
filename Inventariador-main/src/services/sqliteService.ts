@@ -8,7 +8,7 @@ import { carimbarFalhaEnvio } from '../utils/syncFalha';
 import { isConferido, normalizarMarcaConferencia, type MarcaDeConferencia } from '../utils/conferencia';
 import { assetGpsPair } from '../utils/assetGps';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
-import { uniqueAssetsByPrimaryKey } from '../utils/dedupAssets';
+import { uniqueAssetsForDisplay } from '../utils/dedupAssets';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
@@ -562,7 +562,7 @@ export class SqliteService {
       const scoped = list
         .filter(a => a._is_deleted === 0)
         .filter(a => !tenantScope || !String(a.tenantid || '').trim() || String(a.tenantid || '').trim().toUpperCase() === tenantScope);
-      const nonDeleted = tenantScope ? uniqueAssetsByPrimaryKey(scoped, tenantScope) : scoped;
+      const nonDeleted = tenantScope ? uniqueAssetsForDisplay(scoped, tenantScope) : scoped;
 
       // Muro multi-tenant: unidade identificada pela chave composta [tenantid+filial].
       // Filiais homônimas de contratos diferentes viram entradas DISTINTAS.

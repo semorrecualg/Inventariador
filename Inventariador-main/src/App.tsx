@@ -14,7 +14,7 @@ import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } 
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
 import { normalizeFlag, pickCanonical } from './utils/normalize';
-import { uniqueAssetsByPrimaryKey } from './utils/dedupAssets';
+import { summarizeDuplicateAssetKeys, uniqueAssetsForDisplay } from './utils/dedupAssets';
 import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
 import { mesclarConflitoPorCampo } from './utils/mergePorCampo';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
@@ -2054,7 +2054,7 @@ useEffect(() => {
         // contrato não aparecem. Nada é apagado da base.
         const contractTenant = String(user?.tenantid || readSessionTenantId() || '').trim().toUpperCase();
         const contractAssets = contractTenant
-          ? uniqueAssetsByPrimaryKey(
+          ? uniqueAssetsForDisplay(
               allAssets.filter(item => {
                 const itemTenant = String(item.tenantid || '').trim().toUpperCase();
                 return !itemTenant || itemTenant === contractTenant;
@@ -7055,9 +7055,13 @@ useEffect(() => {
       unidadesComAncora: fullCompaniesWithStatus.filter((unidade) => unidade.hasGps).length,
       unidadesComCampanha: fullCompaniesWithStatus.filter((unidade) => unidade.hasCampaign).length,
       // O mesmo ativo pode ter duas linhas (contrato do perfil + resíduo sem
-      // contrato). O número do ecrã é de ATIVOS, não de linhas: uma por
-      // `primarykey`, para «Ativos no aparelho» dizer 12.636 e não 25.272.
-      ativosLocais: uniqueAssetsByPrimaryKey(inventory.assets, activeTenant).length,
+      // contrato, ou a mesma linha importada com outra primarykey). O número do
+      // ecrã é de ATIVOS, não de linhas. As linhas a mais e a divisão
+      // «mesma primarykey × primarykeys diferentes» vão também para o
+      // diagnóstico, para o dono confirmar o caso no aparelho.
+      ativosLocais: uniqueAssetsForDisplay(inventory.assets, activeTenant).length,
+      linhasNoAparelho: inventory.assets.length,
+      ativosRepetidos: summarizeDuplicateAssetKeys(inventory.assets),
       nomesConsultadosEm: unitNamesConsultadosEm,
       ultimoErroDeRede: unitNamesErroDeRede,
       sessaoPersistida
