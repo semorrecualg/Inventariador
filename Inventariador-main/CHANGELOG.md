@@ -45,7 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recém-concluído e o contrato ficava sem `user` — ecrã vazio em `/contexto`.
   A purga volta a ler `app_current_user` no momento em que decide e usa
   `isLocalSessionProfile`, pelo que um login local nunca é confundido com uma
-  sessão fantasma.
+  sessão fantasma. A decisão vive em `resolveSessionAfterCloudCheck`, com teste
+  de regressão (nuvem a responder sem sessão depois do login local) em
+  `bootCloudCheck`.
 
 ## [3.0.0] — 2026-11-21
 

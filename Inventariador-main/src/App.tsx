@@ -84,7 +84,7 @@ import {
 } from './utils/syncCheckpoint';
 import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato, unitNamesCacheKey, readUnitNamesCache, writeUnitNamesCache } from './utils/unitContextUtils';
 import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
-import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
+import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, resolveSessionAfterCloudCheck, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
 import { shouldForceUnitOnEmptyBase } from './utils/bootRedirects';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
@@ -1558,25 +1558,18 @@ useEffect(() => {
                       // token do Supabase por definição — não é fantasma.
                       //
                       // A verificação da nuvem pode terminar DEPOIS do login local
-                      // (getSession lento, SQLite a inicializar). `currentUserStr` foi
-                      // lido antes desse await; reler agora evita apagar um login
-                      // recém-concluído e deixar o contrato sem utilizador (ecrã vazio).
-                      const sessaoAtual = sessionStorage.getItem('app_current_user') || currentUserStr;
-                      let isLocal = isAppManagedSession();
-                      if (sessaoAtual) {
-                        try {
-                          if (isLocalSessionProfile(JSON.parse(sessaoAtual), ADMIN_EMAIL)) {
-                            isLocal = true;
-                          }
-                        } catch { /* ignore */ }
-                      }
+                      // (getSession lento, SQLite a inicializar). O helper relê o
+                      // cache e só purga quando não há sessão local — sem isso, um
+                      // login recém-concluído era apagado e o contrato ficava sem
+                      // utilizador (ecrã vazio).
+                      const { manter, sessao } = resolveSessionAfterCloudCheck(currentUserStr, { adminEmail: ADMIN_EMAIL });
 
-                      if (isLocal) {
+                      if (manter) {
                         logger.info("[Boot - Supabase JWT Check] Mantendo usuário local offline soberano (bypass Supabase login check).");
                         setIsSessionValid(true);
-                        if (sessaoAtual) {
+                        if (sessao) {
                           try {
-                            const parsed = JSON.parse(sessaoAtual);
+                            const parsed = JSON.parse(sessao);
                             setUser(parsed);
                           } catch (e) {
                             logger.warn("Erro ao fazer parse de currentUserStr:", e);
@@ -1587,7 +1580,6 @@ useEffect(() => {
                         removerLoaderEstatico();
                         setIsDataLoaded(true);
                         setUser(null);
-                        sessionStorage.removeItem('app_current_user');
                         setHistory([AppScreen.LOGIN]);
                       }
                     } else {
@@ -1600,21 +1592,16 @@ useEffect(() => {
 
                     // Mesma releitura do ramo acima: o login local pode ter
                     // concluído enquanto a verificação da nuvem estava em voo.
-                    const sessaoAtual = sessionStorage.getItem('app_current_user') || currentUserStr;
-                    let isLocal = isAppManagedSession();
-                    if (sessaoAtual) {
-                      try {
-                        if (isLocalSessionProfile(JSON.parse(sessaoAtual), ADMIN_EMAIL)) {
-                          isLocal = true;
-                        }
-                      } catch { /* ignore */ }
-                    }
+                    const { manter, sessao } = resolveSessionAfterCloudCheck(currentUserStr, {
+                      adminEmail: ADMIN_EMAIL,
+                      falhaDeRede: isNetworkError
+                    });
 
-                    if (isLocal || isNetworkError) {
+                    if (manter) {
                       logger.info("[Boot - Supabase JWT Check] Reteve sessão local ativa após falha de rede/Supabase.");
-                      if (sessaoAtual) {
+                      if (sessao) {
                         try {
-                          const parsed = JSON.parse(sessaoAtual);
+                          const parsed = JSON.parse(sessao);
                           setUser(parsed);
                         } catch (e) {
                           logger.warn("Falha no parse ao reter sessão local:", e);
@@ -1627,7 +1614,6 @@ useEffect(() => {
                       setIsDataLoaded(true);
                       setIsSessionValid(false);
                       setUser(null);
-                      sessionStorage.removeItem('app_current_user');
                       setHistory([AppScreen.LOGIN]);
                     }
                   }
