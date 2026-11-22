@@ -3540,7 +3540,9 @@ export const createCampaign = async (campaign: Partial<InventoryCampaign>): Prom
   // 2. SINCRONIZAÇÃO EM NUVEM (Resiliência Distribuída)
   // v25.70: a nuvem e tentada sempre que o client Supabase estiver configurado,
   // independente do modo — o try-catch isolado mantem o fluxo local-first offline.
-  if (supabase) {
+  // BASE LOCAL é hermética: a campanha fica gravada no aparelho e não sobe.
+  // Antes subia sempre que houvesse client Supabase, mesmo em modo INTERNAL.
+  if (supabase && isOnlineDatabaseMode(getDatabaseMode())) {
     logger.info(">>> [Hybrid] Tentando subir campanha para nuvem...");
     const payload = {
       id: newCampaign.id,

@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
-import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys } from './supabaseService';
+import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, isOnlineDatabaseMode, fetchCloudDeletedKeys } from './supabaseService';
 import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
@@ -53,7 +53,18 @@ export interface SyncResult {
  * nada. O app dizia "sincronizado", o ativo ficava `_is_synced = 0` e a etiqueta
  * PENDENTE NUVEM nunca saía — mesmo com o Supabase conectado e o login correto.
  */
-const canPushToCloud = (): boolean => Capacitor.isNativePlatform();
+/**
+ * Portão do envio para a nuvem.
+ *
+ * A BASE LOCAL é hermética (decisão F1 do plano): além de ser preciso estar no
+ * aparelho, o modo de base tem de ser online. Antes bastava
+ * `Capacitor.isNativePlatform()`: o ciclo de fundo (`runSyncLoopCycle`) chamava
+ * `processDataSyncQueue`/`photoSyncManager`/`processCampaignSyncQueue` sem
+ * consultar o modo e, com sessão e filial activas, ativos conferidos em BASE
+ * LOCAL podiam subir para o Supabase.
+ */
+export const canPushToCloud = (): boolean =>
+  Capacitor.isNativePlatform() && isOnlineDatabaseMode(getDatabaseMode());
 
 const SYNC_DISCARD_AUDIT = 'SYNC_PENDING_DISCARDED';
 /** Janela em que o mesmo descarte não volta a ser registrado (o ciclo roda a cada 60 s). */

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — BASE LOCAL hermética, não envia nada para a nuvem
+
+- **O que era:** o ciclo de fundo (`runSyncLoopCycle`) chamava
+  `processDataSyncQueue`, `photoSyncManager` e `processCampaignSyncQueue`, e
+  `createCampaign` subia a campanha, sem consultar o modo de base. Com sessão e
+  filial activas, ativos conferidos em BASE LOCAL podiam chegar ao Supabase — e a
+  campanha subia sempre. O modo dizia «local» e a rede era usada à mesma.
+- **Agora:** o portão `syncService.canPushToCloud` exige
+  `Capacitor.isNativePlatform()` **e** `isOnlineDatabaseMode(getDatabaseMode())`;
+  em `INTERNAL`/`INTERNAL_PLUS` os três ciclos devolvem 0 registos sem tocar na
+  nuvem, e `createCampaign` grava só no aparelho. Um aviso permanente no topo do
+  app (fora do login) diz que nada sai do aparelho e que desinstalar ou limpar os
+  dados apaga a base, a trilha de auditoria e as fotos pendentes. Teste:
+  `baseLocalPushGate`.
+
 ### Alterado
 
 - **Unidade Operacional fundida no contrato de trabalho.** A rota `/unit` foi

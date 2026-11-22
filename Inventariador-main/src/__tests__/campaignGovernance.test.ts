@@ -74,6 +74,7 @@ const campanhaAberta = (id: string, over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   state.campaigns.length = 0;
   state.workAssets.length = 0;
+  localStorage.clear();
   vi.clearAllMocks();
 });
 
@@ -132,6 +133,25 @@ describe('createCampaign — uma campanha aberta por filial', () => {
 
     expect(criada?.filial).toBe(FILIAL);
     expect(state.saveCampaign).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createCampaign — BASE LOCAL não fala com a nuvem', () => {
+  it('grava a campanha no aparelho e não faz insert no Supabase', async () => {
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    const client = supabaseModule.supabase as unknown as { from: (table: string) => unknown };
+    const from = vi.spyOn(client, 'from');
+
+    const criada = await supabaseModule.createCampaign({
+      name: 'Campanha Local',
+      tenantid: TENANT,
+      filial: FILIAL
+    });
+
+    expect(criada?.filial).toBe(FILIAL);
+    expect(state.saveCampaign).toHaveBeenCalledTimes(1);
+    expect(from).not.toHaveBeenCalled();
+    from.mockRestore();
   });
 });
 
