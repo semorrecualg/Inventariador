@@ -24,7 +24,13 @@ import {
   stripUserSecrets
 } from '../utils/passwordHash';
 import { authenticateLocalUser } from '../utils/authUtils';
-import { sanitizeSessionUserCache } from '../utils/sessionPersistence';
+import {
+  PERSISTED_SESSION_KEY,
+  restorePersistedSession,
+  sanitizePersistedSession,
+  sanitizeSessionUserCache
+} from '../utils/sessionPersistence';
+import { writeAppUsersCache } from '../utils/appUsersCache';
 import { localDb } from '../services/localDbService';
 import { demoService } from '../services/demoService';
 import { DatabaseMode, UserRole } from '../types';
@@ -126,6 +132,41 @@ describe('app_users — nenhuma senha em claro', () => {
   it('o utilizador de demonstração não traz senha', () => {
     expect(demoService.getDemoUser()).not.toHaveProperty('password');
   });
+
+  it('a última gravação de app_users ganha quando as derivações terminam fora de ordem', async () => {
+    let liberarLenta: (() => void) | null = null;
+
+    // 1.º pedido: derivação lenta (senha em texto), fica presa a meio.
+    const lenta = writeAppUsersCache(
+      [
+        {
+          username: 'lento',
+          email: 'lento@example.com',
+          password: 'lenta123',
+          role: UserRole.AUDITOR,
+          tenantid: 'CICOPAL'
+        } as User
+      ],
+      async () => {
+        await new Promise<void>((resolve) => {
+          liberarLenta = resolve;
+        });
+        return [{ username: 'lento', email: 'lento@example.com', role: UserRole.AUDITOR, tenantid: 'CICOPAL' }];
+      }
+    );
+    await vi.waitFor(() => expect(liberarLenta).not.toBeNull());
+
+    // 2.º pedido (mais recente): já tem verificador, grava de imediato.
+    const rapida = await writeAppUsersCache([await auditorComSenha()]);
+    expect(rapida?.map((u) => u.email)).toEqual(['auditor@example.com']);
+
+    // A gravação velha termina depois e não pode passar por cima da nova.
+    liberarLenta!();
+    await expect(lenta).resolves.toBeNull();
+
+    const gravado = JSON.parse(localStorage.getItem('app_users') as string) as User[];
+    expect(gravado.map((u) => u.email)).toEqual(['auditor@example.com']);
+  });
 });
 
 describe('senhas antigas que já estão no aparelho', () => {
@@ -143,6 +184,39 @@ describe('senhas antigas que já estão no aparelho', () => {
     expect(JSON.parse(cache)).toMatchObject({ email: 'auditor@example.com' });
     // Já limpo: segunda passagem não tem nada para fazer.
     expect(sanitizeSessionUserCache()).toBe(false);
+  });
+
+  it('limpa e regrava a cópia da sessão em localStorage sem a senha', () => {
+    localStorage.setItem(
+      PERSISTED_SESSION_KEY,
+      JSON.stringify({
+        savedAt: 1_000,
+        user: {
+          email: 'admin@example.com',
+          role: 'ADMIN',
+          tenantid: 'CICOPAL',
+          filial: 'TODAS',
+          password: 'segredo123'
+        }
+      })
+    );
+
+    expect(sanitizePersistedSession()).toBe(true);
+
+    const raw = localStorage.getItem(PERSISTED_SESSION_KEY) as string;
+    expect(raw).not.toContain('"password"');
+    expect(raw).not.toContain('segredo123');
+    // O prazo não muda: só a senha sai da cópia.
+    expect(JSON.parse(raw)).toMatchObject({
+      savedAt: 1_000,
+      user: { email: 'admin@example.com', role: 'ADMIN' }
+    });
+    // Já sem senha: segunda passagem não reescreve.
+    expect(sanitizePersistedSession()).toBe(false);
+
+    // A cópia limpa continua a repor a sessão no separador.
+    sessionStorage.clear();
+    expect(restorePersistedSession(2_000)?.email).toBe('admin@example.com');
   });
 
   it('converte os registos de localDb.users com texto para verificador', async () => {

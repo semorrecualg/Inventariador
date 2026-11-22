@@ -22,7 +22,8 @@ import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { preservarGpsMaisRecente } from './utils/assetGps';
 import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, resolveProfileUnitId } from './utils/authUtils';
-import { ADMIN_SEED_VERIFIER, createPasswordVerifier, sanitizeUsersForStorage, stripUserSecrets } from './utils/passwordHash';
+import { ADMIN_SEED_VERIFIER, createPasswordVerifier, stripUserSecrets } from './utils/passwordHash';
+import { writeAppUsersCache } from './utils/appUsersCache';
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, userHasPermission } from './services/rbacService';
@@ -84,7 +85,7 @@ import {
 } from './utils/syncCheckpoint';
 import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveSyncPullScope, unitListScope, decideUnitListAction, hasFiliaisLocaisDoContrato, unitNamesCacheKey, readUnitNamesCache, writeUnitNamesCache } from './utils/unitContextUtils';
 import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
-import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, restorePersistedSession, sanitizeSessionUserCache, writePersistedSession } from './utils/sessionPersistence';
+import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, restorePersistedSession, sanitizePersistedSession, sanitizeSessionUserCache, writePersistedSession } from './utils/sessionPersistence';
 import { shouldForceUnitOnEmptyBase } from './utils/bootRedirects';
 import { screenToPath } from './router/routes';
 // import TrustOnboarding from './components/TrustOnboarding';
@@ -3944,11 +3945,13 @@ useEffect(() => {
     setBiometricRequirement(null);
   }, [user?.email]);
 
-  // Senhas antigas em texto que ficaram no aparelho: a sessão do separador é
-  // limpa já e os registos de `localDb.users` são convertidos para verificador
-  // (PBKDF2) no arranque — o login local deixa de aceitar o texto guardado.
+  // Senhas antigas em texto que ficaram no aparelho: a sessão do separador e a
+  // cópia persistida são limpas já (e regravadas sem `password`) e os registos
+  // de `localDb.users` são convertidos para verificador (PBKDF2) no arranque —
+  // o login local deixa de aceitar o texto guardado.
   useEffect(() => {
     sanitizeSessionUserCache();
+    sanitizePersistedSession();
     void localDb.users
       .migrateLocalUserPasswords()
       .then((migrated) => {
@@ -3962,17 +3965,15 @@ useEffect(() => {
   // Sincronização automática de usuários com o Supabase e persistência local
   useEffect(() => {
     // Nunca escreve senha em texto: converte em verificador (PBKDF2) antes de
-    // gravar. Quando havia texto antigo, a memória passa também a ter o hash.
-    void sanitizeUsersForStorage(users)
-      .then((stored) => {
-        localStorage.setItem('app_users', safeStringify(stored));
-        if (users.some((u) => typeof u.password === 'string' && u.password !== '')) {
-          setUsers(stored as User[]);
-        }
-      })
-      .catch((err) => {
-        logger.warn('[Acessos] Falha ao converter senhas locais:', err);
-      });
+    // gravar, e a guarda de sequência garante que a última lista pedida é a que
+    // fica no disco. Quando havia texto antigo, a memória passa também a ter o
+    // hash.
+    void writeAppUsersCache(users).then((stored) => {
+      if (!stored) return;
+      if (users.some((u) => typeof u.password === 'string' && u.password !== '')) {
+        setUsers(stored);
+      }
+    });
     
     if (users.length > 0 && databaseMode === DatabaseMode.SUPABASE && hasFetchedUsers) {
       const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER || user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
@@ -4250,11 +4251,9 @@ useEffect(() => {
         // `null` nunca pode substituir a sessão: no arranque o utilizador ainda
         // não foi reidratado e esta gravação apagava o login do separador.
         if (user) {
-          sessionStorage.setItem('app_current_user', safeStringify(user));
+          sessionStorage.setItem('app_current_user', safeStringify(stripUserSecrets(user)));
         }
-        void sanitizeUsersForStorage(users)
-          .then((stored) => localStorage.setItem('app_users', safeStringify(stored)))
-          .catch((err) => logger.warn('[Acessos] Falha ao converter senhas locais:', err));
+        void writeAppUsersCache(users);
         localStorage.setItem('app_selected_unit', selectedUnit || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
         localStorage.setItem('app_is_inventorying', String(isInventorying));

@@ -31,7 +31,8 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { isAdminEmail } from '../utils/authUtils';
 import { listContracts, type ContractSummary } from '../utils/tenantCatalog';
 import { validateStrongPassword, validateQuickLoginPassword, STRONG_PASSWORD_RULE_LABELS } from '../utils/passwordPolicy';
-import { createPasswordVerifier, sanitizeUsersForStorage, stripUserSecrets } from '../utils/passwordHash';
+import { createPasswordVerifier, stripUserSecrets } from '../utils/passwordHash';
+import { writeAppUsersCache } from '../utils/appUsersCache';
 import { provisionUserInAuth, resetPassword, deleteUserFromCloud, fetchUnitNamesFromCloud, isInternalMode, ProvisionResult } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { logger } from '../utils/logger';
@@ -377,7 +378,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
 
     const updatedWithNewUser = [...users, newUser];
     setUsers(updatedWithNewUser);
-    localStorage.setItem('app_users', safeStringify(await sanitizeUsersForStorage(updatedWithNewUser)));
+    await writeAppUsersCache(updatedWithNewUser);
 
     // Reflexo local: persiste no armazenamento físico (localforage/Dexie) para
     // que o usuário sobreviva a reloads e fique disponível no modo offline/INTERNAL.
@@ -525,7 +526,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
     const updatedWithEdit = users.map(u => u.email === selectedUser.email ? updatedUser : u);
     setUsers(updatedWithEdit);
     logger.info('[UserManagement] Lista de usuários atualizada localmente.');
-    localStorage.setItem('app_users', safeStringify(await sanitizeUsersForStorage(updatedWithEdit)));
+    await writeAppUsersCache(updatedWithEdit);
 
     // Reflexo local: atualiza o registro no armazenamento físico (upsert por e-mail).
     try {
@@ -572,7 +573,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ users, setUsers, onBack
           // 2. Remove Localmente
           const updatedWithoutUser = users.filter(u => u.email !== email);
           setUsers(updatedWithoutUser);
-          localStorage.setItem('app_users', safeStringify(await sanitizeUsersForStorage(updatedWithoutUser)));
+          await writeAppUsersCache(updatedWithoutUser);
           try {
             await localDb.users.remove(email);
             logger.info(`[UserManagement] Acesso de ${email} removido do armazenamento local.`);

@@ -92,6 +92,9 @@ export function restorePersistedSession(
   now: number = Date.now(),
   ttl: number = PERSISTED_SESSION_TTL_MS
 ): User | null {
+  // Repor a sessão passa por aqui: a cópia que estiver no disco fica limpa
+  // antes de ser usada.
+  sanitizePersistedSession();
   const user = readPersistedSession(now, ttl);
   // Cópia de perfil da nuvem (versão anterior) não vale como sessão local.
   if (!user || !isLocalSessionProfile(user)) return null;
@@ -147,6 +150,45 @@ export function sanitizeSessionUserCache(): boolean {
       return false;
     }
     sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(stripUserSecrets(parsed as User)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Limpa e REGRAVA a cópia persistida sem a senha.
+ *
+ * `readPersistedSession` já devolve o perfil limpo, mas o valor antigo — com
+ * `password` em texto — continuava no disco até alguém gravar por cima: um
+ * backup do telemóvel lia-o. Aqui a entrada é reescrita no lugar, mantendo o
+ * `savedAt` (o prazo da sessão não muda). Devolve `true` se reescreveu.
+ */
+export function sanitizePersistedSession(): boolean {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(PERSISTED_SESSION_KEY);
+  } catch {
+    return false;
+  }
+  if (!raw) return false;
+
+  let parsed: Partial<PersistedSession> | null = null;
+  try {
+    parsed = JSON.parse(raw) as Partial<PersistedSession> | null;
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== 'object') return false;
+
+  const user = parsed.user as User | undefined;
+  if (!user || typeof user !== 'object' || !('password' in user)) return false;
+
+  try {
+    localStorage.setItem(
+      PERSISTED_SESSION_KEY,
+      JSON.stringify({ ...parsed, user: stripUserSecrets(user) })
+    );
     return true;
   } catch {
     return false;
