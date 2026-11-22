@@ -33,8 +33,26 @@ test.describe('Contrato de trabalho — unidade fundida', () => {
     });
     await page.waitForURL(/#\/contexto$/, { timeout: 15000 });
 
+    // A sincronização automática pode terminar DEPOIS da navegação e abrir o
+    // aviso «Sincronização Concluída» por cima do contrato (em CI a nuvem não
+    // devolve dados). O aviso é legítimo — fecha-se quando aparece, em vez de
+    // deixar o teste depender do instante em que o sync termina.
+    const contrato = page.getByText('Contrato de Trabalho', { exact: true });
+    const confirmarAviso = page.getByRole('button', { name: 'Confirmar' });
+    await expect
+      .poll(
+        async () => {
+          if (await confirmarAviso.isVisible().catch(() => false)) {
+            await confirmarAviso.click().catch(() => {});
+          }
+          return contrato.isVisible().catch(() => false);
+        },
+        { timeout: 15000, intervals: [250, 500, 1000] }
+      )
+      .toBe(true);
+
     // Título e secção da unidade, agora dentro do contrato.
-    await expect(page.getByText('Contrato de Trabalho', { exact: true })).toBeVisible();
+    await expect(contrato).toBeVisible();
     await expect(page.getByText('Filial · Unidade Operacional')).toBeVisible();
 
     // A contagem por filial é a leitura que veio da tela retirada.
