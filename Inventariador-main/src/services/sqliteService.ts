@@ -1307,7 +1307,7 @@ export class SqliteService {
   /**
    * LIMPEZA DE UNIDADES — O CARIMBO DA FALHA MORRE COM O REGISTO
    * ============================================================================
-   * A «Limpeza Total» de uma unidade (MainMenu/DataManagementPanel) filtrava o
+   * A «Limpeza Total» de uma unidade (MainMenu) filtrava o
    * cache do localforage e o estado React, mas deixava as linhas da unidade nos
    * três espelhos Dexie (`local_assets`/`ativos`/`assets`) — com o `_syncFailAt`
    * agarrado a elas. O selo contava falhas de ativos que já não existiam no
