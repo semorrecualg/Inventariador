@@ -30,6 +30,13 @@ import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, r
 import { isUnitInScope } from './utils/unitScope';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, userHasPermission } from './services/rbacService';
+import { contarAuditoriaPendente } from './services/auditoriaNuvem';
+import { canPushToCloud } from './services/pushGate';
+import {
+  devePedirConfirmacaoAoFechar,
+  mensagemDeSaida,
+  totalDeEscritasPendentes,
+} from './utils/guardaSaida';
 import { canonicalRole, isFieldAuditorRole } from './utils/roles';
 
 // Extend Window interface for pushScreen
@@ -543,6 +550,8 @@ const App: React.FC = () => {
   const [securityThreats, setSecurityThreats] = useState<string[]>([]);
   const [syncQueueLength, setSyncQueueLength] = useState(0);
   const [unsyncedAssetsCount, setUnsyncedAssetsCount] = useState(0);
+  // Eventos da trilha ainda fora da nuvem — a terceira fila da guarda de saída.
+  const [auditoriaPendenteCount, setAuditoriaPendenteCount] = useState(0);
   const [isSyncLocked, setIsSyncLocked] = useState(false);
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => getInitialDatabaseMode());
 
@@ -1235,6 +1244,7 @@ useEffect(() => {
     if (databaseMode === DatabaseMode.INTERNAL) {
       setSyncQueueLength(0);
       setPendingPhotosCount(0);
+      setAuditoriaPendenteCount(0);
       setIsSyncLocked(false);
       return;
     }
@@ -1247,6 +1257,11 @@ useEffect(() => {
 
         const unsyncedCount = await getUnsyncedAssetsCount();
         setUnsyncedAssetsCount(unsyncedCount);
+
+        // Trilha por subir: só se conta quando há remetente (`canPushToCloud`).
+        // Em BASE LOCAL a fila é local por desenho e no browser não sobe — uma
+        // contagem fixa em >0 voltava a transformar a guarda num aviso eterno.
+        setAuditoriaPendenteCount(canPushToCloud() ? await contarAuditoriaPendente() : 0);
 
         const totalPending = len + unsyncedCount;
         if (totalPending >= MAX_SYNC_QUEUE_SIZE && !isSyncLocked) {
@@ -4129,21 +4144,34 @@ useEffect(() => {
   
   // Estados para Modal de Duplicidade
 
+  /**
+   * Confirmação de saída: só quando há escritas por enviar.
+   *
+   * Antes bastava haver ativos carregados — com a base toda sincronizada o F5
+   * abria o diálogo nativo à mesma e, sem resposta, a recarga ficava retida (o
+   * «reload quente prende» investigado a 23/11). A condição passa a ser o que
+   * as três filas ainda não subiram: ativos, fotos e eventos da trilha.
+   */
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (sessionStorage.getItem('__gbr_allow_reload') === 'true') {
         sessionStorage.removeItem('__gbr_allow_reload');
         return;
       }
-      if (inventory.assets.length > 0 && inventory.status !== DatabaseStatus.EMPTY) {
-        e.preventDefault();
-        e.returnValue = 'Inventário em curso. Deseja realmente sair? Seus dados estão salvos no dispositivo.';
-        return e.returnValue;
-      }
+      const pendentes = {
+        ativos: unsyncedAssetsCount,
+        fotos: syncQueueLength,
+        auditoria: auditoriaPendenteCount,
+      };
+      if (!devePedirConfirmacaoAoFechar(pendentes)) return;
+      const mensagem = mensagemDeSaida(totalDeEscritasPendentes(pendentes));
+      e.preventDefault();
+      e.returnValue = mensagem;
+      return mensagem;
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [inventory]);
+  }, [unsyncedAssetsCount, syncQueueLength, auditoriaPendenteCount]);
 
 
   const { allLocations, uniqueCentrosDeCusto, locationsWithStats } = useMemo(() => {
