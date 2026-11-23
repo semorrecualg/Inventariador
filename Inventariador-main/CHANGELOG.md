@@ -42,12 +42,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enviados em colunas próprias; o `delta` antigo escolhia um dos dois e perdia o
   estado anterior (continua como espelho legado, porque a deduplicação de falhas
   lê `delta.signature`).
+- **Um só ponto de escrita:** `sqliteService.gravarAuditoria` (e o construtor
+  `construirAuditoria`, para os lotes) é o único sítio que escreve em
+  `db.audit_logs`. Os escritores directos — `localDb.auditLogs.add` e o flush do
+  buffer, `recnoGuardService`, `DatabaseLoaderService` (reconciliação e
+  correcções) e `InventoryCard` — passam todos por ele, por isso o contrato, o
+  `new_data` e o `_synced` deixam de depender de cada chamada se lembrar.
 - **Migração necessária:** `audit_logs.client_event_id` e o índice único, em
   `docs/supabase_bootstrap.sql`. Sem ela, o envio falha com o erro carimbado na
   fila — nada é apagado nem marcado como enviado.
 - Testes: `auditoriaNuvem` (portão, idempotência, recusa, contrato do
-  nascimento, `old_data`/`new_data`, mapeamento), `auditLogNascimento` (carimbo
-  e os dois estados) e `auditoriaRetencao` (janela de segurança).
+  nascimento, `old_data`/`new_data`, mapeamento), `auditLogNascimento` (carimbo,
+  ponto único e os dois estados), `auditLogPontoUnico` (varredura do código:
+  nenhum `db.audit_logs.put` fora do `sqliteService`) e `auditoriaRetencao`
+  (janela de segurança).
 
 ### Alterado — um só caminho para o Gestor de Base
 

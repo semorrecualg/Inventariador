@@ -1,4 +1,4 @@
-import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
+import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService, construirAuditoria, gravarAuditoria } from './sqliteService';
 import { getCurrentTenantid } from '../utils/tenantAtual';
 import { isAdminEmail } from '../utils/authUtils';
 import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
@@ -283,16 +283,16 @@ export const localDb = {
           .filter(item => Boolean(item.userId))
           .map((item) => {
             const dexieAsset = toDexieAsset(item.asset);
-            return {
-              id: `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            // Mesmo ponto único dos restantes escritores: o bulk mantém-se
+            // (uma operação por flush), mas cada linha nasce carimbada.
+            return construirAuditoria({
               usuario: item.userId as string,
               acao: 'CREATE_OR_UPDATE',
               tabela: 'ativos',
               registro_id: dexieAsset.primarykey,
               details: 'Criação/Update via Buffer',
-              delta: JSON.stringify(item.asset),
-              updated_at: new Date().toISOString()
-            };
+              delta: JSON.stringify(item.asset)
+            });
           });
         if (auditLogs.length > 0) {
           await db.audit_logs.bulkPut(auditLogs);
@@ -782,28 +782,21 @@ export const localDb = {
 
   auditLogs: {
     add: async (log: AuditLogEntry) => {
-      const id = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      // `old_data` e `new_data` são guardados em campos próprios: o `delta`
-      // antigo escolhia UM dos dois (`new_data ? … : old_data`) e perdia o
-      // estado anterior sempre que havia alteração. `delta` fica como espelho
-      // legado — a deduplicação de falhas (`signature`) e os leitores antigos
-      // continuam a lê-lo.
-      await db.audit_logs.put({
-        id,
+      // Tudo passa pelo ponto único (`sqliteService.gravarAuditoria`): contrato
+      // carimbado no nascimento, `new_data`/`old_data` em campos próprios e
+      // `_synced: 0`. O `delta` fica como espelho legado — a deduplicação de
+      // falhas (`signature`) e os leitores antigos continuam a lê-lo.
+      await gravarAuditoria({
         usuario: log.user || log.user_email || 'unknown',
         acao: log.action || 'UNKNOWN',
         tabela: log.table_name || 'ativos',
         registro_id: log.record_id || '',
         details: log.details || '',
         delta: log.new_data ? JSON.stringify(log.new_data) : (log.old_data ? JSON.stringify(log.old_data) : null),
-        new_data: log.new_data === undefined ? null : JSON.stringify(log.new_data),
-        old_data: log.old_data === undefined ? null : JSON.stringify(log.old_data),
-        // O contrato é carimbado NO NASCIMENTO: um evento do contrato A que
-        // suba com o contrato B activo não pode ser arquivado em B.
-        tenantid: String(log.tenantid || getCurrentTenantid() || ''),
-        updated_at: log.timestamp || new Date().toISOString(),
-        // F2: todo o evento nasce na fila da trilha; a nuvem confirma e marca.
-        _synced: 0
+        new_data: log.new_data === undefined ? undefined : JSON.stringify(log.new_data),
+        old_data: log.old_data === undefined ? undefined : JSON.stringify(log.old_data),
+        tenantid: log.tenantid,
+        updated_at: log.timestamp
       });
     },
 

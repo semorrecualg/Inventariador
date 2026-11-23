@@ -1,7 +1,7 @@
 import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
 import * as XLSX from 'xlsx';
-import { db, DexieAsset, invalidateTenantCaseMarker } from './sqliteService';
+import { db, DexieAsset, invalidateTenantCaseMarker, gravarAuditoria } from './sqliteService';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
@@ -260,7 +260,7 @@ export class DatabaseLoaderService {
     report.lines.forEach((line) => (report.ok ? logger.info(line) : logger.error(line)));
 
     try {
-      await db.audit_logs.put({
+      await gravarAuditoria({
         id: `RECON_${Date.now()}_${Math.random().toString(36).slice(2, 9).toUpperCase()}`,
         usuario: 'CARGA_PLANILHA',
         acao: 'IMPORT_RECONCILIATION',
@@ -276,8 +276,7 @@ export class DatabaseLoaderService {
           missing: report.missing,
           wrongFilial: report.wrongFilial,
           perFilial: report.perFilial
-        }),
-        updated_at: new Date().toISOString()
+        })
       });
     } catch (auditErr) {
       logger.warn('[CARGA] Falha ao registar a reconciliação em audit_logs:', auditErr);
@@ -682,16 +681,13 @@ export class DatabaseLoaderService {
 
             // Grava logs de correção se houverem
             for (const corr of correctionsToLog) {
-              const auditId = 'LOG_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
-              await db.audit_logs.put({
-                id: auditId,
+              await gravarAuditoria({
                 usuario: activeEmail,
                 acao: 'CORRECTION_VLR_INIT_ZERO',
                 tabela: 'ativos',
                 registro_id: corr.id,
                 details: `Saneamento de valor de aquisição corrompido para '0' na importação Excel. Valor original: ${corr.originalValue}`,
-                delta: JSON.stringify({ valorOriginal: corr.originalValue }),
-                updated_at: new Date().toISOString()
+                delta: JSON.stringify({ valorOriginal: corr.originalValue })
               });
             }
           });
@@ -984,16 +980,13 @@ export class DatabaseLoaderService {
 
             // Gravação dos logs de correção
             for (const corr of correctionsToLog) {
-              const auditId = 'LOG_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
-              await db.audit_logs.put({
-                id: auditId,
+              await gravarAuditoria({
                 usuario: activeEmail,
                 acao: 'CORRECTION_VLR_INIT_ZERO',
                 tabela: 'ativos',
                 registro_id: corr.id,
                 details: `Saneamento de valor de aquisição corrompido para '0' na importação Excel. Valor original: ${corr.originalValue}`,
-                delta: JSON.stringify({ valorOriginal: corr.originalValue }),
-                updated_at: new Date().toISOString()
+                delta: JSON.stringify({ valorOriginal: corr.originalValue })
               });
             }
           });

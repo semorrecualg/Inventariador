@@ -136,6 +136,73 @@ export interface DexieAuditLog {
   _syncError?: string | null;
 }
 
+export interface EntradaAuditoriaLocal {
+  /** Id local estável (o `client_event_id` da nuvem). Gerado quando ausente. */
+  id?: string;
+  usuario: string;
+  acao: string;
+  tabela?: string;
+  registro_id?: string;
+  details?: string;
+  /** Estado novo em JSON — espelhado em `new_data` quando não há campos próprios. */
+  delta?: string | null;
+  new_data?: string | null;
+  old_data?: string | null;
+  updated_at?: string;
+  /** Contrato do evento; ausente → o contrato efectivo do momento. */
+  tenantid?: string;
+  _synced?: number;
+}
+
+const ehJsonObjeto = (valor: string | null): boolean => {
+  if (!valor) return false;
+  try {
+    const parsed = JSON.parse(valor);
+    return !!parsed && typeof parsed === 'object';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * PONTO ÚNICO de escrita da trilha de auditoria.
+ *
+ * Antes cada serviço chamava `db.audit_logs.put` à mão e decidia por si o
+ * `tenantid`, o `_synced` e o que fazer com o estado. Isso deixava eventos sem
+ * contrato carimbado (a fila de F2 acabava por lhes colar o contrato activo no
+ * envio) e sem `new_data`. Passam todos por aqui:
+ *
+ * - `tenantid` nasce com o evento (parâmetro explícito ou contrato efectivo);
+ * - `new_data` é guardado no campo próprio — quem só traz `delta` (JSON) passa
+ *   a ter o estado novo gravado, em vez de viver só no espelho legado;
+ * - `_synced: 0` põe o evento na fila da nuvem, salvo indicação em contrário.
+ */
+export const construirAuditoria = (entrada: EntradaAuditoriaLocal): DexieAuditLog => {
+  const delta = entrada.delta ?? null;
+  const temEstadoProprio = entrada.new_data != null || entrada.old_data != null;
+  return {
+    id: entrada.id || `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+    usuario: entrada.usuario || 'unknown',
+    acao: entrada.acao || 'UNKNOWN',
+    tabela: entrada.tabela || 'ativos',
+    registro_id: entrada.registro_id || '',
+    details: entrada.details || '',
+    delta,
+    new_data: entrada.new_data ?? (temEstadoProprio || !ehJsonObjeto(delta) ? null : delta),
+    old_data: entrada.old_data ?? null,
+    updated_at: entrada.updated_at || new Date().toISOString(),
+    tenantid: String(entrada.tenantid || getCurrentTenantid() || ''),
+    _synced: entrada._synced ?? 0,
+  };
+};
+
+/** Grava um evento pelo ponto único e devolve o id local (= `client_event_id`). */
+export const gravarAuditoria = async (entrada: EntradaAuditoriaLocal): Promise<string> => {
+  const linha = construirAuditoria(entrada);
+  await db.audit_logs.put(linha);
+  return linha.id;
+};
+
 export interface DexieCampaign {
   id: string;
   name: string;
@@ -714,21 +781,16 @@ export class SqliteService {
     /** Instante da linha (ISO). Só os testes o fixam; o runtime usa «agora». */
     atualizadoEm?: string
   ): Promise<void> {
-    const id = 'LOG_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
-    await db.audit_logs.put({
-      id,
+    // Ponto único: carimba o contrato do momento, guarda o estado novo em
+    // `new_data` e põe o evento na fila da nuvem.
+    await gravarAuditoria({
       usuario,
       acao,
       tabela,
       registro_id,
       details,
       delta: delta ?? null,
-      updated_at: atualizadoEm ?? new Date().toISOString(),
-      // F2: o contrato do evento é o do momento em que ele acontece; a fila
-      // não pode carimbar o contrato que estiver activo quando o evento subir.
-      tenantid: getCurrentTenantid(),
-      // F2: nasce por subir; a fila (`services/auditoriaNuvem`) marca `_synced`.
-      _synced: 0
+      updated_at: atualizadoEm
     });
   }
 

@@ -10,7 +10,7 @@
 // ============================================================================
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, sqliteService } from '../services/sqliteService';
+import { db, gravarAuditoria, sqliteService } from '../services/sqliteService';
 import { localDb } from '../services/localDbService';
 
 const ENTRADA = {
@@ -62,6 +62,58 @@ describe('trilha — contrato carimbado no nascimento', () => {
     const linha = (await db.audit_logs.toArray()).find((log) => log.registro_id === 'PK-2');
     expect(linha?.tenantid).toBe('CICOPAL');
     expect(linha?._synced).toBe(0);
+  });
+});
+
+describe('ponto único — gravarAuditoria', () => {
+  it('carimba o contrato e guarda o estado novo a partir do delta', async () => {
+    localStorage.setItem('tenantid', 'CICOPAL');
+
+    const id = await gravarAuditoria({
+      usuario: 'auditor@gbr.com.br',
+      acao: 'CONFERENCIA',
+      tabela: 'local_assets',
+      registro_id: 'PK-9',
+      details: 'conferido',
+      delta: JSON.stringify({ status: 'CONFERIDO' })
+    });
+
+    const linha = await db.audit_logs.get(id);
+    expect(linha?.tenantid).toBe('CICOPAL');
+    expect(linha?._synced).toBe(0);
+    expect(JSON.parse(String(linha?.new_data))).toEqual({ status: 'CONFERIDO' });
+    expect(linha?.old_data).toBeNull();
+  });
+
+  it('contrato explícito vence o activo e `old_data` fica separado', async () => {
+    localStorage.setItem('tenantid', 'OUTRO_CONTRATO');
+
+    const id = await gravarAuditoria({
+      usuario: 'auditor@gbr.com.br',
+      acao: 'CONFERENCIA',
+      registro_id: 'PK-10',
+      old_data: JSON.stringify({ status: 'PENDENTE' }),
+      new_data: JSON.stringify({ status: 'CONFERIDO' }),
+      tenantid: 'CICOPAL'
+    });
+
+    const linha = await db.audit_logs.get(id);
+    expect(linha?.tenantid).toBe('CICOPAL');
+    expect(JSON.parse(String(linha?.old_data))).toEqual({ status: 'PENDENTE' });
+    expect(JSON.parse(String(linha?.new_data))).toEqual({ status: 'CONFERIDO' });
+  });
+
+  it('delta em texto livre não vira `new_data`', async () => {
+    const id = await gravarAuditoria({
+      usuario: 'auditor@gbr.com.br',
+      acao: 'LOGIN',
+      details: 'login ok',
+      delta: 'texto solto'
+    });
+
+    const linha = await db.audit_logs.get(id);
+    expect(linha?.new_data).toBeNull();
+    expect(linha?.delta).toBe('texto solto');
   });
 });
 
