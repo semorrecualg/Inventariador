@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a confirmação ao sair só aparece com escritas por enviar
+
+- **O que era:** o `beforeunload` pedia confirmação sempre que houvesse ativos
+  carregados (`inventory.assets.length > 0`). Com a base toda sincronizada o F5
+  abria o diálogo nativo na mesma e, sem resposta, a recarga nunca commitava —
+  num build de produção isso parece um separador «preso».
+- **Agora:** a guarda conta o que as filas ainda não subiram — ativos não
+  sincronizados, fotos na fila de envio e eventos da trilha por enviar (estes
+  só quando `canPushToCloud`, para a contagem não ficar presa em BASE LOCAL ou
+  no browser). Sem pendências, fechar e recarregar seguem sem diálogo; a chave
+  `__gbr_allow_reload` continua a deixar o próprio app recarregar-se.
+- Teste: `guardaSaida` cobre a regra (base sincronizada, cada fila isolada,
+  soma robusta a lixo), a mensagem no singular/plural e o contrato com o
+  `App.tsx` (a guarda deixa de decidir por `inventory.assets.length`).
+
 ### Corrigido — a URL passa a mandar na navegação (F5 cai no ecrã certo e o «voltar» funciona)
 
 - **O que era:** o hash da URL era só de escrita. Com sessão válida, um F5 em
