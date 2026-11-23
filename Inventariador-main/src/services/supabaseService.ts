@@ -11,6 +11,7 @@ import { textoDoDetails } from '../utils/auditDetails';
 import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
+import { lerAncorasPendentes, registarAncoraPendente, removerAncoraPendente } from '../utils/ancoraPendente';
 import { isRevokedAnchor } from '../utils/revokedAnchors';
 import { isConferido } from '../utils/conferencia';
 import { assetGpsPair, assetGpsColumns } from '../utils/assetGps';
@@ -4095,6 +4096,84 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
   }
 };
 
+/**
+ * Payload de `inventory_config.data` — a MESMA forma no cache local
+ * (`local_unit_configs`) e na nuvem. Existe uma vez só para os dois caminhos
+ * não divergirem (uma cópia local mais rica do que a que sobe é uma âncora que
+ * «volta» noutro aparelho sem proveniência ou sem raio).
+ */
+const buildUnitConfigDataPayload = (config: UnitConfig, tenantid: string, unitId: string) => ({
+  filial: unitId,
+  tenantid,
+  unit_id: unitId, // Legado
+  lat: Number(config.lat),
+  lng: Number(config.lng),
+  radius_meters: Number(config.radius_meters),
+  is_active: Boolean(config.is_active),
+  // Proveniência da âncora (sensor | manual): viaja no JSONB `inventory_config.data`,
+  // sem depender de coluna nova na tabela da nuvem.
+  source: config.source,
+  updated_by: String(config.updated_by || 'system'),
+  updated_at: new Date().toISOString(),
+  // Flags de política viajam no cache local (e no data do inventory_config):
+  // é isso que faz o chip/regras resolverem offline.
+  flags: buildUnitFlags(config, hasRealAnchor(config.lat, config.lng))
+});
+
+/**
+ * Envia a âncora de uma unidade para a nuvem: `inventory_config` (payload
+ * completo, compatibilidade com builds antigos) + `unit_configs` (linha
+ * canónica, com as flags de política).
+ *
+ * Devolve `true` só quando as DUAS gravações foram confirmadas — uma âncora que
+ * sobe sem as regras da unidade continua a mostrar a filial «sem regras» noutro
+ * aparelho, que é metade do problema da F5.
+ */
+const pushUnitConfigToCloud = async (
+  config: UnitConfig,
+  tenantid: string,
+  unitId: string
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  const payload = buildUnitConfigDataPayload(config, tenantid, unitId);
+
+  try {
+    // FIX(CRITICO): onConflict 'tenantid, filial' — sem isso, o 1º salvamento
+    // insere (201) mas re-salvar a MESMA unidade estoura 23505 (indice unico).
+    const { error } = await supabase
+      .from('inventory_config')
+      .upsert({
+        tenantid,
+        filial: unitId,
+        data: payload,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'tenantid, filial' });
+
+    if (error) {
+      logger.warn(`>>> [Supabase] Sincronização de config falhou (Code: ${error.code}): ${error.message}`);
+      // Se for erro de RLS ou coluna, tentamos um fallback para log_audit para não perder o rastro
+      if (error.code === '42501' || error.code === 'PGRST204') {
+        await logAuditEvent({
+          user_email: payload.updated_by,
+          action: 'GPS_CONFIG_SYNC_FAIL',
+          details: `Falha ao sincronizar configuração de unidade ${unitId}. Erro: ${error.message}`,
+          tenantid
+        });
+      }
+      return false;
+    }
+
+    logger.info('>>> [Supabase] Configuração de unidade sincronizada com a nuvem com sucesso!');
+
+    // Política da unidade (flags) na nuvem: mesma unidade, mesma linha.
+    return await saveUnitConfigFlags({ ...config, tenantid, filial: unitId, unit_id: unitId });
+  } catch (err) {
+    logger.warn('>>> [Supabase] Erro silencioso na sincronização:', err);
+    return false;
+  }
+};
+
 export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | string> => {
   // Âncora revogada na nuvem (apagada em 2026-11-16) não pode voltar por um
   // formulário que ainda traga o valor do cache do aparelho. Recusa aqui, antes
@@ -4142,24 +4221,8 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       logger.warn('>>> [Governance] tenantid/filial ausentes ao salvar âncora. Sincronização em nuvem ignorada.');
       return true;
     }
-    
-    const payload = {
-      filial: unitId,
-      tenantid: tenantid,
-      unit_id: unitId, // Legado
-      lat: Number(config.lat),
-      lng: Number(config.lng),
-      radius_meters: Number(config.radius_meters),
-      is_active: Boolean(config.is_active),
-      // Proveniência da âncora (sensor | manual): viaja no JSONB `inventory_config.data`,
-      // sem depender de coluna nova na tabela da nuvem.
-      source: config.source,
-      updated_by: String(config.updated_by || 'system'),
-      updated_at: new Date().toISOString(),
-      // Flags de política viajam no cache local (e no data do inventory_config):
-      // é isso que faz o chip/regras resolverem offline.
-      flags: buildUnitFlags(config, hasRealAnchor(config.lat, config.lng))
-    };
+
+    const payload = buildUnitConfigDataPayload(config, tenantid, unitId);
 
     logger.info('>>> [Persistence] Salvando GPS Local-First (Cache):', unitKey);
 
@@ -4178,52 +4241,23 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       logger.warn('>>> [Persistence] Falha ao espelhar GPS no Dexie:', dexieErr);
     }
 
-    // Modo INTERNAL = zero chamadas de rede (docs/ARCHITECTURE.md §10). A âncora
-    // e as flags já ficaram no SQLite/Dexie acima; sem esta guarda, um aparelho
-    // em modo interno gravava em `inventory_config` e disparava auditoria.
-    if (!supabase || getDatabaseMode() === 'INTERNAL') return true;
+    // Sem credenciais no build não há nuvem nenhuma: nada a enviar, nem a enfileirar.
+    if (!supabase) return true;
 
-  // 2. SINCRONIZAÇÃO EM NUVEM (falha silenciosa nao bloqueia o fluxo local)
-  const syncToCloud = async () => {
-      try {
-        // Tentativa na tabela de configuração (inventory_config) de forma segura conforme v2.6 (tenantid e filial)
-        // FIX(CRITICO): onConflict 'tenantid, filial' — sem isso, o 1º salvamento insere (201)
-        // mas re-salvar a MESMA unidade estoura 23505 (indice unico), pois o upsert sem
-        // on_conflict resolve so pela PK (id gerado) e cai no INSERT em vez de UPDATE.
-        const { error } = await supabase
-          .from('inventory_config')
-          .upsert({
-            tenantid: tenantid,
-            filial: unitId,
-            data: payload,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'tenantid, filial' });
-
-        if (error) {
-          logger.warn(`>>> [Supabase] Sincronização de config falhou (Code: ${error.code}): ${error.message}`);
-          // Se for erro de RLS ou coluna, tentamos um fallback para log_audit para não perder o rastro
-          if (error.code === '42501' || error.code === 'PGRST204') {
-             await logAuditEvent({
-               user_email: payload.updated_by,
-               action: 'GPS_CONFIG_SYNC_FAIL',
-               details: `Falha ao sincronizar configuração de unidade ${unitId}. Erro: ${error.message}`,
-               tenantid: tenantid
-             });
-          }
-        } else {
-          logger.info('>>> [Supabase] Configuração de unidade sincronizada com a nuvem com sucesso!');
-        }
-
-        // Política da unidade (flags) na nuvem: mesma unidade, mesma linha.
-        await saveUnitConfigFlags(config);
-      } catch (err) {
-        logger.warn('>>> [Supabase] Erro silencioso na sincronização:', err);
-      }
-    };
-
-    // Aguardamos a sincronizacao (try-catch interno) para nao perder a ancora
-    // em caso de fechamento rapido do app — o dado local ja esta garantido antes.
-    await syncToCloud();
+    // A âncora e as flags já ficaram no SQLite/Dexie acima. Só há envio em modo
+    // online com rede; um único ponto decide se fica por subir — em BASE LOCAL
+    // (zero chamadas de rede, docs/ARCHITECTURE.md §10), sem rede ou com a
+    // nuvem a recusar, a âncora entra na fila e sobe depois (portão da F5).
+    const modo = getDatabaseMode();
+    let confirmada = false;
+    if (modo !== 'INTERNAL' && navigator.onLine) {
+      confirmada = await pushUnitConfigToCloud(config, tenantid, unitId);
+    }
+    if (!confirmada) {
+      const fila = registarAncoraPendente(localStorage, { ...config, tenantid, filial: unitId, unit_id: unitId });
+      const motivo = modo === 'INTERNAL' ? 'BASE LOCAL' : navigator.onLine ? 'nuvem não confirmou' : 'sem rede';
+      logger.info(`>>> [GPS] Âncora de ${unitId} fica por subir (${motivo}); fila: ${fila}.`);
+    }
 
     return true;
   } catch (err: unknown) {
@@ -4231,6 +4265,37 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
     logger.error('Erro no salvamento Local-First:', error);
     return `Erro Local: ${error.message || 'Falha ao gravar no navegador'}`;
   }
+};
+
+/**
+ * Reenvia a fila de âncoras que não chegaram à nuvem (`utils/ancoraPendente`).
+ *
+ * Corre no arranque (dentro do `fetchUnitConfigs`) e quando a rede volta
+ * (`App.tsx`). Só actua em modo online com credenciais: em BASE LOCAL a fila
+ * espera, sem uma única chamada de rede (F1). Âncora revogada na nuvem sai da
+ * fila em vez de ser reposta.
+ *
+ * Devolve quantas unidades foram confirmadas neste ciclo.
+ */
+export const flushAncorasPendentes = async (): Promise<number> => {
+  if (!supabase || getDatabaseMode() === 'INTERNAL' || !navigator.onLine) return 0;
+
+  let enviadas = 0;
+  for (const item of lerAncorasPendentes(localStorage)) {
+    if (isRevokedAnchor(item.filial, item.config.lat, item.config.lng)) {
+      removerAncoraPendente(localStorage, item.tenantid, item.filial);
+      continue;
+    }
+    const ok = await pushUnitConfigToCloud(item.config, item.tenantid, item.filial);
+    if (!ok) continue; // mantém na fila para o próximo ciclo
+    removerAncoraPendente(localStorage, item.tenantid, item.filial);
+    enviadas++;
+  }
+
+  if (enviadas > 0) {
+    logger.info(`>>> [GPS] ${enviadas} âncora(s) por subir sincronizada(s) com a nuvem.`);
+  }
+  return enviadas;
 };
 
 /**
@@ -4448,7 +4513,12 @@ export const fetchUnitConfigs = async (tenantid: string): Promise<UnitConfig[]> 
     }
 
     if (!supabase) return visibleConfigs();
-    
+
+    // Âncoras que ficaram por subir (marcadas sem rede ou em BASE LOCAL) sobem
+    // antes da leitura: é isto que faz a âncora de um aparelho voltar noutro
+    // depois de reconectar, sem obrigar a reabrir a tela de configuração.
+    await flushAncorasPendentes();
+
     // 2. Tenta carregar da Nuvem (inventory_config) para atualizar o local
     try {
       const { data, error } = await supabase
