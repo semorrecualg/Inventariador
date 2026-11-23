@@ -27,7 +27,8 @@ Complementa `docs/ARCHITECTURE.md`.
 | `src/components/UnitConfigurator.tsx` | Tela de configuração: mapa MapLibre, círculo de geocerca (`turf.circle`), botão **FIXAR ÂNCORA GPS**, grava âncora em `unit_configs` + `kardek_gps_ancora_<unidade>`; rascunho em `kardek_temp_gps_*`. |
 | `src/components/WorkContextSelector.tsx` | Mostra o status de geocerca por unidade usando `turf.distance` contra a âncora. |
 | `src/components/GPSComplianceGuard.tsx` | Guarda de conformidade: mede a distância do aparelho até a âncora e libera/bloqueia o inventário; `watchPosition` contínuo. |
-| `src/services/supabaseService.ts` | `saveUnitConfig()` → âncora em `inventory_config`, política/flags em `unit_configs`; `fetchUnitConfigs()` faz merge local + nuvem + âncoras de storage. |
+| `src/services/supabaseService.ts` | `saveUnitConfig()` → âncora em `inventory_config`, política/flags em `unit_configs`; `fetchUnitConfigs()` faz merge local + nuvem + âncoras de storage e drena a fila de âncoras por subir; `flushAncorasPendentes()` reenvia a fila. |
+| `src/utils/ancoraPendente.ts` | Fila durável `gbr_unit_config_pending` (uma entrada por filial): registra a âncora que a nuvem não confirmou e remove-a quando sobe. Puro, testável com storage mock. |
 | `src/utils/unitConfigFlags.ts` / `unitRelease.ts` | `hasGps` derivado da âncora real; liberação da unidade = âncora **e** campanha. |
 | `src/components/Dashboard.tsx` | Entrada "Ajustar Perímetro Virtual (GPS Geofencing)". |
 
@@ -165,6 +166,39 @@ nuvem; a coluna ausente deixa o valor existente intacto.
 
 **Não alterado nesta entrega.** O código novo não exige colunas novas: lat/lng continuam em `latitude`/`longitude` e `gps_lat`/`gps_lng`. A proposta da seção 5 (precisão, origem e data no servidor) é uma decisão de migração e fica para depois da aprovação do usuário.
 
+### 3.7 Âncora entre dispositivos (fila por subir)
+
+O portão da F5 é *a âncora volta noutro aparelho*. O `UnitConfigurator` grava
+sempre primeiro no aparelho (SQLite/Dexie/localStorage) e só depois tenta a
+nuvem; o que faltava era o passo seguinte quando essa tentativa não era
+confirmada.
+
+```
+FIXAR ÂNCORA ──▶ SQLite + Dexie + kardek_gps_ancora_*   (sempre)
+      │
+      ├─ online + nuvem OK ──▶ inventory_config + unit_configs
+      │
+      └─ sem rede / BASE LOCAL / erro ──▶ gbr_unit_config_pending
+                                              │  arranque (fetchUnitConfigs)
+                                              │  online (App.tsx)
+                                              ▼
+                                    flushAncorasPendentes()
+```
+
+Regras:
+
+- Uma entrada por filial (chave normalizada), com a **posição mais recente** —
+  dois salvamentos sem rede não acumulam fila.
+- Só entra coordenada válida (`hasRealAnchor`); lixo no storage é ignorado.
+- `flushAncorasPendentes` só corre em modo online com credenciais: em BASE LOCAL
+  a fila espera, sem uma única chamada de rede (F1).
+- Âncora revogada na nuvem sai da fila em vez de ser reposta.
+- O envio só conta como confirmado quando **as duas** gravações passam
+  (`inventory_config` com a âncora e `unit_configs` com a âncora + flags); uma
+  âncora sem as regras deixaria a filial «sem regras» noutro aparelho.
+- Prova: `src/__tests__/ancoraEntreDispositivos.test.ts` (sem rede → reconexão
+  → aparelho B com storage vazio lê a âncora pelo `fetchUnitConfigs`).
+
 ---
 
 ## 4. Regras para novas rotinas (obrigatórias)
@@ -217,5 +251,8 @@ nuvem; a coluna ausente deixa o valor existente intacto.
   precisam de validação em campo.
 - `watchPosition` em `@capacitor/geolocation` com `maximumAge: 60000`: o
   comportamento exato difere do navegador e deve ser confirmado no APK.
-- Mapa de calor com base grande (12.636 ativos) após o novo filtro: verificar se
-  algum ativo legítimo foi excluído por falta de `_gps_accuracy`.
+- Mapa de calor com base grande (12.636 ativos) após o novo filtro: verificar se algum ativo legítimo foi excluído por falta de `_gps_accuracy`.
+- Reinstalação real num segundo aparelho contra o Supabase de produção: o
+  percurso sem rede → reconexão → outro aparelho está coberto por teste com
+  nuvem simulada (`ancoraEntreDispositivos`); a prova manual numa segunda
+  instalação (ou APK) continua por fazer.

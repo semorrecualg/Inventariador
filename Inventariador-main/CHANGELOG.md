@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a âncora GPS volta noutro aparelho (F5)
+
+- **O que era:** a âncora marcada no `UnitConfigurator` só chegava à nuvem se a
+  gravação coubesse naquele instante. Sem rede, em BASE LOCAL ou com o servidor
+  a recusar, a âncora ficava no aparelho e nunca era reenviada: reconectar não
+  bastava e a filial continuava em «FALTA ÂNCORA GPS» nos outros aparelhos.
+- **Agora:** quando a nuvem não confirma, a âncora entra numa fila durável
+  (`gbr_unit_config_pending`, uma entrada por filial com a posição mais
+  recente) e sobe no arranque seguinte (`fetchUnitConfigs`) e quando a rede
+  volta (`online` no `App`). Em BASE LOCAL a fila espera sem uma única chamada
+  de rede — a base local continua hermética (F1). Uma âncora revogada na nuvem
+  sai da fila em vez de ser reposta. O envio só é dado por confirmado quando
+  `inventory_config` **e** `unit_configs` (âncora + regras da unidade) aceitam
+  a gravação.
+- Testes: `ancoraPendente` cobre a fila (unidade única, coordenada inválida,
+  lixo no storage) e `ancoraEntreDispositivos` prova o percurso sem rede →
+  reconexão → outro aparelho com storage vazio, incluindo o reenvio no arranque
+  e a recusa em modo BASE LOCAL.
+
 ### Corrigido — a confirmação ao sair só aparece com escritas por enviar
 
 - **O que era:** o `beforeunload` pedia confirmação sempre que houvesse ativos

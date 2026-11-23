@@ -134,7 +134,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode, isOnlineDatabaseMode } from './services/supabaseService';
+import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, flushAncorasPendentes, fetchCampaigns, isInternalMode, getInitialDatabaseMode, isOnlineDatabaseMode } from './services/supabaseService';
 import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { checkNativeBiometry, isBiometricSupported, hasBiometricRegistered, isNativeAppShell } from './services/biometricService';
@@ -5408,6 +5408,8 @@ useEffect(() => {
   useEffect(() => {
     const onOnline = () => {
       if (cloudQueueRef.current.size > 0) void flushCloudQueueRef.current();
+      // F5: a âncora marcada sem rede (ou em BASE LOCAL) sobe quando a ligação volta.
+      void flushAncorasPendentes();
     };
     window.addEventListener('online', onOnline);
     return () => {
