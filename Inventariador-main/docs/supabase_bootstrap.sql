@@ -262,14 +262,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS unit_configs_tenant_filial_key
 --    (FONTE DO ERRO 42703: tabela legada sem a coluna created_at — corrigido
 --     pelos ALTERs abaixo)
 -- ============================================================================
+-- Esquema real verificado no projeto de produção (23/11/2026): `id` uuid com
+-- default, `user_email` NOT NULL e `details` em JSON (a mensagem 22P02 diz
+-- «type json» tanto para json como para jsonb). Instalações novas usam jsonb,
+-- alinhado com new_data/old_data; uma base já existente NÃO é alterada por este
+-- CREATE TABLE IF NOT EXISTS. Ver SCHEMA_BASELINE §3.2.1.
 CREATE TABLE IF NOT EXISTS public.audit_logs (
-  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenantid    text,
-  user_email  text,
+  user_email  text NOT NULL,
   action      text,
   table_name  text,
   record_id   text,
-  details     text,
+  details     jsonb,
   origin      text,
   new_data    jsonb,
   old_data    jsonb,

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentado — esquema real da `audit_logs` no bootstrap e no baseline
+
+- **O que era:** `docs/supabase_bootstrap.sql` declarava `audit_logs` com `id
+  bigint identity`, `user_email` nulável e `details text`; a produção tem `id
+  uuid` com default, `user_email NOT NULL` e `details` em JSON. O `CREATE TABLE
+  IF NOT EXISTS` nunca corrigiu a tabela existente, e o teste manual da migração
+  bateu nos três sintomas (23502 e 22P02).
+- **Agora:** o `CREATE TABLE` descreve o esquema real (`uuid` + default,
+  `user_email NOT NULL`, `details jsonb`, `client_event_id text` com índice
+  único) e o `SCHEMA_BASELINE` ganha §3.2.1 com a tabela de equivalência, as
+  divergências observadas e a consulta de `information_schema` para confirmar
+  `json` vs `jsonb`. Um teste do bootstrap falha se a declaração voltar ao
+  esquema antigo.
+
 ### Adicionado — contador remoto da trilha por contrato (F2, 2.º passo)
 
 - **O que era:** o Gestor mostrava quantos eventos estavam no aparelho e quantos

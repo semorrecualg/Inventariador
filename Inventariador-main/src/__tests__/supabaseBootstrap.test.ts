@@ -136,4 +136,18 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
       expect(sql).toContain(`ALTER TABLE public.${ident} ALTER COLUMN id SET DEFAULT gen_random_uuid();`);
     }
   });
+
+  it('declara audit_logs com o esquema real de produção (id uuid, user_email NOT NULL, details JSON)', () => {
+    // Produção verificada em 23/11/2026: id uuid com default (o app nunca o
+    // envia), user_email NOT NULL e details em JSON. O CREATE TABLE antigo
+    // (bigint identity / details text) nunca corrigiu a tabela existente e
+    // induzia inserts manuais em erro (23502, 22P02).
+    const start = sql.indexOf('CREATE TABLE IF NOT EXISTS public.audit_logs');
+    expect(start).toBeGreaterThan(-1);
+    const block = sql.slice(start, sql.indexOf(');', start));
+    expect(block).toContain('id          uuid PRIMARY KEY DEFAULT gen_random_uuid()');
+    expect(block).toContain('user_email  text NOT NULL');
+    expect(block).toContain('details     jsonb');
+    expect(block).not.toContain('bigint');
+  });
 });

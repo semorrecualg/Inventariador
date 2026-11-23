@@ -98,6 +98,42 @@ ausente/`0` = por subir, `1` = confirmado pelo Supabase. **Nenhum destes campos 
 índice** e não mudam `version()` — a fila lê por `filter`, para apanhar também as
 linhas escritas antes deste campo existir (que continuam a contar como por subir).
 
+### 3.2.1 Nuvem — `public.audit_logs` (Supabase)
+
+O bootstrap declara a tabela como a produção a tem de facto, verificada em
+23/11/2026 contra o projeto real:
+
+| Item | Produção / bootstrap |
+|---|---|
+| `id` | `uuid PRIMARY KEY DEFAULT gen_random_uuid()` |
+| `user_email` | `text NOT NULL` |
+| `tenantid`, `action`, `table_name`, `record_id`, `origin` | `text` |
+| `details`, `new_data`, `old_data` | JSON — `details` é `json` ou `jsonb` (a mensagem 22P02 diz «type json» para os dois) |
+| `created_at` | `timestamptz DEFAULT now()` |
+| `client_event_id` | `text`, índice único `audit_logs_client_event_id_key` |
+
+Divergências que já custaram erros em produção:
+
+- `CREATE TABLE IF NOT EXISTS` **não** altera uma tabela existente: esta secção
+  documenta o alvo, não migra a base.
+- `details` era `text` no bootstrap antigo; na produção é JSON. O app envia o
+  payload como documento JSON (uma string vira `"…"`), por isso o `upsert` da
+  fila funciona; um `insert` manual em SQL tem de usar `to_jsonb('…'::text)`.
+- `user_email` é `NOT NULL`: o app envia `''`, nunca `null`.
+- `id` em produção é `uuid` com default (o app nunca o envia); o bootstrap antigo
+  declarava `bigint GENERATED ALWAYS AS IDENTITY`.
+
+Confirmar o tipo exato de `details` (json ou jsonb) e as restantes nulabilidades:
+
+```sql
+select column_name, data_type, is_nullable, column_default
+from information_schema.columns
+where table_schema = 'public' and table_name = 'audit_logs'
+order by ordinal_position;
+```
+
+Guia operacional: `docs/MIGRACAO_AUDITORIA_CLIENT_EVENT_ID.md`.
+
 ### 3.3 `campaigns` → `DexieCampaign`
 `id` (pk), `name`, `status`, `tenantid` (canônico), `created_at`.
 
