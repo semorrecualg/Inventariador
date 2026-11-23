@@ -52,6 +52,33 @@ describe('isDeltaSyncEntry', () => {
   });
 });
 
+describe('details como objeto (coluna json na nuvem)', () => {
+  it('conta ativos dentro do JSON', () => {
+    expect(parseAssetCountFromDetails({ mensagem: 'Carga de 12636 ativos injetados.' })).toBe(12636);
+  });
+
+  it('reconhece o delta dentro do JSON', () => {
+    expect(
+      isDeltaSyncEntry({ details: { mensagem: 'Sincronização incremental de 36 ativos (delta).' } })
+    ).toBe(true);
+  });
+
+  it('agrega eventos com details objeto sem rebentar', () => {
+    const { summary } = groupLoadHistory([
+      {
+        id: '1',
+        tenantid: 'CICOPAL',
+        action: 'IMPORT',
+        timestamp: '2026-08-12T00:00:00Z',
+        details: { mensagem: 'Carga: 100 ativos injetados.' },
+      },
+    ]);
+
+    expect(summary[0].totalAtivos).toBe(100);
+    expect(summary[0].totalEventos).toBe(1);
+  });
+});
+
 describe('normalizeTenantLabel', () => {
   it('normaliza para maiúsculas', () => {
     expect(normalizeTenantLabel('cicopal')).toBe('CICOPAL');
