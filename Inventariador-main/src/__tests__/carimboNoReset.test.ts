@@ -2,7 +2,7 @@
 // ============================================================================
 // carimboNoReset.test.ts — o carimbo da falha morre com o registo, nunca antes.
 //
-// Uma limpeza local («Limpeza Total» do MainMenu/DataManagementPanel, limpeza em
+// Uma limpeza local («Limpeza Total» do MainMenu, limpeza em
 // massa por unidade, expurgo do Gestor de Base, «Desvincular e Reiniciar»)
 // filtrava o cache do localforage e o estado React, mas deixava as linhas da
 // unidade nos três espelhos Dexie — e o `_syncFailAt` agarrado a elas. O selo
