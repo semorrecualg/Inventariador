@@ -266,7 +266,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#F8FAFC] text-slate-900 font-sans overflow-hidden">
+    <div className="flex flex-col h-full flex-1 min-h-0 bg-[#F8FAFC] text-slate-900 font-sans overflow-hidden">
       {/* Header Profissional */}
       <header className="bg-slate-900 text-white px-6 py-5 flex items-center justify-between shadow-xl z-20">
         <div className="flex items-center gap-5">
@@ -446,7 +446,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
       </div>
 
       {/* Lista de Logs com Virtuoso */}
-      <div className="flex-1 relative">
+      <div className="flex-1 min-h-0 relative">
         {loading ? (
           <div className="flex flex-col items-center justify-center h-full space-y-6">
             <div className="relative">
@@ -469,7 +469,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
             </div>
           </div>
         ) : (
-          <div className="h-full">
+          <div className="absolute inset-0">
             <Virtuoso
               ref={virtuosoRef}
               style={{ height: '100%' }}
