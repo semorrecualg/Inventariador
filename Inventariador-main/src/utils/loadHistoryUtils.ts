@@ -2,7 +2,6 @@
  * Utils puros do histórico de cargas/sincronizações (tela LoadHistoryScreen).
  * Mantidos fora do componente para serem testáveis e reutilizáveis.
  */
-import { textoDoDetails } from './auditDetails';
 
 /** Ações que caracterizam eventos de carga/sincronização no audit_logs. */
 export const LOAD_HISTORY_ACTIONS = [
@@ -23,18 +22,13 @@ export interface LoadHistoryEntry {
   timestamp?: string | null;
   user_email?: string | null;
   table_name?: string | null;
-  /**
-   * Texto no aparelho, mas **objeto** quando a linha vem da nuvem (a coluna de
-   * produção é json): por isso `unknown`, normalizado por `textoDoDetails`.
-   */
-  details?: unknown;
+  details?: string | null;
 }
 
 /** Extrai a contagem de ativos do campo details (ex.: "12636 ativos"). */
-export const parseAssetCountFromDetails = (details?: unknown): number | null => {
-  const texto = textoDoDetails(details);
-  if (!texto) return null;
-  const match = texto.match(/([0-9]+)[^0-9]*ativos/);
+export const parseAssetCountFromDetails = (details?: string | null): number | null => {
+  if (!details) return null;
+  const match = details.match(/([0-9]+)[^0-9]*ativos/);
   if (!match) return null;
   const count = parseInt(match[1], 10);
   return Number.isFinite(count) ? count : null;
@@ -46,9 +40,8 @@ export const parseAssetCountFromDetails = (details?: unknown): number | null => 
  * (delta)." — e também o formato antigo "(delta)"/"incremental".
  */
 export const isDeltaSyncEntry = (e: Pick<LoadHistoryEntry, 'details'>): boolean => {
-  const texto = textoDoDetails(e.details);
-  if (!texto) return false;
-  return /\(delta\)|incremental/i.test(texto);
+  if (!e.details) return false;
+  return /\(delta\)|incremental/i.test(e.details);
 };
 
 /** Normaliza o tenantid para exibição/agrupamento (vazio → SEM CONTRATO). */

@@ -486,11 +486,7 @@ cai para INTERNAL em vez de rebentar.
 local e a retenção apaga o confirmado aos 7 dias, deixando o não confirmado para a
 janela de segurança de 30. Exige a migração de `docs/supabase_bootstrap.sql`
 (`audit_logs.client_event_id` + índice único); sem ela o envio falha com o erro na
-fila, e nada é apagado nem dado como enviado. O passo-a-passo da migração (com
-diagnóstico condicional, descoberta das colunas `NOT NULL` e teste de `upsert` em
-transação) está em [docs/MIGRACAO_AUDITORIA_CLIENT_EVENT_ID.md](MIGRACAO_AUDITORIA_CLIENT_EVENT_ID.md).
-As linhas lidas da nuvem passam por `textoDoDetails`: a coluna `details` de
-produção é `json` e chega como objeto, não como texto.
+fila, e nada é apagado nem dado como enviado.
 
 **Modos de falha da credencial** (diagnóstico rápido):
 

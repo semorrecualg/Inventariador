@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeft, Database, History, RefreshCw, ChevronDown, ChevronRight, FileUp, DownloadCloud, UploadCloud, AlertTriangle, Package } from 'lucide-react';
 import { AppScreen } from '../types';
 import { fetchLoadHistory } from '../services/supabaseService';
-import { textoDoDetails } from '../utils/auditDetails';
 import { logger } from '../utils/logger';
 import { VOLTAR_SEM_HISTORICO } from '../utils/routingUtils';
 import {
@@ -281,7 +280,7 @@ export const LoadHistoryScreen: React.FC<LoadHistoryScreenProps> = ({ onBack, te
                               {formatLoadTimestamp(e.timestamp)}
                             </span>
                           </div>
-                          <p className="mt-2 text-[11px] text-slate-300 break-words">{textoDoDetails(e.details) || '(sem detalhes)'}</p>
+                          <p className="mt-2 text-[11px] text-slate-300 break-words">{e.details || '(sem detalhes)'}</p>
                           <p className="mt-1 text-[9px] font-bold text-slate-500 uppercase tracking-widest">
                             {e.user_email || 'unknown'}
                           </p>
