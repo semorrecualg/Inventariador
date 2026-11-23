@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — contador remoto da trilha por contrato (F2, 2.º passo)
+
+- **O que era:** o Gestor mostrava quantos eventos estavam no aparelho e quantos
+  faltavam subir, mas não dizia quantos já tinham chegado à nuvem — para
+  confirmar que a fila começou a subir era preciso abrir o Supabase.
+- **Agora:** o cartão «Registros de Auditoria» mostra também o total da trilha
+  **do contrato** na nuvem, lido com `count: 'exact'` e `head: true` (só
+  leitura: nenhuma linha é transferida, enviada ou alterada).
+  `contarAuditoriaNuvem` devolve `off` em BASE LOCAL ou offline (a nuvem nem é
+  chamada), `erro` sem contrato resolvido (não faz contagem global, por
+  isolamento multi-tenant) e `erro` carimbado quando a nuvem recusa ou o pedido
+  passa dos 8 s — por exemplo, com a migração `client_event_id` por aplicar.
+- Teste: `auditoriaNuvemContador`.
+
 ### Adicionado — limpeza de cópias exatas, com backup e desfazer
 
 - **O que era:** a base local podia guardar a MESMA linha duas vezes (a chave
