@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — reconciliação da trilha de ativos entre aparelho, arquivo e `asset_logs` (F2, 3.º passo)
+
+- **O que era:** a aba «Ativos» da Trilha lia `asset_logs` da nuvem e o Dexie,
+  mas ignorava os eventos que a fila da F2 já tinha arquivado em `audit_logs`.
+  Num aparelho reinstalado esses eventos desapareciam do ecrã (o aparelho já
+  não os tinha), e o mesmo evento podia aparecer duas vezes quando as fontes
+  tinham detalhes diferentes.
+- **Agora:** `reconciliarTrilha` junta as três fontes — arquivo da nuvem
+  (`audit_logs`, ligado ao evento local por `client_event_id`), histórico de
+  triggers (`asset_logs`) e trilha do aparelho — com prioridade à identidade e
+  recurso ao conteúdo só quando não há id. Cada linha ganha a marca «app · na
+  nuvem», «app · só aparelho» ou «nuvem · asset_logs», para o operador saber se
+  o evento sobrevive a uma desinstalação.
+- `fetchAssetAuditLogs` faz a leitura paginada (500) dos eventos de ativo do
+  arquivo; os testes `auditReconciliacao` cobrem fusão por `client_event_id`,
+  evento só na nuvem, só no aparelho, duplicado com trigger e ordenação.
+
 ### Documentado — esquema real da `audit_logs` no bootstrap e no baseline
 
 - **O que era:** `docs/supabase_bootstrap.sql` declarava `audit_logs` com `id
