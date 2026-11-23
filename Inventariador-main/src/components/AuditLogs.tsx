@@ -21,7 +21,8 @@ import {
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import BackButton from './BackButton';
 import { User, DatabaseMode } from '../types';
-import { fetchAuditLogs, fetchAssetLogs } from '../services/supabaseService';
+import { fetchAuditLogs, fetchAssetAuditLogs, fetchAssetLogs } from '../services/supabaseService';
+import { reconciliarTrilha } from '../utils/auditReconciliacao';
 import { localDb } from '../services/localDbService';
 import { logger } from '../utils/logger';
 import { textoDoDetails } from '../utils/auditDetails';
@@ -46,37 +47,11 @@ interface AuditLogDB {
   details?: string;
   tenantid?: string;
   origin?: string;
+  /** Liga a linha arquivada na nuvem ao evento local (fila da F2). */
+  client_event_id?: string | null;
+  origem?: 'APP' | 'NUVEM';
+  confirmadoNaNuvem?: boolean;
 }
-
-/**
- * Identidade do evento para unir as duas fontes. O MESMO evento tem ids
- * diferentes no aparelho e na nuvem (o Dexie gera um, o Postgres outro), por
- * isso a chave é o conteúdo — comparar `id` nunca fundia nada.
- */
-const logKey = (log: AuditLogDB): string =>
-  [
-    String(log.timestamp || '').slice(0, 19),
-    String(log.action || '').toUpperCase(),
-    log.user_email || '',
-    log.record_id || '',
-    log.details || ''
-  ].join('|');
-
-/**
- * Une a trilha da nuvem com a do aparelho. As duas fontes descrevem o mesmo
- * evento quando o log local também chegou ao Supabase, por isso a chave evita
- * a linha repetida; a ordem é sempre a mais recente primeiro.
- */
-const mergeLogs = (cloudLogs: AuditLogDB[], localLogs: AuditLogDB[]): AuditLogDB[] => {
-  const byKey = new Map<string, AuditLogDB>();
-  [...cloudLogs, ...localLogs].forEach(log => {
-    const key = logKey(log);
-    if (!byKey.has(key)) byKey.set(key, { ...log, id: key });
-  });
-  return Array.from(byKey.values()).sort(
-    (a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || ''))
-  );
-};
 
 const JsonDiff = ({ oldData, newData }: { oldData: any, newData: any }) => { // eslint-disable-line @typescript-eslint/no-explicit-any
   if (!oldData || !newData) return null;
@@ -145,21 +120,32 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
         const localLogs = (await localDb.auditLogs.reverse().limit(200).toArray()) as unknown as AuditLogDB[];
         const tenantid = String(user?.tenantid || '').trim();
 
-        let cloudLogs: AuditLogDB[] = [];
+        const normalizarLinhaDaNuvem = (log: Record<string, unknown>): AuditLogDB => ({
+          ...(log as unknown as AuditLogDB),
+          // A coluna de produção é json: o ecrã trabalha sempre com texto.
+          details: textoDoDetails(log.details),
+          record_id: String(log.record_id || log.asset_id || ''),
+          table_name: String(log.table_name || (logType === 'ASSET' ? 'assets' : '')),
+          tenantid: String(log.tenantid || tenantid)
+        });
+
+        let arquivoNuvem: AuditLogDB[] = [];
+        let assetLogsNuvem: AuditLogDB[] = [];
         if (databaseMode.startsWith('SUPABASE') && tenantid) {
           try {
-            const data = logType === 'SYSTEM'
-              ? await fetchAuditLogs(tenantid)
-              : await fetchAssetLogs(tenantid);
-
-            cloudLogs = (data as Record<string, any>[]).map(log => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
-              ...log,
-              // A coluna de produção é json: o ecrã trabalha sempre com texto.
-              details: textoDoDetails(log.details),
-              record_id: String(log.record_id || log.asset_id || ''),
-              table_name: (log.table_name || (logType === 'ASSET' ? 'assets' : '')) as string,
-              tenantid: String(log.tenantid || tenantid)
-            })) as AuditLogDB[];
+            if (logType === 'SYSTEM') {
+              const data = await fetchAuditLogs(tenantid);
+              arquivoNuvem = (data as Record<string, unknown>[]).map(normalizarLinhaDaNuvem);
+            } else {
+              // Duas fontes na nuvem: o arquivo da fila (audit_logs, ligado por
+              // `client_event_id`) e o histórico dos triggers (asset_logs).
+              const [arquivo, assetLogs] = await Promise.all([
+                fetchAssetAuditLogs(tenantid),
+                fetchAssetLogs(tenantid)
+              ]);
+              arquivoNuvem = (arquivo as Record<string, unknown>[]).map(normalizarLinhaDaNuvem);
+              assetLogsNuvem = (assetLogs as Record<string, unknown>[]).map(normalizarLinhaDaNuvem);
+            }
           } catch (cloudErr) {
             // Sem rede ou sem as tabelas: a trilha do aparelho continua a abrir.
             logger.warn('Trilha da nuvem indisponível; a mostrar a do aparelho:', cloudErr);
@@ -169,7 +155,7 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
         const localForType = localLogs.filter(log =>
           logType === 'ASSET' ? isAssetLog(log) : !isAssetLog(log)
         );
-        setLogs(mergeLogs(cloudLogs, localForType));
+        setLogs(reconciliarTrilha(localForType, arquivoNuvem, assetLogsNuvem) as AuditLogDB[]);
       } catch (error) {
         logger.error('Erro ao carregar logs:', error);
       } finally {
@@ -516,6 +502,23 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
                             <span className="text-xs font-black text-slate-900 truncate">
                               {log.user_email}
                             </span>
+                            {log.origem && (
+                              <span
+                                className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded border ${
+                                  log.origem === 'NUVEM'
+                                    ? 'bg-slate-100 text-slate-500 border-slate-200'
+                                    : log.confirmadoNaNuvem
+                                      ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                                      : 'bg-amber-50 text-amber-600 border-amber-200'
+                                }`}
+                              >
+                                {log.origem === 'NUVEM'
+                                  ? 'nuvem · asset_logs'
+                                  : log.confirmadoNaNuvem
+                                    ? 'app · na nuvem'
+                                    : 'app · só aparelho'}
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-3 mt-1.5">
                             <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-tighter">

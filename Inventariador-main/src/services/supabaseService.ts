@@ -3145,6 +3145,36 @@ export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promis
 };
 
 /**
+ * Busca no `audit_logs` da nuvem os eventos de ATIVO arquivados pela fila da
+ * F2. O `client_event_id` liga a linha ao evento local; sem esta leitura, um
+ * aparelho reinstalado via só o histórico dos triggers de `asset_logs` e
+ * perdia de vista o que a própria fila já tinha arquivado.
+ */
+export const fetchAssetAuditLogs = async (tenantid: string, limit = 500): Promise<Record<string, unknown>[]> => {
+  if (!supabase) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select('*')
+      .eq('tenantid', tenantid)
+      .in('table_name', ['assets', 'ativos', 'local_assets'])
+      .order('timestamp', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      logger.error('Erro ao buscar eventos de ativos arquivados:', error);
+      return [];
+    }
+
+    return (data || []).map((row: unknown) => normalizarDetalhesDaLinha(row as Record<string, unknown>));
+  } catch (err) {
+    logger.error('Erro inesperado ao buscar eventos de ativos arquivados:', err);
+    return [];
+  }
+};
+
+/**
  * Busca o histórico de cargas/sincronizações no audit_logs da nuvem
  * (ações IMPORT/SYNC_PULL/SYNC_PUSH/LOAD/CARGA/RESTORE/BACKUP, além de
  * qualquer ação cujo nome contenha LOAD/IMPORT/SYNC).
