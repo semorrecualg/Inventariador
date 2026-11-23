@@ -84,6 +84,89 @@ export const mapearLogParaNuvem = (log: DexieAuditLog, tenantFallback: string | 
 export const contarAuditoriaPendente = async (): Promise<number> =>
   db.audit_logs.filter((log) => log._synced !== 1).count();
 
+/**
+ * Retrato do contador remoto da trilha.
+ *
+ * `off` = a nuvem não foi consultada (BASE LOCAL ou aparelho offline) — não é
+ * erro. `ok` = total lido para o contrato. `erro` = a nuvem recusou, o pedido
+ * passou do tempo limite, ou não há contrato resolvido (nunca se conta a
+ * tabela inteira: a trilha é multi-tenant, e uma contagem global expunha
+ * eventos de outro contrato).
+ */
+export interface ContagemAuditoriaNuvem {
+  estado: 'off' | 'ok' | 'erro';
+  /** Contrato consultado (normalizado em maiúsculas); `null` sem contrato. */
+  tenantid: string | null;
+  /** Linhas da trilha na nuvem para o contrato (só quando `estado === 'ok'`). */
+  total: number | null;
+  message?: string;
+}
+
+/**
+ * Quantos eventos da trilha do contrato já estão na nuvem.
+ *
+ * É só leitura (`head: true`, `count: exact`): nenhuma linha é transferida,
+ * enviada ou alterada. Serve de contra-prova ao contador «N por subir» — um
+ * erro de esquema (por exemplo, a migração `client_event_id` por aplicar)
+ * aparece carimbado aqui, em vez de deixar o operador sem saber se subiu.
+ */
+export const contarAuditoriaNuvem = async (
+  tenantid?: string | null
+): Promise<ContagemAuditoriaNuvem> => {
+  const tenant = String(tenantid ?? getCurrentTenantid() ?? '').trim().toUpperCase();
+
+  if (!canPushToCloud() || !supabase) {
+    return {
+      estado: 'off',
+      tenantid: tenant || null,
+      total: null,
+      message: 'BASE LOCAL — a nuvem não é consultada.'
+    };
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return { estado: 'off', tenantid: tenant || null, total: null, message: 'Aparelho sem conexão.' };
+  }
+  if (!tenant) {
+    return {
+      estado: 'erro',
+      tenantid: null,
+      total: null,
+      message: 'Sem contrato resolvido — a contagem não é global.'
+    };
+  }
+
+  try {
+    const resposta = await Promise.race([
+      supabase
+        .from('audit_logs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenantid', tenant),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('AUDIT_COUNT_TIMEOUT')), TEMPO_LIMITE_ENVIO_MS)
+      ),
+    ]);
+
+    const erro = (resposta as { error?: { message?: string } | null }).error;
+    if (erro) {
+      return {
+        estado: 'erro',
+        tenantid: tenant,
+        total: null,
+        message: erro.message || 'Falha ao contar a trilha na nuvem.'
+      };
+    }
+    const total = (resposta as { count?: number | null }).count ?? 0;
+    return { estado: 'ok', tenantid: tenant, total };
+  } catch (err) {
+    return {
+      estado: 'erro',
+      tenantid: tenant,
+      total: null,
+      message: err instanceof Error ? err.message : String(err)
+    };
+  }
+};
+
 const marcarEnviados = async (ids: string[]): Promise<void> => {
   await db.transaction('rw', db.audit_logs, async () => {
     for (const id of ids) {
