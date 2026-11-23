@@ -21,6 +21,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passa dos 8 s — por exemplo, com a migração `client_event_id` por aplicar.
 - Teste: `auditoriaNuvemContador`.
 
+### Corrigido — a trilha lida da nuvem aceita `details` como objeto
+
+- **O que era:** em produção a coluna `audit_logs.details` é `json` (o
+  bootstrap declara `text`), por isso o PostgREST devolve objeto/array. O ecrã da
+  Trilha rebentava em `details.toLowerCase()`, o Histórico de Cargas em
+  `details.match(...)` e a narrativa do evento tentava renderizar o objeto.
+- **Agora:** `textoDoDetails` normaliza no bordo — `fetchAuditLogs`,
+  `fetchAssetLogs` e `fetchLoadHistory` devolvem sempre `details` em texto
+  (objetos serializados em JSON legível) e `parseAssetCountFromDetails` /
+  `isDeltaSyncEntry` aceitam `unknown`, por isso a contagem de ativos continua a
+  ser encontrada dentro do JSON.
+- Testes: `auditDetails` (6) e 3 casos novos em `loadHistoryUtils`.
+
+### Documentado — guia da migração `audit_logs.client_event_id`
+
+- **`docs/MIGRACAO_AUDITORIA_CLIENT_EVENT_ID.md`**: passo-a-passo com
+  diagnóstico que não toca em colunas inexistentes (duplicados condicional em
+  `DO $$`), descoberta das colunas `NOT NULL`, migração idempotente, teste de
+  `upsert` com `to_jsonb` para `details` e `rollback`, validação do esquema,
+  confirmação da fila no Gestor e tabela de sintomas/causas.
+- A variante concorrente documenta que `CREATE INDEX CONCURRENTLY IF NOT EXISTS`
+  é aceite desde o PostgreSQL 9.5 mas **não** repara um índice `INVALID` deixado
+  por um build falhado: verifica-se `pg_index.indisvalid` antes e só se cria sem
+  `IF NOT EXISTS`.
+- Regista a divergência real da tabela de produção (`id uuid`, `user_email
+  NOT NULL`, `details json`) face ao bootstrap, que fica pendente de alinhamento
+  num PR próprio.
+
 ### Adicionado — limpeza de cópias exatas, com backup e desfazer
 
 - **O que era:** a base local podia guardar a MESMA linha duas vezes (a chave
