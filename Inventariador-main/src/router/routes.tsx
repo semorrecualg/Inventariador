@@ -45,3 +45,31 @@ export const screenToPath: Record<AppScreen, string> = {
   [AppScreen.WORK_CONTEXT_SELECTION]: '/contexto',
 };
 
+/**
+ * Caminho → tela: o inverso de `screenToPath`.
+ *
+ * Sem isto o hash da URL era só um espelho de escrita — um F5 em
+ * `#/audit-logs` não tinha como voltar à trilha.
+ */
+export const pathToScreen: Record<string, AppScreen> = Object.fromEntries(
+  (Object.entries(screenToPath) as [AppScreen, string][]).map(([screen, path]) => [path, screen])
+) as Record<string, AppScreen>;
+
+/**
+ * Tela pedida por um hash (`#/audit-logs`, `#/contexto/`, `#/audit-logs?aba=x`,
+ * `#/asset/<etiqueta>`), ou `null` quando não é uma rota conhecida.
+ */
+export function telaDoHash(hash: string): AppScreen | null {
+  if (!hash) return null;
+  const bruto = hash.startsWith('#') ? hash.slice(1) : hash;
+  const caminho = bruto.split(/[?#]/)[0];
+  if (!caminho || caminho === '/') return null;
+
+  // `/asset/<etiqueta>` nunca aparece inteiro em `screenToPath`.
+  const rotaDetalhe = screenToPath[AppScreen.ASSET_DETAIL];
+  if (caminho.startsWith(rotaDetalhe)) return AppScreen.ASSET_DETAIL;
+
+  const semBarraFinal = caminho.length > 1 ? caminho.replace(/\/+$/, '') : caminho;
+  return pathToScreen[semBarraFinal] ?? null;
+}
+

@@ -13,6 +13,7 @@
 import { ADMIN_EMAIL, isAppManagedSession, isLocalSessionProfile } from './authUtils';
 import { AppScreen } from '../types';
 import type { User } from '../types';
+import { historicoDeAncoragem } from './navegacaoHash';
 
 /**
  * Fim da verificação da nuvem no arranque: a sessão do aparelho fica ou é
@@ -172,7 +173,10 @@ export function hasLocalSessionInCache(): boolean {
  * separador novo de parar no ecrã de entrada.
  */
 export function resolveInitialScreenHistory(): AppScreen[] {
-  return hasLocalSessionInCache() ? [AppScreen.WORK_CONTEXT_SELECTION] : [AppScreen.LOGIN];
+  if (!hasLocalSessionInCache()) return [AppScreen.LOGIN];
+  // Com sessão, a URL manda quando pede uma tela: é isto que faz um F5 em
+  // `#/audit-logs` abrir a trilha em vez de voltar sempre ao contrato.
+  return historicoDeAncoragem(AppScreen.WORK_CONTEXT_SELECTION);
 }
 
 /** Logout explícito: o próximo arranque tem de pedir credenciais. */

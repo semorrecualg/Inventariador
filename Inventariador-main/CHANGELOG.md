@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a URL passa a mandar na navegação (F5 cai no ecrã certo e o «voltar» funciona)
+
+- **O que era:** o hash da URL era só de escrita. Com sessão válida, um F5 em
+  `#/audit-logs` ancorava sempre no contrato de trabalho (`#/contexto`), porque
+  o arranque decidia a tela pela sessão sem olhar à URL; e o «voltar/avançar» do
+  browser mudava o hash sem mudar o ecrã (só um separador novo recuperava a
+  navegação à mão).
+- **Agora:** `telaDoHash` lê a rota (`#/audit-logs`, `#/contexto/`,
+  `#/audit-logs?aba=x`, `#/asset/<etiqueta>`) como inverso de `screenToPath`; o
+  arranque ancora a pilha nessa tela (`historicoDeAncoragem`), com o contrato
+  por baixo para o «voltar» ter destino, e sem sessão uma rota profunda
+  continua a pedir login; um `hashchange` corta ou empurra a pilha
+  (`proximaPilha`) e o ecrã acompanha. A escrita estado → URL ficou em
+  `escreverHash`, que não duplica a entrada atual.
+- Testes: `navegacaoHash` cobre o inverso de `screenToPath`, as rotas com
+  prefixo/barra/query, a âncora e o «voltar/avançar»; `sessionPersistence` ganha
+  o F5 numa tela profunda e o controlo sem sessão.
+
 ### Corrigido — arranque à prova de um módulo que não chega (F5)
 
 - **O que era:** com o servidor a devolver `503` na rajada de pedidos de um F5,
