@@ -118,6 +118,16 @@ export interface DexieAuditLog {
   details: string;
   delta: string | null;
   updated_at: string;
+  /**
+   * Fila da trilha para a nuvem (F2): `1` = confirmada pelo Supabase.
+   * Ausente/`0` = por subir. Não é índice — a fila lê por `filter`, para
+   * apanhar também as linhas antigas, escritas antes de este campo existir.
+   */
+  _synced?: number;
+  /** Tentativas de envio já feitas (carimbo de recusa em `_syncError`). */
+  _syncAttempts?: number;
+  /** Motivo da última recusa da nuvem; `null` depois de confirmada. */
+  _syncError?: string | null;
 }
 
 export interface DexieCampaign {
@@ -707,7 +717,9 @@ export class SqliteService {
       registro_id,
       details,
       delta: delta ?? null,
-      updated_at: atualizadoEm ?? new Date().toISOString()
+      updated_at: atualizadoEm ?? new Date().toISOString(),
+      // F2: nasce por subir; a fila (`services/auditoriaNuvem`) marca `_synced`.
+      _synced: 0
     });
   }
 

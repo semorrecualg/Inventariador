@@ -5,6 +5,7 @@ import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets } from '../services/supabaseService';
+import { contarAuditoriaPendente } from '../services/auditoriaNuvem';
 import { isAdminUser } from '../utils/authUtils';
 import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
@@ -83,6 +84,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   // banco local está vazio. Só é lido quando o banco está vazio (diagnóstico).
   const [virtualCount, setVirtualCount] = useState<number>(0);
   const [logCount, setLogCount] = useState<number>(0);
+  // F2: eventos da trilha que ainda não foram confirmados pela nuvem.
+  const [pendingAuditCount, setPendingAuditCount] = useState<number>(0);
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [isLogExpanded, setIsLogExpanded] = useState<boolean>(false);
   const [logCopied, setLogCopied] = useState<boolean>(false);
@@ -437,6 +440,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setAssetCount(aCount);
       const lCount = await db.audit_logs.count();
       setLogCount(lCount);
+      setPendingAuditCount(await contarAuditoriaPendente());
       if (vCount > 0) {
         addLog(`[SRE_STATS] Banco local vazio, mas existe espelho virtual com ${vCount} ativos (origem do número mostrado na Unidade Operacional).`);
       } else {
@@ -913,6 +917,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           <span className="text-xl font-black text-blue-400 mt-1 font-mono">{logCount}</span>
           <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider mt-1 leading-tight">
             audit_logs no Dexie deste aparelho
+          </span>
+          <span className="text-[8px] font-bold text-amber-400 uppercase tracking-wider mt-1 leading-tight">
+            {pendingAuditCount} por subir para a nuvem
           </span>
         </div>
       </div>

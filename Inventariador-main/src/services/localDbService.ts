@@ -808,7 +808,9 @@ export const localDb = {
         registro_id: log.record_id || '',
         details: log.details || '',
         delta: log.new_data ? JSON.stringify(log.new_data) : (log.old_data ? JSON.stringify(log.old_data) : null),
-        updated_at: log.timestamp || new Date().toISOString()
+        updated_at: log.timestamp || new Date().toISOString(),
+        // F2: todo o evento nasce na fila da trilha; a nuvem confirma e marca.
+        _synced: 0
       });
     },
 

@@ -527,58 +527,22 @@ export const logAuditEvent = async (entry: {
     // Ignora silenciosamente durante a carga em lote para isolar o SQLite local
     return;
   }
-  // `getDatabaseMode()`: sem a chave gravada e sem credenciais no build isto é
-  // INTERNAL. Antes a leitura crua dava `false` e o log tentava o Supabase num
-  // build offline, perdendo o registo de auditoria.
-  const isInternal = getDatabaseMode() === 'INTERNAL';
-
-  // Se for modo interno, salva no Dexie
-  if (isInternal) {
-    try {
-      await localDb.auditLogs.add({
-        ...entry,
-        user: entry.user_email,
-        timestamp: new Date().toISOString()
-      } as AuditLogEntry);
-      logger.info('>>> [Persistence] Log de auditoria salvo localmente (Dexie).');
-    } catch (dexieErr) {
-      logger.warn('>>> [Persistence] Falha ao salvar log no Dexie:', dexieErr);
-    }
-    return;
-  }
-
-  if (!supabase) return;
-
+  // A trilha local é o destino durável (F2): o evento é gravado SEMPRE no
+  // Dexie — em Base Local e em Base Oficial — e sobe pela fila de
+  // `services/auditoriaNuvem`, em lotes idempotentes (`client_event_id`).
+  //
+  // Antes, em Base Oficial, tentava-se um `insert` direto com timeout de 2 s:
+  // uma falha de rede perdia o evento (só ficava no log técnico) e não havia
+  // retry nem rasto de qual evento faltava.
   try {
-    // Sanitiza dados para evitar erros de estrutura circular
-    const tenantVal = resolveTenantId(entry as unknown as Record<string, unknown>);
-    const dbPayload: Record<string, unknown> = {
-      user_email: entry.user_email,
-      action: entry.action,
-      table_name: entry.table_name || '',
-      record_id: entry.record_id || '',
-      details: entry.details || '',
-      origin: entry.origin || 'WEB',
-      tenantid: tenantVal
-    };
-
-    if (entry.new_data !== undefined) {
-      dbPayload.new_data = sanitizeForSupabase(entry.new_data);
-    }
-    if (entry.old_data !== undefined) {
-      dbPayload.old_data = sanitizeForSupabase(entry.old_data);
-    }
-
-    const { error } = await Promise.race([
-      supabase.from('audit_logs').insert([dbPayload]),
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error("LOG_TIMEOUT")), 2000))
-    ]).catch(err => ({ error: err })) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-    if (error && error.message !== "LOG_TIMEOUT") {
-      logger.warn('Erro ao registrar log de auditoria:', error);
-    }
-  } catch (err) {
-    logger.warn('Erro inesperado ao registrar log:', err);
+    await localDb.auditLogs.add({
+      ...entry,
+      user: entry.user_email,
+      timestamp: new Date().toISOString()
+    } as AuditLogEntry);
+    logger.info('>>> [Persistence] Log de auditoria salvo localmente (Dexie).');
+  } catch (dexieErr) {
+    logger.warn('>>> [Persistence] Falha ao salvar log no Dexie:', dexieErr);
   }
 };
 

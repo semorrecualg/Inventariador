@@ -22,6 +22,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dados apaga a base, a trilha de auditoria e as fotos pendentes. Teste:
   `baseLocalPushGate`.
 
+### Adicionado — a trilha de auditoria sobe em lotes idempotentes (F2, 1.º passo)
+
+- **O que era:** em Base Oficial, `logAuditEvent` fazia um `insert` direto no
+  Supabase com timeout de 2 s. Se a rede falhasse, o evento só ficava no log
+  técnico: não havia fila, retry nem forma de saber o que faltava. O expurgo aos
+  7 dias apagava também o que nunca tinha subido.
+- **Agora:** todo o evento é gravado em `audit_logs` do Dexie (`_synced: 0`) e
+  sobe pela fila `services/auditoriaNuvem.ts`, em lotes de 200, por `upsert` com
+  `client_event_id` (= `id` local) — reenviar não duplica. A recusa da nuvem fica
+  carimbada na linha (`_syncError`, `_syncAttempts`), o Gestor mostra «N por
+  subir» ao lado da contagem local, e o expurgo só apaga o confirmado aos 7 dias
+  (o não confirmado espera a janela de segurança de 30). A fila usa o mesmo
+  portão da BASE LOCAL de F1, agora em `services/pushGate.ts`.
+- **Migração necessária:** `audit_logs.client_event_id` e o índice único, em
+  `docs/supabase_bootstrap.sql`. Sem ela, o envio falha com o erro carimbado na
+  fila — nada é apagado nem marcado como enviado.
+- Testes: `auditoriaNuvem` (portão, idempotência, recusa, mapeamento) e
+  `auditoriaRetencao` (janela de segurança).
+
 ### Alterado — um só caminho para o Gestor de Base
 
 - **O que era:** o Painel Completo tinha **duas portas** para a mesma base — o
