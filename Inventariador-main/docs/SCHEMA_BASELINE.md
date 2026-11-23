@@ -108,7 +108,7 @@ O bootstrap declara a tabela como a produção a tem de facto, verificada em
 | `id` | `uuid PRIMARY KEY DEFAULT gen_random_uuid()` |
 | `user_email` | `text NOT NULL` |
 | `tenantid`, `action`, `table_name`, `record_id`, `origin` | `text` |
-| `details`, `new_data`, `old_data` | JSON — `details` é `json` ou `jsonb` (a mensagem 22P02 diz «type json» para os dois) |
+| `details`, `new_data`, `old_data` | `jsonb` — confirmado na `information_schema` em 23/11/2026 |
 | `created_at` | `timestamptz DEFAULT now()` |
 | `client_event_id` | `text`, índice único `audit_logs_client_event_id_key` |
 
@@ -116,14 +116,18 @@ Divergências que já custaram erros em produção:
 
 - `CREATE TABLE IF NOT EXISTS` **não** altera uma tabela existente: esta secção
   documenta o alvo, não migra a base.
-- `details` era `text` no bootstrap antigo; na produção é JSON. O app envia o
+- `details` era `text` no bootstrap antigo; na produção é `jsonb`. O app envia o
   payload como documento JSON (uma string vira `"…"`), por isso o `upsert` da
   fila funciona; um `insert` manual em SQL tem de usar `to_jsonb('…'::text)`.
 - `user_email` é `NOT NULL`: o app envia `''`, nunca `null`.
 - `id` em produção é `uuid` com default (o app nunca o envia); o bootstrap antigo
   declarava `bigint GENERATED ALWAYS AS IDENTITY`.
 
-Confirmar o tipo exato de `details` (json ou jsonb) e as restantes nulabilidades:
+Verificado em 23/11/2026: `details`, `new_data` e `old_data` são `jsonb`;
+`user_email` e `action` são `NOT NULL` sem default; as restantes colunas são
+nuláveis. A migração `client_event_id` está aplicada (coluna `text`, índice
+único `audit_logs_client_event_id_key` válido e sem duplicados). Para
+reconfirmar tipos e nulabilidades:
 
 ```sql
 select column_name, data_type, is_nullable, column_default

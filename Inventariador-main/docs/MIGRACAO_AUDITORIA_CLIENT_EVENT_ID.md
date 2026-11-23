@@ -5,14 +5,20 @@ app. Sem ela, a fila `services/auditoriaNuvem.ts` não sobe nada: cada lote falh
 com o erro carimbado na linha (`_syncError`) e o Gestor mostra «N por subir» sem
 baixar. Nada é apagado nem dado como enviado.
 
+> **Estado em 23/11/2026: aplicada e verificada em produção.** A coluna
+> `client_event_id text` existe, o índice `audit_logs_client_event_id_key` é
+> `UNIQUE` e válido (`indisvalid = true`), não havia duplicados e o teste de
+> `upsert` do passo 4 devolveu 1 linha. Falta apenas a prova de envio no APK
+> nativo (passo 5).
+>
 > **Atenção — a tabela de produção é legada e diverge de `docs/supabase_bootstrap.sql`.**
-> Pontos já observados no Supabase de produção:
+> Pontos confirmados no Supabase de produção:
 >
 > | Item | Produção | `supabase_bootstrap.sql` |
 > |---|---|---|
-> | `id` | `uuid` | `bigint identity` |
-> | `user_email` | `NOT NULL` | `text` (nulo) |
-> | `details` | `json`/`jsonb` (JSON) | `text` |
+> | `id` | `uuid` com default `gen_random_uuid()` | igual |
+> | `user_email` | `text NOT NULL` | igual |
+> | `details` | `jsonb` (confirmado na `information_schema`) | igual |
 >
 > O `CREATE TABLE IF NOT EXISTS` do bootstrap **não** corrige a tabela existente.
 > Por isso este guia descobre as colunas obrigatórias antes de testar, e passa
@@ -35,9 +41,10 @@ where table_schema = 'public' and table_name = 'audit_logs'
 order by ordinal_position;
 ```
 
-Confirma `client_event_id` (deve faltar na primeira execução) e anota
+Confirma `client_event_id` (já presente em produção desde 23/11/2026) e anota
 `user_email`, `tenantid` e `details` — os tipos e a nulabilidade são o que manda
-no teste do passo 4.
+no teste do passo 4. O resultado em produção: 13 colunas, `details` em `jsonb`,
+`user_email` e `action` `NOT NULL`.
 
 ### 1.2 Duplicados de `client_event_id` (condicional)
 
@@ -79,7 +86,8 @@ order by ordinal_position;
 ```
 
 Tudo o que aparecer aqui tem de ser preenchido no teste do passo 4. Em produção,
-`user_email` está nesta lista.
+`user_email` e `action` estão nesta lista — são os dois que o teste tem de
+preencher.
 
 ## 2. Aplicar a migração (idempotente)
 
@@ -155,12 +163,16 @@ where schemaname = 'public'
 ```
 
 Esperado: coluna `text` e um `CREATE UNIQUE INDEX ... (client_event_id)`.
+Confirmado em produção a 23/11/2026, com `audit_logs_client_event_id_key`
+`indisvalid = true` e a consulta de duplicados do passo 1.2 em 0 linhas.
 
 ## 4. Teste de `upsert` (transação com `rollback`)
 
-O `details` é `json` em produção: um literal de texto direto rebenta com
-`22P02`. `to_jsonb('…'::text)` produz a string JSON válida. O `user_email` (e
-qualquer outra coluna da lista 1.3) tem de ser preenchido.
+O `details` é `jsonb` em produção (confirmado na `information_schema` em
+23/11/2026): um literal de texto direto rebenta com `22P02`.
+`to_jsonb('…'::text)` produz a string JSON válida e continua a ser a forma
+segura. O `user_email` e o `action` (as colunas da lista 1.3) têm de ser
+preenchidos.
 
 ```sql
 begin;
@@ -258,6 +270,10 @@ NOT NULL`, `details` em JSON, `client_event_id text` + índice único). O
 `CREATE TABLE IF NOT EXISTS` só afeta instalações novas — a base de produção já
 existente não é alterada.
 
-Falta apenas confirmar se `details` é `json` ou `jsonb`: a mensagem 22P02 diz
-«type json» para os dois. A consulta de `information_schema` da secção 3.2.1 do
-`docs/SCHEMA_BASELINE.md` responde, e o app lê ambos.
+Confirmado a 23/11/2026 contra o projeto de produção: `details` é **`jsonb`** —
+a mensagem 22P02 diz «type json» para os dois tipos, por isso só a
+`information_schema` responde —, `user_email` e `action` são `NOT NULL` sem
+default, e o índice único criado é válido. O app lê ambos os tipos.
+
+A migração está aplicada em produção: não há mais nada a executar nos passos 1
+a 3; resta a prova de envio do passo 5, no APK nativo em Base Oficial.
