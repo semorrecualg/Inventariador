@@ -8,7 +8,7 @@
  * arranque e traduzir `hashchange` numa pilha coerente.
  */
 import { AppScreen } from '../types';
-import { telaDoHash } from '../router/routes';
+import { telaDoEstado } from '../router/routes';
 
 /** Telas de entrada: quando a URL as pede, mandam sozinhas. */
 const TELAS_DE_ENTRADA: AppScreen[] = [
@@ -25,13 +25,14 @@ export function hashAtual(): string {
 /**
  * Pilha de arranque: a âncora habitual (o contrato de trabalho) com a tela
  * pedida pela URL por cima, para o «voltar» ter destino e o F5 cair no ecrã
- * certo. Sem tela válida no hash, fica só a âncora.
+ * certo. Só conta a tela desenhada pelo estado: as rotas com `<Route>` própria
+ * (login, menu, gestor de base, dashboard) já são desenhadas pela URL.
  */
 export function historicoDeAncoragem(
   ancora: AppScreen,
   hash: string = hashAtual()
 ): AppScreen[] {
-  const alvo = telaDoHash(hash);
+  const alvo = telaDoEstado(hash);
   if (!alvo) return [ancora];
   if (TELAS_DE_ENTRADA.includes(alvo)) return [alvo];
   if (alvo === ancora) return [ancora];

@@ -90,7 +90,7 @@ import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveS
 import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
 import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, resolveSessionAfterCloudCheck, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
 import { shouldForceUnitOnEmptyBase } from './utils/bootRedirects';
-import { screenToPath, telaDoHash } from './router/routes';
+import { screenToPath, telaDoEstado } from './router/routes';
 import { escreverHash, historicoDeAncoragem, proximaPilha } from './utils/navegacaoHash';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
@@ -641,10 +641,12 @@ const App: React.FC = () => {
   }, []);
 
   // URL → estado: o «voltar/avançar» do browser muda o hash, não a pilha.
-  // Sem este ouvinte a URL mudava e o ecrã ficava igual.
+  // Só para as telas desenhadas pelo estado (catch-all): as que têm `<Route>`
+  // própria (dashboard, menu, gestor de base, login) são desenhadas pela URL e
+  // não podem passar pelo estado — os guards exigem unidade e rebatiam-nas.
   useEffect(() => {
     const aoMudarHash = () => {
-      const alvo = telaDoHash(window.location.hash);
+      const alvo = telaDoEstado(window.location.hash);
       if (!alvo) return;
       setHistory((prev) => {
         const atual = prev[prev.length - 1];

@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AppScreen } from '../types';
-import { pathToScreen, screenToPath, telaDoHash } from '../router/routes';
+import { pathToScreen, screenToPath, telaDoEstado, telaDoHash } from '../router/routes';
 import {
   escreverHash,
   historicoDeAncoragem,
@@ -10,6 +13,18 @@ import {
 
 beforeEach(() => {
   window.location.hash = '';
+});
+
+describe('contrato com o <Routes> do App.tsx', () => {
+  it('toda a <Route> própria é uma tela dirigida pela URL, não pelo estado', () => {
+    const app = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf-8');
+    const rotas = [...app.matchAll(/<Route path="([^"]+)"/g)]
+      .map((encontro) => encontro[1])
+      .filter((rota) => rota !== '*');
+
+    expect(rotas.sort()).toEqual(['/dashboard', '/db-manager', '/login', '/menu']);
+    for (const rota of rotas) expect(telaDoEstado(`#${rota}`)).toBeNull();
+  });
 });
 
 describe('telaDoHash — a URL diz em que tela o app está', () => {
@@ -57,15 +72,24 @@ describe('historicoDeAncoragem — F5 cai na tela pedida pela URL', () => {
     ]);
   });
 
+  it('rotas com <Route> própria não mexem no estado (a URL já as desenha)', () => {
+    for (const rota of ['#/dashboard', '#/menu', '#/db-manager']) {
+      expect(telaDoEstado(rota)).toBeNull();
+      expect(historicoDeAncoragem(AppScreen.WORK_CONTEXT_SELECTION, rota)).toEqual([
+        AppScreen.WORK_CONTEXT_SELECTION,
+      ]);
+    }
+  });
+
   it('na própria âncora não duplica a tela', () => {
     expect(historicoDeAncoragem(AppScreen.WORK_CONTEXT_SELECTION, '#/contexto')).toEqual([
       AppScreen.WORK_CONTEXT_SELECTION,
     ]);
   });
 
-  it('uma tela de entrada manda sozinha', () => {
-    expect(historicoDeAncoragem(AppScreen.WORK_CONTEXT_SELECTION, '#/login')).toEqual([
-      AppScreen.LOGIN,
+  it('uma tela de entrada do catch-all (registo) manda sozinha', () => {
+    expect(historicoDeAncoragem(AppScreen.WORK_CONTEXT_SELECTION, '#/register')).toEqual([
+      AppScreen.REGISTER,
     ]);
   });
 });

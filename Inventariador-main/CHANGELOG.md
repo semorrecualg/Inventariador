@@ -19,7 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arranque ancora a pilha nessa tela (`historicoDeAncoragem`), com o contrato
   por baixo para o «voltar» ter destino, e sem sessão uma rota profunda
   continua a pedir login; um `hashchange` corta ou empurra a pilha
-  (`proximaPilha`) e o ecrã acompanha. A escrita estado → URL ficou em
+  (`proximaPilha`) e o ecrã acompanha. As telas com `<Route>` própria no
+  `App.tsx` (`/login`, `/menu`, `/db-manager`, `/dashboard`) ficam de fora: a
+  URL já as desenha e pôr o estado a segui-las acionava os guards de unidade
+  (o dashboard era rebatido para o contrato). A escrita estado → URL ficou em
   `escreverHash`, que não duplica a entrada atual.
 - Testes: `navegacaoHash` cobre o inverso de `screenToPath`, as rotas com
   prefixo/barra/query, a âncora e o «voltar/avançar»; `sessionPersistence` ganha

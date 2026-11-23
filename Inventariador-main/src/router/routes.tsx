@@ -73,3 +73,25 @@ export function telaDoHash(hash: string): AppScreen | null {
   return pathToScreen[semBarraFinal] ?? null;
 }
 
+/**
+ * Telas desenhadas por uma `<Route>` própria no `App.tsx`: nelas a URL já
+ * manda no render. O estado `screen` não deve segui-las — os guards de estado
+ * (que exigem unidade) rebateriam a tela que o Router está a desenhar.
+ */
+const TELAS_DO_ROUTER: AppScreen[] = [
+  AppScreen.LOGIN,
+  AppScreen.MAIN_MENU,
+  AppScreen.DATABASE_MANAGER,
+  AppScreen.DASHBOARD,
+];
+
+/**
+ * Tela que o hash pede **e** que é desenhada pelo estado (catch-all), não por
+ * uma `<Route>` própria. É só para estas que a URL pode mover o `screen`.
+ */
+export function telaDoEstado(hash: string): AppScreen | null {
+  const tela = telaDoHash(hash);
+  if (!tela || TELAS_DO_ROUTER.includes(tela)) return null;
+  return tela;
+}
+
