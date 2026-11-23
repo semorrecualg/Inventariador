@@ -90,7 +90,8 @@ import { resolveUnitFilter, resolveBootUnitFilter, resolveBootPullPlan, resolveS
 import { buildAccessDiagnostic, sessaoPersistidaNasChaves } from './utils/accessDiagnostics';
 import { clearPersistedSession, hasLocalSessionInCache, resolveInitialScreenHistory, resolveSessionAfterCloudCheck, restorePersistedSession, writePersistedSession } from './utils/sessionPersistence';
 import { shouldForceUnitOnEmptyBase } from './utils/bootRedirects';
-import { screenToPath } from './router/routes';
+import { screenToPath, telaDoEstado } from './router/routes';
+import { escreverHash, historicoDeAncoragem, proximaPilha } from './utils/navegacaoHash';
 // import TrustOnboarding from './components/TrustOnboarding';
 import AuditLogs from './components/AuditLogs';
 import CampaignManager from './components/CampaignManager';
@@ -614,9 +615,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (screen === AppScreen.LOGIN) {
       const hash = window.location.hash || '';
-      if (!hash.startsWith('#/login')) {
-        window.location.hash = '#/login';
-      }
+      if (!hash.startsWith('#/login')) escreverHash('/login');
     }
   }, [screen]);
 
@@ -625,10 +624,7 @@ const App: React.FC = () => {
   // anterior (ex: #/login) após o login, e a próxima tela nunca renderiza.
   useEffect(() => {
     const current = history[history.length - 1] || AppScreen.LOGIN;
-    const path = screenToPath[current] || '/login';
-    if (window.location.hash !== `#${path}`) {
-      window.location.hash = path;
-    }
+    escreverHash(screenToPath[current] || '/login');
   }, [history]);
 
   const setHistory = useCallback((update: AppScreen[] | ((prev: AppScreen[]) => AppScreen[])) => {
@@ -643,6 +639,26 @@ const App: React.FC = () => {
       return finalHistory;
     });
   }, []);
+
+  // URL → estado: o «voltar/avançar» do browser muda o hash, não a pilha.
+  // Só para as telas desenhadas pelo estado (catch-all): as que têm `<Route>`
+  // própria (dashboard, menu, gestor de base, login) são desenhadas pela URL e
+  // não podem passar pelo estado — os guards exigem unidade e rebatiam-nas.
+  useEffect(() => {
+    const aoMudarHash = () => {
+      const alvo = telaDoEstado(window.location.hash);
+      if (!alvo) return;
+      setHistory((prev) => {
+        const atual = prev[prev.length - 1];
+        if (atual === alvo) return prev;
+        logger.info(`>>> [Navigation] hashchange → ${alvo}`);
+        return proximaPilha(prev, alvo);
+      });
+    };
+
+    window.addEventListener('hashchange', aoMudarHash);
+    return () => window.removeEventListener('hashchange', aoMudarHash);
+  }, [setHistory]);
 
     // Ref para setHistory: o boot effect fica ancorado no mount (não re-executa a
   // rotação forçada para LOGIN quando databaseMode/selectedUnit mudam).
@@ -707,10 +723,11 @@ useEffect(() => {
           sessionStorage.removeItem('app_just_cleared_data');
           setHistoryRef.current([AppScreen.DATABASE_MANAGER]);
         } else if (hasLocalSessionInCache()) {
-          // Há sessão local válida: ancora no CONTRATO. Ancorar no login fazia
-          // o ecrã de entrada aparecer por um instante no arranque.
-          logger.info("[SRE_NAV] Sessão local preservada; ancorando no contrato de trabalho.");
-          setHistoryRef.current([AppScreen.WORK_CONTEXT_SELECTION]);
+          // Há sessão local válida: ancora no CONTRATO, mas respeita a URL
+          // quando ela pede uma tela — é isto que faz um F5 em #/audit-logs
+          // abrir a trilha em vez de voltar sempre ao contrato.
+          logger.info("[SRE_NAV] Sessão local preservada; ancorando no contrato de trabalho (URL manda).");
+          setHistoryRef.current(historicoDeAncoragem(AppScreen.WORK_CONTEXT_SELECTION));
         } else {
           logger.info("[SRE_NAV] Forçando ancoragem no portal unificado de autenticação.");
           setHistoryRef.current([AppScreen.LOGIN]);
@@ -1407,8 +1424,13 @@ useEffect(() => {
             setIsEngineReady(true);
             setIsInitializing(false);
             setAuthLoading(false);
-            // Com sessão local reposta ancora no contrato, nunca no login.
-            setHistory([hasLocalSessionInCache() ? AppScreen.WORK_CONTEXT_SELECTION : AppScreen.LOGIN]);
+            // Com sessão local reposta ancora no contrato (ou na tela pedida
+            // pela URL), nunca no login.
+            setHistory(
+              hasLocalSessionInCache()
+                ? historicoDeAncoragem(AppScreen.WORK_CONTEXT_SELECTION)
+                : [AppScreen.LOGIN]
+            );
             removerLoaderEstatico();
           }
           return;

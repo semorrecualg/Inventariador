@@ -130,6 +130,37 @@ describe('resolveInitialScreenHistory — regra de arranque', () => {
     );
     expect(resolveInitialScreenHistory()).toEqual([AppScreen.LOGIN]);
   });
+
+  it('F5 numa tela profunda com sessão abre nessa tela, com o contrato por baixo', () => {
+    writePersistedSession(USER, 1_000);
+    restorePersistedSession(2_000);
+    window.location.hash = '#/audit-logs';
+
+    expect(resolveInitialScreenHistory()).toEqual([
+      AppScreen.WORK_CONTEXT_SELECTION,
+      AppScreen.AUDIT_LOGS,
+    ]);
+
+    window.location.hash = '';
+  });
+
+  it('com sessão, uma rota desenhada pelo Router (dashboard) não muda o estado', () => {
+    writePersistedSession(USER, 1_000);
+    restorePersistedSession(2_000);
+    window.location.hash = '#/dashboard';
+
+    expect(resolveInitialScreenHistory()).toEqual([AppScreen.WORK_CONTEXT_SELECTION]);
+
+    window.location.hash = '';
+  });
+
+  it('sem sessão, uma tela profunda continua a pedir login', () => {
+    window.location.hash = '#/audit-logs';
+
+    expect(resolveInitialScreenHistory()).toEqual([AppScreen.LOGIN]);
+
+    window.location.hash = '';
+  });
 });
 
 describe('clearPersistedSession', () => {
