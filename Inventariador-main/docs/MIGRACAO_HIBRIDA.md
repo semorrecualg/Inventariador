@@ -74,10 +74,18 @@ uma **única camada de repositórios** por trás das telas:
       (checksum SHA-256) ✅ 2026-08-06 — `src/services/securityExportService.ts`
       (`buildSecurityExport`/`restoreSecurityExport`/`serializeSecurityExport`, com
       persistência `.dat` Capacitor e download `.json`/`.dat` no Web).
+- [x] **Pacote exportável com hash verificado (F7)** ✅ 2026-11-23 — v1.1 do
+      formato: `buildSecurityExport` sela o pacote inteiro com `packageChecksum`
+      (SHA-256 do corpo canónico, tabelas ordenadas por nome); `verifySecurityExport`
+      confere contagem e checksum de cada tabela e o hash do pacote; e
+      `restoreSecurityExport` **verifica antes da primeira escrita** — um pacote
+      corrompido ou editado à mão é recusado sem tocar na base. O `DatabaseManagerScreen`
+      ganhou «EXPORTAR PACOTE VERIFICADO» (só descarrega depois de a verificação passar).
 - [x] Testar **backup → restore** de ponta a ponta ✅ 2026-08-06
-      — `src/__tests__/securityExport.test.ts` (6 testes, `fake-indexeddb`): round-trip
+      — `src/__tests__/securityExport.test.ts` (10 testes, `fake-indexeddb`): round-trip
       de checksum, contagem/checksum por tabela, anti-downgrade, tolerância a tabelas
-      ausentes e isolamento de tabelas fora do manifesto.
+      ausentes, isolamento de tabelas fora do manifesto, hash do pacote e recusa de
+      restauro de pacote adulterado (registo, contagem ou hash).
 - [x] **Análise DBA da redundância `ativos`/`assets`/`local_assets`** ✅ 2026-08-06
       (decisão confirmada) — as 3 tabelas são espelhos idênticos (`DexieAsset`, PK
       `primarykey`, índices iguais) com **triple-write** no loader; **papéis aprovados:**

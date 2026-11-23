@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — pacote de backup exportável com hash verificado (F7)
+
+- **O que era:** o export de segurança já levava contagem e checksum SHA-256 por
+  tabela, mas nada selava o pacote inteiro e o restauro escrevia sem verificar
+  nada — um ficheiro corrompido ou editado à mão substituía o trabalho de campo
+  em silêncio. E não havia botão para o exportar: o serviço só era exercido nos
+  testes.
+- **Agora:** o formato v1.1 sela o pacote com `packageChecksum` (SHA-256 do corpo
+  canónico, com as tabelas ordenadas por nome). `verifySecurityExport` confere a
+  contagem e o checksum de cada tabela e o hash do pacote; `restoreSecurityExport`
+  corre essa verificação **antes da primeira escrita** e recusa o pacote inteiro
+  quando algo não bate. O Gestor de Base ganhou «EXPORTAR PACOTE VERIFICADO»:
+  só descarrega o `.json`/`.dat` depois de a verificação passar, e o log mostra o
+  total de registos, a versão do schema e o início do hash.
+- Testes: `securityExport.test.ts` cresce de 6 para 10 casos — pacote selado e
+  verificado, registo adulterado (recusa sem tocar no destino), contagem que não
+  bate com os registos e hash do pacote substituído.
+
 ### Corrigido — a âncora GPS volta noutro aparelho (F5)
 
 - **O que era:** a âncora marcada no `UnitConfigurator` só chegava à nuvem se a

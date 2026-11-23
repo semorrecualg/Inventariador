@@ -17,7 +17,9 @@ import { logger } from '../utils/logger';
 import { db } from './sqliteService';
 
 export const SECURITY_EXPORT_FORMAT = 'GBR_KARDEK_SECURITY_EXPORT' as const;
-export const SECURITY_EXPORT_VERSION = '1.0' as const;
+// 1.1 — pacote inteiro com hash próprio (`packageChecksum`), verificado antes
+// de qualquer restauro. A v1.0 só tinha checksum por tabela.
+export const SECURITY_EXPORT_VERSION = '1.1' as const;
 
 export interface SecurityExportTable {
   /** Número de registros na tabela no momento do snapshot. */
@@ -38,6 +40,31 @@ export interface SecurityExportManifest {
   source: 'DEXIE_INDEXEDDB';
   /** Mapa nome-da-tabela → snapshot (uma entrada por tabela do banco). */
   tables: Record<string, SecurityExportTable>;
+  /**
+   * SHA-256 do pacote inteiro (formato, schema, data, tabelas e registros, em
+   * ordem canónica). Um pacote que não confere é recusado no restauro — cobre a
+   * corrupção no transporte e a edição de um ficheiro à mão.
+   */
+  packageChecksum: string;
+}
+
+/**
+ * Corpo canónico do pacote, sem o próprio hash. As tabelas entram ordenadas por
+ * nome para o hash não depender da ordem em que o Dexie as expõe.
+ */
+function packageBody(manifest: Omit<SecurityExportManifest, 'packageChecksum'>): Record<string, unknown> {
+  const tables: Record<string, SecurityExportTable> = {};
+  for (const name of Object.keys(manifest.tables ?? {}).sort()) {
+    tables[name] = manifest.tables[name];
+  }
+  return {
+    format: manifest.format,
+    version: manifest.version,
+    schemaVersion: manifest.schemaVersion,
+    exportedAt: manifest.exportedAt,
+    source: manifest.source,
+    tables
+  };
 }
 
 /** Ordena registros pela chave primária (canônica) para checksum determinístico. */
@@ -70,7 +97,8 @@ export async function buildSecurityExport(
     schemaVersion: dbInstance.verno,
     exportedAt: new Date().toISOString(),
     source: 'DEXIE_INDEXEDDB',
-    tables: {}
+    tables: {},
+    packageChecksum: ''
   };
 
   for (const table of dbInstance.tables) {
@@ -84,7 +112,54 @@ export async function buildSecurityExport(
     logger.info(`[SecurityExport] Tabela '${table.name}': ${canonical.length} registros (checksum ${canonical.length > 0 ? 'calculado' : 'vazio'}).`);
   }
 
+  manifest.packageChecksum = await generateChecksum(packageBody(manifest));
+  logger.info(`[SecurityExport] Pacote selado: SHA-256 ${manifest.packageChecksum.slice(0, 16)}…`);
   return manifest;
+}
+
+export interface SecurityExportVerification {
+  ok: boolean;
+  /** Problemas encontrados, na ordem em que a verificação os deteta. */
+  problems: string[];
+}
+
+/**
+ * Verifica um pacote SEM tocar em nenhuma base: contagem por tabela, checksum
+ * por tabela e hash do pacote. É o portão do restauro — recusar aqui é o que
+ * impede um ficheiro corrompido de substituir o trabalho de campo.
+ */
+export async function verifySecurityExport(
+  manifest: SecurityExportManifest
+): Promise<SecurityExportVerification> {
+  if (!manifest || manifest.format !== SECURITY_EXPORT_FORMAT) {
+    return { ok: false, problems: ['formato inválido'] };
+  }
+
+  const problems: string[] = [];
+  for (const [name, snapshot] of Object.entries(manifest.tables ?? {})) {
+    if (!snapshot || !Array.isArray(snapshot.records)) {
+      problems.push(`${name}: registros ausentes`);
+      continue;
+    }
+    if (snapshot.count !== snapshot.records.length) {
+      problems.push(`${name}: contagem ${snapshot.count} ≠ ${snapshot.records.length} registros`);
+    }
+    const checksum = await generateChecksum(snapshot.records);
+    if (checksum !== snapshot.checksum) {
+      problems.push(`${name}: checksum não confere`);
+    }
+  }
+
+  if (!manifest.packageChecksum) {
+    problems.push('hash do pacote ausente');
+  } else {
+    const expected = await generateChecksum(packageBody(manifest));
+    if (expected !== manifest.packageChecksum) {
+      problems.push('hash do pacote não confere');
+    }
+  }
+
+  return { ok: problems.length === 0, problems };
 }
 
 export interface SecurityRestoreResult {
@@ -117,6 +192,13 @@ export async function restoreSecurityExport(
     throw new Error(
       `Export de segurança v${manifest.schemaVersion} não pode ser restaurado em banco v${dbInstance.verno} (downgrade).`
     );
+  }
+
+  // Portão do restauro: verifica o pacote inteiro antes da primeira escrita.
+  // Um ficheiro corrompido não chega a limpar nenhuma tabela.
+  const verification = await verifySecurityExport(manifest);
+  if (!verification.ok) {
+    throw new Error(`Pacote de backup inválido: ${verification.problems.join('; ')}`);
   }
 
   const result: SecurityRestoreResult = { restored: {}, skipped: [] };
