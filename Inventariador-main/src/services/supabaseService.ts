@@ -4097,6 +4097,30 @@ export const saveUnitConfigFlags = async (config: UnitConfig): Promise<boolean> 
 };
 
 /**
+ * Payload de `inventory_config.data` — a MESMA forma no cache local
+ * (`local_unit_configs`) e na nuvem. Existe uma vez só para os dois caminhos
+ * não divergirem (uma cópia local mais rica do que a que sobe é uma âncora que
+ * «volta» noutro aparelho sem proveniência ou sem raio).
+ */
+const buildUnitConfigDataPayload = (config: UnitConfig, tenantid: string, unitId: string) => ({
+  filial: unitId,
+  tenantid,
+  unit_id: unitId, // Legado
+  lat: Number(config.lat),
+  lng: Number(config.lng),
+  radius_meters: Number(config.radius_meters),
+  is_active: Boolean(config.is_active),
+  // Proveniência da âncora (sensor | manual): viaja no JSONB `inventory_config.data`,
+  // sem depender de coluna nova na tabela da nuvem.
+  source: config.source,
+  updated_by: String(config.updated_by || 'system'),
+  updated_at: new Date().toISOString(),
+  // Flags de política viajam no cache local (e no data do inventory_config):
+  // é isso que faz o chip/regras resolverem offline.
+  flags: buildUnitFlags(config, hasRealAnchor(config.lat, config.lng))
+});
+
+/**
  * Envia a âncora de uma unidade para a nuvem: `inventory_config` (payload
  * completo, compatibilidade com builds antigos) + `unit_configs` (linha
  * canónica, com as flags de política).
@@ -4112,23 +4136,7 @@ const pushUnitConfigToCloud = async (
 ): Promise<boolean> => {
   if (!supabase) return false;
 
-  const payload = {
-    filial: unitId,
-    tenantid,
-    unit_id: unitId, // Legado
-    lat: Number(config.lat),
-    lng: Number(config.lng),
-    radius_meters: Number(config.radius_meters),
-    is_active: Boolean(config.is_active),
-    // Proveniência da âncora (sensor | manual): viaja no JSONB `inventory_config.data`,
-    // sem depender de coluna nova na tabela da nuvem.
-    source: config.source,
-    updated_by: String(config.updated_by || 'system'),
-    updated_at: new Date().toISOString(),
-    // Flags de política viajam no cache local (e no data do inventory_config):
-    // é isso que faz o chip/regras resolverem offline.
-    flags: buildUnitFlags(config, hasRealAnchor(config.lat, config.lng))
-  };
+  const payload = buildUnitConfigDataPayload(config, tenantid, unitId);
 
   try {
     // FIX(CRITICO): onConflict 'tenantid, filial' — sem isso, o 1º salvamento
@@ -4213,24 +4221,8 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
       logger.warn('>>> [Governance] tenantid/filial ausentes ao salvar âncora. Sincronização em nuvem ignorada.');
       return true;
     }
-    
-    const payload = {
-      filial: unitId,
-      tenantid: tenantid,
-      unit_id: unitId, // Legado
-      lat: Number(config.lat),
-      lng: Number(config.lng),
-      radius_meters: Number(config.radius_meters),
-      is_active: Boolean(config.is_active),
-      // Proveniência da âncora (sensor | manual): viaja no JSONB `inventory_config.data`,
-      // sem depender de coluna nova na tabela da nuvem.
-      source: config.source,
-      updated_by: String(config.updated_by || 'system'),
-      updated_at: new Date().toISOString(),
-      // Flags de política viajam no cache local (e no data do inventory_config):
-      // é isso que faz o chip/regras resolverem offline.
-      flags: buildUnitFlags(config, hasRealAnchor(config.lat, config.lng))
-    };
+
+    const payload = buildUnitConfigDataPayload(config, tenantid, unitId);
 
     logger.info('>>> [Persistence] Salvando GPS Local-First (Cache):', unitKey);
 
@@ -4252,23 +4244,19 @@ export const saveUnitConfig = async (config: UnitConfig): Promise<boolean | stri
     // Sem credenciais no build não há nuvem nenhuma: nada a enviar, nem a enfileirar.
     if (!supabase) return true;
 
-    // A âncora e as flags já ficaram no SQLite/Dexie acima. Sem rede ou em BASE
-    // LOCAL (zero chamadas de rede, docs/ARCHITECTURE.md §10) a gravação fica na
-    // fila de envio: é ela que faz a âncora voltar noutro aparelho depois de
-    // reconectar (portão da F5).
-    if (getDatabaseMode() === 'INTERNAL' || !navigator.onLine) {
-      const fila = registarAncoraPendente(localStorage, { ...config, tenantid, filial: unitId, unit_id: unitId });
-      logger.info(`>>> [GPS] Âncora de ${unitId} guardada por subir (${getDatabaseMode() === 'INTERNAL' ? 'BASE LOCAL' : 'sem rede'}); fila: ${fila}.`);
-      return true;
+    // A âncora e as flags já ficaram no SQLite/Dexie acima. Só há envio em modo
+    // online com rede; um único ponto decide se fica por subir — em BASE LOCAL
+    // (zero chamadas de rede, docs/ARCHITECTURE.md §10), sem rede ou com a
+    // nuvem a recusar, a âncora entra na fila e sobe depois (portão da F5).
+    const modo = getDatabaseMode();
+    let confirmada = false;
+    if (modo !== 'INTERNAL' && navigator.onLine) {
+      confirmada = await pushUnitConfigToCloud(config, tenantid, unitId);
     }
-
-    // 2. SINCRONIZAÇÃO EM NUVEM (falha silenciosa nao bloqueia o fluxo local)
-    // Aguardamos a sincronizacao (try-catch interno) para nao perder a ancora
-    // em caso de fechamento rapido do app — o dado local ja esta garantido antes.
-    const confirmada = await pushUnitConfigToCloud(config, tenantid, unitId);
     if (!confirmada) {
       const fila = registarAncoraPendente(localStorage, { ...config, tenantid, filial: unitId, unit_id: unitId });
-      logger.warn(`>>> [GPS] Âncora de ${unitId} não confirmada na nuvem; fica por subir (fila: ${fila}).`);
+      const motivo = modo === 'INTERNAL' ? 'BASE LOCAL' : navigator.onLine ? 'nuvem não confirmou' : 'sem rede';
+      logger.info(`>>> [GPS] Âncora de ${unitId} fica por subir (${motivo}); fila: ${fila}.`);
     }
 
     return true;
@@ -4298,11 +4286,7 @@ export const flushAncorasPendentes = async (): Promise<number> => {
       removerAncoraPendente(localStorage, item.tenantid, item.filial);
       continue;
     }
-    const ok = await pushUnitConfigToCloud(
-      { ...item.config, tenantid: item.tenantid, filial: item.filial },
-      item.tenantid,
-      item.filial
-    );
+    const ok = await pushUnitConfigToCloud(item.config, item.tenantid, item.filial);
     if (!ok) continue; // mantém na fila para o próximo ciclo
     removerAncoraPendente(localStorage, item.tenantid, item.filial);
     enviadas++;
