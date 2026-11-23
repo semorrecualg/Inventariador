@@ -24,6 +24,7 @@ import { User, DatabaseMode } from '../types';
 import { fetchAuditLogs, fetchAssetLogs } from '../services/supabaseService';
 import { localDb } from '../services/localDbService';
 import { logger } from '../utils/logger';
+import { textoDoDetails } from '../utils/auditDetails';
 import { ehFalhaDeEnvio, getActionColor, isAssetLog } from '../utils/auditActions';
 import { falhasDeEnvio, falhasDeEnvioCsv, falhasDeEnvioJson } from '../utils/falhasDeEnvio';
 
@@ -153,6 +154,8 @@ const AuditLogs: React.FC<AuditLogsProps> = ({ user, onBack, databaseMode }) => 
 
             cloudLogs = (data as Record<string, any>[]).map(log => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
               ...log,
+              // A coluna de produção é json: o ecrã trabalha sempre com texto.
+              details: textoDoDetails(log.details),
               record_id: String(log.record_id || log.asset_id || ''),
               table_name: (log.table_name || (logType === 'ASSET' ? 'assets' : '')) as string,
               tenantid: String(log.tenantid || tenantid)
