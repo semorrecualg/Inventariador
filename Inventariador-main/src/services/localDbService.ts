@@ -1,4 +1,5 @@
 import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
+import { getCurrentTenantid } from '../utils/tenantAtual';
 import { isAdminEmail } from '../utils/authUtils';
 import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
 import { pickAssetAddress } from '../utils/assetAddress';
@@ -23,6 +24,16 @@ const snapshotStore = localforage.createInstance({
   name: 'InventoryApp_Snapshots',
   storeName: 'virtual_backups'
 });
+
+/** Lê um campo JSON guardado como texto na trilha; texto livre → `undefined`. */
+const lerJsonDoLog = (valor: string | null | undefined): unknown => {
+  if (!valor) return undefined;
+  try {
+    return JSON.parse(valor);
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * Normaliza texto para a busca de endereço: sem acentos, caixa alta e
@@ -69,38 +80,10 @@ export const normalizeUnitMatchKey = (value: unknown): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-/**
- * Contrato efetivo para as consultas locais: perfil → sessão → armazenamento.
- *
- * O dono global (`ADMIN`) NÃO declara `tenantid` no perfil: se a leitura parasse
- * no utilizador, todas as consultas `[tenantid+filial]` (endereços, localidades,
- * estatísticas) rodavam com contrato vazio e devolviam «Nenhum Endereço
- * Cadastrado» mesmo com a base carregada. A cadeia é a mesma de
- * `resolveTenantId` (utils/tenantUtils) usada no resto do app.
- */
-export const getCurrentTenantid = (): string => {
-  const candidatos: string[] = [];
-  try {
-    const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      candidatos.push(
-        String(user?.tenantid || user?.tenantId || user?.tenant_id || user?.tenantid_ || '')
-      );
-    }
-  } catch { /* ignore */ }
-  try {
-    candidatos.push(sessionStorage.getItem('tenantid') || '', sessionStorage.getItem('tenantId') || '');
-  } catch { /* ignore */ }
-  try {
-    candidatos.push(localStorage.getItem('tenantid') || '', localStorage.getItem('tenantId') || '');
-  } catch { /* ignore */ }
-
-  const valido = candidatos
-    .map(c => c.trim())
-    .find(c => c !== '' && !['NULL', 'UNDEFINED', 'N/A'].includes(c.toUpperCase()));
-  return valido || '';
-};
+// O contrato efectivo vive em `utils/tenantAtual` para o `sqliteService` o
+// poder usar (o evento da trilha carimba o contrato NO NASCIMENTO, não no
+// envio). Reexportado daqui para não mudar os consumidores existentes.
+export { getCurrentTenantid };
 
 const handleDemoAuditIncrement = () => {
   try {
@@ -800,6 +783,11 @@ export const localDb = {
   auditLogs: {
     add: async (log: AuditLogEntry) => {
       const id = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      // `old_data` e `new_data` são guardados em campos próprios: o `delta`
+      // antigo escolhia UM dos dois (`new_data ? … : old_data`) e perdia o
+      // estado anterior sempre que havia alteração. `delta` fica como espelho
+      // legado — a deduplicação de falhas (`signature`) e os leitores antigos
+      // continuam a lê-lo.
       await db.audit_logs.put({
         id,
         usuario: log.user || log.user_email || 'unknown',
@@ -808,6 +796,11 @@ export const localDb = {
         registro_id: log.record_id || '',
         details: log.details || '',
         delta: log.new_data ? JSON.stringify(log.new_data) : (log.old_data ? JSON.stringify(log.old_data) : null),
+        new_data: log.new_data === undefined ? null : JSON.stringify(log.new_data),
+        old_data: log.old_data === undefined ? null : JSON.stringify(log.old_data),
+        // O contrato é carimbado NO NASCIMENTO: um evento do contrato A que
+        // suba com o contrato B activo não pode ser arquivado em B.
+        tenantid: String(log.tenantid || getCurrentTenantid() || ''),
         updated_at: log.timestamp || new Date().toISOString(),
         // F2: todo o evento nasce na fila da trilha; a nuvem confirma e marca.
         _synced: 0
@@ -842,8 +835,9 @@ export const localDb = {
             table_name: log.tabela,
             record_id: log.registro_id,
             details: log.details,
-            new_data: log.delta ? JSON.parse(log.delta) : undefined,
-            tenantid: getCurrentTenantid()
+            new_data: lerJsonDoLog(log.new_data) ?? lerJsonDoLog(log.delta),
+            old_data: lerJsonDoLog(log.old_data),
+            tenantid: log.tenantid || getCurrentTenantid()
           }));
         }
       })

@@ -2,6 +2,7 @@ import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
 import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
+import { getCurrentTenantid } from '../utils/tenantAtual';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { carimbarFalhaEnvio } from '../utils/syncFalha';
@@ -118,6 +119,11 @@ export interface DexieAuditLog {
   details: string;
   delta: string | null;
   updated_at: string;
+  /** Contrato em que o evento ACONTECEU (carimbado no nascimento, F2). */
+  tenantid?: string;
+  /** Estado depois/dantes, em JSON próprio (`old_data` não se perde, F2). */
+  new_data?: string | null;
+  old_data?: string | null;
   /**
    * Fila da trilha para a nuvem (F2): `1` = confirmada pelo Supabase.
    * Ausente/`0` = por subir. Não é índice — a fila lê por `filter`, para
@@ -718,6 +724,9 @@ export class SqliteService {
       details,
       delta: delta ?? null,
       updated_at: atualizadoEm ?? new Date().toISOString(),
+      // F2: o contrato do evento é o do momento em que ele acontece; a fila
+      // não pode carimbar o contrato que estiver activo quando o evento subir.
+      tenantid: getCurrentTenantid(),
       // F2: nasce por subir; a fila (`services/auditoriaNuvem`) marca `_synced`.
       _synced: 0
     });

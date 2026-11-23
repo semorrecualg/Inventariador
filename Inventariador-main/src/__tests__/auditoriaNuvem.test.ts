@@ -108,6 +108,31 @@ describe('fila da trilha — Base Oficial', () => {
     expect(await contarAuditoriaPendente()).toBe(0);
   });
 
+  it('sobe com o contrato do nascimento, mesmo com outro contrato activo no envio', async () => {
+    await semear('LOG_NASCIDO', { tenantid: 'CICOPAL' });
+    // O operador trocou de contrato antes de a fila subir.
+    localStorage.setItem('tenantid', 'OUTRO_CONTRATO');
+
+    await enviarFilaAuditoria();
+
+    const [payload] = upsertMock.mock.calls[0][0] as Record<string, unknown>[];
+    expect(payload.tenantid).toBe('CICOPAL');
+  });
+
+  it('envia old_data e new_data em colunas próprias', async () => {
+    await semear('LOG_ESTADOS', {
+      tenantid: 'CICOPAL',
+      old_data: JSON.stringify({ status: 'PENDENTE' }),
+      new_data: JSON.stringify({ status: 'CONFERIDO' })
+    });
+
+    await enviarFilaAuditoria();
+
+    const [payload] = upsertMock.mock.calls[0][0] as Record<string, unknown>[];
+    expect(payload.new_data).toEqual({ status: 'CONFERIDO' });
+    expect(payload.old_data).toEqual({ status: 'PENDENTE' });
+  });
+
   it('reenviar não duplica: sem pendentes, não há segundo upsert', async () => {
     await semear('LOG_2');
 
@@ -152,6 +177,27 @@ describe('mapeamento local → nuvem', () => {
 
     expect(mapa).not.toHaveProperty('new_data');
     expect(mapa.client_event_id).toBe('LOG_X');
+    // Linha legada (sem carimbo): usa o contrato activo como fallback.
     expect(mapa.tenantid).toBeNull();
+  });
+
+  it('linha legada com `delta` continua a alimentar `new_data`', () => {
+    const mapa = mapearLogParaNuvem(
+      {
+        id: 'LOG_LEGADO',
+        usuario: 'auditor@gbr.com.br',
+        acao: 'CONFERENCIA',
+        tabela: 'local_assets',
+        registro_id: 'PK-1',
+        details: 'conferido',
+        delta: JSON.stringify({ status: 'CONFERIDO' }),
+        updated_at: '2026-11-23T10:00:00.000Z'
+      },
+      'CICOPAL'
+    );
+
+    expect(mapa.new_data).toEqual({ status: 'CONFERIDO' });
+    expect(mapa).not.toHaveProperty('old_data');
+    expect(mapa.tenantid).toBe('CICOPAL');
   });
 });

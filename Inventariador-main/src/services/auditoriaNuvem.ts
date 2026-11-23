@@ -17,7 +17,7 @@
 import { supabase } from './supabaseService';
 import { canPushToCloud } from './pushGate';
 import { db, type DexieAuditLog } from './sqliteService';
-import { getCurrentTenantid } from './localDbService';
+import { getCurrentTenantid } from '../utils/tenantAtual';
 import { logger } from '../utils/logger';
 
 /** Eventos por lote — o mesmo porte das cargas (`DatabaseLoaderService`). */
@@ -36,11 +36,11 @@ export interface ResultadoFilaAuditoria {
   error?: string;
 }
 
-/** Lê o `delta` local (JSON) sem rebentar com texto livre. */
-const lerDelta = (delta: string | null): unknown => {
-  if (!delta) return undefined;
+/** Lê um campo JSON local sem rebentar com texto livre. */
+const lerJson = (valor: string | null | undefined): unknown => {
+  if (!valor) return undefined;
   try {
-    const parsed = JSON.parse(delta);
+    const parsed = JSON.parse(valor);
     return parsed && typeof parsed === 'object' ? parsed : undefined;
   } catch {
     return undefined;
@@ -50,13 +50,20 @@ const lerDelta = (delta: string | null): unknown => {
 /**
  * Mapeamento local → nuvem, fixado pelo plano de F2:
  * `usuario → user_email`, `acao → action`, `tabela → table_name`,
- * `registro_id → record_id`, `delta → new_data`, `updated_at → created_at`.
+ * `registro_id → record_id`, `new_data`/`old_data` → as mesmas colunas e
+ * `updated_at → created_at`.
  *
- * `tenantid` é resolvido no envio, a partir do contrato activo: o registo
- * local não guarda o contrato, e o ciclo só corre com sessão escolhida.
+ * O `tenantid` do evento vem do **nascimento** (carimbado em `sqliteService` e
+ * em `localDb.auditLogs.add`): subir com o contrato activo no momento do envio
+ * arquivava em B um evento que aconteceu em A. O `tenantFallback` só serve as
+ * linhas antigas, escritas antes deste carimbo existir.
+ *
+ * `delta` continua a alimentar `new_data` quando a linha é legada — e só nesse
+ * caso, porque o `delta` antigo guardava UM estado e perdia o outro.
  */
-export const mapearLogParaNuvem = (log: DexieAuditLog, tenantid: string | null) => {
-  const newData = lerDelta(log.delta);
+export const mapearLogParaNuvem = (log: DexieAuditLog, tenantFallback: string | null) => {
+  const newData = lerJson(log.new_data) ?? lerJson(log.delta);
+  const oldData = lerJson(log.old_data);
   return {
     client_event_id: log.id,
     user_email: log.usuario || '',
@@ -65,10 +72,11 @@ export const mapearLogParaNuvem = (log: DexieAuditLog, tenantid: string | null) 
     record_id: log.registro_id || '',
     details: log.details || '',
     origin: 'APP',
-    tenantid,
+    tenantid: log.tenantid || tenantFallback,
     // A hora do evento, não a do envio: a trilha tem de dizer QUANDO aconteceu.
     created_at: log.updated_at,
     ...(newData !== undefined ? { new_data: newData } : {}),
+    ...(oldData !== undefined ? { old_data: oldData } : {}),
   };
 };
 
@@ -120,8 +128,9 @@ export const enviarFilaAuditoria = async (): Promise<ResultadoFilaAuditoria> => 
       return { success: true, enviados: 0, falhados: 0, pendentes: 0 };
     }
 
-    const tenantid = getCurrentTenantid() || null;
-    const payload = pendentes.map((log) => mapearLogParaNuvem(log, tenantid));
+    // Fallback só para linhas legadas, sem contrato carimbado no nascimento.
+    const tenantFallback = getCurrentTenantid() || null;
+    const payload = pendentes.map((log) => mapearLogParaNuvem(log, tenantFallback));
 
     const resposta = await Promise.race([
       supabase.from('audit_logs').upsert(payload, { onConflict: 'client_event_id' }),

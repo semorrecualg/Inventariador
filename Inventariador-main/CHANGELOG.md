@@ -35,11 +35,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subir» ao lado da contagem local, e o expurgo só apaga o confirmado aos 7 dias
   (o não confirmado espera a janela de segurança de 30). A fila usa o mesmo
   portão da BASE LOCAL de F1, agora em `services/pushGate.ts`.
+- **O contrato viaja com o evento:** `tenantid` é carimbado no nascimento
+  (`localDb.auditLogs.add` e `sqliteService.logAuditEvent`), não no envio — um
+  evento do contrato A que subisse com o contrato B activo ficava arquivado em B.
+- **Os dois estados ficam:** `new_data` e `old_data` passam a ser guardados e
+  enviados em colunas próprias; o `delta` antigo escolhia um dos dois e perdia o
+  estado anterior (continua como espelho legado, porque a deduplicação de falhas
+  lê `delta.signature`).
 - **Migração necessária:** `audit_logs.client_event_id` e o índice único, em
   `docs/supabase_bootstrap.sql`. Sem ela, o envio falha com o erro carimbado na
   fila — nada é apagado nem marcado como enviado.
-- Testes: `auditoriaNuvem` (portão, idempotência, recusa, mapeamento) e
-  `auditoriaRetencao` (janela de segurança).
+- Testes: `auditoriaNuvem` (portão, idempotência, recusa, contrato do
+  nascimento, `old_data`/`new_data`, mapeamento), `auditLogNascimento` (carimbo
+  e os dois estados) e `auditoriaRetencao` (janela de segurança).
 
 ### Alterado — um só caminho para o Gestor de Base
 

@@ -79,12 +79,22 @@ Três tabelas espelho (mesmo tipo/shape). Isolamento multi-tenant obrigatório p
 
 ### 3.2 `audit_logs` → `DexieAuditLog`
 `id` (pk), `usuario`, `acao`, `tabela`, `registro_id`, `details`, `delta` (`string|null`), `updated_at`,
+`tenantid?`, `new_data?` (`string|null`), `old_data?` (`string|null`),
 `_synced?` (`0|1`), `_syncAttempts?`, `_syncError?` (`string|null`).
 
-Os três últimos são o estado da fila para a nuvem (F2): ausente/`0` = por subir,
-`1` = confirmado pelo Supabase. **Não são índices** e não mudam `version()` — a fila
-lê por `filter`, para apanhar também as linhas escritas antes deste campo existir
-(que continuam a contar como por subir).
+- `tenantid` é o **contrato do momento do evento**, carimbado no nascimento
+  (`localDb.auditLogs.add` e `sqliteService.logAuditEvent`). Antes, a fila de F2
+  resolvia-o no envio — um evento de A subia carimbado como B se o operador
+tivesse trocado de contrato entretanto.
+- `new_data`/`old_data` são os dois estados, em JSON próprio. O `delta` legado
+  guardava UM deles (`new_data ? … : old_data`) e perdia o anterior; continua a
+  ser preenchido como espelho do estado novo porque a deduplicação de falhas lê
+  `delta.signature`.
+
+`_synced`, `_syncAttempts` e `_syncError` são o estado da fila para a nuvem (F2):
+ausente/`0` = por subir, `1` = confirmado pelo Supabase. **Nenhum destes campos é
+índice** e não mudam `version()` — a fila lê por `filter`, para apanhar também as
+linhas escritas antes deste campo existir (que continuam a contar como por subir).
 
 ### 3.3 `campaigns` → `DexieCampaign`
 `id` (pk), `name`, `status`, `tenantid` (canônico), `created_at`.
