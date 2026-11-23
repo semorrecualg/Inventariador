@@ -26,7 +26,6 @@ import {
   ListChecks,
   Database,
   Cloud,
-  Server,
   Map as MapIcon,
   RefreshCw,
   ShieldAlert,
@@ -527,7 +526,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="w-8 h-8 bg-accent-soft text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/10"><DatabaseZap size={16} /></div>
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-ink uppercase tracking-tight">Gestão e Manutenção</h4>
-                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Base, sincronização, carga e limpeza</p>
+                  <p className="text-[8px] font-bold text-ink-muted uppercase tracking-widest mt-0.5">Modo de base, sincronização, backup e limpeza</p>
                 </div>
               </button>
               )}
@@ -824,7 +823,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <DatabaseZap size={32} />
               </div>
               <h2 className="text-xl font-bold text-white uppercase tracking-tight">Gestão e Manutenção</h2>
-              <p className="text-[9px] font-bold text-accent uppercase tracking-[0.3em] mt-1.5 opacity-70">Operações de Banco de Dados</p>
+              <p className="text-[9px] font-bold text-accent uppercase tracking-[0.3em] mt-1.5 opacity-70">Configuração e Ações do Utilizador</p>
             </div>
 
             <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar pr-1">
@@ -891,7 +890,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   </p>
                   <div className="mt-2 flex items-center space-x-2">
                     <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-                    <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">Arquivo: GBR_INVENTARIO_EXPERT.DB</span>
+                    <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">Arquivo: {(dirStatus?.path || 'Directory.Data/gbr_kardek.db').split('/').pop()}</span>
                   </div>
                 </div>
 
@@ -964,33 +963,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
               </div>
 
-              {/* Modalidade de Acesso - Fixado em Local por Orientação */}
-              <div className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl shadow-sm mb-3">
-                <div className="flex items-center mb-3">
-                  <div className="w-8 h-8 bg-accent/20 text-accent rounded-lg flex items-center justify-center mr-4 border border-accent/30 shadow-sm"><Database size={16} /></div>
-                  <div className="flex-1">
-                    <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Modalidade de Acesso</h4>
-                    <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Configuração de Banco de Dados</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div 
-                    className="w-full py-3 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-between border bg-slate-600/20 border-slate-500 text-slate-400 shadow-sm select-none"
-                  >
-                    <div className="flex items-center">
-                      <Server size={14} className="mr-3" />
-                      <span>Mobile Puro (Local)</span>
-                    </div>
-                    <div className="w-2 h-2 bg-slate-400 rounded-full shadow-[0_0_8px_rgba(148,163,184,0.8)]" />
-                  </div>
-                </div>
-                <div className="mt-3 p-2 bg-accent/10 border border-accent/20 rounded-lg">
-                  <p className="text-[7px] font-bold text-accent uppercase leading-relaxed tracking-wide opacity-80">
-                    Nota: Atualmente configurado em modo offline-first restrito (sem conexão com a nuvem).
-                  </p>
-                </div>
-              </div>
-
               <button 
                 onClick={() => { 
                   setIsDataMenuOpen(false); 
@@ -1001,9 +973,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
               >
                 <div className="w-12 h-12 bg-white/20 text-white rounded-xl flex items-center justify-center mr-5 shadow-inner"><Database size={24} /></div>
                 <div className="flex-1">
-                  <h4 className="text-sm font-black uppercase tracking-tight">GESTOR DE BASE</h4>
+                  <h4 className="text-sm font-black uppercase tracking-tight">ABRIR O GESTOR DE BASE</h4>
                   <p className="text-[9px] font-bold text-white/70 uppercase tracking-widest mt-0.5 whitespace-pre-wrap">
-                    Zerar Base de Dados Local, Diagnóstico de Hardware & Logs de SRE
+                    Mesmo ecrã do cartão «Banco de Dados»: contadores, carga, purga e logs SRE
                   </p>
                 </div>
                 <ChevronRight size={20} className="text-white/40" />

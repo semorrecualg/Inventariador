@@ -33,6 +33,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Procedimento em `docs/LIMPEZA_COPIAS_EXATAS.md`. Testes:
   `assetMirrorCleanupService`.
 
+### Corrigido — BASE LOCAL hermética, não envia nada para a nuvem
+
+- **O que era:** o ciclo de fundo (`runSyncLoopCycle`) chamava
+  `processDataSyncQueue`, `photoSyncManager` e `processCampaignSyncQueue`, e
+  `createCampaign` subia a campanha, sem consultar o modo de base. Com sessão e
+  filial activas, ativos conferidos em BASE LOCAL podiam chegar ao Supabase — e a
+  campanha subia sempre. O modo dizia «local» e a rede era usada à mesma.
+- **Agora:** o portão `syncService.canPushToCloud` exige
+  `Capacitor.isNativePlatform()` **e** `isOnlineDatabaseMode(getDatabaseMode())`;
+  em `INTERNAL`/`INTERNAL_PLUS` os três ciclos devolvem 0 registos sem tocar na
+  nuvem, e `createCampaign` grava só no aparelho. Um aviso permanente no topo do
+  app (fora do login) diz que nada sai do aparelho e que desinstalar ou limpar os
+  dados apaga a base, a trilha de auditoria e as fotos pendentes. Teste:
+  `baseLocalPushGate`.
+
+### Adicionado — a trilha de auditoria sobe em lotes idempotentes (F2, 1.º passo)
+
+- **O que era:** em Base Oficial, `logAuditEvent` fazia um `insert` direto no
+  Supabase com timeout de 2 s. Se a rede falhasse, o evento só ficava no log
+  técnico: não havia fila, retry nem forma de saber o que faltava. O expurgo aos
+  7 dias apagava também o que nunca tinha subido.
+- **Agora:** todo o evento é gravado em `audit_logs` do Dexie (`_synced: 0`) e
+  sobe pela fila `services/auditoriaNuvem.ts`, em lotes de 200, por `upsert` com
+  `client_event_id` (= `id` local) — reenviar não duplica. A recusa da nuvem fica
+  carimbada na linha (`_syncError`, `_syncAttempts`), o Gestor mostra «N por
+  subir» ao lado da contagem local, e o expurgo só apaga o confirmado aos 7 dias
+  (o não confirmado espera a janela de segurança de 30). A fila usa o mesmo
+  portão da BASE LOCAL de F1, agora em `services/pushGate.ts`.
+- **O contrato viaja com o evento:** `tenantid` é carimbado no nascimento
+  (`localDb.auditLogs.add` e `sqliteService.logAuditEvent`), não no envio — um
+  evento do contrato A que subisse com o contrato B activo ficava arquivado em B.
+- **Os dois estados ficam:** `new_data` e `old_data` passam a ser guardados e
+  enviados em colunas próprias; o `delta` antigo escolhia um dos dois e perdia o
+  estado anterior (continua como espelho legado, porque a deduplicação de falhas
+  lê `delta.signature`).
+- **Um só ponto de escrita:** `sqliteService.gravarAuditoria` (e o construtor
+  `construirAuditoria`, para os lotes) é o único sítio que escreve em
+  `db.audit_logs`. Os escritores directos — `localDb.auditLogs.add` e o flush do
+  buffer, `recnoGuardService`, `DatabaseLoaderService` (reconciliação e
+  correcções) e `InventoryCard` — passam todos por ele, por isso o contrato, o
+  `new_data` e o `_synced` deixam de depender de cada chamada se lembrar.
+- **Migração necessária:** `audit_logs.client_event_id` e o índice único, em
+  `docs/supabase_bootstrap.sql`. Sem ela, o envio falha com o erro carimbado na
+  fila — nada é apagado nem marcado como enviado.
+- Testes: `auditoriaNuvem` (portão, idempotência, recusa, contrato do
+  nascimento, `old_data`/`new_data`, mapeamento), `auditLogNascimento` (carimbo,
+  ponto único e os dois estados), `auditLogPontoUnico` (varredura do código:
+  nenhum `db.audit_logs.put` fora do `sqliteService`) e `auditoriaRetencao`
+  (janela de segurança).
+
+### Alterado — um só caminho para o Gestor de Base
+
+- **O que era:** o Painel Completo tinha **duas portas** para a mesma base — o
+  cartão «Banco de Dados» abria o Gestor de Base e a «Gestão e Manutenção»
+  anunciava «Base, sincronização, carga e limpeza» para depois exigir um segundo
+  toque num botão «GESTOR DE BASE». A copy prometia contagens que só o Gestor
+  mostra, e a caixa «Modalidade de Acesso» dizia «offline-first restrito (sem
+  conexão com a nuvem)» logo abaixo do alternador que oferece a Base Oficial —
+  dois estados contraditórios no mesmo painel.
+- **Agora:** o cartão «Banco de Dados» fica como caminho do menu para o Gestor
+  de Base, e na Gestão e Manutenção o botão passa a «ABRIR O GESTOR DE BASE»,
+  com a nota de que é o mesmo ecrã (contadores, carga, purga e logs SRE). O
+  Painel anuncia-se como «Configuração e Ações do Utilizador»; a caixa
+  «Modalidade de Acesso» sai, porque o modo de base vive no alternador Local ↔
+  Oficial; o nome do ficheiro vem do caminho real do banco, em vez do
+  `GBR_INVENTARIO_EXPERT.DB` fixo. No Gestor, «Registros de Auditoria» passa a
+  «(local)», com a nota de que é a contagem do `audit_logs` no Dexie do aparelho.
+  Teste: `painelCompletoHub` (o atalho pede o mesmo `AppScreen.DATABASE_MANAGER`).
+
 ### Alterado
 
 - **Unidade Operacional fundida no contrato de trabalho.** A rota `/unit` foi

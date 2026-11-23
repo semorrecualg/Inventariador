@@ -8,8 +8,10 @@
 // (mesmo padrão de fetchTenantFiliais.test.ts), de modo que o resultado não
 // depende do ambiente de quem corre os testes.
 // ============================================================================
+import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type * as SupabaseService from '../services/supabaseService';
+import { db } from '../services/sqliteService';
 
 vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
@@ -97,7 +99,8 @@ describe('syncConfigToCloud — modo nuvem', () => {
     expect(events).toHaveLength(0);
   });
 
-  it('registra CONFIG_SYNC_FAIL em audit_logs quando a gravação falha', async () => {
+  it('registra CONFIG_SYNC_FAIL na trilha local quando a gravação falha', async () => {
+    await db.audit_logs.clear();
     stubs.upsert.mockResolvedValue({
       error: { code: '42501', message: 'permission denied for table inventory_config' }
     });
@@ -106,15 +109,22 @@ describe('syncConfigToCloud — modo nuvem', () => {
       code: '42501'
     });
 
-    await vi.waitFor(() => expect(stubs.insert).toHaveBeenCalled());
+    // F2: a trilha é gravada no Dexie e sobe pela fila. Não há mais `insert`
+    // direto em `audit_logs` — por isso o rasto tem de estar no aparelho, por
+    // subir (`_synced: 0`), e não numa chamada à nuvem.
+    await vi.waitFor(async () => {
+      expect(await db.audit_logs.count()).toBeGreaterThan(0);
+    });
 
-    const entry = stubs.insert.mock.calls[0][0][0];
-    expect(entry.action).toBe('CONFIG_SYNC_FAIL');
-    expect(entry.table_name).toBe('inventory_config');
-    expect(entry.record_id).toBe('config_CICOPAL');
-    expect(String(entry.details)).toContain('config_CICOPAL');
-    expect(String(entry.details)).toContain('42501');
+    const entry = (await db.audit_logs.toArray()).find((log) => log.acao === 'CONFIG_SYNC_FAIL');
+    expect(entry).toBeTruthy();
+    expect(entry?.tabela).toBe('inventory_config');
+    expect(entry?.registro_id).toBe('config_CICOPAL');
+    expect(String(entry?.details)).toContain('config_CICOPAL');
+    expect(String(entry?.details)).toContain('42501');
+    expect(entry?._synced).toBe(0);
     // A auditoria não pode virar gravação de config: só a config levou upsert.
+    expect(stubs.insert).not.toHaveBeenCalled();
     expect(stubs.upsert).toHaveBeenCalledTimes(1);
   });
 });

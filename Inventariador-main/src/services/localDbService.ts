@@ -1,4 +1,5 @@
-import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService } from './sqliteService';
+import { db, DexieAddress, DexieAsset, DexieCampaign, sqliteService, construirAuditoria, gravarAuditoria } from './sqliteService';
+import { getCurrentTenantid } from '../utils/tenantAtual';
 import { isAdminEmail } from '../utils/authUtils';
 import { SEM_LOCAL_LABEL } from '../constants/addressLabels';
 import { pickAssetAddress } from '../utils/assetAddress';
@@ -23,6 +24,16 @@ const snapshotStore = localforage.createInstance({
   name: 'InventoryApp_Snapshots',
   storeName: 'virtual_backups'
 });
+
+/** Lê um campo JSON guardado como texto na trilha; texto livre → `undefined`. */
+const lerJsonDoLog = (valor: string | null | undefined): unknown => {
+  if (!valor) return undefined;
+  try {
+    return JSON.parse(valor);
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * Normaliza texto para a busca de endereço: sem acentos, caixa alta e
@@ -69,38 +80,10 @@ export const normalizeUnitMatchKey = (value: unknown): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-/**
- * Contrato efetivo para as consultas locais: perfil → sessão → armazenamento.
- *
- * O dono global (`ADMIN`) NÃO declara `tenantid` no perfil: se a leitura parasse
- * no utilizador, todas as consultas `[tenantid+filial]` (endereços, localidades,
- * estatísticas) rodavam com contrato vazio e devolviam «Nenhum Endereço
- * Cadastrado» mesmo com a base carregada. A cadeia é a mesma de
- * `resolveTenantId` (utils/tenantUtils) usada no resto do app.
- */
-export const getCurrentTenantid = (): string => {
-  const candidatos: string[] = [];
-  try {
-    const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      candidatos.push(
-        String(user?.tenantid || user?.tenantId || user?.tenant_id || user?.tenantid_ || '')
-      );
-    }
-  } catch { /* ignore */ }
-  try {
-    candidatos.push(sessionStorage.getItem('tenantid') || '', sessionStorage.getItem('tenantId') || '');
-  } catch { /* ignore */ }
-  try {
-    candidatos.push(localStorage.getItem('tenantid') || '', localStorage.getItem('tenantId') || '');
-  } catch { /* ignore */ }
-
-  const valido = candidatos
-    .map(c => c.trim())
-    .find(c => c !== '' && !['NULL', 'UNDEFINED', 'N/A'].includes(c.toUpperCase()));
-  return valido || '';
-};
+// O contrato efectivo vive em `utils/tenantAtual` para o `sqliteService` o
+// poder usar (o evento da trilha carimba o contrato NO NASCIMENTO, não no
+// envio). Reexportado daqui para não mudar os consumidores existentes.
+export { getCurrentTenantid };
 
 const handleDemoAuditIncrement = () => {
   try {
@@ -300,16 +283,16 @@ export const localDb = {
           .filter(item => Boolean(item.userId))
           .map((item) => {
             const dexieAsset = toDexieAsset(item.asset);
-            return {
-              id: `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            // Mesmo ponto único dos restantes escritores: o bulk mantém-se
+            // (uma operação por flush), mas cada linha nasce carimbada.
+            return construirAuditoria({
               usuario: item.userId as string,
               acao: 'CREATE_OR_UPDATE',
               tabela: 'ativos',
               registro_id: dexieAsset.primarykey,
               details: 'Criação/Update via Buffer',
-              delta: JSON.stringify(item.asset),
-              updated_at: new Date().toISOString()
-            };
+              delta: JSON.stringify(item.asset)
+            });
           });
         if (auditLogs.length > 0) {
           await db.audit_logs.bulkPut(auditLogs);
@@ -799,16 +782,21 @@ export const localDb = {
 
   auditLogs: {
     add: async (log: AuditLogEntry) => {
-      const id = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      await db.audit_logs.put({
-        id,
+      // Tudo passa pelo ponto único (`sqliteService.gravarAuditoria`): contrato
+      // carimbado no nascimento, `new_data`/`old_data` em campos próprios e
+      // `_synced: 0`. O `delta` fica como espelho legado — a deduplicação de
+      // falhas (`signature`) e os leitores antigos continuam a lê-lo.
+      await gravarAuditoria({
         usuario: log.user || log.user_email || 'unknown',
         acao: log.action || 'UNKNOWN',
         tabela: log.table_name || 'ativos',
         registro_id: log.record_id || '',
         details: log.details || '',
         delta: log.new_data ? JSON.stringify(log.new_data) : (log.old_data ? JSON.stringify(log.old_data) : null),
-        updated_at: log.timestamp || new Date().toISOString()
+        new_data: log.new_data === undefined ? undefined : JSON.stringify(log.new_data),
+        old_data: log.old_data === undefined ? undefined : JSON.stringify(log.old_data),
+        tenantid: log.tenantid,
+        updated_at: log.timestamp
       });
     },
 
@@ -840,8 +828,9 @@ export const localDb = {
             table_name: log.tabela,
             record_id: log.registro_id,
             details: log.details,
-            new_data: log.delta ? JSON.parse(log.delta) : undefined,
-            tenantid: getCurrentTenantid()
+            new_data: lerJsonDoLog(log.new_data) ?? lerJsonDoLog(log.delta),
+            old_data: lerJsonDoLog(log.old_data),
+            tenantid: log.tenantid || getCurrentTenantid()
           }));
         }
       })

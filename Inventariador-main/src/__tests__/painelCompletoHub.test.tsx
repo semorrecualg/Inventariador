@@ -8,6 +8,7 @@ import React from 'react';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import MainMenu from '../components/MainMenu';
 import {
+  AppScreen,
   DatabaseMode,
   ScanFeedbackMode,
   ScannerMode,
@@ -36,10 +37,10 @@ afterEach(cleanup);
 const ADMIN = { id: '1', name: 'Admin', email: 'admin@gbr.com.br', role: 'MASTER' } as User;
 const AUDITOR = { id: '2', name: 'Auditor', email: 'auditor@gbr.com.br', role: 'AUDITOR' } as User;
 
-const renderPainelCompleto = (user: User) => {
+const renderPainelCompleto = (user: User, onNavigate = vi.fn()) => {
   render(
     <MainMenu
-      onNavigate={vi.fn()}
+      onNavigate={onNavigate}
       onExport={vi.fn()}
       onBackup={vi.fn()}
       onDownloadCloudData={vi.fn()}
@@ -75,6 +76,7 @@ const renderPainelCompleto = (user: User) => {
       showModal={vi.fn()}
     />
   );
+  return onNavigate;
 };
 
 describe('PAINEL COMPLETO — o hub abre Gestão e Manutenção e Auditoria', () => {
@@ -85,14 +87,25 @@ describe('PAINEL COMPLETO — o hub abre Gestão e Manutenção e Auditoria', ()
     fireEvent.click(screen.getByText('Gestão e Manutenção'));
 
     // Cabeçalho próprio do painel de dados: só existe na camada aberta.
-    expect(await screen.findByText('Operações de Banco de Dados')).toBeTruthy();
+    expect(await screen.findByText('Configuração e Ações do Utilizador')).toBeTruthy();
 
     // O último «Voltar» do DOM é o da camada de Dados (as camadas empilham).
     const voltar = screen.getAllByLabelText('Voltar');
     fireEvent.click(voltar[voltar.length - 1]);
 
-    expect(screen.queryByText('Operações de Banco de Dados')).toBeNull();
+    expect(screen.queryByText('Configuração e Ações do Utilizador')).toBeNull();
     expect(screen.getByText('Gestão e Manutenção')).toBeTruthy();
+  });
+
+  it('o atalho «ABRIR O GESTOR DE BASE» leva ao mesmo ecrã do cartão «Banco de Dados»', async () => {
+    const onNavigate = renderPainelCompleto(ADMIN);
+
+    fireEvent.click(screen.getByText('Gestão e Manutenção'));
+    fireEvent.click(await screen.findByText('ABRIR O GESTOR DE BASE'));
+
+    // Uma só porta: o atalho do painel e o cartão do hub pedem o mesmo ecrã,
+    // que é a fonte única dos contadores da base.
+    expect(onNavigate).toHaveBeenCalledWith(AppScreen.DATABASE_MANAGER);
   });
 
   it('abre Auditoria e Concordância a partir do hub', async () => {

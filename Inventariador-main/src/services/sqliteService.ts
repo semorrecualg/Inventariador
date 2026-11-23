@@ -2,6 +2,7 @@ import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
 import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
+import { getCurrentTenantid } from '../utils/tenantAtual';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { carimbarFalhaEnvio } from '../utils/syncFalha';
@@ -118,7 +119,89 @@ export interface DexieAuditLog {
   details: string;
   delta: string | null;
   updated_at: string;
+  /** Contrato em que o evento ACONTECEU (carimbado no nascimento, F2). */
+  tenantid?: string;
+  /** Estado depois/dantes, em JSON próprio (`old_data` não se perde, F2). */
+  new_data?: string | null;
+  old_data?: string | null;
+  /**
+   * Fila da trilha para a nuvem (F2): `1` = confirmada pelo Supabase.
+   * Ausente/`0` = por subir. Não é índice — a fila lê por `filter`, para
+   * apanhar também as linhas antigas, escritas antes de este campo existir.
+   */
+  _synced?: number;
+  /** Tentativas de envio já feitas (carimbo de recusa em `_syncError`). */
+  _syncAttempts?: number;
+  /** Motivo da última recusa da nuvem; `null` depois de confirmada. */
+  _syncError?: string | null;
 }
+
+export interface EntradaAuditoriaLocal {
+  /** Id local estável (o `client_event_id` da nuvem). Gerado quando ausente. */
+  id?: string;
+  usuario: string;
+  acao: string;
+  tabela?: string;
+  registro_id?: string;
+  details?: string;
+  /** Estado novo em JSON — espelhado em `new_data` quando não há campos próprios. */
+  delta?: string | null;
+  new_data?: string | null;
+  old_data?: string | null;
+  updated_at?: string;
+  /** Contrato do evento; ausente → o contrato efectivo do momento. */
+  tenantid?: string;
+  _synced?: number;
+}
+
+const ehJsonObjeto = (valor: string | null): boolean => {
+  if (!valor) return false;
+  try {
+    const parsed = JSON.parse(valor);
+    return !!parsed && typeof parsed === 'object';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * PONTO ÚNICO de escrita da trilha de auditoria.
+ *
+ * Antes cada serviço chamava `db.audit_logs.put` à mão e decidia por si o
+ * `tenantid`, o `_synced` e o que fazer com o estado. Isso deixava eventos sem
+ * contrato carimbado (a fila de F2 acabava por lhes colar o contrato activo no
+ * envio) e sem `new_data`. Passam todos por aqui:
+ *
+ * - `tenantid` nasce com o evento (parâmetro explícito ou contrato efectivo);
+ * - `new_data` é guardado no campo próprio — quem só traz `delta` (JSON) passa
+ *   a ter o estado novo gravado, em vez de viver só no espelho legado;
+ * - `_synced: 0` põe o evento na fila da nuvem, salvo indicação em contrário.
+ */
+export const construirAuditoria = (entrada: EntradaAuditoriaLocal): DexieAuditLog => {
+  const delta = entrada.delta ?? null;
+  const temEstadoProprio = entrada.new_data != null || entrada.old_data != null;
+  return {
+    id: entrada.id || `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+    usuario: entrada.usuario || 'unknown',
+    acao: entrada.acao || 'UNKNOWN',
+    tabela: entrada.tabela || 'ativos',
+    registro_id: entrada.registro_id || '',
+    details: entrada.details || '',
+    delta,
+    new_data: entrada.new_data ?? (temEstadoProprio || !ehJsonObjeto(delta) ? null : delta),
+    old_data: entrada.old_data ?? null,
+    updated_at: entrada.updated_at || new Date().toISOString(),
+    tenantid: String(entrada.tenantid || getCurrentTenantid() || ''),
+    _synced: entrada._synced ?? 0,
+  };
+};
+
+/** Grava um evento pelo ponto único e devolve o id local (= `client_event_id`). */
+export const gravarAuditoria = async (entrada: EntradaAuditoriaLocal): Promise<string> => {
+  const linha = construirAuditoria(entrada);
+  await db.audit_logs.put(linha);
+  return linha.id;
+};
 
 export interface DexieCampaign {
   id: string;
@@ -721,16 +804,16 @@ export class SqliteService {
     /** Instante da linha (ISO). Só os testes o fixam; o runtime usa «agora». */
     atualizadoEm?: string
   ): Promise<void> {
-    const id = 'LOG_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9).toUpperCase();
-    await db.audit_logs.put({
-      id,
+    // Ponto único: carimba o contrato do momento, guarda o estado novo em
+    // `new_data` e põe o evento na fila da nuvem.
+    await gravarAuditoria({
       usuario,
       acao,
       tabela,
       registro_id,
       details,
       delta: delta ?? null,
-      updated_at: atualizadoEm ?? new Date().toISOString()
+      updated_at: atualizadoEm
     });
   }
 
@@ -1330,7 +1413,7 @@ export class SqliteService {
   /**
    * LIMPEZA DE UNIDADES — O CARIMBO DA FALHA MORRE COM O REGISTO
    * ============================================================================
-   * A «Limpeza Total» de uma unidade (MainMenu/DataManagementPanel) filtrava o
+   * A «Limpeza Total» de uma unidade (MainMenu) filtrava o
    * cache do localforage e o estado React, mas deixava as linhas da unidade nos
    * três espelhos Dexie (`local_assets`/`ativos`/`assets`) — com o `_syncFailAt`
    * agarrado a elas. O selo contava falhas de ativos que já não existiam no

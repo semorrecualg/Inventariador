@@ -1,7 +1,8 @@
-import { Capacitor } from '@capacitor/core';
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
 import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys } from './supabaseService';
+import { canPushToCloud } from './pushGate';
+import { enviarFilaAuditoria } from './auditoriaNuvem';
 import { sqliteService, db } from './sqliteService';
 import { logger } from '../utils/logger';
 import { sanitizeAssetKey } from '../utils/assetKey';
@@ -46,14 +47,20 @@ export interface SyncResult {
 }
 
 /**
- * Trava do envio para a nuvem.
+ * Portão do envio para a nuvem.
  *
- * Existia aqui uma constante `IS_OFFLINE_FIRST_PHASE` fixa em `true`, repetida
- * em QUATRO funções: cada uma devolvia sucesso com 0 registros e não enviava
- * nada. O app dizia "sincronizado", o ativo ficava `_is_synced = 0` e a etiqueta
- * PENDENTE NUVEM nunca saía — mesmo com o Supabase conectado e o login correto.
+ * A BASE LOCAL é hermética (decisão F1 do plano): além de ser preciso estar no
+ * aparelho, o modo de base tem de ser online. Antes bastava
+ * `Capacitor.isNativePlatform()`: o ciclo de fundo (`runSyncLoopCycle`) chamava
+ * `processDataSyncQueue`/`photoSyncManager`/`processCampaignSyncQueue` sem
+ * consultar o modo e, com sessão e filial activas, ativos conferidos em BASE
+ * LOCAL podiam subir para o Supabase.
+ *
+ * A regra vive em `services/pushGate.ts` para a fila da trilha de auditoria (F2)
+ * a reutilizar sem fechar um ciclo de imports (`auditoriaNuvem` ↔ `syncService`).
+ * Reexportada daqui para não mudar os consumidores existentes.
  */
-const canPushToCloud = (): boolean => Capacitor.isNativePlatform();
+export { canPushToCloud };
 
 const SYNC_DISCARD_AUDIT = 'SYNC_PENDING_DISCARDED';
 /** Janela em que o mesmo descarte não volta a ser registrado (o ciclo roda a cada 60 s). */
@@ -954,7 +961,8 @@ const _syncService = {
         logger.info(">>> [Disk Saturation Guard] Executando expurgo de logs antigos via Dexie...");
         const expurgo = await purgarAuditoriaAntiga();
         logger.info(
-          `>>> [Disk Saturation Guard] Expurgo concluído: ${expurgo.apagadas} linha(s) anteriores a ${expurgo.limite}; falhas de envio preservadas.`
+          `>>> [Disk Saturation Guard] Expurgo concluído: ${expurgo.apagadas} linha(s) anteriores a ${expurgo.limite}; ` +
+          `${expurgo.preservadas} sem confirmação da nuvem preservadas até ${expurgo.limiteSeguranca}; falhas de envio preservadas.`
         );
       } catch (logErr) {
         logger.warn(">>> [Disk Saturation Guard] Erro silencioso ao expurgar logs:", logErr);
@@ -1119,6 +1127,9 @@ export const processSyncQueue = async (): Promise<void> => {
     logger.info(">>> [Sync Alias] Starting sequential manual synchronization...");
     await syncService.processDataSyncQueue().catch(console.error);
     await photoSyncManager.processPhotoSyncQueue().catch(console.error);
+    // F2: a trilha de auditoria sobe depois do que ela descreve (o registo só
+    // pode ser enviado quando o ativo que ele conta já foi aceite).
+    await enviarFilaAuditoria().catch(console.error);
   } finally {
     isSyncingLoopActive = false;
   }
@@ -1200,6 +1211,12 @@ const runSyncLoopCycle = async () => {
       await processCampaignSyncQueue().catch(err => {
         logger.error(">>> [Sync Loop] Falha no ciclo de sincronização de campanhas:", err);
         hasFailure = true;
+      });
+      // F2: a trilha local é durável e sobe em lotes idempotentes. Uma falha
+      // daqui NÃO entra no backoff: a trilha não é o dado operacional, e os
+      // eventos ficam carimbados na fila para o próximo ciclo.
+      await enviarFilaAuditoria().catch(err => {
+        logger.error(">>> [Sync Loop] Falha na fila da trilha de auditoria:", err);
       });
     }
   } catch (err) {
