@@ -7,6 +7,7 @@ import { localDb } from './localDbService';
 import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
+import { textoDoDetails } from '../utils/auditDetails';
 import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
@@ -3070,9 +3071,21 @@ export const resetPassword = async (email: string) => {
 };
 
 /**
- * Busca os logs de auditoria do Supabase
+ * Normaliza `details` de uma linha lida da nuvem.
+ *
+ * A coluna de produção é `json` (o bootstrap declara `text`), por isso o
+ * PostgREST devolve objeto/array. Converter aqui, no único ponto em que a
+ * trilha e o histórico são lidos, evita que `details.toLowerCase()`,
+ * `details.match()` ou um nó React recebam um objeto.
  */
-export const fetchAuditLogs = async (tenantid: string, recordId?: string): Promise<Record<string, unknown>[]> => {
+const normalizarDetalhesDaLinha = (row: Record<string, unknown>): Record<string, unknown> => ({
+  ...row,
+  details: textoDoDetails(row.details)
+});
+
+/**
+ * Busca os logs de auditoria do Supabase
+ */export const fetchAuditLogs = async (tenantid: string, recordId?: string): Promise<Record<string, unknown>[]> => {
   if (!supabase) return [];
 
   try {
@@ -3093,7 +3106,7 @@ export const fetchAuditLogs = async (tenantid: string, recordId?: string): Promi
       return [];
     }
 
-    return (data || []) as Record<string, unknown>[];
+    return (data || []).map((row: unknown) => normalizarDetalhesDaLinha(row as Record<string, unknown>));
   } catch (err) {
     logger.error('Erro inesperado ao buscar logs:', err);
     return [];
@@ -3124,7 +3137,7 @@ export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promis
       return [];
     }
 
-    return (data || []) as Record<string, unknown>[];
+    return (data || []).map((row: unknown) => normalizarDetalhesDaLinha(row as Record<string, unknown>));
   } catch (err) {
     logger.error('Erro inesperado ao buscar logs de ativos:', err);
     return [];
@@ -3165,7 +3178,7 @@ export const fetchLoadHistory = async (tenantid?: string, limit = 300): Promise<
       return [];
     }
 
-    return (data || []) as Record<string, unknown>[];
+    return (data || []).map((row: unknown) => normalizarDetalhesDaLinha(row as Record<string, unknown>));
   } catch (err) {
     logger.error('Erro inesperado ao buscar histórico de cargas:', err);
     return [];
