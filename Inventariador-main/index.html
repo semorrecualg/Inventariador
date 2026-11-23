@@ -36,7 +36,8 @@
     <div id="root"></div>
     <script type="module" src="/src/index.tsx"></script>
     <script>
-      // Emergency Reset: If React doesn't mount or data loading fails to complete, force hide loader as a safety fallback
+      // Emergency Reset: se o React não montar (módulo que não chega, crash),
+      // o loader sai do caminho — antes eram 95 s com o erro escondido atrás.
       setTimeout(() => {
         const loader = document.getElementById('gbr-initial-loader');
         if (loader && loader.style.display !== 'none') {
@@ -44,7 +45,7 @@
           loader.style.opacity = '0';
           setTimeout(() => { loader.style.display = 'none'; }, 500);
         }
-      }, 95000); // 95s threshold keeps loader visible throughout the download of 12,636 assets
+      }, 20000); // 20s: o App retira o loader ao montar; 95s deixava o erro escondido atrás dele
     </script>
   </body>
 </html>

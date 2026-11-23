@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — arranque à prova de um módulo que não chega (F5)
+
+- **O que era:** com o servidor a devolver `503` na rajada de pedidos de um F5,
+  o `import()` de `App.tsx` rejeitava com «Failed to fetch dynamically imported
+  module» e o `ErrorBoundary` mostrava «Ops! Algo deu errado» — mas o loader do
+  `index.html` (`position: fixed; z-index: 9999`) ficava por cima até aos 95 s,
+  com o botão «Recarregar» inalcançável. Além disso o `React.lazy` era criado
+  dentro do render (novo tipo a cada render → remontagem do `App` inteiro) e um
+  único `503` matava o arranque sem segunda tentativa. O vigia de 6 s limpava
+  `isInitializing` e `sqliteStatus`, mas não `authLoading` — um init travado
+  deixava o splash para sempre. E o Dexie (8 versões) não tratava
+  `blocked`/`versionchange`: uma aba antiga segurava a base e o F5 ficava à
+  espera indefinidamente.
+- **Agora:** o `React.lazy` vive no escopo do módulo e repete a falha de rede
+  três vezes com espera crescente; `vite:preloadError` e o `ErrorBoundary`
+  recarregam uma única vez (janela de 20 s em `sessionStorage`, sem ciclos), o
+  loader sai do caminho no erro e o fallback estático cai para 20 s; o vigia do
+  arranque limpa os três sinais do splash, `authLoading` incluído; e o Dexie
+  fecha a ligação em `blocked`/`versionchange`, registando o motivo em
+  `estadoBloqueioDexie`.
+- Testes: `bootArranque` (16) cobre o retry, a guarda de recarga, a remoção do
+  loader, o vigia do arranque e as guardas do Dexie.
+
 ### Corrigido — login na nuvem: perfil com contrato e sem filial deixa de ser expulso
 
 - **O que era:** ao entrar no browser com um perfil que tem `tenantid` em

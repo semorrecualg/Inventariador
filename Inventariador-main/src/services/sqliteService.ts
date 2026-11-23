@@ -2,6 +2,7 @@ import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
 import { AnchorSource, DatabaseStatus } from '../types';
 import { logger } from '../utils/logger';
+import { registarGuardasDexie } from '../utils/bootArranque';
 import { getCurrentTenantid } from '../utils/tenantAtual';
 import { NORMALIZE_ON_UPGRADE } from '../utils/normalize';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
@@ -459,6 +460,23 @@ export const runMigrationV5DryRun = (): Promise<V5DryRunReport> =>
   runMigrationV5DryRunOn(db as unknown as V5Source);
 
 export const db = new InventoryDexieDatabase();
+
+// Uma base com 8 versões e sem estes guardas fica à espera para sempre quando
+// outra aba segura a versão antiga (`blocked`) ou quando a versão muda noutra
+// aba (`versionchange`) — era o F5 que só passava num separador novo. Fechar a
+// ligação liberta a migração; o vigia do arranque liberta a tela.
+export const estadoBloqueioDexie: { motivo: 'blocked' | 'versionchange' | null; mensagem: string | null } = {
+  motivo: null,
+  mensagem: null,
+};
+
+registarGuardasDexie(db, {
+  fechar: () => db.close(),
+  avisar: (motivo, mensagem) => {
+    estadoBloqueioDexie.motivo = motivo;
+    estadoBloqueioDexie.mensagem = mensagem;
+  },
+});
 
 /** Marcador da migração única de `tenantid` para UPPER (ver migrateLegacyTenantids). */
 export const TENANT_CASE_MARKER = 'f0_tenant_case_canonical_v1';
