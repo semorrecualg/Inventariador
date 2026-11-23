@@ -263,10 +263,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS unit_configs_tenant_filial_key
 --     pelos ALTERs abaixo)
 -- ============================================================================
 -- Esquema real verificado no projeto de produção (23/11/2026): `id` uuid com
--- default, `user_email` NOT NULL e `details` em JSON (a mensagem 22P02 diz
--- «type json» tanto para json como para jsonb). Instalações novas usam jsonb,
--- alinhado com new_data/old_data; uma base já existente NÃO é alterada por este
--- CREATE TABLE IF NOT EXISTS. Ver SCHEMA_BASELINE §3.2.1.
+-- default, `user_email` NOT NULL e `details`/`new_data`/`old_data` em jsonb
+-- (confirmado na information_schema; a mensagem 22P02 diz «type json» para os
+-- dois tipos). Instalações novas usam jsonb, alinhado com a produção; uma base
+-- já existente NÃO é alterada por este CREATE TABLE IF NOT EXISTS. Ver
+-- SCHEMA_BASELINE §3.2.1.
 CREATE TABLE IF NOT EXISTS public.audit_logs (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenantid    text,
