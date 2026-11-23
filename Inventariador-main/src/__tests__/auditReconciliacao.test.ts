@@ -71,6 +71,87 @@ describe('reconciliação da trilha de ativos', () => {
     expect(linhas.map((l) => l.origem).sort()).toEqual(['APP', 'NUVEM']);
   });
 
+  it('não funde dois eventos arquivados no mesmo segundo com ids distintos', () => {
+    // Caso real da aba Ativos: dois cliques no mesmo segundo, sem `record_id`
+    // e com os mesmos detalhes. O conteúdo é igual, os factos não.
+    const linhas = reconciliarTrilha(
+      [],
+      [
+        {
+          ...base,
+          id: 'uuid-a',
+          client_event_id: null,
+          record_id: null,
+          timestamp: '2026-11-23T10:00:00.100Z',
+        },
+        {
+          ...base,
+          id: 'uuid-b',
+          client_event_id: null,
+          record_id: null,
+          timestamp: '2026-11-23T10:00:00.900Z',
+        },
+      ]
+    );
+
+    expect(linhas).toHaveLength(2);
+    expect(linhas.map((l) => l.id).sort()).toEqual(['uuid-a', 'uuid-b']);
+    expect(chaveDoConteudo(linhas[0])).toBe(chaveDoConteudo(linhas[1]));
+  });
+
+  it('emparelha um-a-um os eventos do mesmo segundo entre arquivo e aparelho', () => {
+    const arquivo = [
+      {
+        ...base,
+        id: 'uuid-a',
+        client_event_id: null,
+        record_id: null,
+        timestamp: '2026-11-23T10:00:00.100Z',
+      },
+      {
+        ...base,
+        id: 'uuid-b',
+        client_event_id: null,
+        record_id: null,
+        timestamp: '2026-11-23T10:00:00.900Z',
+      },
+    ];
+    const locais = [
+      { ...base, id: 'LOG_A', _synced: 1, record_id: null, timestamp: '2026-11-23T10:00:00.100Z' },
+      { ...base, id: 'LOG_B', _synced: 1, record_id: null, timestamp: '2026-11-23T10:00:00.900Z' },
+    ];
+
+    const linhas = reconciliarTrilha(locais, arquivo);
+
+    expect(linhas).toHaveLength(2);
+    expect(linhas.every((l) => l.origem === 'APP' && l.confirmadoNaNuvem)).toBe(true);
+    // A linha fundida guarda o id do arquivo (o local só a confirma).
+    expect(linhas.map((l) => l.id).sort()).toEqual(['uuid-a', 'uuid-b']);
+  });
+
+  it('não funde dois eventos do aparelho com o mesmo conteúdo', () => {
+    const linhas = reconciliarTrilha(
+      [
+        { ...base, id: 'LOG_C', _synced: 0, record_id: null },
+        { ...base, id: 'LOG_D', _synced: 0, record_id: null },
+      ],
+      []
+    );
+
+    expect(linhas).toHaveLength(2);
+    expect(linhas.map((l) => l.id).sort()).toEqual(['LOG_C', 'LOG_D']);
+  });
+
+  it('liga o arquivo antigo sem client_event_id ao evento do aparelho pelo conteúdo', () => {
+    const linhas = reconciliarTrilha(
+      [{ ...base, id: 'LOG_7', _synced: 1 }],
+      [{ ...base, id: 'uuid-7', client_event_id: null }]
+    );
+
+    expect(linhas).toHaveLength(1);
+    expect(linhas[0]).toMatchObject({ id: 'uuid-7', origem: 'APP', confirmadoNaNuvem: true });
+  });
+
   it('ordena do mais recente para o mais antigo', () => {
     const linhas = reconciliarTrilha(
       [
