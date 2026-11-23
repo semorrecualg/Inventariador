@@ -226,7 +226,10 @@ bloqueiam sync sem tenant na tela de login). Upsert `onConflict('tenantid, id')`
 `processDataSyncQueue`, `addCampaignToSyncQueue`, `checkHardwareSafety`.
 - **Envio do aparelho (`syncService.canPushToCloud`):** `processDataSyncQueue`,
   `processCampaignSyncQueue`, `photoSyncManager` e `runSyncLoopCycle` só correm com
-  `Capacitor.isNativePlatform()`. Até 2026-11 havia uma constante fixa
+  `Capacitor.isNativePlatform()` **e** `isOnlineDatabaseMode(getDatabaseMode())` —
+  em BASE LOCAL (`INTERNAL`/`INTERNAL_PLUS`) o ciclo devolve 0 registos sem tocar
+  na nuvem e `createCampaign` grava só no aparelho. O ecrã mostra um aviso
+  permanente de que nada sai do aparelho e que desinstalar apaga a base. Até 2026-11 havia uma constante fixa
   (`IS_OFFLINE_FIRST_PHASE = true`) nas quatro: devolviam sucesso com 0 registros e
   nada subia — a etiqueta **PENDENTE NUVEM** ficava para sempre, com o Supabase
   conectado. O payload leva agora `conferido`, `auditor` e `data_leitura`

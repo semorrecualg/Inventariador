@@ -262,11 +262,13 @@ describe('snapshots e fila de fotos — modo resolvido por getDatabaseMode()', (
     expect(result.success).toBe(true);
   });
 
-  it('a fila de fotos respeita o INTERNAL gravado de propósito', async () => {
+  it('a fila de fotos não envia nada com o INTERNAL gravado de propósito', async () => {
     localStorage.setItem('app_database_mode', 'INTERNAL');
 
     const result = await photoSyncManager.processPhotoSyncQueue();
 
-    expect(result.success).toBe(false);
+    // F1: a BASE LOCAL é hermética — o ciclo termina sem erro e sem enviar nada
+    // (antes devolvia `success: false`, que o loop de fundo contava como falha).
+    expect(result).toEqual({ success: true, uploadCount: 0, failedCount: 0 });
   });
 });

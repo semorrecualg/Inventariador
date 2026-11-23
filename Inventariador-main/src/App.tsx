@@ -126,7 +126,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode } from './services/supabaseService';
+import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, fetchCampaigns, isInternalMode, getInitialDatabaseMode, isOnlineDatabaseMode } from './services/supabaseService';
 import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { checkNativeBiometry, isBiometricSupported, hasBiometricRegistered, isNativeAppShell } from './services/biometricService';
@@ -7450,6 +7450,16 @@ useEffect(() => {
                 </span>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* BASE LOCAL é hermética: aviso permanente de que nada sai do aparelho. */}
+        {!isOnlineDatabaseMode(databaseMode) && screen !== AppScreen.LOGIN && (
+          <div className="flex items-center space-x-2 px-4 py-1.5 bg-amber-50 border-b border-amber-200 text-amber-800 shrink-0 z-[200]">
+            <HardDrive size={11} className="shrink-0" />
+            <p className="text-[8px] font-black uppercase tracking-widest leading-tight">
+              Base Local — nada sai deste aparelho. Desinstalar ou limpar os dados apaga a base, a trilha de auditoria e as fotos pendentes.
+            </p>
           </div>
         )}
         

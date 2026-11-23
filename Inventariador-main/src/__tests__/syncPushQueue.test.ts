@@ -11,8 +11,15 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
-vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
+// `isInternalMode`/`getDatabaseMode` são calculados quando `supabaseService` é
+// carregado: sem credenciais o modo é INTERNAL e a guarda da BASE LOCAL fecha a
+// fila. O stub tem de existir ANTES desse import — `vi.hoisted` corre acima dos
+// imports (içados); no topo do ficheiro, um ambiente sem `.env` (o CI) ficava em
+// INTERNAL e estes testes da fila real de envio mediam zero envios.
+vi.hoisted(() => {
+  vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
+  vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
+});
 
 const upsert = vi.fn();
 // Guarda «exclusão vence a subida»: por omissão a nuvem não tem nada apagado.
