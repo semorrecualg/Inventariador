@@ -12,7 +12,7 @@ baixar. Nada é apagado nem dado como enviado.
 > |---|---|---|
 > | `id` | `uuid` | `bigint identity` |
 > | `user_email` | `NOT NULL` | `text` (nulo) |
-> | `details` | `json` | `text` |
+> | `details` | `json`/`jsonb` (JSON) | `text` |
 >
 > O `CREATE TABLE IF NOT EXISTS` do bootstrap **não** corrige a tabela existente.
 > Por isso este guia descobre as colunas obrigatórias antes de testar, e passa
@@ -250,10 +250,14 @@ alter table public.audit_logs drop column if exists client_event_id;
 Reverter com o app F2 a correr faz o envio falhar de novo — a fila fica
 carimbada, sem perder linhas locais. Preferir reaplicar o passo 2.
 
-## 7. Pendente de alinhamento
+## 7. Alinhamento do esquema
 
-`docs/supabase_bootstrap.sql` e `docs/SCHEMA_BASELINE.md` descrevem a tabela como
-`id bigint identity`, `user_email text` e `details text`; a produção tem
-`id uuid`, `user_email NOT NULL` e `details json`. Alinhar o baseline com o
-esquema real é um trabalho à parte (PR próprio), para o guia e o bootstrap não
-prometerem uma tabela que não existe.
+O `docs/supabase_bootstrap.sql` e o `docs/SCHEMA_BASELINE.md` foram alinhados com
+o esquema real observado em 23/11/2026 (`id uuid` com default, `user_email
+NOT NULL`, `details` em JSON, `client_event_id text` + índice único). O
+`CREATE TABLE IF NOT EXISTS` só afeta instalações novas — a base de produção já
+existente não é alterada.
+
+Falta apenas confirmar se `details` é `json` ou `jsonb`: a mensagem 22P02 diz
+«type json» para os dois. A consulta de `information_schema` da secção 3.2.1 do
+`docs/SCHEMA_BASELINE.md` responde, e o app lê ambos.
