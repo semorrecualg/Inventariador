@@ -146,6 +146,7 @@ import { demoService } from './services/demoService';
 import { FileSystemStorageService } from './services/FileSystemStorageService';
 import { verifyAndRestorePhysicalBackup } from './services/DatabaseLoaderService';
 import { logger } from './utils/logger';
+import { vigiarArranque } from './utils/bootArranque';
 import { APP_VERSION_LABEL } from './utils/appVersion';
 
 export class AppBootstrapError extends Error {
@@ -1309,17 +1310,24 @@ useEffect(() => {
 
 
   useEffect(() => {
-    // Timeout curto para garantir que a tela de login apareca mesmo
-    // se a inicializacao do SQLite/IndexedDB falhar ou travar no mobile.
-    const timeout = setTimeout(() => {
-      if (isInitializing && !bootstrapError) {
-        logger.warn(">>> [App] Inicializacao excedeu o limite de 6s. Liberando renderizacao do Login.");
+    // Vigia do arranque: se o init do SQLite/IndexedDB (ou a sessão) travar, a
+    // tela tem de ser libertada. O splash é a soma de TRÊS sinais —
+    // `sqliteStatus.loading || isInitializing || authLoading` — e o antigo
+    // timeout de 6 s só limpava dois: o `authLoading` continuava a segurar o
+    // splash para sempre (o F5 ficava preso mesmo depois de o init falhar).
+    return vigiarArranque({
+      atrasoMs: 6000,
+      estaBloqueado: () => isInitializing && !bootstrapError,
+      aoExpirar: () => {
+        logger.warn(">>> [App] Inicializacao excedeu o limite de 6s. Liberando a tela (authLoading incluido).");
+      },
+      liberar: () => {
         setDbInitialized(true);
         setSqliteStatus('ACTIVE');
         setIsInitializing(false);
-      }
-    }, 6000);
-    return () => clearTimeout(timeout);
+        setAuthLoading(false);
+      },
+    });
   }, [isInitializing, bootstrapError, setSqliteStatus]);
 
   useEffect(() => {

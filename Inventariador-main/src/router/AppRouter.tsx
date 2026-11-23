@@ -5,6 +5,8 @@ import { useUiStore } from '../stores/uiStore';
 import { AppScreen, NavigationParams } from '../types';
 import { Loader2 } from 'lucide-react';
 import AppVersionStamp from '../components/AppVersionStamp';
+import { logger } from '../utils/logger';
+import { carregarComRetry, recarregarBootstrapUmaVez } from '../utils/bootArranque';
 
 /**
  * Full-screen loading spinner shown while a lazy-loaded route is loading.
@@ -19,6 +21,24 @@ function RouteLoadingFallback() {
     </div>
   );
 }
+
+/**
+ * O `App` é carregado uma única vez, no escopo do módulo.
+ *
+ * Antes o `React.lazy` era criado DENTRO do componente: cada render produzia um
+ * tipo novo, o React desmontava e remontava o `App` inteiro (re-executando o
+ * boot e a história de navegação) e uma falha transitória de rede no primeiro
+ * pedido não tinha segunda oportunidade — o F5 aterrava no ErrorBoundary.
+ */
+const carregarApp = () =>
+  carregarComRetry(() => import('../App'), {
+    tentativas: 3,
+    esperaMs: 300,
+    aoFalhar: (erro, tentativa) =>
+      logger.warn(`>>> [BOOT] Falha ao carregar o módulo do app (tentativa ${tentativa}).`, erro),
+  });
+
+const AppLazy = React.lazy(carregarApp);
 
 /**
  * Internal component that bridges the legacy window.pushScreen API to React Router.
@@ -74,7 +94,19 @@ function NavigationBridgeEffect() {
  * Bridges legacy pushScreen → React Router navigate.
  */
 const AppRouter: React.FC = () => {
-  const AppLazy = React.lazy(() => import('../App'));
+  // O Vite avisa por este evento quando um módulo pré-carregado não chega
+  // (redeploy, proxy a devolver 503). Sem o handler, a rejeição sobe ao
+  // ErrorBoundary e o utilizador fica preso no cartão de erro; com ele,
+  // recarregamos UMA vez (guarda contra ciclos em `bootArranque`).
+  useEffect(() => {
+    const aoFalharPreload = (evento: Event) => {
+      evento.preventDefault();
+      logger.warn('>>> [BOOT] Módulo pré-carregado falhou (vite:preloadError).');
+      recarregarBootstrapUmaVez();
+    };
+    window.addEventListener('vite:preloadError', aoFalharPreload);
+    return () => window.removeEventListener('vite:preloadError', aoFalharPreload);
+  }, []);
 
   return (
     <>
