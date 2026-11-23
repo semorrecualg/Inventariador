@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import Dexie from 'dexie';
 import {
   buildSecurityExport,
+  exportVerifiedSecurityPackage,
   restoreSecurityExport,
   verifySecurityExport,
   SECURITY_EXPORT_FORMAT,
@@ -228,6 +229,26 @@ describe('securityExport — export de segurança Fase 0', () => {
     }
   });
 
+  it('exporta o pacote verificado com o total de registos (ponto único dos dois ecrãs)', async () => {
+    const name = `${DB_PREFIX}_export_${++counter}`;
+    const src = makeDb(name);
+    await src.open();
+    try {
+      await src.table('assets_test').bulkAdd([{ primarykey: 'A-001' }, { primarykey: 'B-002' }]);
+      await src.table('config_test').put({ key: 'k', value: 'v' });
+
+      // Em Node não há `document`: o download no-opa e o teste fica no que
+      // interessa — o pacote sai selado e o total conta as duas tabelas.
+      const exported = await exportVerifiedSecurityPackage(src);
+      expect(exported.ok).toBe(true);
+      expect(exported.problems).toEqual([]);
+      expect(exported.total).toBe(3);
+      expect(exported.manifest.packageChecksum).toMatch(/^[0-9a-f]{64}$/);
+    } finally {
+      await src.delete();
+    }
+  });
+
   it('recusa restaurar um pacote com um registo adulterado e não toca no destino', async () => {
     const srcName = `${DB_PREFIX}_tamper_src_${++counter}`;
     const dstName = `${DB_PREFIX}_tamper_dst_${++counter}`;
@@ -245,8 +266,9 @@ describe('securityExport — export de segurança Fase 0', () => {
 
       const verification = await verifySecurityExport(adulterado);
       expect(verification.ok).toBe(false);
-      expect(verification.problems.join(' | ')).toMatch(/checksum não confere/);
-      expect(verification.problems.join(' | ')).toMatch(/hash do pacote não confere/);
+      // O hash do pacote cobre os registos: é o portão, sem recalcular o
+      // checksum de cada tabela (que viaja no manifesto como evidência).
+      expect(verification.problems).toEqual(['hash do pacote não confere']);
 
       await expect(restoreSecurityExport(adulterado, dst)).rejects.toThrow(/Pacote de backup inválido/);
       const rows = await dst.table('assets_test').toArray();
@@ -288,6 +310,25 @@ describe('securityExport — export de segurança Fase 0', () => {
       const verification = await verifySecurityExport(manifest);
       expect(verification.ok).toBe(false);
       expect(verification.problems).toEqual(['hash do pacote não confere']);
+    } finally {
+      await src.delete();
+    }
+  });
+
+  it('recusa um pacote sem hash válido (checksum_error não sela nada)', async () => {
+    const name = `${DB_PREFIX}_sem_seal_${++counter}`;
+    const src = makeDb(name);
+    await src.open();
+    try {
+      await src.table('assets_test').bulkAdd([{ primarykey: 'A-001' }]);
+      const manifest = await buildSecurityExport(src);
+      // `generateChecksum` devolve este valor quando o `crypto.subtle` falha:
+      // comparado consigo próprio passaria sem selar o pacote.
+      manifest.packageChecksum = 'checksum_error';
+
+      const verification = await verifySecurityExport(manifest);
+      expect(verification.ok).toBe(false);
+      expect(verification.problems).toEqual(['hash do pacote inválido']);
     } finally {
       await src.delete();
     }

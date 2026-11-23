@@ -11,7 +11,7 @@ import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { previewExactCopyCleanup, cleanExactAssetCopies, restoreExactCopyCleanup, latestExactCopyBackup, formatExactCopyReport, type ExactCopyReport, type ExactCopyBackupInfo } from '../services/assetMirrorCleanupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
-import { buildSecurityExport, verifySecurityExport, downloadSecurityExport } from '../services/securityExportService';
+import { exportVerifiedSecurityPackage } from '../services/securityExportService';
 import { logger } from '../utils/logger';
 import { APP_VERSION } from '../utils/appVersion';
 import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
@@ -224,20 +224,20 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
    * contagem + checksum por tabela e hash do pacote inteiro. O ficheiro sai
    * depois de verificado; o restauro recusa qualquer pacote cujo hash não
    * confira (`restoreSecurityExport`), por isso o mesmo cálculo é o portão.
+   *
+   * Montagem, portão e descarga vivem em `exportVerifiedSecurityPackage`, que a
+   * Gestão e Manutenção também usa: o mesmo pacote nos dois caminhos de backup.
    */
   const handleSecurityPackageExport = async () => {
     try {
       addLog('[F7] Montando pacote de backup verificado...');
-      const manifest = await buildSecurityExport();
-      const verification = await verifySecurityExport(manifest);
-      const total = Object.values(manifest.tables).reduce((sum, table) => sum + table.count, 0);
-      if (!verification.ok) {
-        addLog(`[F7] Pacote recusado: ${verification.problems.join('; ')}`);
+      const result = await exportVerifiedSecurityPackage();
+      if (!result.ok) {
+        addLog(`[F7] Pacote recusado: ${result.problems.join('; ')}`);
         showRecoveryToast('✗ PACOTE DE BACKUP NÃO VERIFICADO.', 'red');
         return;
       }
-      downloadSecurityExport(manifest);
-      addLog(`[F7] Pacote verificado: ${total} registros, schema v${manifest.schemaVersion}, SHA-256 ${manifest.packageChecksum.slice(0, 16)}…`);
+      addLog(`[F7] Pacote verificado: ${result.total} registros, schema v${result.manifest.schemaVersion}, SHA-256 ${result.manifest.packageChecksum.slice(0, 16)}…`);
       showRecoveryToast('✓ PACOTE DE BACKUP VERIFICADO EXPORTADO (.json/.dat).', 'blue');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -124,9 +124,13 @@ export interface SecurityExportVerification {
 }
 
 /**
- * Verifica um pacote SEM tocar em nenhuma base: contagem por tabela, checksum
- * por tabela e hash do pacote. É o portão do restauro — recusar aqui é o que
- * impede um ficheiro corrompido de substituir o trabalho de campo.
+ * Verifica um pacote SEM tocar em nenhuma base: formato, contagem por tabela e
+ * hash do pacote. É o portão do restauro — recusar aqui é o que impede um
+ * ficheiro corrompido de substituir o trabalho de campo.
+ *
+ * O `packageChecksum` cobre os registos de todas as tabelas (corpo canónico),
+ * por isso não se recalcula o SHA-256 por tabela: o checksum de cada tabela
+ * viaja no manifesto como evidência da Fase 0, não como segundo portão.
  */
 export async function verifySecurityExport(
   manifest: SecurityExportManifest
@@ -144,14 +148,15 @@ export async function verifySecurityExport(
     if (snapshot.count !== snapshot.records.length) {
       problems.push(`${name}: contagem ${snapshot.count} ≠ ${snapshot.records.length} registros`);
     }
-    const checksum = await generateChecksum(snapshot.records);
-    if (checksum !== snapshot.checksum) {
-      problems.push(`${name}: checksum não confere`);
-    }
   }
 
   if (!manifest.packageChecksum) {
     problems.push('hash do pacote ausente');
+  } else if (!/^[0-9a-f]{64}$/.test(manifest.packageChecksum)) {
+    // `generateChecksum` devolve `checksum_error` quando o `crypto.subtle`
+    // falha: sem esta guarda esse valor compararia igual a si próprio e o
+    // pacote passava sem selo nenhum.
+    problems.push('hash do pacote inválido');
   } else {
     const expected = await generateChecksum(packageBody(manifest));
     if (expected !== manifest.packageChecksum) {
@@ -278,4 +283,32 @@ export function downloadSecurityExport(manifest: SecurityExportManifest): void {
       logger.warn(`[SecurityExport] Download .${ext} bloqueado (esperado em sandbox):`, error);
     }
   }
+}
+
+export interface SecurityPackageExport {
+  ok: boolean;
+  /** Problemas que recusaram o pacote (vazio quando `ok`). */
+  problems: string[];
+  /** Pacote montado — o mesmo que foi (ou seria) descarregado. */
+  manifest: SecurityExportManifest;
+  /** Total de registos em todas as tabelas do pacote. */
+  total: number;
+}
+
+/**
+ * Monta, verifica e descarrega o pacote de backup verificado. Ponto único do
+ * export: o Gestor de Base e a Gestão e Manutenção não repetem nem a montagem
+ * nem o portão, e nenhum deles descarrega um pacote recusado.
+ */
+export async function exportVerifiedSecurityPackage(
+  dbInstance: Dexie = db
+): Promise<SecurityPackageExport> {
+  const manifest = await buildSecurityExport(dbInstance);
+  const verification = await verifySecurityExport(manifest);
+  const total = Object.values(manifest.tables).reduce((sum, table) => sum + table.count, 0);
+  if (!verification.ok) {
+    return { ok: false, problems: verification.problems, manifest, total };
+  }
+  downloadSecurityExport(manifest);
+  return { ok: true, problems: [], manifest, total };
 }

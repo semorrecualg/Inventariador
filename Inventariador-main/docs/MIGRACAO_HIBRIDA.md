@@ -77,15 +77,19 @@ uma **única camada de repositórios** por trás das telas:
 - [x] **Pacote exportável com hash verificado (F7)** ✅ 2026-11-23 — v1.1 do
       formato: `buildSecurityExport` sela o pacote inteiro com `packageChecksum`
       (SHA-256 do corpo canónico, tabelas ordenadas por nome); `verifySecurityExport`
-      confere contagem e checksum de cada tabela e o hash do pacote; e
-      `restoreSecurityExport` **verifica antes da primeira escrita** — um pacote
-      corrompido ou editado à mão é recusado sem tocar na base. O `DatabaseManagerScreen`
-      ganhou «EXPORTAR PACOTE VERIFICADO» (só descarrega depois de a verificação passar).
+      confere a contagem de cada tabela e o hash do pacote (que cobre os registos,
+      pelo que não recalcula o SHA-256 por tabela); e `restoreSecurityExport`
+      **verifica antes da primeira escrita** — um pacote corrompido ou editado à
+      mão é recusado sem tocar na base. «EXPORTAR PACOTE VERIFICADO»
+      (`exportVerifiedSecurityPackage`) está no `DatabaseManagerScreen` e na
+      **Gestão e Manutenção** (`MainMenu`), junto ao backup: só descarrega depois
+      de a verificação passar.
 - [x] Testar **backup → restore** de ponta a ponta ✅ 2026-08-06
-      — `src/__tests__/securityExport.test.ts` (10 testes, `fake-indexeddb`): round-trip
+      — `src/__tests__/securityExport.test.ts` (12 testes, `fake-indexeddb`): round-trip
       de checksum, contagem/checksum por tabela, anti-downgrade, tolerância a tabelas
-      ausentes, isolamento de tabelas fora do manifesto, hash do pacote e recusa de
-      restauro de pacote adulterado (registo, contagem ou hash).
+      ausentes, isolamento de tabelas fora do manifesto, hash do pacote (incluindo
+      `checksum_error`) e recusa de restauro de pacote adulterado (registo, contagem
+      ou hash), mais o export verificado partilhado pelos dois ecrãs.
 - [x] **Análise DBA da redundância `ativos`/`assets`/`local_assets`** ✅ 2026-08-06
       (decisão confirmada) — as 3 tabelas são espelhos idênticos (`DexieAsset`, PK
       `primarykey`, índices iguais) com **triple-write** no loader; **papéis aprovados:**

@@ -16,14 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testes.
 - **Agora:** o formato v1.1 sela o pacote com `packageChecksum` (SHA-256 do corpo
   canónico, com as tabelas ordenadas por nome). `verifySecurityExport` confere a
-  contagem e o checksum de cada tabela e o hash do pacote; `restoreSecurityExport`
-  corre essa verificação **antes da primeira escrita** e recusa o pacote inteiro
-  quando algo não bate. O Gestor de Base ganhou «EXPORTAR PACOTE VERIFICADO»:
-  só descarrega o `.json`/`.dat` depois de a verificação passar, e o log mostra o
-  total de registos, a versão do schema e o início do hash.
-- Testes: `securityExport.test.ts` cresce de 6 para 10 casos — pacote selado e
-  verificado, registo adulterado (recusa sem tocar no destino), contagem que não
-  bate com os registos e hash do pacote substituído.
+  contagem de cada tabela e o hash do pacote — o hash já cobre os registos, por
+  isso não recalcula o SHA-256 tabela a tabela; `restoreSecurityExport` corre
+  essa verificação **antes da primeira escrita** e recusa o pacote inteiro
+  quando algo não bate. «EXPORTAR PACOTE VERIFICADO» está no Gestor de Base e na
+  **Gestão e Manutenção** (junto ao backup), com um ponto único de montagem e
+  verificação: só descarrega o `.json`/`.dat` depois de a verificação passar, e
+  o resultado mostra o total de registos, a versão do schema e o início do hash.
+- Testes: `securityExport.test.ts` cresce de 6 para 12 casos — pacote selado e
+  verificado, export verificado com o total de registos, registo adulterado
+  (recusa sem tocar no destino), contagem que não bate com os registos, hash do
+  pacote substituído e hash de forma inválida (`checksum_error`), que antes
+  compararia igual a si próprio e passaria sem selo.
 
 ### Corrigido — a âncora GPS volta noutro aparelho (F5)
 

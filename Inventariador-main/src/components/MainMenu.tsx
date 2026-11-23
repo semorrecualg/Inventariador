@@ -43,6 +43,7 @@ import AccessDiagnosticPanel from './AccessDiagnosticPanel';
 import type { AccessDiagnostic } from '../utils/accessDiagnostics';
 
 import { sqliteService } from '../services/sqliteService';
+import { exportVerifiedSecurityPackage } from '../services/securityExportService';
 import { logger } from '../utils/logger';
 
 interface MainMenuProps {
@@ -177,6 +178,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [pendingAction, setPendingAction] = useState<() => void>(() => {});
   
   const [isCheckingIntegrity, setIsCheckingIntegrity] = useState(false);
+  const [isExportingPackage, setIsExportingPackage] = useState(false);
   const [isSystemLocked, setIsSystemLocked] = useState(() => localStorage.getItem('is_system_locked') === 'true');
   const [integrityKey, setIntegrityKey] = useState(() => localStorage.getItem('gbr_integrity_key') || '');
 
@@ -194,6 +196,30 @@ const MainMenu: React.FC<MainMenuProps> = ({
       showModal("Erro", "Falha ao realizar verificação de integridade.", "error");
     } finally {
       setIsCheckingIntegrity(false);
+    }
+  };
+
+  /**
+   * F7 — mesmo pacote verificado do Gestor de Base, aqui na Gestão e Manutenção
+   * para o utilizador o encontrar onde procura o backup. Montagem, portão e
+   * descarga vivem no `securityExportService` (fonte única).
+   */
+  const handleSecurityPackageExport = async () => {
+    setIsExportingPackage(true);
+    try {
+      const result = await exportVerifiedSecurityPackage();
+      showModal(
+        result.ok ? 'Pacote de Backup Verificado' : 'Pacote de Backup Não Verificado',
+        result.ok
+          ? `Pacote exportado com ${result.total} registos (schema v${result.manifest.schemaVersion}). SHA-256 do pacote: ${result.manifest.packageChecksum.slice(0, 16)}… O restauro recusa qualquer pacote cujo hash não confira.`
+          : `Pacote recusado, nada foi descarregado: ${result.problems.join('; ')}.`,
+        result.ok ? 'success' : 'error'
+      );
+    } catch (err) {
+      logger.warn('[F7] Falha ao exportar o pacote de backup:', err);
+      showModal('Falha ao Exportar Pacote', err instanceof Error ? err.message : String(err), 'error');
+    } finally {
+      setIsExportingPackage(false);
     }
   };
 
@@ -1069,6 +1095,19 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="flex-1">
                   <h4 className="text-[13px] font-bold text-white uppercase tracking-tight">Gerar Backup JSON (Local)</h4>
                   <p className="text-[8px] font-bold text-white/40 uppercase tracking-widest mt-0.5">Segurança de Dados Locais</p>
+                </div>
+              </button>
+
+              {/* F7 — pacote de backup exportável e verificado (todas as tabelas). */}
+              <button
+                disabled={isExportingPackage}
+                onClick={() => { void handleSecurityPackageExport(); }}
+                className="w-full flex items-center p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl active:scale-[0.98] disabled:opacity-40 transition-all text-left"
+              >
+                <div className="w-10 h-10 bg-emerald-500 text-white rounded-lg flex items-center justify-center mr-4 shadow-lg shadow-emerald-500/20"><ShieldCheck size={20} /></div>
+                <div className="flex-1">
+                  <h4 className="text-[13px] font-bold text-emerald-400 uppercase tracking-tight">{isExportingPackage ? 'Selando pacote…' : 'Pacote de Backup Verificado'}</h4>
+                  <p className="text-[8px] font-bold text-emerald-400/60 uppercase tracking-widest mt-0.5">Todas as tabelas · SHA-256 do pacote (.json/.dat)</p>
                 </div>
               </button>
 
