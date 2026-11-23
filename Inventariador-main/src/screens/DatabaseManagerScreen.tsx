@@ -909,8 +909,11 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           )}
         </div>
         <div className="p-4 bg-slate-900/30 border border-slate-800/50 rounded-xl flex flex-col justify-between">
-          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Registros de Auditoria</span>
+          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Registros de Auditoria (local)</span>
           <span className="text-xl font-black text-blue-400 mt-1 font-mono">{logCount}</span>
+          <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider mt-1 leading-tight">
+            audit_logs no Dexie deste aparelho
+          </span>
         </div>
       </div>
 

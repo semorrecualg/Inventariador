@@ -233,6 +233,13 @@ são abertos por dentro do **Painel Completo** (`isAdminMenuOpen`) e o «Voltar�
 um devolve ao hub. O botão PAINEL aparece para ADMIN e AUDITOR; os itens
 administrativos do hub ficam ocultos para quem não é administrador.
 
+**Uma porta para o Gestor de Base (2026-11-23):** o cartão **Banco de Dados** do
+hub é o caminho do menu para o `DATABASE_MANAGER`; dentro da **Gestão e
+Manutenção** o botão «ABRIR O GESTOR DE BASE» é um atalho para o mesmo ecrã, e
+não uma segunda implementação. Os contadores (base local, nuvem, espelhos,
+`audit_logs`) existem só no Gestor; a Gestão e Manutenção trata de configuração e
+acções do utilizador.
+
 ---
 
 ## 3. Tabela de referência — AppScreen → Componente → Rota

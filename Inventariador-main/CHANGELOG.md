@@ -22,6 +22,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dados apaga a base, a trilha de auditoria e as fotos pendentes. Teste:
   `baseLocalPushGate`.
 
+### Alterado — um só caminho para o Gestor de Base
+
+- **O que era:** o Painel Completo tinha **duas portas** para a mesma base — o
+  cartão «Banco de Dados» abria o Gestor de Base e a «Gestão e Manutenção»
+  anunciava «Base, sincronização, carga e limpeza» para depois exigir um segundo
+  toque num botão «GESTOR DE BASE». A copy prometia contagens que só o Gestor
+  mostra, e a caixa «Modalidade de Acesso» dizia «offline-first restrito (sem
+  conexão com a nuvem)» logo abaixo do alternador que oferece a Base Oficial —
+  dois estados contraditórios no mesmo painel.
+- **Agora:** o cartão «Banco de Dados» fica como caminho do menu para o Gestor
+  de Base, e na Gestão e Manutenção o botão passa a «ABRIR O GESTOR DE BASE»,
+  com a nota de que é o mesmo ecrã (contadores, carga, purga e logs SRE). O
+  Painel anuncia-se como «Configuração e Ações do Utilizador»; a caixa
+  «Modalidade de Acesso» sai, porque o modo de base vive no alternador Local ↔
+  Oficial; o nome do ficheiro vem do caminho real do banco, em vez do
+  `GBR_INVENTARIO_EXPERT.DB` fixo. No Gestor, «Registros de Auditoria» passa a
+  «(local)», com a nota de que é a contagem do `audit_logs` no Dexie do aparelho.
+  Teste: `painelCompletoHub` (o atalho pede o mesmo `AppScreen.DATABASE_MANAGER`).
+
 ### Alterado
 
 - **Unidade Operacional fundida no contrato de trabalho.** A rota `/unit` foi
