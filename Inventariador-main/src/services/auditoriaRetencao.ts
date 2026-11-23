@@ -15,16 +15,27 @@ import { db } from './sqliteService';
 import { ehFalhaDeEnvio } from '../utils/auditActions';
 import { idsDeFalhasRepetidas } from '../utils/syncFalha';
 
-/** Idade a partir da qual a trilha é expurgada (falhas de envio de fora). */
+/** Idade a partir da qual a trilha **confirmada na nuvem** é expurgada. */
 export const RETENCAO_AUDITORIA_DIAS = 7;
+/**
+ * Janela de segurança do que ainda não subiu (F2): uma linha sem confirmação
+ * da nuvem — ou escrita antes de a fila existir (`_synced` ausente) — só é
+ * apagada aos 30 dias. Aos 7 dias, como antes, apagava-se a única cópia de um
+ * evento que ainda não tinha destino durável.
+ */
+export const RETENCAO_NAO_ENVIADO_DIAS = 30;
 
 export interface ResultadoDoExpurgo {
   /** Linhas apagadas nesta passagem. */
   apagadas: number;
   /** Das apagadas, quantas eram falhas de envio repetidas do mesmo dia. */
   consolidadas: number;
-  /** Limite usado (ISO) — tudo o que é anterior e não é falha de envio sai. */
+  /** Limite usado (ISO) — confirmados anteriores a este instante saem. */
   limite: string;
+  /** Limite da janela de segurança para o que ainda não subiu (ISO). */
+  limiteSeguranca: string;
+  /** Linhas antigas que ficaram por não ter confirmação da nuvem. */
+  preservadas: number;
 }
 
 /**
@@ -37,11 +48,20 @@ export const purgarAuditoriaAntiga = async (
   dias: number = RETENCAO_AUDITORIA_DIAS
 ): Promise<ResultadoDoExpurgo> => {
   const limite = new Date(agora - dias * 24 * 60 * 60 * 1000).toISOString();
+  const limiteSeguranca = new Date(
+    agora - RETENCAO_NAO_ENVIADO_DIAS * 24 * 60 * 60 * 1000
+  ).toISOString();
 
   // Lê e apaga por chave em vez de `Collection.delete()`: o filtro decide o que
   // fica, e o expurgo tem de ser explícito sobre o que apagou.
   const vencidas = await db.audit_logs.where('updated_at').below(limite).toArray();
-  const alvo = vencidas.filter((log) => !ehFalhaDeEnvio(log.acao));
+  const semFalha = vencidas.filter((log) => !ehFalhaDeEnvio(log.acao));
+  // F2: a janela dos 7 dias só vale para o que a nuvem confirmou. O que ainda
+  // não subiu espera a janela de segurança (30 dias) — e o Gestor mostra a fila.
+  const alvo = semFalha.filter(
+    (log) => log._synced === 1 || log.updated_at < limiteSeguranca
+  );
+  const preservadas = semFalha.length - alvo.length;
 
   // TETO: as falhas preservadas ficam com a linha mais recente de cada
   // (ação + registo + dia + assinatura). O histórico anterior a este teto tem
@@ -58,5 +78,11 @@ export const purgarAuditoriaAntiga = async (
     await db.audit_logs.bulkDelete(alvo.map((log) => log.id));
   }
 
-  return { apagadas: alvo.length + repetidas.length, consolidadas: repetidas.length, limite };
+  return {
+    apagadas: alvo.length + repetidas.length,
+    consolidadas: repetidas.length,
+    limite,
+    limiteSeguranca,
+    preservadas
+  };
 };

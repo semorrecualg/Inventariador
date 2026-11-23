@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { db, DexieAsset } from '../services/sqliteService';
+import { db, DexieAsset, gravarAuditoria } from '../services/sqliteService';
 import { getCurrentTenantid } from '../services/localDbService';
 import { Asset } from '../types';
 import { saveCollectedAssetAtomic } from '../services/persistenceService';
@@ -345,9 +345,8 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         await db.assets.put({ ...updatedItem, tenantid: detalhadoKey[0] });
       }
 
-      // Log de auditoria local no Dexie
-      await db.audit_logs.put({
-        id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      // Log de auditoria local pelo ponto único (contrato no nascimento).
+      await gravarAuditoria({
         usuario: userEmail,
         acao: `CONFERENCIA_CAMPANHA_FISICA`,
         tabela: `local_assets`,
@@ -357,7 +356,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
           antes: { status: ativoDetalhado.status, _conferido: ativoDetalhado._conferido },
           depois: { status: novoStatusLocal, ...marcarConferido(), _is_synced: updatedItem._is_synced }
         }),
-        updated_at: new Date().toISOString()
+        tenantid: ativoDetalhado.tenantid
       });
 
       // Recarregar os ativos para manter a consistência da UI

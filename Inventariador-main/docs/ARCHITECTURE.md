@@ -478,6 +478,16 @@ cai para INTERNAL em vez de rebentar.
   `status = 'CONFERIDO'`, mas fica sem autor/data: correr o script não é pré-requisito para
   sincronizar, é o que impede perder o autor e a data ao reinstalar o app.
 
+**A trilha de auditoria tem destino durável (F2).** `logAuditEvent` grava sempre em
+`audit_logs` do Dexie, em Base Local e em Base Oficial; a fila
+`services/auditoriaNuvem.ts` sobe lotes de 200 por `upsert` com `client_event_id`
+(= `id` local), por isso o reenvio não duplica. A recusa fica carimbada na linha
+(`_syncError`, `_syncAttempts`), o Gestor mostra «N por subir» ao lado da contagem
+local e a retenção apaga o confirmado aos 7 dias, deixando o não confirmado para a
+janela de segurança de 30. Exige a migração de `docs/supabase_bootstrap.sql`
+(`audit_logs.client_event_id` + índice único); sem ela o envio falha com o erro na
+fila, e nada é apagado nem dado como enviado.
+
 **Modos de falha da credencial** (diagnóstico rápido):
 
 | Causa | Sintoma | Onde se vê |

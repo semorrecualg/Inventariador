@@ -1,4 +1,4 @@
-import { db } from './sqliteService';
+import { db, gravarAuditoria } from './sqliteService';
 import type { DexieAsset } from './sqliteService';
 import {
   describeRecnoCollision,
@@ -122,7 +122,9 @@ const alreadyLogged = async (collision: RecnoCollision): Promise<boolean> => {
 
 const logCollision = async (collision: RecnoCollision, source: RecnoGuardSource): Promise<boolean> => {
   if (await alreadyLogged(collision)) return false;
-  await db.audit_logs.put({
+  // Ponto único da trilha: o contrato nasce com o evento (o da colisão) e não
+  // depende do contrato que estiver activo quando a fila subir.
+  await gravarAuditoria({
     id: `DUP_${Date.now()}_${Math.random().toString(36).slice(2, 9).toUpperCase()}`,
     usuario: currentUserEmail() || 'SISTEMA',
     acao: RECNO_AUDIT_ACTION,
@@ -137,7 +139,7 @@ const logCollision = async (collision: RecnoCollision, source: RecnoGuardSource)
       recno: collision.recno,
       rows: collision.rows
     }),
-    updated_at: new Date().toISOString()
+    tenantid: collision.tenantid
   });
   logger.warn(`>>> [RECNO] Possível duplicidade registrada: ${describeRecnoCollision(collision)}`);
   return true;

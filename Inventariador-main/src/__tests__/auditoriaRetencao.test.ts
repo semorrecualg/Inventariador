@@ -11,12 +11,16 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db } from '../services/sqliteService';
-import { purgarAuditoriaAntiga, RETENCAO_AUDITORIA_DIAS } from '../services/auditoriaRetencao';
+import {
+  purgarAuditoriaAntiga,
+  RETENCAO_AUDITORIA_DIAS,
+  RETENCAO_NAO_ENVIADO_DIAS
+} from '../services/auditoriaRetencao';
 
 const DIA = 24 * 60 * 60 * 1000;
 const AGORA = Date.parse('2026-11-19T12:00:00.000Z');
 
-const linha = (id: string, acao: string, quando: number) => ({
+const linha = (id: string, acao: string, quando: number, sincronizada = 1) => ({
   id,
   usuario: 'semorr@gmail.com',
   acao,
@@ -25,6 +29,7 @@ const linha = (id: string, acao: string, quando: number) => ({
   details: 'detalhe',
   delta: null,
   updated_at: new Date(quando).toISOString(),
+  _synced: sincronizada,
 });
 
 beforeEach(async () => {
@@ -32,10 +37,10 @@ beforeEach(async () => {
 });
 
 describe('expurgo da trilha de auditoria', () => {
-  it('apaga o histórico com mais de sete dias', async () => {
+  it('apaga o histórico confirmado com mais de sete dias', async () => {
     await db.audit_logs.bulkPut([
-      linha('velho', 'UPDATE', AGORA - 8 * DIA),
-      linha('recente', 'LOGIN', AGORA - 1 * DIA),
+      linha('velho', 'UPDATE', AGORA - 8 * DIA, 1),
+      linha('recente', 'LOGIN', AGORA - 1 * DIA, 1),
     ]);
 
     const resultado = await purgarAuditoriaAntiga(AGORA);
@@ -45,11 +50,35 @@ describe('expurgo da trilha de auditoria', () => {
     expect((await db.audit_logs.toArray()).map((log) => log.id)).toEqual(['recente']);
   });
 
+  it('não apaga um evento sem confirmação da nuvem (janela de segurança de 30 dias)', async () => {
+    await db.audit_logs.bulkPut([
+      linha('nao-subiu', 'CONFERENCIA', AGORA - 8 * DIA, 0),
+      linha('confirmado', 'LOGIN', AGORA - 8 * DIA, 1),
+    ]);
+
+    const resultado = await purgarAuditoriaAntiga(AGORA);
+
+    expect(resultado.apagadas).toBe(1);
+    expect(resultado.preservadas).toBe(1);
+    expect((await db.audit_logs.toArray()).map((log) => log.id)).toEqual(['nao-subiu']);
+  });
+
+  it('apaga o não confirmado depois da janela de segurança', async () => {
+    await db.audit_logs.put(linha('abandonado', 'CONFERENCIA', AGORA - 31 * DIA, 0));
+
+    const resultado = await purgarAuditoriaAntiga(AGORA);
+
+    expect(resultado.apagadas).toBe(1);
+    expect(resultado.limiteSeguranca).toBe(
+      new Date(AGORA - RETENCAO_NAO_ENVIADO_DIAS * DIA).toISOString()
+    );
+  });
+
   it('preserva as recusas e as excepções do envio, mesmo antigas', async () => {
     await db.audit_logs.bulkPut([
       linha('fail', 'SYNC_RECORD_FAIL', AGORA - 30 * DIA),
       linha('exc', 'SYNC_RECORD_EXCEPTION', AGORA - 30 * DIA),
-      linha('velho', 'UPDATE', AGORA - 30 * DIA),
+      linha('velho', 'UPDATE', AGORA - 30 * DIA, 1),
     ]);
 
     expect((await purgarAuditoriaAntiga(AGORA)).apagadas).toBe(1);

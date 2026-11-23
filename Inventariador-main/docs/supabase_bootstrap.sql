@@ -291,6 +291,14 @@ ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS tenant_id text;
 CREATE INDEX IF NOT EXISTS audit_logs_tenantid_idx ON public.audit_logs (tenantid);
 CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx ON public.audit_logs (created_at DESC);
 
+-- F2 — idempotência da trilha enviada pelo app.
+-- `client_event_id` é o `id` do evento no Dexie; o app faz upsert por ele, e o
+-- índice único garante que um reenvio (offline → online, retry) não duplica.
+-- Linhas antigas ficam com NULL, e vários NULL convivem num índice único.
+ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS client_event_id text;
+CREATE UNIQUE INDEX IF NOT EXISTS audit_logs_client_event_id_key
+  ON public.audit_logs (client_event_id);
+
 -- ============================================================================
 -- 4. USER_PERMISSIONS — perfil de usuário (upsert onConflict email)
 -- ============================================================================
