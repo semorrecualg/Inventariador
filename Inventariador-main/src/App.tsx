@@ -4521,7 +4521,19 @@ useEffect(() => {
         }
 
         const isOwnerAccount = session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-        if ((!resolvedTenantid || resolvedTenantid === 'NULL' || resolvedTenantid === 'UNDEFINED' || !resolvedUnitId || resolvedUnitId === 'NULL' || resolvedUnitId === 'UNDEFINED') && !isOwnerAccount) {
+        // Fail-safe de escopo (SRE ISOLAMENTO). Faltar CONTRATO e faltar FILIAL
+        // não são o mesmo problema e não podem ter o mesmo desfecho:
+        //  - sem contrato não há banco a isolar → a sessão é encerrada;
+        //  - com contrato e sem filial a credencial é válida e o contrato existe.
+        //    Encerrar aqui (signOut + «Sessão Expirada · reautentique») era um
+        //    beco sem saída — reautenticar nunca preenche a filial do perfil. O
+        //    fluxo documentado (FLUXO_ACESSO_INICIAL) manda abrir o CONTRATO DE
+        //    TRABALHO, que lista as filiais da nuvem desse contrato; a carga de
+        //    dados espera a escolha (o arranque nunca baixa o contrato inteiro).
+        const semContrato = !resolvedTenantid || resolvedTenantid === 'NULL' || resolvedTenantid === 'UNDEFINED';
+        const semFilial = !resolvedUnitId || resolvedUnitId === 'NULL' || resolvedUnitId === 'UNDEFINED';
+
+        if (semContrato && !isOwnerAccount) {
           if (isAppManagedSession()) {
             // Quem entrou por credencial local continua dentro: o fail-safe da
             // nuvem não pode encerrar uma sessão que ele próprio abriu.
@@ -4529,7 +4541,7 @@ useEffect(() => {
             setIsLoading(false);
             return;
           }
-          logger.warn(`[Auth Fail-Safe] Usuário logado sem tenantid ou filial associado: ${session.user.email}`);
+          logger.warn(`[Auth Fail-Safe] Usuário logado sem tenantid associado: ${session.user.email}`);
           setIsSessionValid(false);
           clearPersistedSession();
           setUser(null);
@@ -4543,13 +4555,19 @@ useEffect(() => {
 
           setModalConfig({
             isOpen: true,
-            title: 'Sessão Expirada',
-            message: 'Identificador de Contrato ou Filial ausente para isolamento do banco RLS. Por favor, reautentique.',
+            title: 'Acesso sem contrato',
+            message: 'O seu perfil não tem Contrato (tenantid) na tabela user_permissions. Sem contrato o banco não pode ser isolado (RLS). Peça ao administrador para vincular o seu usuário a um contrato e entre de novo.',
             type: 'error',
             onConfirm: () => {}
           });
           setIsLoading(false);
           return;
+        }
+
+        if (semFilial && !isOwnerAccount) {
+          // Perfil com contrato mas sem filial (user_permissions.filial/units
+          // vazios): entra e escolhe a filial no CONTRATO DE TRABALHO.
+          logger.warn(`[Auth Fail-Safe] Perfil de ${session.user.email} tem o contrato ${resolvedTenantid} mas nenhuma filial em user_permissions (filial/units). Acesso segue para o CONTRATO DE TRABALHO; a carga de dados espera a escolha da filial.`);
         }
 
         const loggedUser: User = {
@@ -4610,7 +4628,9 @@ useEffect(() => {
           // Multi-contrato: o sync fica para a escolha no seletor pós-login,
           // evitando puxar dados de um contrato que o usuário não escolheu.
           const multiContextProfile = buildWorkContexts(loggedUser, undefined, workContextFiliais).length > 1;
-          if (!multiContextProfile) {
+          if (semFilial) {
+            logger.info('>>> [SRE_NAV] Perfil com contrato e sem filial: sync adiado até a escolha da filial no CONTRATO DE TRABALHO.');
+          } else if (!multiContextProfile) {
             // ETAPA 1 (FLUXO_ACESSO_INICIAL): se o Boot Loader já baixou o
             // contrato inteiro nesta sessão, o auto-login não repete o pull.
             // ETAPA 2 (FLUXO_ACESSO_INICIAL): o auto-login respeita o filtro de

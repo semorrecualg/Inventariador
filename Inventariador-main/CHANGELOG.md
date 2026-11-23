@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — login na nuvem: perfil com contrato e sem filial deixa de ser expulso
+
+- **O que era:** ao entrar no browser com um perfil que tem `tenantid` em
+  `user_permissions` e nenhuma `filial`/`units`, o `processSession` tratava a
+  falta de contrato e a falta de filial como o mesmo erro: limpava a sessão,
+  fazia `signOut` e mostrava «SESSÃO EXPIRADA · Identificador de Contrato ou
+  Filial ausente para isolamento do banco RLS. Por favor, reautentique.».
+  Reautenticar nunca preenche a filial do perfil — era um beco sem saída, e a
+  sessão do Supabase era destruída sem necessidade.
+- **Agora:** sem contrato a sessão continua a ser encerrada (não há banco a
+  isolar), com a mensagem certa — «Acesso sem contrato», a pedir o vínculo em
+  `user_permissions`. Com contrato e sem filial a sessão é mantida e a entrada
+  segue para o CONTRATO DE TRABALHO (`/contexto`), que lista as filiais da
+  nuvem desse contrato; o sync espera a escolha da filial, para nunca descer o
+  contrato inteiro (mesma regra do arranque).
+- Teste: `authSemFilial` — login de nuvem com perfil sem filial não chama
+  `signOut`, não mostra «Sessão Expirada» e chega a `/contexto`.
+
 ### Adicionado — reconciliação da trilha de ativos entre aparelho, arquivo e `asset_logs` (F2, 3.º passo)
 
 - **O que era:** a aba «Ativos» da Trilha lia `asset_logs` da nuvem e o Dexie,
