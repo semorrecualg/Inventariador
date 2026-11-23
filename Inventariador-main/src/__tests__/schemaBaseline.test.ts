@@ -1,13 +1,13 @@
 // src/__tests__/schemaBaseline.test.ts
 // CONTRATO DE CONGELAMENTO DO SCHEMA LOCAL (Fase 0 — docs/MIGRACAO_HIBRIDA.md).
 //
-// Trava o baseline canônico `InventoryLocalStore` v7:
-//  - `db.verno === 7`
+// Trava o baseline canônico `InventoryLocalStore` v8:
+//  - `db.verno === 8`
 //
 // A chave composta `[tenantid+primarykey]` foi aplicada na cadeia v6→v7
 // (v6: DROP + backup; v7: RECREATE + restauração — o Dexie não permite trocar
 // a chave primária num único upgrade).
-//  - conjunto exato das 9 tabelas Dexie
+//  - conjunto exato das 10 tabelas Dexie
 //  - assinatura de chave primária + índices de cada tabela (order-insensitive)
 //  - os 21 canônicos do contrato de carga presentes em DB_ASSET_COLUMNS
 //
@@ -15,6 +15,8 @@
 // (o tenantid é o muro entre contratos — mesma regra da nuvem com PK (tenantid, id)).
 // `primarykey` passou de chave primária para ÍNDICE. v5 (Fase C4) não mudou a
 // estrutura; a etapa de DADOS (normalização) segue no upgrade do v5.
+// v8 = tabela `asset_cleanup_backups` (backup da limpeza de cópias exatas do
+// Gestor de Base). Tabela NOVA — nenhuma tabela existente muda de assinatura.
 // Referência congelada: docs/SCHEMA_BASELINE.md.
 // Qualquer evolução do schema exige nova version(n) no InventoryDexieDatabase,
 // atualização do doc E deste contrato.
@@ -60,7 +62,8 @@ const BASELINE: Record<string, string> = {
   SYSTEM_CONTEXT: 'key',
   unit_configs: 'id, filial',
   campaign_snapshots: 'id, campaign_id',
-  addresses: '++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced'
+  addresses: '++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced',
+  asset_cleanup_backups: '++seq, cleanup_id, kind'
 };
 
 // Contrato do loader: exatamente 21 colunas canônicas (nome e ordem fixas,
@@ -73,17 +76,17 @@ const LOADER_CONTRACT_21 = [
 ];
 
 describe('schemaBaseline — congelamento do InventoryLocalStore (Fase 0)', () => {
-  it('banco canônico `InventoryLocalStore` na versão de schema v7', () => {
+  it('banco canônico `InventoryLocalStore` na versão de schema v8', () => {
     expect(db.name).toBe('InventoryLocalStore');
-    expect(db.verno).toBe(7);
+    expect(db.verno).toBe(8);
   });
 
-  it('conjunto exato de 9 tabelas (sem tabelas órfãs nem faltantes)', () => {
+  it('conjunto exato de 10 tabelas (sem tabelas órfãs nem faltantes)', () => {
     const names = db.tables.map((t) => t.name).sort();
     expect(names).toEqual(Object.keys(BASELINE).sort());
   });
 
-  it('assinatura de chave primária + índices de cada tabela corresponde ao baseline v6', () => {
+  it('assinatura de chave primária + índices de cada tabela corresponde ao baseline', () => {
     for (const table of db.tables) {
       expect(normalize(tableSignature(table)), `tabela: ${table.name}`).toBe(
         normalize(BASELINE[table.name])
