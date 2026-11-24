@@ -378,4 +378,15 @@ describe('Login — "Esqueci a senha"', () => {
     await waitFor(() => expect(screen.getByText(/rate limit reached/i)).toBeTruthy());
     expect(onShowModal).not.toHaveBeenCalled();
   });
+
+  it('erro de rede continua a cair no banco local, não em credencial inválida', async () => {
+    // Regressão da tradução dos erros: `Failed to fetch` tem de continuar a
+    // tentar o SQLite (fallback local) e nunca virar «e-mail/senha incorretos».
+    supabaseMock.auth.signInWithPassword.mockRejectedValueOnce({ message: 'Failed to fetch' });
+    renderLogin();
+    await submitCredentials('sem.conta.local@example.com', 'senha123');
+
+    await waitFor(() => expect(screen.getByText(/Credenciais internas inválidas/i)).toBeTruthy());
+    expect(screen.queryByText(/E-mail\/senha incorretos/i)).toBeNull();
+  });
 });

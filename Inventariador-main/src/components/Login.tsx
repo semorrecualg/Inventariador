@@ -810,7 +810,7 @@ const Login: React.FC<LoginProps> = ({
           if (isNetError) {
             logger.info('[Login] Erro de rede legítimo detectado. Executando login via SQLite local.');
             loggedUser = doLocalAuthFallback();
-                    } else {
+          } else {
             // Se for erro de credenciais (ou qualquer coisa diferente de timeout/falha de rede), NÃO mascara com o SQLite!
             // `Invalid login credentials` (resposta real do GoTrue) não contém
             // `invalid credentials` — o ramo localizado nunca corria e o
@@ -1075,16 +1075,18 @@ const Login: React.FC<LoginProps> = ({
           </div>
         </div>
 
-        <div className="flex justify-end -mt-1">
-          <button
-            type="button"
-            onClick={handleForgotPassword}
-            disabled={isSendingReset || isLoading}
-            className="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-accent transition-colors disabled:opacity-60 cursor-pointer"
-          >
-            {isSendingReset ? 'A enviar...' : 'Esqueci a senha'}
-          </button>
-        </div>
+        {!isInternalMode && (
+          <div className="flex justify-end -mt-1">
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={isSendingReset || isLoading}
+              className="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-accent transition-colors disabled:opacity-60 cursor-pointer"
+            >
+              {isSendingReset ? 'A enviar...' : 'Esqueci a senha'}
+            </button>
+          </div>
+        )}
 
         <button 
           type="submit"

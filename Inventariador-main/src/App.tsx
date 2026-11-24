@@ -8586,6 +8586,9 @@ useEffect(() => {
           onCancel={() => {
             limparRecuperacaoDeSenha();
             setIsPasswordRecovery(false);
+            // Desistir tem de matar a sessão temporária do link: sem isto ela
+            // sobrevivia ao ecrã e podia voltar como login normal no reload.
+            if (supabase) void supabase.auth.signOut();
             pushScreen(AppScreen.LOGIN);
           }}
         />
