@@ -27,12 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   botão «VALIDAR SOBERANIA» grava `is_system_locked` e o arranque força
   BASE LOCAL. Ao escolher Base Oficial, o diálogo anunciava «MODO NUVEM»; no
   reload, todas as telas voltavam a dizer BASE LOCAL — a troca nunca valia.
-- **Agora:** a troca para Base Oficial com blindagem ativa pede confirmação e
-  remove a blindagem (registada na auditoria), para o modo escolhido ser o modo
-  real; sem as chaves do Supabase no build, a troca é recusada antes de gravar
-  o modo, em vez de anunciar uma nuvem que não existe. No sentido inverso,
-  «VALIDAR SOBERANIA» passa a recusar selar o aparelho enquanto a Base Oficial
-  estiver ativa (a blindagem voltaria a forçar BASE LOCAL no arranque).
+- **Agora:** a troca para Base Oficial com blindagem ativa mostra o bloqueio e
+  explica o caminho, sem alterar o modo nem remover a blindagem por conta
+  própria; sem as chaves do Supabase no build, a troca é recusada antes de
+  gravar o modo, em vez de anunciar uma nuvem que não existe. O desbloqueio é
+  uma ação explícita no cartão «Status de Blindagem» («Desbloquear
+  blindagem»), com confirmação e registo de auditoria — só depois a Base
+  Oficial fica disponível. No sentido inverso, «VALIDAR SOBERANIA» passa a
+  recusar selar o aparelho enquanto a Base Oficial estiver ativa (a blindagem
+  voltaria a forçar BASE LOCAL no arranque).
 - **Placar do Gestor:** em BASE LOCAL ou com blindagem ativa o cartão do
   protocolo SRE já não dispara uma leitura à nuvem que ficava eternamente em
   «CONSULTANDO»; mostra `SUPABASE n/d · não consultada (base local)` e regista

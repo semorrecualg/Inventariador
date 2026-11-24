@@ -5303,6 +5303,56 @@ useEffect(() => {
   };
 
   /**
+   * DESBLOQUEIO EXPLÍCITO DA BLINDAGEM FÍSICA.
+   *
+   * A blindagem («Pronto para Campo», `is_system_locked`) suspende a nuvem e
+   * mantém o app na Base Local no arranque. Removê-la é uma decisão do
+   * operador, tomada no cartão da blindagem — nunca como efeito colateral de
+   * pedir a Base Oficial. Pede confirmação, fica registada na auditoria e avisa
+   * as telas abertas para relerem o selo.
+   */
+  const handleUnlockSovereignty = () => {
+    if (localStorage.getItem('is_system_locked') !== 'true') {
+      setModalConfig({
+        isOpen: true,
+        title: 'Blindagem já removida',
+        message: 'Este aparelho não está blindado: a Base Oficial já pode ser escolhida em «Modo de Base».',
+        type: 'info'
+      });
+      return;
+    }
+
+    setModalConfig({
+      isOpen: true,
+      title: 'Desbloquear a blindagem física?',
+      message: 'A blindagem «Pronto para Campo» suspende a sincronização com a nuvem e mantém o app na Base Local. ' +
+        'Ao confirmar, a blindagem é removida e a Base Oficial (Supabase) volta a poder ser escolhida em «Modo de Base». ' +
+        'A base local, a trilha de diretório e as fotos pendentes ficam intactas. Continuar?',
+      type: 'confirm',
+      confirmText: 'Desbloquear',
+      onConfirm: () => {
+        localStorage.removeItem('is_system_locked');
+        localStorage.removeItem('gbr_integrity_key');
+        window.dispatchEvent(new Event('gbr_sovereignty_changed'));
+        logger.info('>>> [Soberania] Blindagem física removida por ação explícita do operador.');
+        logAuditEvent({
+          user_email: user?.email || 'unknown',
+          action: 'UPDATE',
+          table_name: 'config',
+          details: 'Blindagem física removida (desbloqueio explícito no cartão da blindagem)',
+          tenantid: user?.tenantid || readSessionTenantId() || ''
+        });
+        setModalConfig({
+          isOpen: true,
+          title: 'Blindagem removida',
+          message: 'O aparelho deixou de estar blindado. Em «Gestão e Manutenção → Modo de Base» já pode escolher a Base Oficial (precisa de internet). A base local continua intacta.',
+          type: 'success'
+        });
+      }
+    });
+  };
+
+  /**
    * Pedido de troca de modo vindo do hub (painel DADOS). Confirma antes de
    * aplicar: as bases LOCAL e NUVEM são independentes e a troca salva o estado
    * atual no modo de origem antes de recarregar o outro banco.
@@ -5333,31 +5383,18 @@ useEffect(() => {
 
     // BLINDAGEM FÍSICA × NUVEM: com `is_system_locked` gravado (botão
     // «VALIDAR SOBERANIA» → PROTEGIDO), o arranque força BASE LOCAL e a
-    // sincronização é suspensa por desenho. Antes a troca para Base Oficial
-    // anunciava «MODO NUVEM» e, no reload, todas as telas voltavam a dizer
-    // BASE LOCAL — uma troca que nunca valia. Agora a blindagem só sai com
-    // confirmação explícita, para o modo escolhido ser o modo real.
+    // sincronização é suspensa por desenho. A troca NÃO desfaz a blindagem:
+    // mostra o bloqueio e o caminho do desbloqueio explícito, que vive no
+    // cartão da blindagem (confirmação + auditoria). O modo atual fica como está.
     if (mode !== DatabaseMode.INTERNAL && localStorage.getItem('is_system_locked') === 'true') {
       setModalConfig({
         isOpen: true,
-        title: 'Blindagem ativa — remover para usar a Base Oficial',
-        message: 'Este aparelho está blindado («Pronto para Campo»): a blindagem suspende a sincronização com a nuvem. ' +
-          'Ao confirmar, a blindagem é removida e o sistema passa a operar na Base Oficial (precisa de internet). ' +
-          'A base local e a trilha de diretório ficam intactas. Continuar?',
-        type: 'confirm',
-        onConfirm: () => {
-          localStorage.removeItem('is_system_locked');
-          localStorage.removeItem('gbr_integrity_key');
-          logger.info('>>> [ModeSwitch] Blindagem física removida: a nuvem pode voltar a sincronizar.');
-          logAuditEvent({
-            user_email: user?.email || 'unknown',
-            action: 'UPDATE',
-            table_name: 'config',
-            details: 'Blindagem física removida para operar na Base Oficial (Supabase)',
-            tenantid: user?.tenantid || readSessionTenantId() || ''
-          });
-          void handleUpdateDatabaseMode(mode);
-        }
+        title: 'Blindagem ativa — Base Oficial bloqueada',
+        message: 'Este aparelho está blindado («Pronto para Campo») e a blindagem suspende a sincronização com a nuvem. ' +
+          'Enquanto ela estiver ativa, o app opera na Base Local e a Base Oficial não pode ser ativada. ' +
+          'Para desbloquear, abra Gestão e Manutenção → Status de Blindagem → «Desbloquear blindagem» (pede confirmação e fica registado na auditoria). ' +
+          'Nada foi alterado: o modo atual e a base local continuam intactos.',
+        type: 'warning'
       });
       return;
     }
@@ -7861,6 +7898,7 @@ useEffect(() => {
             onToggleGpsBypass={handleToggleGpsBypass}
             isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
             onCheckIntegrity={handleCheckIntegrity}
+            onUnlockSovereignty={handleUnlockSovereignty}
             campaignsCount={campaigns.length}
             currentCampaignId={inventory.currentCampaignId}
             accessDiagnostic={accessDiagnostic}
