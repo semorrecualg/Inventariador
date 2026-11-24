@@ -1432,8 +1432,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           <div className="flex-1">
             <h3 className="text-xs font-black uppercase text-amber-200 tracking-wider">Preparar Nova Carga</h3>
             <p className="text-[10px] text-amber-200/70 font-bold uppercase tracking-wide mt-1 leading-relaxed">
-              Limpa a base local, o espelho virtual e a fila de âncoras por subir.
-              Use depois de reiniciar a base da nuvem (scripts/reset-test-database.sql) e antes de carregar a planilha.
+              Limpa a base local, o espelho virtual e a fila de âncoras por subir, e larga o selo de geração antigo.
+              Use depois de reiniciar a base da nuvem (scripts/reset-test-database.sql) e antes de carregar a planilha;
+              sem este passo o envio fica bloqueado pelo selo da nova geração.
             </p>
           </div>
           <button

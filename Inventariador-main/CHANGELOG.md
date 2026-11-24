@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — selo de geração da base
+
+- **O que era:** o reset da nuvem só limpava o aparelho onde «Preparar Nova Carga»
+  era corrido. Um segundo aparelho com a base antiga reenviava as chaves velhas no
+  primeiro sync e repovoava a tabela `assets` — em silêncio, porque a nuvem não
+  tinha como saber que aquela geração já não valia.
+- **Agora:** `public.base_generation` (uma linha, `generation` uuid + `seq`) dá
+  identidade à geração corrente; o aparelho espelha-a em `localStorage` e
+  `exigirGeracaoBaseCorrente` compara antes de qualquer upsert nos dois caminhos
+  que escrevem em `assets` (`syncAssetsToCloud` e a fila
+  `processDataSyncQueue`). Geração igual segue;
+  base local vazia ou primeira geração (rollout) adota; qualquer outra diferença
+  bloqueia o envio com aviso na barra de sincronização e pede «Preparar Nova
+  Carga». Falha aberta: sem tabela, sem rede ou resposta inválida o envio segue
+  sem portão (projetos que ainda não correram o bootstrap novo), com tecto de
+  4 s na leitura para um pedido pendurado não travar a fila.
+- **Operação:** o § 2-B de `scripts/reset-test-database.sql` gira o selo depois
+  do bootstrap; ver `docs/GERACAO_BASE.md`.
+- **Testes:** `baseGeneration` (16), 6 em `syncAssetsToCloudGuard` e o encaixe
+  na fila em `syncPushQueue`.
+
 ### Adicionado — reset da base de teste e preparação para nova carga
 
 - **O que era:** reiniciar a base de teste no Supabase exigia cirurgia manual

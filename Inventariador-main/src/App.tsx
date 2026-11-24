@@ -1878,6 +1878,20 @@ useEffect(() => {
     return () => window.removeEventListener('gbr_cloud_push_blocked', handleCloudPushBlocked);
   }, []);
 
+  // SELO DE GERAÇÃO (utils/baseGeneration): a nuvem foi reiniciada e este
+  // aparelho ainda tem a base antiga. O envio é recusado antes de qualquer
+  // upsert; o aviso tem de chegar ao operador com a ação que o resolve.
+  useEffect(() => {
+    const handleBaseGenerationBlocked = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      const message = detail?.message
+        || 'Envio bloqueado: este aparelho tem uma base de geração anterior. Abra o Gestor de Base → «Preparar Nova Carga».';
+      setSyncError(prev => (prev === message ? prev : message));
+    };
+    window.addEventListener('gbr_base_generation_blocked', handleBaseGenerationBlocked);
+    return () => window.removeEventListener('gbr_base_generation_blocked', handleBaseGenerationBlocked);
+  }, []);
+
   useEffect(() => {
     // Check inicial
     const initialCheck = checkRuntimeIntegrity();

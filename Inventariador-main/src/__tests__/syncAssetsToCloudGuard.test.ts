@@ -8,10 +8,13 @@
 // linhas da planilha com a mesma etiqueta são registos distintos e sobem as
 // duas; só o MESMO registo repetido no payload bloqueia.
 // ============================================================================
+import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type * as SupabaseService from '../services/supabaseService';
 import type { Asset } from '../types';
 import { CloudPushBlockedError } from '../utils/cloudPushGuard';
+import { BaseGenerationBlockedError } from '../utils/baseGeneration';
+import { db } from '../services/sqliteService';
 
 vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
@@ -248,5 +251,129 @@ describe('syncAssetsToCloud — identidade já existente na nuvem com outro prim
 
     expect(stubs.upsert).toHaveBeenCalledTimes(1);
     expect(result.sort()).toEqual(['PAI', 'U1']);
+  });
+});
+
+// ============================================================================
+// SELO DE GERAÇÃO — o aparelho com a base antiga não pode repovoar a nuvem
+// depois de um reset. O portão vive no mesmo ponto único de envio.
+// ============================================================================
+describe('syncAssetsToCloud — selo de geração da base', () => {
+  const seedLocalAsset = async (key: string) => {
+    await db.local_assets.put({
+      id: key,
+      tenantid: 'CICOPAL',
+      filial: '010101 CICOPAL GO',
+      primarykey: key,
+      etiqueta: '007222',
+      _is_synced: 0
+    } as never);
+  };
+
+  /** Stub com `base_generation` + as leituras de identidade do lote. */
+  const stubComGeracao = (geracao: { generation: string; seq: number } | null) => {
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    const maybeSingle = vi.fn().mockResolvedValue({ data: geracao, error: null });
+    const eq = vi.fn(() => ({ maybeSingle }));
+    const selectGen = vi.fn(() => ({ eq }));
+    const byEtiqueta = vi.fn().mockResolvedValue({ data: [], error: null });
+    const byTenant = vi.fn(() => ({ in: byEtiqueta }));
+    const select = vi.fn(() => ({ in: byTenant }));
+    vi.spyOn(supabaseStub, 'from').mockImplementation((table: string) => (
+      table === 'base_generation' ? { select: selectGen } : { upsert, select }
+    ));
+    return { upsert, selectGen, maybeSingle };
+  };
+
+  const collectGenerationBlocked = () => {
+    const messages: string[] = [];
+    const handler = (event: Event) => messages.push((event as CustomEvent<{ message: string }>).detail.message);
+    window.addEventListener('gbr_base_generation_blocked', handler);
+    return { messages, stop: () => window.removeEventListener('gbr_base_generation_blocked', handler) };
+  };
+
+  const g = (generation: string, seq: number) => ({ generation, seq });
+
+  beforeEach(async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    localStorage.setItem('app_database_mode', 'SUPABASE');
+    resetNotice();
+    await db.local_assets.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('recusa a base de geração anterior antes de qualquer upsert', async () => {
+    localStorage.setItem('gbr_base_generation', JSON.stringify(g('geracao-antiga', 1)));
+    await seedLocalAsset('A');
+    const stubs = stubComGeracao(g('geracao-nova', 2));
+    const blocked = collectGenerationBlocked();
+
+    await expect(syncAssetsToCloud([asset({ id: 'A', primarykey: 'A' })], 'CICOPAL'))
+      .rejects.toBeInstanceOf(BaseGenerationBlockedError);
+
+    blocked.stop();
+    expect(stubs.upsert).not.toHaveBeenCalled();
+    expect(stubs.selectGen).toHaveBeenCalledTimes(1);
+    expect(blocked.messages).toHaveLength(1);
+    expect(blocked.messages[0]).toContain('ENVIO BLOQUEADO');
+    expect(blocked.messages[0]).toContain('geração 2');
+    expect(blocked.messages[0]).toContain('Preparar Nova Carga');
+  });
+
+  it('avisa uma só vez por episódio, mesmo com a fila a tentar de novo', async () => {
+    localStorage.setItem('gbr_base_generation', JSON.stringify(g('geracao-antiga', 1)));
+    await seedLocalAsset('A');
+    stubComGeracao(g('geracao-nova', 2));
+    const blocked = collectGenerationBlocked();
+
+    await expect(syncAssetsToCloud([asset({ id: 'A', primarykey: 'A' })], 'CICOPAL'))
+      .rejects.toBeInstanceOf(BaseGenerationBlockedError);
+    await expect(syncAssetsToCloud([asset({ id: 'A', primarykey: 'A' })], 'CICOPAL'))
+      .rejects.toBeInstanceOf(BaseGenerationBlockedError);
+    expect(blocked.messages).toHaveLength(1);
+    blocked.stop();
+  });
+
+  it('segue quando o aparelho está na geração corrente', async () => {
+    localStorage.setItem('gbr_base_generation', JSON.stringify(g('geracao-atual', 2)));
+    const stubs = stubComGeracao(g('geracao-atual', 2));
+
+    const result = await syncAssetsToCloud([asset({ id: 'A', primarykey: 'A' })], 'CICOPAL');
+
+    expect(stubs.upsert).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(['A']);
+  });
+
+  it('adota a geração 1 sem selo local (rollout com aparelhos já em campo)', async () => {
+    await seedLocalAsset('A');
+    const stubs = stubComGeracao(g('primeira-geracao', 1));
+
+    const result = await syncAssetsToCloud([asset({ id: 'A', primarykey: 'A' })], 'CICOPAL');
+
+    expect(stubs.upsert).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(['A']);
+    expect(JSON.parse(localStorage.getItem('gbr_base_generation') || 'null')).toEqual(g('primeira-geracao', 1));
+  });
+
+  it('adota sem bloqueio quando a base local está vazia (acabou de ser preparada)', async () => {
+    const stubs = stubComGeracao(g('geracao-nova', 3));
+
+    await syncAssetsToCloud([asset({ id: 'A', primarykey: 'A' })], 'CICOPAL');
+
+    expect(stubs.upsert).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(localStorage.getItem('gbr_base_generation') || 'null')).toEqual(g('geracao-nova', 3));
+  });
+
+  it('falha aberto quando a nuvem não tem selo (projeto ainda sem o bootstrap novo)', async () => {
+    const stubs = stubComGeracao(null);
+
+    const result = await syncAssetsToCloud([asset({ id: 'A', primarykey: 'A' })], 'CICOPAL');
+
+    expect(stubs.upsert).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(['A']);
   });
 });

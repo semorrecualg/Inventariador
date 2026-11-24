@@ -29,7 +29,8 @@
 --    Sem ela o script aborta com uma mensagem — protecção contra correr isto
 --    no projeto errado.
 -- 2) No mesmo editor, rode § 0 + § 1 (drops).
--- 3) No mesmo editor, rode agora `docs/supabase_bootstrap.sql` (recria tudo).
+-- 3) No mesmo editor, rode agora `docs/supabase_bootstrap.sql` (recria tudo) e,
+--    logo depois, o bloco § 2-B (gira o selo de geração da base).
 -- 4) No dispositivo: Gestor de Base → «Preparar Nova Carga» (limpa a base
 --    local, o espelho virtual, os endereços, a trilha e a fila da âncora).
 -- 5) Carga de Dados.
@@ -132,6 +133,25 @@ select table_name
 from information_schema.tables
 where table_schema = 'public'
 order by table_name;
+
+-- ----------------------------------------------------------------------------
+-- 2-B. GIRAR O SELO DE GERAÇÃO (rodar DEPOIS do bootstrap)
+--      É isto que faz os aparelhos com a base antiga pararem de enviar: o app
+--      compara a geração antes de cada upsert e recusa quem ficou na anterior.
+--      A tabela `base_generation` NÃO é dropada pelo § 1; por isso o `seq` sobe
+--      em vez de recomeçar em 1 (a geração 1 é a adoção de rollout).
+--      Só corre com o papel que tem escrita (SQL Editor / service_role): o
+--      cliente do app só lê.
+-- ----------------------------------------------------------------------------
+insert into public.base_generation (id, generation, seq, reset_at)
+values (1, gen_random_uuid(), 1, now())
+on conflict (id) do update
+  set generation = gen_random_uuid(),
+      seq        = public.base_generation.seq + 1,
+      reset_at   = now();
+
+-- Confirmação: a geração mudou e o seq subiu.
+select generation, seq, reset_at from public.base_generation;
 
 -- ----------------------------------------------------------------------------
 -- 3. VALIDAÇÕES PÓS-CARGA

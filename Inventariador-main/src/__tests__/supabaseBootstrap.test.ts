@@ -2,7 +2,7 @@
 // Regressão para docs/supabase_bootstrap.sql:
 //  - impede o retorno do DO/EXECUTE/format() dinâmico (erros 42601 e 26000 que
 //    aconteceram ao rodar o script no SQL Editor do Supabase);
-//  - garante as 10 políticas estáticas (p_all) e a resiliência a schema legado
+//  - garante as 11 políticas estáticas (p_all) e a resiliência a schema legado
 //    (ALTER TABLE ... ADD COLUMN IF NOT EXISTS — erro 42703).
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -49,9 +49,10 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     expect(doBlocks.length).toBeLessThanOrEqual(1);
   });
 
-  it('tem exatamente 10 pares DROP + CREATE POLICY (estático, um por tabela)', () => {
-    expect(codeLines.filter((l) => l.startsWith('DROP POLICY IF EXISTS')).length).toBe(10);
-    expect(codeLines.filter((l) => l.startsWith('CREATE POLICY')).length).toBe(10);
+  it('tem exatamente 11 pares DROP + CREATE POLICY (estático, um por tabela)', () => {
+    // 10 tabelas do app + `base_generation` (selo de geração, só leitura).
+    expect(codeLines.filter((l) => l.startsWith('DROP POLICY IF EXISTS')).length).toBe(11);
+    expect(codeLines.filter((l) => l.startsWith('CREATE POLICY')).length).toBe(11);
   });
 
   it('todas as políticas usam o nome fixo p_all (nunca interpolado)', () => {

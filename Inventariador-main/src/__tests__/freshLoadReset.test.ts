@@ -20,6 +20,7 @@ vi.mock('../services/localDbService', () => ({
 import { db } from '../services/sqliteService';
 import { resetLocalBaseForFreshLoad } from '../services/localBaseReset';
 import { ANCORA_PENDENTE_KEY } from '../utils/ancoraPendente';
+import { BASE_GENERATION_KEY } from '../utils/baseGeneration';
 
 const asset = (primarykey: string) =>
   ({
@@ -73,6 +74,14 @@ describe('resetLocalBaseForFreshLoad', () => {
     expect(result.clearedPendingAnchors).toBe(true);
     expect(localStorage.getItem(ANCORA_PENDENTE_KEY)).toBeNull();
     expect(localStorage.getItem('gbr_chave_da_app')).toBe('manter');
+  });
+
+  it('larga o selo de geração antigo para o próximo envio adotar a geração da nuvem', async () => {
+    localStorage.setItem(BASE_GENERATION_KEY, JSON.stringify({ generation: 'antiga', seq: 1 }));
+
+    await resetLocalBaseForFreshLoad();
+
+    expect(localStorage.getItem(BASE_GENERATION_KEY)).toBeNull();
   });
 
   it('sem fila nem ativos não inventa remoções', async () => {
