@@ -252,35 +252,64 @@ export function parseSecurityExport(text: string): SecurityExportManifest {
   return parsed as SecurityExportManifest;
 }
 
+/** Resultado da gravação do pacote no telefone. */
+export interface SecurityExportSavedFile {
+  saved: boolean;
+  /** Caminho legível para o operador (pasta/nome). */
+  path?: string;
+  /** URI devolvido pelo Capacitor (`file://…`). */
+  uri?: string;
+}
+
 /**
- * Persiste o snapshot em arquivo físico `.dat` no dispositivo (Capacitor,
- * Directory.Documents/GBR_KARDEK_DATA). Best-effort: em Web/iFrame retorna false
- * silenciosamente (mesmo padrão de `backupDatabaseToPhysicalStorage`).
+ * Persiste o snapshot em arquivo físico `.dat` no dispositivo (Capacitor).
+ *
+ * No APK o download por `<a download>` do WebView não escreve nada, e o
+ * operador ficava sem saber onde o pacote foi parar. Aqui grava-se pelo
+ * Filesystem, com nome datado — um export novo não apaga o pacote antigo que o
+ * teste de restauro precisa —, tentando primeiro os Documentos públicos e,
+ * sem permissão, o armazenamento do app. Devolve o caminho para a UI mostrar.
  */
 export async function persistSecurityExportPhysical(
   manifest: SecurityExportManifest
-): Promise<boolean> {
-  if (!Capacitor.isNativePlatform()) return false;
-  try {
-    await Filesystem.writeFile({
-      path: `GBR_KARDEK_DATA/security_export_v${manifest.schemaVersion}.dat`,
-      data: serializeSecurityExport(manifest),
-      directory: Directory.Documents,
-      encoding: Encoding.UTF8,
-      recursive: true
-    });
-    logger.info(`[SecurityExport] Artefato físico .dat gravado (schema v${manifest.schemaVersion}).`);
-    return true;
-  } catch (error) {
-    logger.error('[SecurityExport] Erro ao gravar artefato físico .dat:', error);
-    return false;
+): Promise<SecurityExportSavedFile> {
+  if (!Capacitor.isNativePlatform()) return { saved: false };
+
+  const stamp = new Date(manifest.exportedAt).toISOString().replace(/[:.]/g, '-');
+  const fileName = `GBR_SECURITY_EXPORT_v${manifest.schemaVersion}_${stamp}.dat`;
+  const tentativas = [
+    { directory: Directory.Documents, label: 'Documentos' },
+    { directory: Directory.External, label: 'Armazenamento do app' }
+  ];
+
+  let ultimoErro: unknown = null;
+  for (const tentativa of tentativas) {
+    try {
+      const escrito = await Filesystem.writeFile({
+        path: `GBR_KARDEK_DATA/${fileName}`,
+        data: serializeSecurityExport(manifest),
+        directory: tentativa.directory,
+        encoding: Encoding.UTF8,
+        recursive: true
+      });
+      const path = `${tentativa.label}/GBR_KARDEK_DATA/${fileName}`;
+      logger.info(`[SecurityExport] Pacote gravado em ${path} (${escrito.uri}).`);
+      return { saved: true, path, uri: escrito.uri };
+    } catch (error) {
+      ultimoErro = error;
+    }
   }
+
+  logger.error('[SecurityExport] Não foi possível gravar o pacote no telefone:', ultimoErro);
+  return { saved: false };
 }
 
 /**
  * Dispara o download do snapshot no navegador/Web (artefato fora do app, em
- * `.json` e `.dat`). Em sandbox/iFrame o download pode ser bloqueado — a falha
- * é esperada e não-fatal (mesmo padrão de `saveSnapshotToWorkspace`).
+ * `.json` e `.dat`). Só corre fora do nativo: no WebView do APK o `<a download>`
+ * é ignorado e não grava ficheiro nenhum (aí o caminho é
+ * `persistSecurityExportPhysical`). Em sandbox/iFrame o download pode ser
+ * bloqueado — a falha é esperada e não-fatal.
  */
 export function downloadSecurityExport(manifest: SecurityExportManifest): void {
   if (typeof document === 'undefined') return;
@@ -311,6 +340,8 @@ export interface SecurityPackageExport {
   manifest: SecurityExportManifest;
   /** Total de registos em todas as tabelas do pacote. */
   total: number;
+  /** Ficheiro gravado no telefone (só no nativo; a Web descarrega). */
+  savedFile?: SecurityExportSavedFile;
 }
 
 /**
@@ -326,6 +357,10 @@ export async function exportVerifiedSecurityPackage(
   const total = Object.values(manifest.tables).reduce((sum, table) => sum + table.count, 0);
   if (!verification.ok) {
     return { ok: false, problems: verification.problems, manifest, total };
+  }
+  if (Capacitor.isNativePlatform()) {
+    const savedFile = await persistSecurityExportPhysical(manifest);
+    return { ok: true, problems: [], manifest, total, savedFile };
   }
   downloadSecurityExport(manifest);
   return { ok: true, problems: [], manifest, total };

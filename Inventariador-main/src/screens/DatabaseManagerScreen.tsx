@@ -60,6 +60,8 @@ interface DatabaseManagerScreenProps {
 export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ onBack, onLocalBaseLoaded }) => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isPurging, setIsPurging] = useState<boolean>(false);
+  /** Caminho do último pacote gravado no telefone (export nativo). */
+  const [ultimoPacoteExportado, setUltimoPacoteExportado] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
   const [showModal, setShowModal] = useState<boolean>(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -241,7 +243,18 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         return;
       }
       addLog(`[F7] Pacote verificado: ${result.total} registros, schema v${result.manifest.schemaVersion}, SHA-256 ${result.manifest.packageChecksum.slice(0, 16)}…`);
-      showRecoveryToast('✓ PACOTE DE BACKUP VERIFICADO EXPORTADO (.json/.dat).', 'blue');
+      if (result.savedFile?.saved) {
+        const caminho = result.savedFile.path || result.savedFile.uri || 'Documentos/GBR_KARDEK_DATA';
+        setUltimoPacoteExportado(caminho);
+        addLog(`[F7] Pacote gravado no telefone: ${caminho}`);
+        showRecoveryToast(`✓ PACOTE EXPORTADO EM ${caminho}`, 'blue');
+      } else if (result.savedFile) {
+        setUltimoPacoteExportado('');
+        addLog('[F7] Pacote verificado, mas nenhuma pasta do telefone aceitou a gravação.');
+        showRecoveryToast('✗ PACOTE VERIFICADO, MAS NÃO FOI GRAVADO NO TELEMÓVEL.', 'red');
+      } else {
+        showRecoveryToast('✓ PACOTE DE BACKUP VERIFICADO EXPORTADO (.json/.dat).', 'blue');
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addLog(`[F7] Falha ao exportar o pacote: ${msg}`);
@@ -1456,6 +1469,11 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <ShieldCheck size={14} />
             <span>EXPORTAR PACOTE VERIFICADO</span>
           </button>
+          {ultimoPacoteExportado && (
+            <p className="w-full text-[9px] font-mono text-emerald-200 break-all bg-emerald-950/30 border border-emerald-900/40 rounded-lg px-2 py-1.5 text-left">
+              Último pacote: {ultimoPacoteExportado}
+            </p>
+          )}
         </div>
 
         {/* F7 (2/2) — restauro do pacote verificado (relatório antes da escrita). */}

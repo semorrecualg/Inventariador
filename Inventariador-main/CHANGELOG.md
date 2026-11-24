@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — export do pacote de backup no telemóvel
+
+- **O que era:** no APK o «EXPORTAR PACOTE VERIFICADO» só disparava um
+  `<a download>` do WebView. O Android ignora esse download e o operador ficava
+  sem ficheiro nenhum — e sem saber onde procurá-lo.
+- **Agora:** no nativo o pacote é escrito pelo Filesystem em
+  `GBR_KARDEK_DATA/GBR_SECURITY_EXPORT_v<schema>_<data>.dat`, primeiro nos
+  Documentos e, sem permissão, no armazenamento do app. O nome é datado (um
+  export novo não apaga o pacote antigo que o restauro precisa) e o caminho
+  aparece no toast, no terminal e por baixo do botão. A Web continua a
+  descarregar `.json`/`.dat`.
+
 ### Adicionado — selo de geração da base
 
 - **O que era:** o reset da nuvem só limpava o aparelho onde «Preparar Nova Carga»
