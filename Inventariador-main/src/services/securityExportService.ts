@@ -17,7 +17,9 @@ import { logger } from '../utils/logger';
 import { db } from './sqliteService';
 
 export const SECURITY_EXPORT_FORMAT = 'GBR_KARDEK_SECURITY_EXPORT' as const;
-export const SECURITY_EXPORT_VERSION = '1.0' as const;
+// 1.1 — pacote inteiro com hash próprio (`packageChecksum`), verificado antes
+// de qualquer restauro. A v1.0 só tinha checksum por tabela.
+export const SECURITY_EXPORT_VERSION = '1.1' as const;
 
 export interface SecurityExportTable {
   /** Número de registros na tabela no momento do snapshot. */
@@ -38,6 +40,31 @@ export interface SecurityExportManifest {
   source: 'DEXIE_INDEXEDDB';
   /** Mapa nome-da-tabela → snapshot (uma entrada por tabela do banco). */
   tables: Record<string, SecurityExportTable>;
+  /**
+   * SHA-256 do pacote inteiro (formato, schema, data, tabelas e registros, em
+   * ordem canónica). Um pacote que não confere é recusado no restauro — cobre a
+   * corrupção no transporte e a edição de um ficheiro à mão.
+   */
+  packageChecksum: string;
+}
+
+/**
+ * Corpo canónico do pacote, sem o próprio hash. As tabelas entram ordenadas por
+ * nome para o hash não depender da ordem em que o Dexie as expõe.
+ */
+function packageBody(manifest: Omit<SecurityExportManifest, 'packageChecksum'>): Record<string, unknown> {
+  const tables: Record<string, SecurityExportTable> = {};
+  for (const name of Object.keys(manifest.tables ?? {}).sort()) {
+    tables[name] = manifest.tables[name];
+  }
+  return {
+    format: manifest.format,
+    version: manifest.version,
+    schemaVersion: manifest.schemaVersion,
+    exportedAt: manifest.exportedAt,
+    source: manifest.source,
+    tables
+  };
 }
 
 /** Ordena registros pela chave primária (canônica) para checksum determinístico. */
@@ -70,7 +97,8 @@ export async function buildSecurityExport(
     schemaVersion: dbInstance.verno,
     exportedAt: new Date().toISOString(),
     source: 'DEXIE_INDEXEDDB',
-    tables: {}
+    tables: {},
+    packageChecksum: ''
   };
 
   for (const table of dbInstance.tables) {
@@ -84,7 +112,59 @@ export async function buildSecurityExport(
     logger.info(`[SecurityExport] Tabela '${table.name}': ${canonical.length} registros (checksum ${canonical.length > 0 ? 'calculado' : 'vazio'}).`);
   }
 
+  manifest.packageChecksum = await generateChecksum(packageBody(manifest));
+  logger.info(`[SecurityExport] Pacote selado: SHA-256 ${manifest.packageChecksum.slice(0, 16)}…`);
   return manifest;
+}
+
+export interface SecurityExportVerification {
+  ok: boolean;
+  /** Problemas encontrados, na ordem em que a verificação os deteta. */
+  problems: string[];
+}
+
+/**
+ * Verifica um pacote SEM tocar em nenhuma base: formato, contagem por tabela e
+ * hash do pacote. É o portão do restauro — recusar aqui é o que impede um
+ * ficheiro corrompido de substituir o trabalho de campo.
+ *
+ * O `packageChecksum` cobre os registos de todas as tabelas (corpo canónico),
+ * por isso não se recalcula o SHA-256 por tabela: o checksum de cada tabela
+ * viaja no manifesto como evidência da Fase 0, não como segundo portão.
+ */
+export async function verifySecurityExport(
+  manifest: SecurityExportManifest
+): Promise<SecurityExportVerification> {
+  if (!manifest || manifest.format !== SECURITY_EXPORT_FORMAT) {
+    return { ok: false, problems: ['formato inválido'] };
+  }
+
+  const problems: string[] = [];
+  for (const [name, snapshot] of Object.entries(manifest.tables ?? {})) {
+    if (!snapshot || !Array.isArray(snapshot.records)) {
+      problems.push(`${name}: registros ausentes`);
+      continue;
+    }
+    if (snapshot.count !== snapshot.records.length) {
+      problems.push(`${name}: contagem ${snapshot.count} ≠ ${snapshot.records.length} registros`);
+    }
+  }
+
+  if (!manifest.packageChecksum) {
+    problems.push('hash do pacote ausente');
+  } else if (!/^[0-9a-f]{64}$/.test(manifest.packageChecksum)) {
+    // `generateChecksum` devolve `checksum_error` quando o `crypto.subtle`
+    // falha: sem esta guarda esse valor compararia igual a si próprio e o
+    // pacote passava sem selo nenhum.
+    problems.push('hash do pacote inválido');
+  } else {
+    const expected = await generateChecksum(packageBody(manifest));
+    if (expected !== manifest.packageChecksum) {
+      problems.push('hash do pacote não confere');
+    }
+  }
+
+  return { ok: problems.length === 0, problems };
 }
 
 export interface SecurityRestoreResult {
@@ -117,6 +197,13 @@ export async function restoreSecurityExport(
     throw new Error(
       `Export de segurança v${manifest.schemaVersion} não pode ser restaurado em banco v${dbInstance.verno} (downgrade).`
     );
+  }
+
+  // Portão do restauro: verifica o pacote inteiro antes da primeira escrita.
+  // Um ficheiro corrompido não chega a limpar nenhuma tabela.
+  const verification = await verifySecurityExport(manifest);
+  if (!verification.ok) {
+    throw new Error(`Pacote de backup inválido: ${verification.problems.join('; ')}`);
   }
 
   const result: SecurityRestoreResult = { restored: {}, skipped: [] };
@@ -196,4 +283,32 @@ export function downloadSecurityExport(manifest: SecurityExportManifest): void {
       logger.warn(`[SecurityExport] Download .${ext} bloqueado (esperado em sandbox):`, error);
     }
   }
+}
+
+export interface SecurityPackageExport {
+  ok: boolean;
+  /** Problemas que recusaram o pacote (vazio quando `ok`). */
+  problems: string[];
+  /** Pacote montado — o mesmo que foi (ou seria) descarregado. */
+  manifest: SecurityExportManifest;
+  /** Total de registos em todas as tabelas do pacote. */
+  total: number;
+}
+
+/**
+ * Monta, verifica e descarrega o pacote de backup verificado. Ponto único do
+ * export: o Gestor de Base e a Gestão e Manutenção não repetem nem a montagem
+ * nem o portão, e nenhum deles descarrega um pacote recusado.
+ */
+export async function exportVerifiedSecurityPackage(
+  dbInstance: Dexie = db
+): Promise<SecurityPackageExport> {
+  const manifest = await buildSecurityExport(dbInstance);
+  const verification = await verifySecurityExport(manifest);
+  const total = Object.values(manifest.tables).reduce((sum, table) => sum + table.count, 0);
+  if (!verification.ok) {
+    return { ok: false, problems: verification.problems, manifest, total };
+  }
+  downloadSecurityExport(manifest);
+  return { ok: true, problems: [], manifest, total };
 }

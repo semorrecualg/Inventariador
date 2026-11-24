@@ -11,12 +11,13 @@ import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { previewExactCopyCleanup, cleanExactAssetCopies, restoreExactCopyCleanup, latestExactCopyBackup, formatExactCopyReport, type ExactCopyReport, type ExactCopyBackupInfo } from '../services/assetMirrorCleanupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
+import { exportVerifiedSecurityPackage } from '../services/securityExportService';
 import { logger } from '../utils/logger';
 import { APP_VERSION } from '../utils/appVersion';
 import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
 import { redactDiagnosticText } from '../utils/diagnosticRedaction';
 import { SRE_PROTOCOL_LINE, CLOUD_STATE_LABEL, formatBasesLine, type CloudBaseCount } from '../utils/sreProtocol';
-import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download, Copy, Check, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
+import { Database, Trash2, ArrowLeft, Terminal, AlertTriangle, FileSpreadsheet, UploadCloud, FolderOpen, Download, Copy, Check, Maximize2, Minimize2, RefreshCw, ShieldCheck } from 'lucide-react';
 import { VOLTAR_SEM_HISTORICO } from '../utils/routingUtils';
 
 export async function processAndInjectSpreadsheetData(file: File, onProgress: (p: number) => void): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -217,6 +218,33 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     const time = new Date().toLocaleTimeString('pt-BR');
     setConsoleLogs(prev => [...prev, `>> [${time}] ${msg}`].slice(-15));
   }, []);
+
+  /**
+   * F7 — pacote de backup exportável: snapshot de todas as tabelas Dexie com
+   * contagem + checksum por tabela e hash do pacote inteiro. O ficheiro sai
+   * depois de verificado; o restauro recusa qualquer pacote cujo hash não
+   * confira (`restoreSecurityExport`), por isso o mesmo cálculo é o portão.
+   *
+   * Montagem, portão e descarga vivem em `exportVerifiedSecurityPackage`, que a
+   * Gestão e Manutenção também usa: o mesmo pacote nos dois caminhos de backup.
+   */
+  const handleSecurityPackageExport = async () => {
+    try {
+      addLog('[F7] Montando pacote de backup verificado...');
+      const result = await exportVerifiedSecurityPackage();
+      if (!result.ok) {
+        addLog(`[F7] Pacote recusado: ${result.problems.join('; ')}`);
+        showRecoveryToast('✗ PACOTE DE BACKUP NÃO VERIFICADO.', 'red');
+        return;
+      }
+      addLog(`[F7] Pacote verificado: ${result.total} registros, schema v${result.manifest.schemaVersion}, SHA-256 ${result.manifest.packageChecksum.slice(0, 16)}…`);
+      showRecoveryToast('✓ PACOTE DE BACKUP VERIFICADO EXPORTADO (.json/.dat).', 'blue');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addLog(`[F7] Falha ao exportar o pacote: ${msg}`);
+      logger.warn('[F7] Falha ao exportar o pacote de backup:', err);
+    }
+  };
 
   const handleBackupButtonClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -1310,6 +1338,27 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
               ))}
             </div>
           )}
+        </div>
+
+        {/* F7 — pacote de backup exportável e verificado (todas as tabelas). */}
+        <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col items-center text-center space-y-4">
+          <div className="p-3 bg-emerald-950/40 text-emerald-400 rounded-full border border-emerald-900/30">
+            <ShieldCheck className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Pacote de Backup Verificado</h3>
+            <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
+              Todas as tabelas locais, com contagem e SHA-256 por tabela e do pacote. Restauro recusa hash que não confira
+            </p>
+          </div>
+          <button
+            disabled={isUploading || isPurging}
+            onClick={() => { void handleSecurityPackageExport(); }}
+            className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-98 cursor-pointer border border-emerald-500/30"
+          >
+            <ShieldCheck size={14} />
+            <span>EXPORTAR PACOTE VERIFICADO</span>
+          </button>
         </div>
 
         {/* Reconexão de Backup Físico Sandbox */}

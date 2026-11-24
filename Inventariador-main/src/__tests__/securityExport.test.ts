@@ -7,7 +7,8 @@
 //  - determinismo do checksum (dados idênticos → mesmo hash; dados diferentes → hash distinto);
 //  - restore de ponta a ponta reproduzindo dados idênticos (round-trip de checksum);
 //  - recusa de formato inválido e de snapshot mais novo que o banco-alvo (anti-downgrade);
-//  - tolerância a tabelas ausentes no banco-alvo e isolamento de tabelas fora do manifesto.
+//  - tolerância a tabelas ausentes no banco-alvo e isolamento de tabelas fora do manifesto;
+//  - F7: hash do pacote inteiro e recusa de restauro de um pacote adulterado.
 // Polyfill de IndexedDB para o ambiente Node (Vitest) — permite teste REAL de
 // backup → restore com Dexie de ponta a ponta (critério de aceite da Fase 0).
 import 'fake-indexeddb/auto';
@@ -15,7 +16,9 @@ import { describe, it, expect } from 'vitest';
 import Dexie from 'dexie';
 import {
   buildSecurityExport,
+  exportVerifiedSecurityPackage,
   restoreSecurityExport,
+  verifySecurityExport,
   SECURITY_EXPORT_FORMAT,
   type SecurityExportManifest
 } from '../services/securityExportService';
@@ -159,11 +162,12 @@ describe('securityExport — export de segurança Fase 0', () => {
 
       const tooNew: SecurityExportManifest = {
         format: SECURITY_EXPORT_FORMAT,
-        version: '1.0',
+        version: '1.1',
         schemaVersion: 99,
         exportedAt: new Date().toISOString(),
         source: 'DEXIE_INDEXEDDB',
-        tables: {}
+        tables: {},
+        packageChecksum: 'a'.repeat(64)
       };
       await expect(restoreSecurityExport(tooNew, dst)).rejects.toThrow(/downgrade/);
     } finally {
@@ -199,6 +203,134 @@ describe('securityExport — export de segurança Fase 0', () => {
     } finally {
       await src.delete();
       await dst.delete();
+    }
+  });
+
+  it('sela o pacote com SHA-256 próprio e a verificação passa num pacote íntegro', async () => {
+    const name = `${DB_PREFIX}_${++counter}`;
+    const src = makeDb(name);
+    await src.open();
+    try {
+      await src.table('assets_test').bulkAdd([
+        { primarykey: 'A-001', filial: 'F1', _is_synced: 0 },
+        { primarykey: 'B-002', filial: 'F1', _is_synced: 1 }
+      ]);
+      await src.table('config_test').put({ key: 'k', value: 'v' });
+
+      const manifest = await buildSecurityExport(src);
+      expect(manifest.version).toBe('1.1');
+      expect(manifest.packageChecksum).toMatch(/^[0-9a-f]{64}$/);
+
+      const verification = await verifySecurityExport(manifest);
+      expect(verification.problems).toEqual([]);
+      expect(verification.ok).toBe(true);
+    } finally {
+      await src.delete();
+    }
+  });
+
+  it('exporta o pacote verificado com o total de registos (ponto único dos dois ecrãs)', async () => {
+    const name = `${DB_PREFIX}_export_${++counter}`;
+    const src = makeDb(name);
+    await src.open();
+    try {
+      await src.table('assets_test').bulkAdd([{ primarykey: 'A-001' }, { primarykey: 'B-002' }]);
+      await src.table('config_test').put({ key: 'k', value: 'v' });
+
+      // Em Node não há `document`: o download no-opa e o teste fica no que
+      // interessa — o pacote sai selado e o total conta as duas tabelas.
+      const exported = await exportVerifiedSecurityPackage(src);
+      expect(exported.ok).toBe(true);
+      expect(exported.problems).toEqual([]);
+      expect(exported.total).toBe(3);
+      expect(exported.manifest.packageChecksum).toMatch(/^[0-9a-f]{64}$/);
+    } finally {
+      await src.delete();
+    }
+  });
+
+  it('recusa restaurar um pacote com um registo adulterado e não toca no destino', async () => {
+    const srcName = `${DB_PREFIX}_tamper_src_${++counter}`;
+    const dstName = `${DB_PREFIX}_tamper_dst_${++counter}`;
+    const src = makeDb(srcName);
+    const dst = makeDb(dstName);
+    await src.open();
+    await dst.open();
+    try {
+      await src.table('assets_test').bulkAdd([{ primarykey: 'A-001', filial: 'F1', status: 'ATIVO' }]);
+      await dst.table('assets_test').put({ primarykey: 'INTACTO', filial: 'ORIGINAL' });
+
+      const manifest = await buildSecurityExport(src);
+      const adulterado = JSON.parse(JSON.stringify(manifest)) as SecurityExportManifest;
+      (adulterado.tables.assets_test.records[0] as Record<string, unknown>).status = 'ADULTERADO';
+
+      const verification = await verifySecurityExport(adulterado);
+      expect(verification.ok).toBe(false);
+      // O hash do pacote cobre os registos: é o portão, sem recalcular o
+      // checksum de cada tabela (que viaja no manifesto como evidência).
+      expect(verification.problems).toEqual(['hash do pacote não confere']);
+
+      await expect(restoreSecurityExport(adulterado, dst)).rejects.toThrow(/Pacote de backup inválido/);
+      const rows = await dst.table('assets_test').toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].primarykey).toBe('INTACTO');
+    } finally {
+      await src.delete();
+      await dst.delete();
+    }
+  });
+
+  it('deteta contagem que não bate com os registos do pacote', async () => {
+    const name = `${DB_PREFIX}_count_${++counter}`;
+    const src = makeDb(name);
+    await src.open();
+    try {
+      await src.table('assets_test').bulkAdd([{ primarykey: 'A-001' }, { primarykey: 'B-002' }]);
+      const manifest = await buildSecurityExport(src);
+      manifest.tables.assets_test.count = 99;
+
+      const verification = await verifySecurityExport(manifest);
+      expect(verification.ok).toBe(false);
+      expect(verification.problems.join(' | ')).toMatch(/contagem 99 ≠ 2 registros/);
+      expect(verification.problems.join(' | ')).toMatch(/hash do pacote não confere/);
+    } finally {
+      await src.delete();
+    }
+  });
+
+  it('deteta um hash de pacote substituído, mesmo com as tabelas intactas', async () => {
+    const name = `${DB_PREFIX}_hash_${++counter}`;
+    const src = makeDb(name);
+    await src.open();
+    try {
+      await src.table('assets_test').bulkAdd([{ primarykey: 'A-001' }]);
+      const manifest = await buildSecurityExport(src);
+      manifest.packageChecksum = 'a'.repeat(64);
+
+      const verification = await verifySecurityExport(manifest);
+      expect(verification.ok).toBe(false);
+      expect(verification.problems).toEqual(['hash do pacote não confere']);
+    } finally {
+      await src.delete();
+    }
+  });
+
+  it('recusa um pacote sem hash válido (checksum_error não sela nada)', async () => {
+    const name = `${DB_PREFIX}_sem_seal_${++counter}`;
+    const src = makeDb(name);
+    await src.open();
+    try {
+      await src.table('assets_test').bulkAdd([{ primarykey: 'A-001' }]);
+      const manifest = await buildSecurityExport(src);
+      // `generateChecksum` devolve este valor quando o `crypto.subtle` falha:
+      // comparado consigo próprio passaria sem selar o pacote.
+      manifest.packageChecksum = 'checksum_error';
+
+      const verification = await verifySecurityExport(manifest);
+      expect(verification.ok).toBe(false);
+      expect(verification.problems).toEqual(['hash do pacote inválido']);
+    } finally {
+      await src.delete();
     }
   });
 });
