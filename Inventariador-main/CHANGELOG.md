@@ -27,9 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sempre. O Gestor de Base ganhou «Adotar geração atual» — confirmação explícita,
   não apaga nem envia nada, grava o selo da nuvem e limpa o aviso; a mensagem de
   bloqueio passou a apontar esse caminho quando houve restauro.
-- **Ecrã em branco no logout forçado:** quando o arranque forçava LOGIN com a URL
-  num ecrã conduzido pelo estado (ex.: `/contexto`), não havia rota e a página
-  ficava vazia. O boot passou a escrever `#/login` ao forçar a sessão.
+- **Ecrã em branco no arranque/login:** o ramo do boot que decide a sessão
+  repetia a lógica à mão em vez de usar `resolveSessionAfterCloudCheck`, por isso
+  um `getSession()` lento apagava o login local recém-concluído. Passou a usar o
+  helper (que relê o cache depois do await) e os três caminhos de LOGIN forçado
+  escrevem `#/login` — sem rota para o ecrã conduzido pelo estado, a página ficava
+  vazia.
 - **Operação:** o § 2-B de `scripts/reset-test-database.sql` gira o selo depois
   do bootstrap; ver `docs/GERACAO_BASE.md`.
 - **Testes:** `baseGeneration` (16), 8 em `syncAssetsToCloudGuard` (guarda +
