@@ -13,6 +13,7 @@ import { previewExactCopyCleanup, cleanExactAssetCopies, restoreExactCopyCleanup
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { exportVerifiedSecurityPackage } from '../services/securityExportService';
 import { SecurityPackageRestore, type SecurityPackageRestoredInfo } from '../components/SecurityPackageRestore';
+import { resetLocalBaseForFreshLoad } from '../services/localBaseReset';
 import { logger } from '../utils/logger';
 import { APP_VERSION } from '../utils/appVersion';
 import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
@@ -515,6 +516,41 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     void loadStats();
     onLocalBaseLoaded?.({ count: registos.length || total, tenantids });
   }, [addLog, loadStats, onLocalBaseLoaded]);
+
+  /**
+   * Prepara o dispositivo para uma nova carga depois de a nuvem ser reiniciada:
+   * limpa o inventário local, o espelho virtual, os endereços, a trilha e a
+   * fila da âncora. Sem isto, o aparelho reenvia as chaves antigas e o reset da
+   * nuvem não serve.
+   */
+  const handlePrepareFreshLoad = useCallback(async () => {
+    const confirmado = window.confirm(
+      'PREPARAR NOVA CARGA\n\n' +
+      'Isto apaga a base local (ativos, espelhos, endereços e auditoria), o espelho virtual\n' +
+      'e a fila de âncoras por subir.\n\n' +
+      'Use DEPOIS de reiniciar a base da nuvem e ANTES de carregar a planilha.\n' +
+      'Recarregue o app depois para o ecrã refletir a base vazia. Continuar?'
+    );
+    if (!confirmado) return;
+
+    setIsPurging(true);
+    try {
+      const result = await resetLocalBaseForFreshLoad();
+      addLog(
+        `[SRE_RESET] Base local limpa (${result.clearedAssets} ativo(s)) · fila da âncora ${
+          result.clearedPendingAnchors ? 'removida' : 'já estava vazia'
+        }.`
+      );
+      showRecoveryToast('🧹 PRONTO PARA NOVA CARGA: base local e fila da âncora limpas.', 'blue');
+      await loadStats();
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      addLog(`[SRE ERROR] Falha ao preparar a nova carga: ${errMsg}`);
+      showRecoveryToast('❌ NÃO FOI POSSÍVEL LIMPAR A BASE LOCAL.', 'red');
+    } finally {
+      setIsPurging(false);
+    }
+  }, [addLog, loadStats]);
 
   /** F0: grava no aparelho o retrato da linha de base (espelhos + p50/p95). */
   const registrarLinhaDeBase = useCallback(async () => {
@@ -1387,6 +1423,28 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
         {/* F7 (2/2) — restauro do pacote verificado (relatório antes da escrita). */}
         <SecurityPackageRestore dbInstance={db} onRestored={handleSecurityPackageRestored} />
+
+        {/* Reset da base de teste → dispositivo limpo para nova carga. */}
+        <div className="p-5 bg-amber-950/20 border border-amber-900/40 rounded-2xl flex flex-col md:flex-row md:items-center gap-4">
+          <div className="p-3 bg-amber-950/40 text-amber-400 rounded-full border border-amber-900/30 shrink-0">
+            <RefreshCw className="w-6 h-6" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-xs font-black uppercase text-amber-200 tracking-wider">Preparar Nova Carga</h3>
+            <p className="text-[10px] text-amber-200/70 font-bold uppercase tracking-wide mt-1 leading-relaxed">
+              Limpa a base local, o espelho virtual e a fila de âncoras por subir.
+              Use depois de reiniciar a base da nuvem (scripts/reset-test-database.sql) e antes de carregar a planilha.
+            </p>
+          </div>
+          <button
+            disabled={isUploading || isPurging}
+            onClick={() => { void handlePrepareFreshLoad(); }}
+            className="flex items-center justify-center space-x-2 px-5 py-3 font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg border bg-amber-600 hover:bg-amber-700 text-white cursor-pointer border-amber-500/30 active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={14} />
+            <span>{isPurging ? 'PREPARANDO...' : 'LIMPAR BASE LOCAL E ÂNCORAS'}</span>
+          </button>
+        </div>
 
         {/* Reconexão de Backup Físico Sandbox */}
         <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col items-center text-center space-y-4">

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — reset da base de teste e preparação para nova carga
+
+- **O que era:** reiniciar a base de teste no Supabase exigia cirurgia manual
+  de tabelas e índices, e o aparelho continuava com as linhas da carga anterior.
+  O primeiro sync reenviava tudo e anulava o reset da nuvem; a fila durável da
+  âncora podia ainda empurrar uma âncora de um contrato já reiniciado.
+- **Agora:** `scripts/reset-test-database.sql` dropa as tabelas de
+  inventário/auditoria que o bootstrap recria (com autorização explícita,
+  `auth.users` e `user_permissions` intactos por omissão) e deixa a recriação
+  para `docs/supabase_bootstrap.sql`; as tabelas sem DDL no repositório ficam
+  mantidas salvo autorização própria. No Gestor de Base, «Preparar Nova Carga»
+  limpa o inventário local, os três espelhos, os endereços, a trilha e o espelho
+  virtual, e remove a fila `gbr_unit_config_pending`.
+- **Testes:** `freshLoadReset` (4).
+
 ### Adicionado — recuperação de senha e diagnóstico de erros de login
 
 - **O que era:** quem esquecia a senha não tinha saída própria — só o «Redefinir
