@@ -320,6 +320,19 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const handleValidateSovereignty = async () => {
     // Flag ou controle visual para evitar clique duplo e sobrecarga na ponte nativa
     if (isCheckingIntegrity) return; 
+
+    // Blindagem e Base Oficial são incompatíveis: o selo suspende a nuvem e o
+    // arranque seguinte força BASE LOCAL. Sem esta guarda, o operador selava o
+    // aparelho em modo oficial e a escolha desaparecia no reload, sem aviso.
+    if (databaseMode !== DatabaseMode.INTERNAL) {
+      showModal(
+        'Blindagem exige Base Local',
+        'A blindagem «Pronto para Campo» suspende a sincronização com a nuvem — no próximo arranque o sistema voltaria a operar na Base Local. ' +
+          'Troque para a Base Local em «Modo de Base» antes de validar a soberania. Nada foi alterado.',
+        'warning'
+      );
+      return;
+    }
     
     try {
       logger.info(">>> [Soberania] Iniciando validação definitiva da base de dados pelo Administrador...");

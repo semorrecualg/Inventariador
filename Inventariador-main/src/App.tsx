@@ -117,6 +117,7 @@ import ThemePalette from './components/ThemePalette';
 import AssetPrintView from './components/AssetPrintView';
 import SyncManager from './components/SyncManager';
 import SyncBadge from './components/SyncBadge';
+import BaseModeBeacon from './components/BaseModeBeacon';
 import UnitConfigurator from './components/UnitConfigurator';
 import StressTestManager from './components/StressTestManager';
 
@@ -5166,6 +5167,19 @@ useEffect(() => {
   };
 
   const handleUpdateDatabaseMode = async (mode: DatabaseMode) => {
+    // Sem as chaves do Supabase (build INTERNAL) a Base Oficial não existe: o
+    // arranque seguinte voltaria a resolver INTERNAL e a troca seria um
+    // no-op que ainda anunciava «MODO NUVEM». Falha antes de gravar o modo.
+    if (mode !== DatabaseMode.INTERNAL && isInternalMode) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Base Oficial indisponível',
+        message: 'Este build não foi compilado com as chaves do Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). O sistema continua a operar na Base Local. Use um APK ou uma versão web com as chaves configuradas.',
+        type: 'warning'
+      });
+      return;
+    }
+
     setIsSyncing(true);
     try {
       // 1. Salva o estado atual no modo atual antes de trocar para garantir persistência
@@ -5313,6 +5327,37 @@ useEffect(() => {
         title: 'Nuvem indisponível',
         message: 'Este build não foi compilado com as chaves do Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). A Base Oficial só pode ser aberta em um APK/versão web com essas chaves configuradas.',
         type: 'warning'
+      });
+      return;
+    }
+
+    // BLINDAGEM FÍSICA × NUVEM: com `is_system_locked` gravado (botão
+    // «VALIDAR SOBERANIA» → PROTEGIDO), o arranque força BASE LOCAL e a
+    // sincronização é suspensa por desenho. Antes a troca para Base Oficial
+    // anunciava «MODO NUVEM» e, no reload, todas as telas voltavam a dizer
+    // BASE LOCAL — uma troca que nunca valia. Agora a blindagem só sai com
+    // confirmação explícita, para o modo escolhido ser o modo real.
+    if (mode !== DatabaseMode.INTERNAL && localStorage.getItem('is_system_locked') === 'true') {
+      setModalConfig({
+        isOpen: true,
+        title: 'Blindagem ativa — remover para usar a Base Oficial',
+        message: 'Este aparelho está blindado («Pronto para Campo»): a blindagem suspende a sincronização com a nuvem. ' +
+          'Ao confirmar, a blindagem é removida e o sistema passa a operar na Base Oficial (precisa de internet). ' +
+          'A base local e a trilha de diretório ficam intactas. Continuar?',
+        type: 'confirm',
+        onConfirm: () => {
+          localStorage.removeItem('is_system_locked');
+          localStorage.removeItem('gbr_integrity_key');
+          logger.info('>>> [ModeSwitch] Blindagem física removida: a nuvem pode voltar a sincronizar.');
+          logAuditEvent({
+            user_email: user?.email || 'unknown',
+            action: 'UPDATE',
+            table_name: 'config',
+            details: 'Blindagem física removida para operar na Base Oficial (Supabase)',
+            tenantid: user?.tenantid || readSessionTenantId() || ''
+          });
+          void handleUpdateDatabaseMode(mode);
+        }
       });
       return;
     }
@@ -7635,6 +7680,18 @@ useEffect(() => {
             </div>
           </div>
         )}
+
+        {/* SELO GLOBAL: base ativa + estado da sincronização, presente em todas
+            as telas do shell (as telas que devolvem cedo têm as suas próprias
+            barras). Sem toques: não tapa botões nem diálogos. */}
+        <BaseModeBeacon
+          isOnlineMode={isOnlineDatabaseMode(databaseMode)}
+          isSyncing={isSyncing}
+          pendingData={unsyncedAssetsCount + auditoriaPendenteCount}
+          pendingPhotos={pendingPhotosCount}
+          isSyncLocked={isSyncLocked}
+          syncError={syncError}
+        />
 
         {/* BASE LOCAL é hermética: aviso permanente de que nada sai do aparelho. */}
         {!isOnlineDatabaseMode(databaseMode) && screen !== AppScreen.LOGIN && (

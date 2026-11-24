@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — selo global de base e sincronização
+
+- **O que era:** o modo ativo só era legível em duas telas (cartão «Modo de
+  Base» e barra amarela do Gestor). Fora delas, nada dizia se o aparelho
+  operava em Base Local ou na Base Oficial, nem se havia fila por subir.
+- **Agora:** um selo fixo e discreto no canto inferior esquerdo acompanha todas
+  as telas do shell: a primeira luz diz **Base Local** (vermelha, nada sai do
+  aparelho) ou **Supabase** (verde). A segunda é a da sincronização — verde
+  quando está tudo enviado, âmbar a piscar enquanto sincroniza ou com fila
+  pendente, vermelha sem rede ou com o envio parado, e cinza em Base Local (a
+  nuvem está desligada por desenho, não é falha). Não intercepta toques.
+- **Testes:** `baseModeBeacon` (10) fixa a regra da luz e o selo nos cinco
+  estados.
+
+### Corrigido — troca para Base Oficial que voltava a BASE LOCAL
+
+- **O que era:** com a blindagem física («Pronto para Campo», `PROTEGIDO`), o
+  botão «VALIDAR SOBERANIA» grava `is_system_locked` e o arranque força
+  BASE LOCAL. Ao escolher Base Oficial, o diálogo anunciava «MODO NUVEM»; no
+  reload, todas as telas voltavam a dizer BASE LOCAL — a troca nunca valia.
+- **Agora:** a troca para Base Oficial com blindagem ativa pede confirmação e
+  remove a blindagem (registada na auditoria), para o modo escolhido ser o modo
+  real; sem as chaves do Supabase no build, a troca é recusada antes de gravar
+  o modo, em vez de anunciar uma nuvem que não existe. No sentido inverso,
+  «VALIDAR SOBERANIA» passa a recusar selar o aparelho enquanto a Base Oficial
+  estiver ativa (a blindagem voltaria a forçar BASE LOCAL no arranque).
+- **Placar do Gestor:** em BASE LOCAL ou com blindagem ativa o cartão do
+  protocolo SRE já não dispara uma leitura à nuvem que ficava eternamente em
+  «CONSULTANDO»; mostra `SUPABASE n/d · não consultada (base local)` e regista
+  no terminal que nenhuma chamada foi feita.
+- **Testes:** `sreProtocol` (5) cobre o estado de Base Local no placar.
+
 ### Adicionado — selo de geração da base
 
 - **O que era:** o reset da nuvem só limpava o aparelho onde «Preparar Nova Carga»
