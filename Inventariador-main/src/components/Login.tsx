@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { isAdminEmail, markAppManagedSession, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
-import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode } from '../services/supabaseService';
+import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode, resetPassword } from '../services/supabaseService';
 import { authenticateBiometric, checkNativeBiometry, hasBiometricRegistered, isBiometricSupported, isNativeAppShell } from '../services/biometricService';
 import { canOfferBiometricUnlock, forgetLastLoginUser, normalizeUnlockUser, readLastLoginUser, rememberLastLoginUser } from '../utils/biometricUnlock';
 import BiometricUnlock from './BiometricUnlock';
@@ -16,6 +16,16 @@ import { logger } from '../utils/logger';
 import { readSessionTenantId, readLocalTenantId } from '../utils/tenantUtils';
 import { resetLocalAccessStorage } from '../utils/localAccessReset';
 import { clearPersistedSession } from '../utils/sessionPersistence';
+import { refDoProjetoSupabase } from '../utils/supabaseProjectRef';
+import {
+  comCodigoTecnico,
+  ehCredencialInvalida,
+  emailNaoConfirmado,
+  linhaSreDeLoginRecusado,
+  resumoDaRecusaDeLogin,
+  MENSAGEM_CREDENCIAL_INVALIDA,
+  MENSAGEM_EMAIL_NAO_CONFIRMADO
+} from '../utils/loginErrors';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -48,6 +58,32 @@ const Login: React.FC<LoginProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clickCount, setClickCount] = useState(0);
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  // Última recusa do Auth, mostrada aqui mesmo: o monitor SRE só abre depois
+  // de autenticar, ou seja, nunca quando é preciso.
+  const [ultimaRecusa, setUltimaRecusa] = useState<{
+    codigo: string;
+    projeto: string;
+    utilizador: string;
+  } | null>(null);
+  // Ref do projeto em uso: o badge de ambiente dizia só «SUPABASE (WEB)» e um
+  // VITE_SUPABASE_URL trocado no ambiente dava o mesmo erro de senha errada.
+  const projectRef = refDoProjetoSupabase(import.meta.env.VITE_SUPABASE_URL);
+
+  // O formulário diz que a entrada foi recusada, mas não que código o Auth
+  // devolveu nem contra que projeto: sem esta linha no diagnóstico, comparar
+  // com o dashboard obrigava a abrir o DevTools no aparelho onde falhou.
+  const registarFalhaDeLogin = (codigo: unknown, motivo: string) => {
+    const falha = {
+      codigo,
+      motivo,
+      projectRef,
+      projetoUrl: import.meta.env.VITE_SUPABASE_URL,
+      utilizador: username.trim()
+    };
+    setUltimaRecusa(resumoDaRecusaDeLogin(falha));
+    logger.warn(linhaSreDeLoginRecusado(falha));
+  };
 
   // FLUXO ÚNICO DE ACESSO: a tela de login apenas AUTENTICA. Contrato, filial
   // (unidade operacional) e módulo são escolhidos na tela de contrato de
@@ -228,6 +264,42 @@ const Login: React.FC<LoginProps> = ({
     }
   };
 
+  /**
+   * "Esqueci a senha": pede ao Supabase o e-mail de redefinição do endereço que
+   * está no campo. O Auth não revela se a conta existe (devolve sucesso nos dois
+   * casos), por isso a confirmação diz o que é verdade: o pedido foi aceite e o
+   * e-mail segue se a conta existir.
+   */
+  const handleForgotPassword = async () => {
+    const alvo = username.trim().toLowerCase();
+    if (!alvo.includes('@')) {
+      setError('Escreve o teu e-mail no campo acima para receber o link de redefinição de senha.');
+      return;
+    }
+    if (!supabase) {
+      setError('Este build não tem ligação ao Supabase: não é possível enviar o e-mail de redefinição.');
+      return;
+    }
+
+    setError(null);
+    setIsSendingReset(true);
+    try {
+      await resetPassword(alvo);
+      logger.info(`[Login] Pedido de redefinição de senha aceite para ${alvo}.`);
+      onShowModal({
+        title: 'E-mail Enviado',
+        message: `O pedido de redefinição para ${alvo} foi aceite pela nuvem. Se existir uma conta com este endereço, o link chega em instantes — confirma também a pasta de spam. O Supabase não revela se o endereço está registado, por isso a app não pode afirmar isso.`,
+        type: 'info'
+      });
+    } catch (err) {
+      const detalhe = err instanceof Error ? err.message : String(err);
+      logger.warn('[Login] Falha ao pedir redefinição de senha:', detalhe);
+      setError(`Não foi possível enviar o e-mail de redefinição: ${detalhe}`);
+    } finally {
+      setIsSendingReset(false);
+    }
+  };
+
   const handleClearSession = async () => {
     // Busca telemetria de erro persistida localmente se houver
     const lastDbErrorStr = localStorage.getItem('gbr_kardex_last_db_error');
@@ -330,6 +402,8 @@ const Login: React.FC<LoginProps> = ({
         return prev;
       });
     }, 45000);
+
+    let codigoDeAuth: unknown = null;
 
     try {
       const inputUser = username.trim();
@@ -719,6 +793,9 @@ const Login: React.FC<LoginProps> = ({
             ? supErr 
             : (supErr?.message || supErr?.error_description || String(supErr || ''));
           const errorMsg = rawMessage.toLowerCase();
+          // Código/estado devolvido pelo GoTrue (`invalid_credentials`, 400…):
+          // é o que vai para o diagnóstico junto com o ref do projeto.
+          codigoDeAuth = supErr?.code ?? supErr?.status ?? null;
           
           // Verificação se o erro é de fato um limite de rede ou conexão
           const isNetError = !navigator.onLine || 
@@ -733,23 +810,23 @@ const Login: React.FC<LoginProps> = ({
           if (isNetError) {
             logger.info('[Login] Erro de rede legítimo detectado. Executando login via SQLite local.');
             loggedUser = doLocalAuthFallback();
-          } else {
+                    } else {
             // Se for erro de credenciais (ou qualquer coisa diferente de timeout/falha de rede), NÃO mascara com o SQLite!
-            const isInvalidCreds = errorMsg.includes('invalid credentials') || 
-                                   errorMsg.includes('invalid_credentials') || 
-                                   errorMsg.includes('incorrect') || 
-                                   errorMsg.includes('senha') ||
-                                   errorMsg.includes('invalid grant') ||
-                                   errorMsg.includes('user not found') ||
-                                   errorMsg.includes('user_not_found') ||
-                                   errorMsg.includes('invalid email') ||
-                                   errorMsg.includes('invalid password');
-            
-            if (isInvalidCreds) {
-              throw new Error("E-mail ou senha incorretos na nuvem");
-            } else {
-              throw new Error(rawMessage || "Erro ao autenticar. Verifique seus dados.");
+            // `Invalid login credentials` (resposta real do GoTrue) não contém
+            // `invalid credentials` — o ramo localizado nunca corria e o
+            // formulário mostrava o texto cru em inglês.
+            if (emailNaoConfirmado(rawMessage)) {
+              throw new Error(MENSAGEM_EMAIL_NAO_CONFIRMADO);
             }
+
+            if (ehCredencialInvalida(rawMessage)) {
+              throw new Error(comCodigoTecnico(
+                MENSAGEM_CREDENCIAL_INVALIDA,
+                supErr?.code || supErr?.status
+              ));
+            }
+
+            throw new Error(rawMessage || "Erro ao autenticar. Verifique seus dados.");
           }
         }
       } else {
@@ -780,6 +857,7 @@ const Login: React.FC<LoginProps> = ({
     } catch (err: unknown) {
       const error = err as Error;
       logger.error('[Login] Erro durante o processo:', error);
+      registarFalhaDeLogin(codigoDeAuth, error.message || 'Falha sem mensagem');
       setError(error.message || "Erro ao autenticar. Verifique seus dados.");
     } finally {
       clearTimeout(loginTimeout);
@@ -891,6 +969,14 @@ const Login: React.FC<LoginProps> = ({
             <span className="text-[7px] font-black text-slate-900 uppercase tracking-wider">
               AMBIENTE: {isInternalMode ? 'MOBILE (LOCAL)' : 'SUPABASE (WEB)'}
             </span>
+            {!isInternalMode && projectRef && (
+              <span
+                className="text-[7px] font-black text-slate-500 uppercase tracking-wider pl-1.5 border-l border-accent/20"
+                title={`Projeto Supabase em uso: ${projectRef}`}
+              >
+                PROJETO: {projectRef}
+              </span>
+            )}
           </div>
 
           <div 
@@ -938,6 +1024,20 @@ const Login: React.FC<LoginProps> = ({
               <span className="flex-1">{error}</span>
             </div>
           )}
+
+          {ultimaRecusa && (
+            <div
+              className="mb-4 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-[9px] font-bold text-slate-500 tracking-wider flex flex-wrap items-center justify-center gap-x-2 gap-y-1"
+              data-testid="ultima-recusa"
+            >
+              <span className="uppercase">Última recusa:</span>
+              <span className="text-slate-900">{ultimaRecusa.codigo || 'sem código'}</span>
+              <span className="text-slate-300">·</span>
+              <span className="uppercase">Projeto {ultimaRecusa.projeto}</span>
+              <span className="text-slate-300">·</span>
+              <span className="lowercase">{ultimaRecusa.utilizador}</span>
+            </div>
+          )}
         
         <div className="space-y-1.5">
           <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">{config.userLabel}</label>
@@ -973,6 +1073,17 @@ const Login: React.FC<LoginProps> = ({
               {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
           </div>
+        </div>
+
+        <div className="flex justify-end -mt-1">
+          <button
+            type="button"
+            onClick={handleForgotPassword}
+            disabled={isSendingReset || isLoading}
+            className="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-accent transition-colors disabled:opacity-60 cursor-pointer"
+          >
+            {isSendingReset ? 'A enviar...' : 'Esqueci a senha'}
+          </button>
         </div>
 
         <button 

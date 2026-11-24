@@ -29,7 +29,7 @@ vi.stubEnv('VITE_ADMIN_EMAIL', 'admin@example.com');
 
 const ADMIN_EMAIL = 'admin@example.com';
 
-const { supabaseMock, ensureUserProfileMock, logAuditEventMock, getEmailByUsernameMock } = vi.hoisted(
+const { supabaseMock, ensureUserProfileMock, logAuditEventMock, getEmailByUsernameMock, resetPasswordMock } = vi.hoisted(
   () => ({
     supabaseMock: {
       auth: {
@@ -40,6 +40,7 @@ const { supabaseMock, ensureUserProfileMock, logAuditEventMock, getEmailByUserna
     ensureUserProfileMock: vi.fn(),
     logAuditEventMock: vi.fn().mockResolvedValue(undefined),
     getEmailByUsernameMock: vi.fn().mockResolvedValue(null),
+    resetPasswordMock: vi.fn().mockResolvedValue(undefined),
   })
 );
 
@@ -48,6 +49,7 @@ vi.mock('../services/supabaseService', () => ({
   ensureUserProfile: ensureUserProfileMock,
   logAuditEvent: logAuditEventMock,
   getEmailByUsername: getEmailByUsernameMock,
+  resetPassword: resetPasswordMock,
   isInternalMode: false,
 }));
 
@@ -327,5 +329,53 @@ describe('Login — fluxo único (autentica e entra; filial é escolhida em /con
     const loggedUser = onLogin.mock.calls[0][0] as User;
     expect(loggedUser.email).toBe(ADMIN_EMAIL);
     expect(loggedUser.tenantid).toBe('');
+  });
+});
+
+describe('Login — "Esqueci a senha"', () => {
+  it('pede a redefinição para o e-mail digitado e confirma o envio', async () => {
+    const onShowModal = vi.fn();
+    renderLoginWithModal(onShowModal);
+    fireEvent.change(screen.getByPlaceholderText('Digite seu usuário ou e-mail'), {
+      target: { value: 'Auditor@Example.com' },
+    });
+
+    fireEvent.click(screen.getByText('Esqueci a senha'));
+
+    await waitFor(() => expect(resetPasswordMock).toHaveBeenCalledTimes(1));
+    // normalizado em minúsculas, como o resto do login
+    expect(resetPasswordMock).toHaveBeenCalledWith('auditor@example.com');
+    await waitFor(() => expect(onShowModal).toHaveBeenCalledTimes(1));
+    const modal = onShowModal.mock.calls[0][0] as { title: string; message: string };
+    expect(modal.title).toMatch(/e-mail enviado/i);
+    expect(modal.message).toContain('auditor@example.com');
+  });
+
+  it('não envia sem e-mail e diz o que falta', async () => {
+    const onShowModal = vi.fn();
+    renderLoginWithModal(onShowModal);
+    fireEvent.change(screen.getByPlaceholderText('Digite seu usuário ou e-mail'), {
+      target: { value: 'admin' },
+    });
+
+    fireEvent.click(screen.getByText('Esqueci a senha'));
+
+    await waitFor(() => expect(screen.getByText(/Escreve o teu e-mail/i)).toBeTruthy());
+    expect(resetPasswordMock).not.toHaveBeenCalled();
+    expect(onShowModal).not.toHaveBeenCalled();
+  });
+
+  it('mostra a falha quando o pedido é recusado', async () => {
+    resetPasswordMock.mockRejectedValueOnce(new Error('rate limit reached'));
+    const onShowModal = vi.fn();
+    renderLoginWithModal(onShowModal);
+    fireEvent.change(screen.getByPlaceholderText('Digite seu usuário ou e-mail'), {
+      target: { value: 'auditor@example.com' },
+    });
+
+    fireEvent.click(screen.getByText('Esqueci a senha'));
+
+    await waitFor(() => expect(screen.getByText(/rate limit reached/i)).toBeTruthy());
+    expect(onShowModal).not.toHaveBeenCalled();
   });
 });

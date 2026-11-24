@@ -38,6 +38,12 @@ import {
   totalDeEscritasPendentes,
 } from './utils/guardaSaida';
 import { canonicalRole, isFieldAuditorRole } from './utils/roles';
+import {
+  emRecuperacaoDeSenha,
+  limparRecuperacaoDeSenha,
+  marcarRecuperacaoDeSenha
+} from './utils/passwordRecovery';
+import { tokensDoLinkDeRecuperacao } from './utils/recoveryLink';
 
 // Extend Window interface for pushScreen
 declare global {
@@ -49,6 +55,7 @@ declare global {
 }
 import Modal from './components/Modal';
 const Login = React.lazy(() => import('./components/Login'));
+const RecoveryPassword = React.lazy(() => import('./components/RecoveryPassword'));
 import Register from './components/Register';
 const MainMenu = React.lazy(() => import('./components/MainMenu'));
 const DatabaseManagerScreen = React.lazy(() => import('./screens/DatabaseManagerScreen').then(m => ({ default: m.DatabaseManagerScreen })));
@@ -840,6 +847,58 @@ useEffect(() => {
   }, []);
 
   const [isLoading, setIsLoading] = useState(false);
+  // Link de recuperação do Supabase: a app mostra o ecrã de nova senha em vez
+  // de deixar entrar com a sessão temporária que o link cria.
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(() => emRecuperacaoDeSenha());
+
+  // Deep link de recuperação (APK): `com.gbr.kardek://recovery#access_token=…`.
+  // `appUrlOpen` só dispara com a app viva; `getLaunchUrl` cobre a partida a frio.
+  useEffect(() => {
+    let disposed = false;
+    let appUrlHandle: { remove: () => Promise<void> } | null = null;
+
+    const abrirRecuperacaoDeSenha = async (url?: string | null) => {
+      const tokens = tokensDoLinkDeRecuperacao(url);
+      if (!tokens || !supabase) return;
+      logger.info('[Auth] Link de recuperação recebido no app: trocando tokens por sessão.');
+      const { error } = await supabase.auth.setSession({
+        access_token: tokens.accessToken,
+        refresh_token: tokens.refreshToken
+      });
+      if (error) {
+        logger.warn('[Auth] Não foi possível abrir a sessão do link de recuperação:', error.message);
+        return;
+      }
+      marcarRecuperacaoDeSenha();
+      setIsPasswordRecovery(true);
+      setIsSessionValid(false);
+    };
+
+    void (async () => {
+      try {
+        const { App: CapacitorApp } = await import('@capacitor/app');
+        const handle = await CapacitorApp.addListener('appUrlOpen', ({ url }) => {
+          void abrirRecuperacaoDeSenha(url);
+        });
+        if (disposed) {
+          void handle.remove();
+        } else {
+          appUrlHandle = handle;
+        }
+        // Partida a frio: o link que LANÇOU a app não passa pelo evento acima.
+        const launch = await CapacitorApp.getLaunchUrl();
+        if (launch?.url) await abrirRecuperacaoDeSenha(launch.url);
+      } catch (err) {
+        // Browser/PWA: não há deep link nativo, o fluxo web continua.
+        logger.warn('[Auth] appUrlOpen indisponível nesta plataforma:', err);
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      if (appUrlHandle) void appUrlHandle.remove();
+    };
+  }, []);
   const [selectedAddress, setSelectedAddressState] = useState<string | null>(() => sessionStorage.getItem('current_selected_address') || null);
 
   const setSelectedAddress = useCallback((addr: string | null) => {
@@ -4534,6 +4593,15 @@ useEffect(() => {
     // Função para processar o login a partir de uma sessão
     const processSession = async (session: Session) => {
       if (!session?.user) return;
+
+      // Sessão vinda do link de recuperação não é um login: só serve para
+      // `auth.updateUser`. Sem este guarda, o utilizador entrava com a senha
+      // antiga e o ecrã de nova senha nunca aparecia.
+      if (emRecuperacaoDeSenha()) {
+        logger.info('[Auth] Sessão de recuperação de senha: login suspenso até definir a nova senha.');
+        setIsLoading(false);
+        return;
+      }
       
       const currentUser = userRef.current;
       
@@ -4869,6 +4937,16 @@ useEffect(() => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       logger.info('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
+
+      // PASSWORD_RECOVERY: o link do e-mail abriu uma sessão temporária. Login
+      // suspenso até a senha nova ser definida no ecrã de recuperação.
+      if (event === 'PASSWORD_RECOVERY') {
+        marcarRecuperacaoDeSenha();
+        setIsPasswordRecovery(true);
+        setIsSessionValid(false);
+        setIsLoading(false);
+        return;
+      }
       const isValid = !!session && !!session.user && typeof session.user.id === "string";
 
       // Sessão gerida pelo app: sem token do Supabase, ou com token de OUTRO
@@ -8488,6 +8566,29 @@ useEffect(() => {
             Soberania de Dados Ativa (Modo Interno)
           </p>
         </div>
+      )}
+
+      {isPasswordRecovery && (
+        <RecoveryPassword
+          onDone={() => {
+            limparRecuperacaoDeSenha();
+            setIsPasswordRecovery(false);
+            setUser(null);
+            setIsSessionValid(false);
+            pushScreen(AppScreen.LOGIN);
+            setModalConfig({
+              isOpen: true,
+              title: 'Senha Alterada',
+              message: 'A nova senha foi definida. Entre com ela para continuar.',
+              type: 'info'
+            });
+          }}
+          onCancel={() => {
+            limparRecuperacaoDeSenha();
+            setIsPasswordRecovery(false);
+            pushScreen(AppScreen.LOGIN);
+          }}
+        />
       )}
     </ErrorBoundary>
   );
