@@ -12,6 +12,7 @@ import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/ass
 import { previewExactCopyCleanup, cleanExactAssetCopies, restoreExactCopyCleanup, latestExactCopyBackup, formatExactCopyReport, type ExactCopyReport, type ExactCopyBackupInfo } from '../services/assetMirrorCleanupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
 import { exportVerifiedSecurityPackage } from '../services/securityExportService';
+import { SecurityPackageRestore, type SecurityPackageRestoredInfo } from '../components/SecurityPackageRestore';
 import { logger } from '../utils/logger';
 import { APP_VERSION } from '../utils/appVersion';
 import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
@@ -491,6 +492,29 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       console.error("[SRE STATS ERR]", err);
     }
   }, [activeTenantid, addLog]);
+
+  /**
+   * F7 (2/2) — o pacote restaurado é a BASE LOCAL deste aparelho: o App tem de
+   * operar nela e os espelhos/estatísticas do Gestor têm de refletir o restauro.
+   * Os tenantids saem da própria base restaurada (nunca de valor fixo).
+   */
+  const handleSecurityPackageRestored = useCallback(({ manifest, result }: SecurityPackageRestoredInfo) => {
+    const total = Object.values(result.restored).reduce((sum, count) => sum + count, 0);
+    const registos = manifest.tables.assets?.records
+      ?? manifest.tables.local_assets?.records
+      ?? manifest.tables.ativos?.records
+      ?? [];
+    const tenantids = [...new Set(registos
+      .map((r) => String((r as { tenantid?: unknown })?.tenantid ?? '').trim().toUpperCase())
+      .filter(Boolean))];
+    addLog(
+      `[F7] Pacote restaurado: ${total} registos em ${Object.keys(result.restored).length} tabela(s), schema v${manifest.schemaVersion}` +
+      `${result.skipped.length > 0 ? `, ${result.skipped.length} tabela(s) pulada(s): ${result.skipped.join(', ')}` : ''}.`
+    );
+    showRecoveryToast('✓ PACOTE DE BACKUP RESTAURADO COM HASH VERIFICADO.', 'blue');
+    void loadStats();
+    onLocalBaseLoaded?.({ count: registos.length || total, tenantids });
+  }, [addLog, loadStats, onLocalBaseLoaded]);
 
   /** F0: grava no aparelho o retrato da linha de base (espelhos + p50/p95). */
   const registrarLinhaDeBase = useCallback(async () => {
@@ -1360,6 +1384,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <span>EXPORTAR PACOTE VERIFICADO</span>
           </button>
         </div>
+
+        {/* F7 (2/2) — restauro do pacote verificado (relatório antes da escrita). */}
+        <SecurityPackageRestore dbInstance={db} onRestored={handleSecurityPackageRestored} />
 
         {/* Reconexão de Backup Físico Sandbox */}
         <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col items-center text-center space-y-4">

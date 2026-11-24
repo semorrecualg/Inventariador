@@ -83,13 +83,20 @@ uma **única camada de repositórios** por trás das telas:
       mão é recusado sem tocar na base. «EXPORTAR PACOTE VERIFICADO»
       (`exportVerifiedSecurityPackage`) está no `DatabaseManagerScreen` e na
       **Gestão e Manutenção** (`MainMenu`), junto ao backup: só descarrega depois
-      de a verificação passar.
+      de a verificação passar. O restauro (2/2) vive no `SecurityPackageRestore`,
+      ligado ao Gestor de Base: mostra o relatório de `verifySecurityExport`
+      (schema, data, total, hash do pacote e contagem por tabela) e só restaura
+      depois de a verificação passar **e** o operador confirmar; o resultado lista
+      as tabelas restauradas e as puladas (ausentes na base-alvo).
 - [x] Testar **backup → restore** de ponta a ponta ✅ 2026-08-06
       — `src/__tests__/securityExport.test.ts` (12 testes, `fake-indexeddb`): round-trip
       de checksum, contagem/checksum por tabela, anti-downgrade, tolerância a tabelas
       ausentes, isolamento de tabelas fora do manifesto, hash do pacote (incluindo
       `checksum_error`) e recusa de restauro de pacote adulterado (registo, contagem
-      ou hash), mais o export verificado partilhado pelos dois ecrãs.
+      ou hash), mais o export verificado partilhado pelos dois ecrãs. O ecrã de
+      restauro tem testes próprios (`securityPackageRestore.test.tsx`, 3 casos):
+      relatório + restauro confirmado, pacote adulterado recusado sem tocar na
+      base-alvo e ficheiro que não é JSON.
 - [x] **Análise DBA da redundância `ativos`/`assets`/`local_assets`** ✅ 2026-08-06
       (decisão confirmada) — as 3 tabelas são espelhos idênticos (`DexieAsset`, PK
       `primarykey`, índices iguais) com **triple-write** no loader; **papéis aprovados:**

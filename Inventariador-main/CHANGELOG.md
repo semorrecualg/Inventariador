@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Gestão e Manutenção** (junto ao backup), com um ponto único de montagem e
   verificação: só descarrega o `.json`/`.dat` depois de a verificação passar, e
   o resultado mostra o total de registos, a versão do schema e o início do hash.
+- **Restauro (2/2):** «RESTAURO DO PACOTE DE BACKUP» no Gestor de Base — seleciona
+  o `.json`/`.dat`, apresenta o relatório de `verifySecurityExport` (schema, data
+  do snapshot, total de registos, SHA-256 do pacote e contagem por tabela) e só
+  habilita o restauro quando o pacote confere. A base só é substituída depois da
+  confirmação explícita; o resultado lista as tabelas restauradas e as puladas
+  (ausentes na base-alvo). Um ficheiro que não é JSON válido é recusado na
+  leitura, sem tocar na base.
+- Testes: `securityPackageRestore.test.tsx` cobre os três caminhos do ecrã —
+  pacote íntegro restaurado só depois da confirmação, pacote adulterado recusado
+  no relatório (base-alvo intacta) e ficheiro que não é JSON.
 - Testes: `securityExport.test.ts` cresce de 6 para 12 casos — pacote selado e
   verificado, export verificado com o total de registos, registo adulterado
   (recusa sem tocar no destino), contagem que não bate com os registos, hash do
