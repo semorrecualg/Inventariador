@@ -36,6 +36,8 @@ vi.stubGlobal('sessionStorage', memoryStorage());
 
 let syncAssetsToCloud: typeof SupabaseService.syncAssetsToCloud;
 let resetNotice: typeof SupabaseService.resetCloudPushBlockedNotice;
+let adotarGeracaoAtualDaNuvem: typeof SupabaseService.adotarGeracaoAtualDaNuvem;
+let exigirGeracaoBaseCorrente: typeof SupabaseService.exigirGeracaoBaseCorrente;
 let supabaseStub: { from: (table: string) => unknown };
 
 const asset = (over: Record<string, unknown>) =>
@@ -84,6 +86,8 @@ describe('syncAssetsToCloud — guarda de registo repetido', () => {
     const mod = await import('../services/supabaseService');
     syncAssetsToCloud = mod.syncAssetsToCloud;
     resetNotice = mod.resetCloudPushBlockedNotice;
+    adotarGeracaoAtualDaNuvem = mod.adotarGeracaoAtualDaNuvem;
+    exigirGeracaoBaseCorrente = mod.exigirGeracaoBaseCorrente;
     supabaseStub = mod.supabase as unknown as { from: (table: string) => unknown };
   }, 120000);
 
@@ -375,5 +379,68 @@ describe('syncAssetsToCloud — selo de geração da base', () => {
 
     expect(stubs.upsert).toHaveBeenCalledTimes(1);
     expect(result).toEqual(['A']);
+  });
+});
+
+// ============================================================================
+// ADOÇÃO EXPLÍCITA — restauro de um pacote que pertence à geração corrente
+// ============================================================================
+describe('adotarGeracaoAtualDaNuvem', () => {
+  const stubGeracao = (geracao: { generation: string; seq: number } | null) => {
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    const maybeSingle = vi.fn().mockResolvedValue({ data: geracao, error: null });
+    const eq = vi.fn(() => ({ maybeSingle }));
+    const selectGen = vi.fn(() => ({ eq }));
+    const byEtiqueta = vi.fn().mockResolvedValue({ data: [], error: null });
+    const byTenant = vi.fn(() => ({ in: byEtiqueta }));
+    const select = vi.fn(() => ({ in: byTenant }));
+    vi.spyOn(supabaseStub, 'from').mockImplementation((table: string) => (
+      table === 'base_generation' ? { select: selectGen } : { upsert, select }
+    ));
+    return { upsert, selectGen };
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    localStorage.setItem('app_database_mode', 'SUPABASE');
+    resetNotice();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('grava o selo da nuvem e liberta o envio sem apagar a base', async () => {
+    const stubs = stubGeracao({ generation: 'geracao-atual', seq: 4 });
+    const adopted: number[] = [];
+    const handler = (event: Event) => adopted.push((event as CustomEvent<{ seq: number }>).detail.seq);
+    window.addEventListener('gbr_base_generation_adopted', handler);
+
+    const result = await adotarGeracaoAtualDaNuvem();
+
+    window.removeEventListener('gbr_base_generation_adopted', handler);
+    expect(result.adopted).toBe(true);
+    expect(JSON.parse(localStorage.getItem('gbr_base_generation') || 'null')).toEqual({
+      generation: 'geracao-atual',
+      seq: 4
+    });
+    // O envio deixa de estar bloqueado na chamada seguinte.
+    await expect(exigirGeracaoBaseCorrente()).resolves.toBeUndefined();
+    expect(adopted).toEqual([4]);
+
+    // E um envio já passa a chegar à nuvem.
+    await syncAssetsToCloud([asset({ id: 'A', primarykey: 'A' })], 'CICOPAL');
+    expect(stubs.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('não adota quando a nuvem não devolve selo legível', async () => {
+    stubGeracao(null);
+
+    const result = await adotarGeracaoAtualDaNuvem();
+
+    expect(result.adopted).toBe(false);
+    if (!result.adopted) expect(result.reason).toContain('não devolveu um selo');
+    expect(localStorage.getItem('gbr_base_generation')).toBeNull();
   });
 });

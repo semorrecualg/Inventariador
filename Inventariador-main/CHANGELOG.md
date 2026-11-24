@@ -23,10 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Carga». Falha aberta: sem tabela, sem rede ou resposta inválida o envio segue
   sem portão (projetos que ainda não correram o bootstrap novo), com tecto de
   4 s na leitura para um pedido pendurado não travar a fila.
+- **Restauro depois de um reset:** o pacote não leva selo e ficava bloqueado para
+  sempre. O Gestor de Base ganhou «Adotar geração atual» — confirmação explícita,
+  não apaga nem envia nada, grava o selo da nuvem e limpa o aviso; a mensagem de
+  bloqueio passou a apontar esse caminho quando houve restauro.
+- **Ecrã em branco no logout forçado:** quando o arranque forçava LOGIN com a URL
+  num ecrã conduzido pelo estado (ex.: `/contexto`), não havia rota e a página
+  ficava vazia. O boot passou a escrever `#/login` ao forçar a sessão.
 - **Operação:** o § 2-B de `scripts/reset-test-database.sql` gira o selo depois
   do bootstrap; ver `docs/GERACAO_BASE.md`.
-- **Testes:** `baseGeneration` (16), 6 em `syncAssetsToCloudGuard` e o encaixe
-  na fila em `syncPushQueue`.
+- **Testes:** `baseGeneration` (16), 8 em `syncAssetsToCloudGuard` (guarda +
+  adoção explícita) e o encaixe na fila em `syncPushQueue`.
 
 ### Adicionado — reset da base de teste e preparação para nova carga
 

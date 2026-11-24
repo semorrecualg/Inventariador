@@ -1892,6 +1892,14 @@ useEffect(() => {
     return () => window.removeEventListener('gbr_base_generation_blocked', handleBaseGenerationBlocked);
   }, []);
 
+  // Adoção explícita da geração (restauro de pacote): o aviso de bloqueio deixa
+  // de fazer sentido assim que o selo é adotado no Gestor de Base.
+  useEffect(() => {
+    const handleBaseGenerationAdopted = () => setSyncError(null);
+    window.addEventListener('gbr_base_generation_adopted', handleBaseGenerationAdopted);
+    return () => window.removeEventListener('gbr_base_generation_adopted', handleBaseGenerationAdopted);
+  }, []);
+
   useEffect(() => {
     // Check inicial
     const initialCheck = checkRuntimeIntegrity();
@@ -4887,6 +4895,9 @@ useEffect(() => {
       sessionStorage.removeItem('filial');
       sessionStorage.removeItem('tenantid');
       setHistory([AppScreen.LOGIN]);
+      // A URL tem de acompanhar o LOGIN forçado: sem isto, um ecrã conduzido
+      // pelo estado (ex.: /contexto) ficava sem rota e a página em branco.
+      escreverHash('/login');
     } else {
       supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
         const isValid = !!session && !!session.user && typeof session.user.id === "string";
@@ -4928,6 +4939,7 @@ useEffect(() => {
             sessionStorage.removeItem('filial');
             sessionStorage.removeItem('tenantid');
             setHistory([AppScreen.LOGIN]);
+            escreverHash('/login');
           }
         }
       }).catch((err: unknown) => {
@@ -4946,6 +4958,7 @@ useEffect(() => {
         sessionStorage.removeItem('filial');
         sessionStorage.removeItem('tenantid');
         setHistory([AppScreen.LOGIN]);
+        escreverHash('/login');
       });
     }
 

@@ -26,6 +26,16 @@ test.describe('Contrato de trabalho — unidade fundida', () => {
     // Aparelho novo → Gestor de Base; base carregada → contrato. Em qualquer
     // dos casos, o contrato é alcançável pelo mesmo pushScreen dos botões.
     await page.waitForURL(/\/(contexto|db-manager)/, { timeout: 20000 });
+
+    // A checagem de sessão do arranque ainda pode terminar DEPOIS do login e
+    // forçar LOGIN (o CI não tem sessão de nuvem). Forçar a navegação nesse
+    // instante deixava a URL /contexto sem ecrã — página em branca e 3 falhas
+    // no run 45311049374. Esperar pela tela pós-login montada fecha a corrida.
+    await page.waitForFunction(() => {
+      const texto = document.getElementById('root')?.textContent || '';
+      return texto.includes('Gestor de Base de Dados') || texto.includes('Contrato de Trabalho');
+    }, { timeout: 20000 });
+
     await page.evaluate(() => {
       (window as unknown as { pushScreen: (screen: string) => void }).pushScreen(
         'WORK_CONTEXT_SELECTION'

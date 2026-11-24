@@ -1121,6 +1121,43 @@ export const exigirGeracaoBaseCorrente = async (): Promise<void> => {
 };
 
 /**
+ * Adoção EXPLÍCITA da geração atual, sem limpar a base local.
+ *
+ * Existe para o restauro de um pacote que pertence à geração corrente da nuvem:
+ * o pacote não leva selo, por isso o portão o bloquearia para sempre. Só é
+ * chamada por um botão do Gestor de Base, com confirmação — nunca sozinha.
+ */
+export const adotarGeracaoAtualDaNuvem = async (): Promise<
+  { adopted: true; generation: BaseGeneration } | { adopted: false; reason: string }
+> => {
+  // Leitura fresca: o operador acabou de ver o bloqueio e pode ter corrido o
+  // reset entretanto.
+  resetBaseGenerationCache();
+  const remoto = await lerGeracaoNuvem();
+  if (!remoto) {
+    return {
+      adopted: false,
+      reason: 'A nuvem não devolveu um selo legível (sem rede ou sem bootstrap). Sem selo, o envio já não está bloqueado.'
+    };
+  }
+  if (!gravarSeloBase(remoto)) {
+    return { adopted: false, reason: 'Não foi possível gravar o selo neste aparelho (storage indisponível).' };
+  }
+
+  lastBaseGenerationNoticeKey = null;
+  logger.info(
+    `>>> [Supabase] Geração ${remoto.seq} adotada explicitamente no Gestor de Base ` +
+    '(base local mantida, sem enviar nada).'
+  );
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gbr_base_generation_adopted', {
+      detail: { seq: remoto.seq }
+    }));
+  }
+  return { adopted: true, generation: remoto };
+};
+
+/**
  * Aviso INFORMATIVO, uma vez por episodio: linhas distintas da planilha com a
  * mesma etiqueta seguem para a nuvem e o terminal diz que foram vistas.
  */
