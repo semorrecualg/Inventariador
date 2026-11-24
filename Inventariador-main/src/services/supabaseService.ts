@@ -987,6 +987,23 @@ export const resetCloudPushBlockedNotice = (): void => {
 // ============================================================================
 
 const BASE_GENERATION_TTL_MS = 60_000;
+// Sem tecto, um pedido pendurado ao selo travava a fila inteira (a leitura é
+// awaited antes do primeiro upsert). Esgotar o tempo é falha aberta.
+const BASE_GENERATION_READ_TIMEOUT_MS = 4_000;
+
+const comTecto = async <T>(promise: PromiseLike<T>, ms: number): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('tempo esgotado a ler o selo')), ms);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
 let baseGenerationCache: { at: number; value: BaseGeneration | null } | null = null;
 let lastBaseGenerationReadWarn = '';
 let lastBaseGenerationNoticeKey: string | null = null;
@@ -1006,11 +1023,14 @@ export const lerGeracaoNuvem = async (): Promise<BaseGeneration | null> => {
 
   let value: BaseGeneration | null = null;
   try {
-    const { data, error } = await supabase
-      .from('base_generation')
-      .select('generation, seq')
-      .eq('id', 1)
-      .maybeSingle();
+    const { data, error } = await comTecto<{ data: unknown; error: { message?: string } | null }>(
+      supabase
+        .from('base_generation')
+        .select('generation, seq')
+        .eq('id', 1)
+        .maybeSingle() as unknown as PromiseLike<{ data: unknown; error: { message?: string } | null }>,
+      BASE_GENERATION_READ_TIMEOUT_MS
+    );
     if (error) throw new Error(error.message || 'erro de esquema');
     value = normalizarGeracao(data);
   } catch (err) {
@@ -1054,10 +1074,9 @@ const baseLocalTemInventario = async (): Promise<boolean> => {
 
 /**
  * Compara a geração da nuvem com a do aparelho e adota-a quando é seguro
- * (base local vazia ou primeira geração). Devolve o veredicto para o chamador
- * decidir entre seguir e bloquear.
+ * (base local vazia ou primeira geração).
  */
-export const verificarGeracaoBase = async (): Promise<{
+const verificarGeracaoBase = async (): Promise<{
   verdict: BaseGenerationVerdict;
   remoto: BaseGeneration | null;
   local: BaseGeneration | null;
@@ -1086,6 +1105,19 @@ export const verificarGeracaoBase = async (): Promise<{
   }
 
   return { verdict: decisao.verdict, remoto, local };
+};
+
+/**
+ * Portão único do envio de ativos: recusa a base de uma geração anterior,
+ * avisa uma vez e lança. Chamado por `syncAssetsToCloud` e pela fila
+ * (`processDataSyncQueue`) — os dois caminhos que escrevem em `assets`.
+ */
+export const exigirGeracaoBaseCorrente = async (): Promise<void> => {
+  const { verdict, remoto, local } = await verificarGeracaoBase();
+  if (verdict !== 'blocked' || !remoto) return;
+  const message = mensagemGeracaoAntiga(remoto, local);
+  announceBaseGenerationOnce(message);
+  throw new BaseGenerationBlockedError(remoto, local);
 };
 
 /**
@@ -1270,12 +1302,7 @@ export const syncAssetsToCloud = async (
 
   // SELO DE GERAÇÃO: sem isto, um aparelho com a base antiga repovoava a nuvem
   // reiniciada no primeiro sync. Falha aberta quando a nuvem não tem selo.
-  const geracao = await verificarGeracaoBase();
-  if (geracao.verdict === 'blocked' && geracao.remoto) {
-    const message = mensagemGeracaoAntiga(geracao.remoto, geracao.local);
-    announceBaseGenerationOnce(message);
-    throw new BaseGenerationBlockedError(geracao.remoto, geracao.local);
-  }
+  await exigirGeracaoBaseCorrente();
 
   const isBatteryCritical = await sqliteService.isBatteryCritical?.() ?? false;
   if (isBatteryCritical) {

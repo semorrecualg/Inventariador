@@ -30,6 +30,10 @@ vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: vi.fn(() => true) }
 }));
 
+// A guarda do selo é substituída: este ficheiro testa o encaixe na fila, e a
+// leitura real do selo faria um pedido de rede a cada ciclo.
+const { exigirGeracao } = vi.hoisted(() => ({ exigirGeracao: vi.fn() }));
+
 vi.mock('../services/supabaseService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/supabaseService')>();
   return {
@@ -38,12 +42,14 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
       from: () => ({ upsert: (...args: unknown[]) => upsert(...args) })
     },
     fetchCloudDeletedKeys,
-    registerCampaignSyncQueueDelegate: vi.fn()
+    registerCampaignSyncQueueDelegate: vi.fn(),
+    exigirGeracaoBaseCorrente: exigirGeracao
   };
 });
 
 import { db } from '../services/sqliteService';
 import { ASSETS_CONFLICT_TARGET, processDataSyncQueue } from '../services/syncService';
+import { BaseGenerationBlockedError } from '../utils/baseGeneration';
 import { SyncRequestTimeoutError, UPSERT_TIMEOUT_MS } from '../services/syncQueueGuards';
 
 const asset = (over: Record<string, unknown> = {}) =>
@@ -110,6 +116,27 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     // A etiqueta PENDENTE NUVEM só desaparece com a marcação local.
     const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
     expect(Number(local?._is_synced)).toBe(1);
+  });
+
+  // SELO DE GERAÇÃO: a fila escreve em `assets` directamente, por isso o portão
+  // tem de estar aqui e não só em `syncAssetsToCloud`. Sem isto, o aparelho com
+  // a base antiga repovoava a nuvem reiniciada no primeiro ciclo.
+  it('recusa a fila quando o selo diz que a base é de outra geração', async () => {
+    await db.local_assets.put(asset() as never);
+    exigirGeracao.mockRejectedValueOnce(
+      new BaseGenerationBlockedError(
+        { generation: 'geracao-nova', seq: 2 },
+        { generation: 'geracao-antiga', seq: 1 }
+      )
+    );
+
+    const result = await processDataSyncQueue();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('ENVIO BLOQUEADO');
+    expect(upsert).not.toHaveBeenCalled();
+    const local = await db.local_assets.where('primarykey').equals('01010100000005000001').first();
+    expect(Number(local?._is_synced)).toBe(0);
   });
 
   // EXCLUSÃO VENCE A SUBIDA: a cópia local está ativa, mas a nuvem diz

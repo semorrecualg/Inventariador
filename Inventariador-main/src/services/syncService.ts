@@ -1,6 +1,7 @@
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
-import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys } from './supabaseService';
+import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys, exigirGeracaoBaseCorrente } from './supabaseService';
+import { BaseGenerationBlockedError } from '../utils/baseGeneration';
 import { canPushToCloud } from './pushGate';
 import { enviarFilaAuditoria } from './auditoriaNuvem';
 import { sqliteService, db } from './sqliteService';
@@ -688,6 +689,19 @@ const _syncService = {
 
     if (!navigator.onLine) {
       return { success: false, processedCount: 0, error: "Dispositivo em modo Offline" };
+    }
+
+    // SELO DE GERAÇÃO: esta fila é o caminho normal de envio e escreve em
+    // `assets` directamente, sem passar por `syncAssetsToCloud`. Sem esta
+    // chamada o portão não valia para o fluxo real: um aparelho com a base
+    // antiga repovoava a nuvem reiniciada no primeiro ciclo.
+    try {
+      await exigirGeracaoBaseCorrente();
+    } catch (err) {
+      if (err instanceof BaseGenerationBlockedError) {
+        return { success: false, processedCount: 0, error: err.message };
+      }
+      throw err;
     }
 
     const tenantidClean = String(rawTenant).trim();

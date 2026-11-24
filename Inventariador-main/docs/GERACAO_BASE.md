@@ -19,9 +19,11 @@ com `service_role`; o cliente (anon/authenticated) tem apenas política de
 
 ## Decisão antes de cada envio
 
-`utils/baseGeneration.ts` decide; `syncAssetsToCloud` (o ponto único por onde
-passam a carga em massa, o autosave, o push delta, a fila da nuvem e os envios de
-uma linha) aplica antes de qualquer `upsert`:
+`utils/baseGeneration.ts` decide; `exigirGeracaoBaseCorrente` (em
+`supabaseService`) aplica antes de qualquer `upsert`, nos **dois** caminhos que
+escrevem em `assets`: `syncAssetsToCloud` (carga em massa, autosave, push delta e
+envios de uma linha) e `processDataSyncQueue` (a fila normal, que faz upsert
+directo por registo).
 
 | Selo local | Geração da nuvem | Base local | Resultado |
 |---|---|---|---|
@@ -46,7 +48,8 @@ esquema ou resposta inválida, `lerGeracaoNuvem` devolve `null` e o envio segue
 por causa do selo. O `warn` aparece uma vez por episódio e diz para correr
 `docs/supabase_bootstrap.sql`.
 
-A leitura é cacheada 60 s (a fila da nuvem tenta de novo a cada 1,2 s) e o cache
+A leitura é cacheada 60 s (a fila da nuvem tenta de novo a cada 1,2 s), tem tecto
+de 4 s — um pedido pendurado travaria a fila antes do primeiro upsert — e o cache
 é limpo em `resetCloudPushBlockedNotice()` e nos testes.
 
 ## Operação
@@ -78,6 +81,8 @@ on conflict (id) do update
 
 - `src/__tests__/baseGeneration.test.ts` — normalização, storage e a tabela de
   decisão (16 casos).
-- `src/__tests__/syncAssetsToCloudGuard.test.ts` — o portão aplicado no ponto
-  único de envio: bloqueia, segue na geração igual, adota no rollout e falha
-  aberto sem selo.
+- `src/__tests__/syncAssetsToCloudGuard.test.ts` — o portão no envio em massa:
+  bloqueia, segue na geração igual, adota no rollout e falha aberto sem selo.
+- `src/__tests__/syncPushQueue.test.ts` — o encaixe na fila normal
+  (`processDataSyncQueue`): recusa sem tocar no `upsert` e deixa o ativo
+  pendente.
