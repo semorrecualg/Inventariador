@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — recuperação de senha e diagnóstico de erros de login
+
+- **O que era:** quem esquecia a senha não tinha saída própria — só o «Redefinir
+  Acesso», que limpa o estado local e não envia e-mail. O link de recuperação do
+  Supabase abria uma sessão e a app entrava como login normal, sem ecrã para
+  definir a senha nova. E a resposta real do GoTrue (`Invalid login
+  credentials`) não casava o teste `invalid credentials`, por isso o formulário
+  mostrava o texto cru em inglês.
+- **Agora:** «Esqueci a senha» no login pede o e-mail pelo `resetPassword`
+  existente e confirma o que é verificável (o pedido foi aceite; se a conta
+  existir, o link chega). O link de recuperação passa a ser reconhecido antes de
+  o supabase-js consumir o hash, abre o ecrã «Definir Nova Senha», grava com
+  `auth.updateUser` e encerra a sessão temporária; no APK o e-mail aponta para o
+  deep link `com.gbr.kardek://recovery` (guia em
+  `docs/RECUPERACAO_SENHA_MOBILE.md`). Os erros de login passam a distinguir
+  credencial inválida de e-mail por confirmar, mostram o código do Auth, o ref do
+  projeto Supabase em uso e a última recusa no próprio formulário, e registam
+  uma linha `[Login]` no log do SRE com os mesmos campos (a senha nunca entra).
+- **Testes:** `loginErrors` (11), `supabaseProjectRef` (3), `passwordRecovery`
+  (4), `recoveryLink` (8) e `recoveryPasswordScreen` (5), mais 3 casos de
+  «Esqueci a senha» em `loginFluxoUnico`.
+
 ### Adicionado — pacote de backup exportável com hash verificado (F7)
 
 - **O que era:** o export de segurança já levava contagem e checksum SHA-256 por

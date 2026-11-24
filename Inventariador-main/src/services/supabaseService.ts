@@ -1,7 +1,9 @@
 
 import { createClient } from '@supabase/supabase-js';
+import { Capacitor } from '@capacitor/core';
 import { Asset, InventoryState, User, UserRole, InventoryCampaign, CampaignStatus, UnitConfig, AuditLogEntry, CampaignSnapshot, DatabaseMode } from '../types';
 import { getAppBaseUrl } from '../utils/urlUtils';
+import { urlDeRecuperacao } from '../utils/recoveryLink';
 import { sanitizeForSupabase } from './utils';
 import { localDb } from './localDbService';
 import { sqliteService, db } from './sqliteService';
@@ -3065,8 +3067,12 @@ export const deleteAssetPhoto = async (photoUrl: string): Promise<boolean> => {
  */
 export const resetPassword = async (email: string) => {
   if (!supabase) return;
+  // No APK o origin é `https://localhost`: um link para lá não abre em browser
+  // nenhum. No nativo o e-mail manda para o deep link da própria app.
+  const redirectTo = urlDeRecuperacao(Capacitor.isNativePlatform());
+  logger.info('[Supabase] Recuperação de senha — destino do link:', redirectTo);
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: getAppBaseUrl(),
+    redirectTo,
   });
   if (error) throw error;
 };

@@ -1,4 +1,7 @@
 
+// PRIMEIRO import: captura o #access_token de recuperação antes de o
+// supabase-js ser construído (ele consome e limpa esse hash).
+import './utils/passwordRecovery';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import 'maplibre-gl/dist/maplibre-gl.css';
