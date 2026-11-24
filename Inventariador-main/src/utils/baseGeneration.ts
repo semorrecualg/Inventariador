@@ -139,7 +139,8 @@ export const mensagemGeracaoAntiga = (remoto: BaseGeneration, local: BaseGenerat
   return (
     `ENVIO BLOQUEADO: a base da nuvem foi reiniciada (geração ${remoto.seq}) e este aparelho ` +
     `ainda tem a base antiga (${aparelho}). Nada foi enviado. ` +
-    'Abra o Gestor de Base → «Preparar Nova Carga», recarregue o app e carregue a planilha de novo.'
+    'Abra o Gestor de Base → «Preparar Nova Carga», recarregue o app e carregue a planilha de novo. ' +
+    'Se acabou de restaurar um pacote que pertence a esta base, use antes «Adotar geração atual».'
   );
 };
 

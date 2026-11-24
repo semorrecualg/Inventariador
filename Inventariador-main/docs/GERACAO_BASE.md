@@ -40,6 +40,21 @@ log diz o que fazer («Preparar Nova Carga» + recarregar + carregar a planilha)
 `«Preparar Nova Carga»` limpa o selo junto com a base local: como a base fica
 vazia, o envio seguinte adota a geração corrente sem risco.
 
+## Restaurar um pacote depois de um reset
+
+Um pacote de backup não leva o selo, por isso restaurá-lo depois de um reset
+ficava bloqueado — e a mensagem mandava limpar a base, o que apagaria o
+restauro. O caminho explícito é o botão **«Adotar geração atual»** no Gestor de
+Base, ao lado de «Preparar Nova Carga»:
+
+- exige confirmação e diz o que assume (a base local pertence à geração
+  corrente da nuvem);
+- não apaga nem envia nada, só grava o selo da nuvem no aparelho e limpa o aviso;
+- falha aberta: se a nuvem não devolver selo legível, não grava nada e diz porquê.
+
+É o único caminho que adopta a geração **sem** a base estar vazia, e é sempre
+uma ação do operador — nunca automática.
+
 ## Falha aberta
 
 Sem tabela (projeto que ainda não correu o bootstrap novo), sem rede, erro de
@@ -61,7 +76,7 @@ de 4 s — um pedido pendurado travaria a fila antes do primeiro upsert — e o 
 3. **Aparelhos:** nenhum passo. Quem estiver na geração antiga fica bloqueado e
    resolve com «Preparar Nova Carga».
 
-### Limite conhecido
+### Limite conhecido (wipe total)
 
 O `seq = 1` distingue o rollout de um reset. Se alguém apagar **também**
 `base_generation` (wipe total, fora do guião), o bootstrap volta a semear
@@ -82,7 +97,9 @@ on conflict (id) do update
 - `src/__tests__/baseGeneration.test.ts` — normalização, storage e a tabela de
   decisão (16 casos).
 - `src/__tests__/syncAssetsToCloudGuard.test.ts` — o portão no envio em massa:
-  bloqueia, segue na geração igual, adota no rollout e falha aberto sem selo.
+  bloqueia, segue na geração igual, adota no rollout e falha aberto sem selo;
+  e a adoção explícita (grava o selo e liberta o envio; sem selo legível não
+  grava nada).
 - `src/__tests__/syncPushQueue.test.ts` — o encaixe na fila normal
   (`processDataSyncQueue`): recusa sem tocar no `upsert` e deixa o ativo
   pendente.

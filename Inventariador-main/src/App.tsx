@@ -1892,6 +1892,14 @@ useEffect(() => {
     return () => window.removeEventListener('gbr_base_generation_blocked', handleBaseGenerationBlocked);
   }, []);
 
+  // Adoção explícita da geração (restauro de pacote): o aviso de bloqueio deixa
+  // de fazer sentido assim que o selo é adotado no Gestor de Base.
+  useEffect(() => {
+    const handleBaseGenerationAdopted = () => setSyncError(null);
+    window.addEventListener('gbr_base_generation_adopted', handleBaseGenerationAdopted);
+    return () => window.removeEventListener('gbr_base_generation_adopted', handleBaseGenerationAdopted);
+  }, []);
+
   useEffect(() => {
     // Check inicial
     const initialCheck = checkRuntimeIntegrity();
@@ -4887,6 +4895,9 @@ useEffect(() => {
       sessionStorage.removeItem('filial');
       sessionStorage.removeItem('tenantid');
       setHistory([AppScreen.LOGIN]);
+      // A URL tem de acompanhar o LOGIN forçado: sem isto, um ecrã conduzido
+      // pelo estado (ex.: /contexto) ficava sem rota e a página em branco.
+      escreverHash('/login');
     } else {
       supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
         const isValid = !!session && !!session.user && typeof session.user.id === "string";
@@ -4895,28 +4906,26 @@ useEffect(() => {
           processSession(session);
         } else {
           // Soberania Nativa: usuário local (proprietário/offline-first) é mantido mesmo
-          // sem sessão de nuvem — espelha a proteção isLocalUser do listener onAuthStateChange
-          // (o login local via Barreira Local não cria token Supabase; destruí-lo aqui deslogaria
-          // o proprietário sempre que o databaseMode mudar e re-disparar este useEffect).
+          // sem sessão de nuvem. O login local não cria token Supabase; destruí-lo
+          // aqui deslogaria o proprietário sempre que o modo mudasse.
+          //
+          // A verificação da nuvem pode terminar DEPOIS de um login local (getSession
+          // lento). O helper relê o cache e só purga quando não há sessão local — sem
+          // isso, o login recém-concluído era apagado e a URL ficava num ecrã de
+          // estado sem utilizador (página em branco, o E2E de `contextoUnidade`).
           const currentUserStr = sessionStorage.getItem('app_current_user');
-          // Sessão gerida pelo app (login por credencial local) não tem token
-          // do Supabase e continua válida — só fantasmas de F5 são destruídos.
-          let isLocalUser = isAppManagedSession();
-          try {
-            if (currentUserStr) {
-              const parsed = JSON.parse(currentUserStr);
-              const lowerEmail = (parsed.email || '').toLowerCase();
-              if (parsed.role === 'DEMO' || parsed.role === 'ADMIN' || parsed.role === 'MASTER' || parsed.role === 'MOBILE_SINGLE' || lowerEmail === ADMIN_EMAIL.toLowerCase()) {
-                isLocalUser = true;
-              }
-            }
-          } catch { /* ignore */ }
+          const { manter } = resolveSessionAfterCloudCheck(currentUserStr, {
+            adminEmail: ADMIN_EMAIL
+          });
 
-          if (isLocalUser) {
+          if (manter) {
             logger.info('[Boot SRE] Usuário local autenticado (Soberania Nativa). Mantendo sessão offline...');
             setIsSessionValid(true);
             removerLoaderEstatico();
             setIsDataLoaded(true);
+            // A hidratação do perfil é feita pela restauração do arranque:
+            // chamar setUser aqui re-disparava este efeito (deps incluem
+            // workContextFiliais) e ciclava no teste.
           } else {
             // GBR KARDEK SRE: Proibido recuperar sessões locais fantasmas em nova montagem (F5)
             logger.warn('[Boot SRE] Nenhuma sessão de nuvem autenticada. Resetando cache e forçando LOGIN...');
@@ -4928,6 +4937,7 @@ useEffect(() => {
             sessionStorage.removeItem('filial');
             sessionStorage.removeItem('tenantid');
             setHistory([AppScreen.LOGIN]);
+            escreverHash('/login');
           }
         }
       }).catch((err: unknown) => {
@@ -4946,6 +4956,7 @@ useEffect(() => {
         sessionStorage.removeItem('filial');
         sessionStorage.removeItem('tenantid');
         setHistory([AppScreen.LOGIN]);
+        escreverHash('/login');
       });
     }
 

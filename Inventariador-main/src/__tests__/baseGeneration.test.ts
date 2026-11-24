@@ -89,5 +89,8 @@ describe('avaliarGeracaoBase', () => {
     expect(msg).toContain('geração 2');
     expect(msg).toContain('Nada foi enviado');
     expect(msg).toContain('Preparar Nova Carga');
+    // Restauro de um pacote da geração corrente: o caminho explícito tem de
+    // estar na própria mensagem, senão o operador limpa a base sem querer.
+    expect(msg).toContain('Adotar geração atual');
   });
 });

@@ -14,6 +14,7 @@ import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type 
 import { exportVerifiedSecurityPackage } from '../services/securityExportService';
 import { SecurityPackageRestore, type SecurityPackageRestoredInfo } from '../components/SecurityPackageRestore';
 import { resetLocalBaseForFreshLoad } from '../services/localBaseReset';
+import { adotarGeracaoAtualDaNuvem } from '../services/supabaseService';
 import { logger } from '../utils/logger';
 import { APP_VERSION } from '../utils/appVersion';
 import { collectPerfSummary, formatPerfBaseline, PERF_METRICS, readPerfBaseline, savePerfBaseline, type PerfBaseline, type PerfMetricName, type PerfSummary } from '../utils/perfMetrics';
@@ -551,6 +552,42 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setIsPurging(false);
     }
   }, [addLog, loadStats]);
+
+  /**
+   * Restauro de um pacote da geração CORRENTE: o pacote não leva selo, por isso
+   * o envio fica bloqueado até o aparelho adotar a geração atual. Exige
+   * confirmação explícita e não apaga nada.
+   */
+  const handleAdoptCurrentGeneration = useCallback(async () => {
+    const confirmado = window.confirm(
+      'ADOTAR GERAÇÃO ATUAL\n\n' +
+      'Isto assume que a base local pertence à geração atual da nuvem e libera o envio.\n' +
+      'Use SÓ depois de restaurar um pacote que pertence a esta base. Nada é apagado.\n\n' +
+      'Se a base local é de um reset anterior, o caminho certo é «Preparar Nova Carga». Continuar?'
+    );
+    if (!confirmado) return;
+
+    setIsPurging(true);
+    try {
+      const result = await adotarGeracaoAtualDaNuvem();
+      if (!result.adopted) {
+        addLog(`[SRE_RESET] Geração atual não adotada: ${result.reason}`);
+        showRecoveryToast('❌ NÃO FOI POSSÍVEL ADOTAR A GERAÇÃO DA NUVEM.', 'red');
+        return;
+      }
+      addLog(
+        `[SRE_RESET] Geração ${result.generation.seq} adotada explicitamente (restauro de pacote); ` +
+        'a base local foi mantida e o envio está liberado.'
+      );
+      showRecoveryToast(`✓ GERAÇÃO ${result.generation.seq} ADOTADA: o envio volta a estar liberado.`, 'blue');
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      addLog(`[SRE ERROR] Falha ao adotar a geração da nuvem: ${errMsg}`);
+      showRecoveryToast('❌ NÃO FOI POSSÍVEL ADOTAR A GERAÇÃO DA NUVEM.', 'red');
+    } finally {
+      setIsPurging(false);
+    }
+  }, [addLog]);
 
   /** F0: grava no aparelho o retrato da linha de base (espelhos + p50/p95). */
   const registrarLinhaDeBase = useCallback(async () => {
@@ -1435,16 +1472,27 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
               Limpa a base local, o espelho virtual e a fila de âncoras por subir, e larga o selo de geração antigo.
               Use depois de reiniciar a base da nuvem (scripts/reset-test-database.sql) e antes de carregar a planilha;
               sem este passo o envio fica bloqueado pelo selo da nova geração.
+              Restaurou um pacote desta base? Use «Adotar geração atual» em vez de limpar.
             </p>
           </div>
-          <button
-            disabled={isUploading || isPurging}
-            onClick={() => { void handlePrepareFreshLoad(); }}
-            className="flex items-center justify-center space-x-2 px-5 py-3 font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg border bg-amber-600 hover:bg-amber-700 text-white cursor-pointer border-amber-500/30 active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RefreshCw size={14} />
-            <span>{isPurging ? 'PREPARANDO...' : 'LIMPAR BASE LOCAL E ÂNCORAS'}</span>
-          </button>
+          <div className="flex flex-col gap-2 shrink-0">
+            <button
+              disabled={isUploading || isPurging}
+              onClick={() => { void handlePrepareFreshLoad(); }}
+              className="flex items-center justify-center space-x-2 px-5 py-3 font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg border bg-amber-600 hover:bg-amber-700 text-white cursor-pointer border-amber-500/30 active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw size={14} />
+              <span>{isPurging ? 'PREPARANDO...' : 'LIMPAR BASE LOCAL E ÂNCORAS'}</span>
+            </button>
+            <button
+              disabled={isUploading || isPurging}
+              onClick={() => { void handleAdoptCurrentGeneration(); }}
+              className="flex items-center justify-center space-x-2 px-5 py-2.5 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer border-slate-600/50 active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ShieldCheck size={13} />
+              <span>ADOTAR GERAÇÃO ATUAL</span>
+            </button>
+          </div>
         </div>
 
         {/* Reconexão de Backup Físico Sandbox */}
