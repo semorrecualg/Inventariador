@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import * as XLSX from 'xlsx';
 import { db, DexieAsset, invalidateTenantCaseMarker, gravarAuditoria } from './sqliteService';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { readFileOnTrail } from './directoryTrailService';
 import { isAdminEmail } from '../utils/authUtils';
 import { logger } from '../utils/logger';
 import { normalizeDateISO, normalizeNumeric } from '../utils/normalize';
@@ -1037,14 +1038,18 @@ export const databaseLoaderService = new DatabaseLoaderService();
 
 export async function verifyAndRestorePhysicalBackup(): Promise<boolean> {
   try {
-    const fileContent = await Filesystem.readFile({
-      path: 'GBR_KARDEK_DATA/local_assets_secure.dat',
-      directory: Directory.Documents,
-      encoding: Encoding.UTF8
-    });
+    // O backup do inventário é procurado na TRILHA DE DIRETÓRIO (a pasta que o
+    // operador escolheu) e, sem ela, em Documentos — o mesmo par que
+    // `saveFileOnTrail` grava.
+    const conteudo = await readFileOnTrail('local_assets_secure.dat')
+      ?? (await Filesystem.readFile({
+        path: 'GBR_KARDEK_DATA/local_assets_secure.dat',
+        directory: Directory.Documents,
+        encoding: Encoding.UTF8
+      })).data;
 
-    if (fileContent.data) {
-      const restoredAssets = JSON.parse(fileContent.data as string);
+    if (conteudo) {
+      const restoredAssets = JSON.parse(conteudo as string);
       // Só invalida quando há mesmo restauro: este caminho corre em todo boot.
       await invalidateTenantCaseMarker();
       // Alimenta atomicamente o Dexie.js para restabelecer os 12.636 ativos sem Race Conditions

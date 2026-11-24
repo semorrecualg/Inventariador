@@ -1,37 +1,30 @@
-import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
-import { FilePicker } from '@capawesome/capacitor-file-picker';
 import { Capacitor } from '@capacitor/core';
+import { FilePicker } from '@capawesome/capacitor-file-picker';
+import { readFileOnTrail, saveFileOnTrail } from './directoryTrailService';
 
 export class FileSystemStorageService {
-  private static DIR = 'GBR_KARDEK_DATA';
   private static FILE = 'db_backup_inventario.json';
 
+  /**
+   * Backup JSON do inventário. Grava na TRILHA DE DIRETÓRIO (pasta escolhida
+   * pelo operador) e, sem ela, em Documentos/armazenamento do app.
+   */
   static async salvarEmDiretorioLocal(dados: unknown[]): Promise<boolean> {
     if (!Capacitor.isNativePlatform()) return false; // Early-return silencioso na Web
-    try {
-      await Filesystem.writeFile({
-        path: `${this.DIR}/${this.FILE}`,
-        data: JSON.stringify(dados, null, 2),
-        directory: Directory.Documents,
-        encoding: Encoding.UTF8,
-        recursive: true
-      });
-      return true;
-    } catch (error) {
-      console.error('[SRE] Erro ao gravar arquivo físico de salvaguarda:', error);
+    const resultado = await saveFileOnTrail(this.FILE, JSON.stringify(dados, null, 2));
+    if (!resultado.saved) {
+      console.error('[SRE] Nenhuma pasta aceitou gravar o arquivo físico de salvaguarda.');
       return false;
     }
+    return true;
   }
 
   static async carregarDeDiretorioLocal(): Promise<unknown[] | null> {
     if (!Capacitor.isNativePlatform()) return null;
     try {
-      const arquivo = await Filesystem.readFile({
-        path: `${this.DIR}/${this.FILE}`,
-        directory: Directory.Documents,
-        encoding: Encoding.UTF8
-      });
-      return JSON.parse(arquivo.data as string) as unknown[];
+      const conteudo = await readFileOnTrail(this.FILE);
+      if (!conteudo) return null;
+      return JSON.parse(conteudo) as unknown[];
     } catch {
       return null;
     }

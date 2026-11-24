@@ -11,7 +11,7 @@
 // seguem o mesmo padrão best-effort dos serviços existentes.
 import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { saveFileOnTrail } from './directoryTrailService';
 import { generateChecksum } from './utils';
 import { logger } from '../utils/logger';
 import { db } from './sqliteService';
@@ -265,10 +265,12 @@ export interface SecurityExportSavedFile {
  * Persiste o snapshot em arquivo físico `.dat` no dispositivo (Capacitor).
  *
  * No APK o download por `<a download>` do WebView não escreve nada, e o
- * operador ficava sem saber onde o pacote foi parar. Aqui grava-se pelo
- * Filesystem, com nome datado — um export novo não apaga o pacote antigo que o
- * teste de restauro precisa —, tentando primeiro os Documentos públicos e,
- * sem permissão, o armazenamento do app. Devolve o caminho para a UI mostrar.
+ * operador ficava sem saber onde o pacote foi parar. A gravação passa pela
+ * TRILHA DE DIRETÓRIO (`saveFileOnTrail`): a pasta que o operador escolheu ao
+ * carregar a planilha é o primeiro destino; sem ela — ou sem permissão — a
+ * trilha cai para Documentos e para o armazenamento do app. O nome é datado,
+ * para um export novo não apagar o pacote antigo que o restauro precisa, e o
+ * caminho devolvido é o que a UI mostra ao operador.
  */
 export async function persistSecurityExportPhysical(
   manifest: SecurityExportManifest
@@ -277,31 +279,15 @@ export async function persistSecurityExportPhysical(
 
   const stamp = new Date(manifest.exportedAt).toISOString().replace(/[:.]/g, '-');
   const fileName = `GBR_SECURITY_EXPORT_v${manifest.schemaVersion}_${stamp}.dat`;
-  const tentativas = [
-    { directory: Directory.Documents, label: 'Documentos' },
-    { directory: Directory.External, label: 'Armazenamento do app' }
-  ];
+  const resultado = await saveFileOnTrail(fileName, serializeSecurityExport(manifest));
 
-  let ultimoErro: unknown = null;
-  for (const tentativa of tentativas) {
-    try {
-      const escrito = await Filesystem.writeFile({
-        path: `GBR_KARDEK_DATA/${fileName}`,
-        data: serializeSecurityExport(manifest),
-        directory: tentativa.directory,
-        encoding: Encoding.UTF8,
-        recursive: true
-      });
-      const path = `${tentativa.label}/GBR_KARDEK_DATA/${fileName}`;
-      logger.info(`[SecurityExport] Pacote gravado em ${path} (${escrito.uri}).`);
-      return { saved: true, path, uri: escrito.uri };
-    } catch (error) {
-      ultimoErro = error;
-    }
+  if (!resultado.saved) {
+    logger.error('[SecurityExport] Não foi possível gravar o pacote no telefone:', resultado.tentativas.join(' · '));
+    return { saved: false };
   }
 
-  logger.error('[SecurityExport] Não foi possível gravar o pacote no telefone:', ultimoErro);
-  return { saved: false };
+  logger.info(`[SecurityExport] Pacote gravado em ${resultado.path} (${resultado.uri}).`);
+  return { saved: true, path: resultado.path, uri: resultado.uri };
 }
 
 /**

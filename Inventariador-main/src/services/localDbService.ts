@@ -8,7 +8,7 @@ import { normalizeFlag } from '../utils/normalize';
 import { Asset, UnitConfig, AuditLogEntry, User, InventoryCampaign, CampaignStatus } from '../types';
 import localforage from 'localforage';
 import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { saveFileOnTrail } from './directoryTrailService';
 
 type SqlValue = string | number | boolean | null;
 
@@ -1148,15 +1148,17 @@ export async function backupDatabaseToPhysicalStorage(assetsData: any[]): Promis
 
   try {
     const payloadString = JSON.stringify(assetsData);
-    
-    // Força a criação física do diretório estrutural e do arquivo de dados real
-    await Filesystem.writeFile({
-      path: 'GBR_KARDEK_DATA/local_assets_secure.dat',
-      data: payloadString,
-      directory: Directory.Documents,
-      encoding: Encoding.UTF8,
-      recursive: true // Garante a criação da pasta pai física se não existir
-    });
+
+    // O backup do inventário vive na TRILHA DE DIRETÓRIO (pasta escolhida pelo
+    // operador na carga da planilha) — e não numa pasta fixa que o operador
+    // não escolheu. Sem trilha/permissão, a própria trilha cai para Documentos
+    // e para o armazenamento do app, devolvendo o caminho usado.
+    const resultado = await saveFileOnTrail('local_assets_secure.dat', payloadString);
+    if (resultado.saved) {
+      logger.info(`[SRE GESTOR] Backup físico gravado em ${resultado.path}.`);
+    } else {
+      logger.error('[SRE GESTOR] Nenhuma pasta aceitou o backup físico:', resultado.tentativas.join(' · '));
+    }
   } catch (error) {
     // SRE Protocol: Logs de diagnóstico expostos no barramento
     logger.error("[SRE GESTOR] Erro crítico de gravação física em hardware:", error);
@@ -1290,6 +1292,12 @@ export async function saveSnapshotToWorkspace(dataPayload: any[]): Promise<boole
     }
 
     return snapshotSaved;
+  }
+
+  // NATIVO: o snapshot também vai para a trilha de diretório do aparelho.
+  if (Capacitor.isNativePlatform()) {
+    const resultado = await saveFileOnTrail('gbr_kardek_backup.dat', JSON.stringify(dataPayload));
+    return resultado.saved;
   }
 
   if (!userWorkspaceHandle) return false;

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — trilha de diretório no telemóvel
+
+- **O que era:** a pasta que o operador percorria para escolher a planilha da
+  base era descartada. Cada rotina gravava numa pasta fixa
+  (`GBR_KARDEK_DATA`), o vínculo antigo vivia em `sessionStorage` (morria ao
+  fechar a app) e o cartão «Vincular Pasta e Ver Planilhas» pedia uma segunda
+  navegação que nada acrescentava.
+- **Agora:** a pasta da planilha passa a ser a **Trilha de Diretório** — o
+  endereço físico do app no aparelho, gravado de forma persistente e mostrado
+  no Gestor de Base (com a origem e a data da captura). É por ela que o app
+  grava e procura: pacote de backup verificado, espelhos do inventário e
+  snapshot da carga.
+  Sem permissão na pasta escolhida, a gravação cai para Documentos e para o
+  armazenamento do app, sempre a devolver o caminho real usado.
+- **Cartão removido:** «PLANILHA DA PASTA — VINCULAR PASTA E VER PLANILHAS» saiu;
+  no telemóvel a barreira de pasta antes de abrir o Gestor também saiu (o
+  WebView não tem `showDirectoryPicker` e a trilha nasce dentro do Gestor).
+- **Testes:** `directoryTrailService` (9) cobre a conversão dos caminhos SAF
+  (`tree`/`document`), a persistência da trilha e a ordem de gravação
+  trilha → Documentos → app, incluindo leitura e o caso Web.
+
 ### Corrigido — export do pacote de backup no telemóvel
 
 - **O que era:** no APK o «EXPORTAR PACOTE VERIFICADO» só disparava um
