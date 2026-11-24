@@ -18,19 +18,31 @@ test.describe('Contrato de trabalho — unidade fundida', () => {
   });
 
   test('o contrato concentra a escolha da unidade e as entradas operacionais', async ({ page }) => {
-    await page.goto('/#/login');
-    await page.getByPlaceholder(/Digite seu usuário/).fill('admin');
-    await page.getByPlaceholder('••••••••').fill('admin');
-    await page.getByRole('button', { name: /Acessar Sistema/i }).click();
+    // Esta spec NÃO faz login: `login.spec` e `loginContrato.spec` já o cobrem.
+    // Semear a cópia persistida da sessão (o mecanismo real de retomar sessão,
+    // `gbr_persisted_session`) tira do teste a corrida entre o login e a
+    // checagem de sessão do arranque — a corrida que deixava a URL /contexto
+    // sem ecrã e deu 3 falhas no run 45311049374. O que se testa aqui é o
+    // contrato, não o formulário de entrada.
+    await page.addInitScript(() => {
+      localStorage.setItem('gbr_persisted_session', JSON.stringify({
+        user: {
+          id: 'e2e-admin',
+          username: 'admin',
+          name: 'Admin E2E',
+          email: 'admin@e2e.local',
+          role: 'ADMIN',
+          tenantid: 'CICOPAL'
+        },
+        savedAt: Date.now()
+      }));
+    });
 
-    // Aparelho novo → Gestor de Base; base carregada → contrato. Em qualquer
-    // dos casos, o contrato é alcançável pelo mesmo pushScreen dos botões.
-    await page.waitForURL(/\/(contexto|db-manager)/, { timeout: 20000 });
+    await page.goto('/');
 
-    // A checagem de sessão do arranque ainda pode terminar DEPOIS do login e
-    // forçar LOGIN (o CI não tem sessão de nuvem). Forçar a navegação nesse
-    // instante deixava a URL /contexto sem ecrã — página em branca e 3 falhas
-    // no run 45311049374. Esperar pela tela pós-login montada fecha a corrida.
+    // Com base vazia o arranque abre o Gestor; com base carregada, o contrato.
+    // Esperar pela tela montada antes de navegar (a sessão já está reposta, por
+    // isso não há mais nenhum logout a caminho).
     await page.waitForFunction(() => {
       const texto = document.getElementById('root')?.textContent || '';
       return texto.includes('Gestor de Base de Dados') || texto.includes('Contrato de Trabalho');
@@ -43,9 +55,8 @@ test.describe('Contrato de trabalho — unidade fundida', () => {
     });
     await page.waitForURL(/#\/contexto$/, { timeout: 15000 });
 
-    // A sincronização automática pode terminar DEPOIS da navegação e abrir o
-    // aviso «Sincronização Concluída» por cima do contrato (em CI a nuvem não
-    // devolve dados). O aviso é legítimo — fecha-se quando aparece, em vez de
+    // A sincronização automática pode terminar e abrir o aviso «Sincronização
+    // Concluída» por cima do contrato (em CI a nuvem não devolve dados). O aviso é legítimo — fecha-se quando aparece, em vez de
     // deixar o teste depender do instante em que o sync termina.
     const contrato = page.getByText('Contrato de Trabalho', { exact: true });
     const confirmarAviso = page.getByRole('button', { name: 'Confirmar' });
