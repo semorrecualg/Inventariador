@@ -235,6 +235,24 @@ export function serializeSecurityExport(manifest: SecurityExportManifest): strin
 }
 
 /**
+ * Lê o texto de um pacote exportado por este serviço (`.json`/`.dat`). Não toca
+ * em nenhuma base: um ficheiro truncado ou que não seja JSON é recusado aqui,
+ * antes de `verifySecurityExport` julgar o conteúdo.
+ */
+export function parseSecurityExport(text: string): SecurityExportManifest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('ficheiro não é JSON válido');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('conteúdo do ficheiro não é um pacote de backup');
+  }
+  return parsed as SecurityExportManifest;
+}
+
+/**
  * Persiste o snapshot em arquivo físico `.dat` no dispositivo (Capacitor,
  * Directory.Documents/GBR_KARDEK_DATA). Best-effort: em Web/iFrame retorna false
  * silenciosamente (mesmo padrão de `backupDatabaseToPhysicalStorage`).
