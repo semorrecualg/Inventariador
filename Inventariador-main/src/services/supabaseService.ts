@@ -30,6 +30,16 @@ import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeFlag } from '../utils/normalize';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
 import {
+  BaseGenerationBlockedError,
+  avaliarGeracaoBase,
+  gravarSeloBase,
+  lerSeloBase,
+  mensagemGeracaoAntiga,
+  normalizarGeracao,
+  type BaseGeneration,
+  type BaseGenerationVerdict
+} from '../utils/baseGeneration';
+import {
   checkCloudPushGuard,
   findIdentityConflicts,
   formatCloudPushIdentityConflicts,
@@ -957,6 +967,125 @@ let lastIdentityNoticeKey: string | null = null;
 export const resetCloudPushBlockedNotice = (): void => {
   lastCloudPushBlockedNoticeKey = null;
   lastIdentityNoticeKey = null;
+  lastBaseGenerationNoticeKey = null;
+  resetBaseGenerationCache();
+};
+
+// ============================================================================
+// SELO DE GERAÇÃO DA BASE — portão de envio
+// ----------------------------------------------------------------------------
+// A nuvem guarda a geração corrente em `public.base_generation` (uma linha).
+// O aparelho espelha-a em `localStorage` (utils/baseGeneration). Se a nuvem foi
+// reiniciada e este aparelho ainda tem a base antiga, o envio é bloqueado antes
+// de qualquer upsert: sem isto, o primeiro sync repovoava a nuvem com as chaves
+// que o reset acabou de apagar.
+//
+// A leitura é cacheada por um minuto (a fila da nuvem tenta de novo a cada
+// 1,2 s) e FALHA ABERTA: sem tabela, sem rede ou com resposta inválida o envio
+// segue sem portão — compatibilidade com projetos que ainda não correram o
+// bootstrap novo.
+// ============================================================================
+
+const BASE_GENERATION_TTL_MS = 60_000;
+let baseGenerationCache: { at: number; value: BaseGeneration | null } | null = null;
+let lastBaseGenerationReadWarn = '';
+let lastBaseGenerationNoticeKey: string | null = null;
+
+/** Rearranque do cache/aviso do selo (testes e fim de episódio). */
+export const resetBaseGenerationCache = (): void => {
+  baseGenerationCache = null;
+  lastBaseGenerationReadWarn = '';
+};
+
+/** Geração corrente da nuvem; `null` quando não há como saber (falha aberta). */
+export const lerGeracaoNuvem = async (): Promise<BaseGeneration | null> => {
+  const now = Date.now();
+  if (baseGenerationCache && now - baseGenerationCache.at < BASE_GENERATION_TTL_MS) {
+    return baseGenerationCache.value;
+  }
+
+  let value: BaseGeneration | null = null;
+  try {
+    const { data, error } = await supabase
+      .from('base_generation')
+      .select('generation, seq')
+      .eq('id', 1)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'erro de esquema');
+    value = normalizarGeracao(data);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message !== lastBaseGenerationReadWarn) {
+      lastBaseGenerationReadWarn = message;
+      logger.warn(
+        `>>> [Supabase] Selo de geração indisponível (${message}); o envio segue sem portão. ` +
+        'Corra docs/supabase_bootstrap.sql para ativar o selo.'
+      );
+    }
+    value = null;
+  }
+
+  baseGenerationCache = { at: Date.now(), value };
+  return value;
+};
+
+/** Avisa UMA vez por episódio que o envio foi bloqueado pelo selo. */
+const announceBaseGenerationOnce = (message: string): void => {
+  if (message === lastBaseGenerationNoticeKey) return;
+  lastBaseGenerationNoticeKey = message;
+  logger.warn(`>>> [Supabase] ${message}`);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gbr_base_generation_blocked', {
+      detail: { message }
+    }));
+  }
+};
+
+/** `true` enquanto houver inventário local (as três tabelas espelho). */
+const baseLocalTemInventario = async (): Promise<boolean> => {
+  try {
+    const counts = await sqliteService.countAssetMirrors();
+    return counts.local_assets + counts.ativos + counts.assets > 0;
+  } catch {
+    // Na dúvida nunca se adota: adotar é o caminho que permite enviar.
+    return true;
+  }
+};
+
+/**
+ * Compara a geração da nuvem com a do aparelho e adota-a quando é seguro
+ * (base local vazia ou primeira geração). Devolve o veredicto para o chamador
+ * decidir entre seguir e bloquear.
+ */
+export const verificarGeracaoBase = async (): Promise<{
+  verdict: BaseGenerationVerdict;
+  remoto: BaseGeneration | null;
+  local: BaseGeneration | null;
+}> => {
+  const remoto = await lerGeracaoNuvem();
+  const local = lerSeloBase();
+  if (!remoto) return { verdict: 'unknown', remoto: null, local };
+
+  // Caminho quente: gerações iguais não custam leitura do Dexie.
+  if (local && local.generation === remoto.generation) {
+    return { verdict: 'ok', remoto, local };
+  }
+
+  const decisao = avaliarGeracaoBase({
+    local,
+    remoto,
+    baseLocalVazia: !(await baseLocalTemInventario())
+  });
+
+  if (decisao.verdict === 'adopt') {
+    const gravou = gravarSeloBase(remoto);
+    logger.info(
+      `>>> [Supabase] Selo de geração ${remoto.seq} adotado` +
+      `${gravou ? '' : ' (storage indisponível: o aviso repete na próxima sessão)'} — ${decisao.reason}`
+    );
+  }
+
+  return { verdict: decisao.verdict, remoto, local };
 };
 
 /**
@@ -1137,6 +1266,15 @@ export const syncAssetsToCloud = async (
   if (!supabase || !navigator.onLine) {
     logger.warn('>>> [Supabase] Sincronização ignorada: Sem conexão ou Supabase não configurado.');
     return [];
+  }
+
+  // SELO DE GERAÇÃO: sem isto, um aparelho com a base antiga repovoava a nuvem
+  // reiniciada no primeiro sync. Falha aberta quando a nuvem não tem selo.
+  const geracao = await verificarGeracaoBase();
+  if (geracao.verdict === 'blocked' && geracao.remoto) {
+    const message = mensagemGeracaoAntiga(geracao.remoto, geracao.local);
+    announceBaseGenerationOnce(message);
+    throw new BaseGenerationBlockedError(geracao.remoto, geracao.local);
   }
 
   const isBatteryCritical = await sqliteService.isBatteryCritical?.() ?? false;

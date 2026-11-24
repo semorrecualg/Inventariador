@@ -14,6 +14,7 @@
 import { db } from './sqliteService';
 import { clearVirtualSnapshot } from './localDbService';
 import { ANCORA_PENDENTE_KEY } from '../utils/ancoraPendente';
+import { limparSeloBase } from '../utils/baseGeneration';
 
 export interface FreshLoadResetResult {
   /** Linhas que existiam em `local_assets` antes da limpeza. */
@@ -39,6 +40,10 @@ export async function resetLocalBaseForFreshLoad(): Promise<FreshLoadResetResult
   // Espelho virtual (sandbox): alimentava a Unidade Operacional com a base
   // antiga mesmo depois de o Dexie ser limpo.
   await clearVirtualSnapshot();
+
+  // Selo de geração: sai com a base antiga. A base local está vazia, por isso o
+  // próximo envio adota sem risco a geração corrente da nuvem.
+  limparSeloBase();
 
   // Âncora que ficou por subir: aponta para um contrato que acabou de ser
   // reiniciado, por isso não pode voltar a ser empurrada no arranque.

@@ -550,6 +550,32 @@ CREATE POLICY p_all ON public.asset_logs FOR ALL TO anon, authenticated USING (t
 DROP POLICY IF EXISTS p_all ON public."asset-photos";
 CREATE POLICY p_all ON public."asset-photos" FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
+-- ============================================================================
+-- 8. SELO DE GERAÇÃO DA BASE (uma linha) — ver docs/GERACAO_BASE.md
+-- ----------------------------------------------------------------------------
+-- Depois de um reset da nuvem, um aparelho com a base antiga reenviaria as
+-- chaves velhas e repovoaria a tabela `assets`. O selo dá identidade à geração
+-- corrente: o app compara-a antes de cada envio e recusa a base de uma geração
+-- anterior (Gestor de Base → «Preparar Nova Carga» resolve).
+--
+-- `seq` sobe a cada reset e só serve para o rollout do selo: aparelhos que nunca
+-- o viram adotam a geração 1 sem bloquear. O app só LÊ esta tabela; a escrita é
+-- feita pelo SQL de reset (service_role/SQL Editor), nunca pelo cliente.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.base_generation (
+  id         smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  generation uuid NOT NULL DEFAULT gen_random_uuid(),
+  seq        bigint NOT NULL DEFAULT 1,
+  reset_at   timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.base_generation ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS p_all ON public.base_generation;
+CREATE POLICY p_all ON public.base_generation FOR SELECT TO anon, authenticated USING (true);
+
+INSERT INTO public.base_generation (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
 COMMIT;
 
 -- ============================================================================
