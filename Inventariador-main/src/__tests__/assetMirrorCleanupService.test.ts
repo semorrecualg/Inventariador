@@ -53,7 +53,7 @@ describe('assetMirrorCleanupService — cópias EXATAS (mesma primarykey + conte
     await db.asset_cleanup_backups.clear();
   });
 
-  it('remove a cópia sem contrato e mantém a linha do contrato nos três espelhos', async () => {
+  it('remove a cópia sem contrato e mantém a linha do contrato nas duas tabelas', async () => {
     await seed([
       asset({ primarykey: 'A1', tenantid: 'CICOPAL', _is_synced: 0 }),
       asset({ primarykey: 'A1', tenantid: '', _is_synced: 1 })
@@ -63,7 +63,7 @@ describe('assetMirrorCleanupService — cópias EXATAS (mesma primarykey + conte
 
     expect(report.applied).toBe(true);
     expect(report.removed).toBe(1); // local_assets
-    expect(report.removedTotal).toBe(3); // um por espelho
+    expect(report.removedTotal).toBe(2); // um por tabela da união
     expect(report.before).toBe(2);
     expect(report.after).toBe(1);
     expect(report.distinctBefore).toBe(1);
@@ -71,7 +71,9 @@ describe('assetMirrorCleanupService — cópias EXATAS (mesma primarykey + conte
 
     expect(await db.local_assets.count()).toBe(1);
     expect(await db.ativos.count()).toBe(1);
-    expect(await db.assets.count()).toBe(1);
+    // `assets` não faz parte da limpeza desde A.3a.2: continua com as duas
+    // linhas até a tabela ser removida na A.3a.4.
+    expect(await db.assets.count()).toBe(2);
     expect((await db.local_assets.toArray())[0].tenantid).toBe('CICOPAL');
     // A linha que fica herda o estado de sincronização da cópia removida.
     expect((await db.local_assets.toArray())[0]._is_synced).toBe(1);
@@ -142,11 +144,10 @@ describe('assetMirrorCleanupService — cópias EXATAS (mesma primarykey + conte
     const plan = await previewExactCopyCleanup('CICOPAL');
 
     expect(plan.applied).toBe(false);
-    expect(plan.removedTotal).toBe(3);
+    expect(plan.removedTotal).toBe(2);
     expect(plan.tables.map((t) => `${t.table}:${t.before}->${t.after}`)).toEqual([
       'local_assets:3->2',
-      'ativos:3->2',
-      'assets:3->2'
+      'ativos:3->2'
     ]);
     const texto = formatExactCopyReport(plan).join('\n');
     expect(texto).toContain('DEPOIS (projeção)');
@@ -168,10 +169,10 @@ describe('assetMirrorCleanupService — cópias EXATAS (mesma primarykey + conte
     expect(await db.local_assets.count()).toBe(1);
 
     const backup = await latestExactCopyBackup();
-    expect(backup).toMatchObject({ id: report.backupId, removedTotal: 3 });
+    expect(backup).toMatchObject({ id: report.backupId, removedTotal: 2 });
 
     const { restored } = await restoreExactCopyCleanup(report.backupId as string);
-    expect(restored).toBe(3);
+    expect(restored).toBe(2);
     expect(await db.local_assets.count()).toBe(2);
     expect(await db.ativos.count()).toBe(2);
     expect(await db.assets.count()).toBe(2);

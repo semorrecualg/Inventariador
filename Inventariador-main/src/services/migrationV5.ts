@@ -59,7 +59,9 @@ const FLAG_FIELDS = [
   '_isNew', '_is_unitized', '_is_divergent_baixa'
 ] as const;
 
-export const ASSET_TABLES = ['assets', 'local_assets', 'ativos'] as const;
+// A.3a.2: duas tabelas. Normalizar `assets` reescrevia o terceiro espelho à
+// custa de I/O sem leitor nenhum desde o A.3a.1.
+export const ASSET_TABLES = ['local_assets', 'ativos'] as const;
 
 export interface NormalizeResult {
   changed: boolean;

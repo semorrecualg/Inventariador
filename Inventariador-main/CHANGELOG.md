@@ -451,6 +451,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pelo `count` e a gravação em caso de falha; `perfMetrics` passa a exigir
   `save` no contrato das métricas.
 
+### Corrigido — leituras por campanha rebentavam por chave sem índice
+
+- **O que era:** `getMapData` e `removeCampaignFromAssets` filtravam com
+  `db.<tabela>.where('currentCampaignId')`. Essa chave **nunca** teve índice —
+  nem em `assets` (onde a query nasceu) nem em `ativos`. O Dexie responde com
+  `SchemaError: KeyPath currentCampaignId ... is not indexed`, por isso o mapa
+  vinha vazio e a limpeza de campanha não fazia nada.
+- **Agora:** as duas leituras usam `.filter()` sobre a tabela viva. Sem
+  migração de schema; o custo é uma passagem pela tabela que já era carregada.
+- **Testes:** `campaignReads` (3) — um caso prova a causa (`.where()` rejeita
+  com SchemaError, para travar o regresso), os outros fixam o resultado de
+  `getMapData` (campanha certa, exclusão e contrato da sessão).
+
+### Alterado — A.3a.2: listas por nome passam a duas tabelas
+
+- `ASSET_MIRROR_TABLES` (`assetDedupService`) e `ASSET_TABLES` (`migrationV5`)
+  ficaram com `local_assets` + `ativos`. `assets` só recebe escrita até à
+  A.3a.3/A.3a.4: medi-lo como espelho de negócio inflacionava o relatório de
+  cópias e a normalização reescrevia o terceiro espelho sem leitor.
+- Consequência assumida: a limpeza de cópias exactas deixa de tocar em `assets`
+  (a tabela sai inteira na A.3a.4) e as localidades derivadas passam a sair das
+  duas tabelas vivas. As provas foram ajustadas para este contrato.
+
 ### Alterado — A.3a.1: leituras deixam de passar pelo terceiro espelho
 
 - **O que era:** quatro leitores ainda iam a `assets`, o espelho canónico do

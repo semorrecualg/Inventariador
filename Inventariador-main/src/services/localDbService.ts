@@ -302,9 +302,11 @@ export const localDb = {
 
     getMapData: async (campaignId: string): Promise<Asset[]> => {
       const tenant = getCurrentTenantid().trim().toUpperCase();
+      // `currentCampaignId` NÃO é índice em `ativos` (nunca foi em `assets`):
+      // `.where()` lança `SchemaError: KeyPath ... is not indexed` e o mapa
+      // vinha vazio. O filtro percorre a tabela viva — correto sem migração.
       const results = await db.ativos
-        .where('currentCampaignId')
-        .equals(campaignId)
+        .filter((a) => String(a.currentCampaignId || '') === String(campaignId))
         .toArray();
 
       return results
@@ -736,7 +738,10 @@ export const localDb = {
     },
 
     removeCampaignFromAssets: async (campaignId: string): Promise<void> => {
-      const allAtivos = await db.ativos.where('currentCampaignId').equals(campaignId).toArray();
+      // Mesmo motivo de `getMapData`: chave sem índice → filtro, não `.where()`.
+      const allAtivos = await db.ativos
+        .filter((a) => String(a.currentCampaignId || '') === String(campaignId))
+        .toArray();
       await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
         for (const asset of allAtivos) {
           asset.currentCampaignId = null;
