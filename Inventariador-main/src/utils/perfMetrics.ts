@@ -8,6 +8,11 @@ import { logger } from './logger';
  * e a linha de base é um retrato datado (`gbr_perf_baseline_v1`), exibido no
  * Gestor de Base de Dados. Sem backend: medição é local, por aparelho.
  *
+ * A amostra `save` é de CAMINHO QUENTE (o autosave corre a cada alteração):
+ * fica em memória e só desce ao `localStorage` num ocioso ou quando alguém lê
+ * o retrato. Serializar duzentas amostras a cada save custava mais do que o
+ * próprio save.
+ *
  * Nada aqui altera o fluxo medido — as chamadas são O(1) e nunca lançam
  * (storage indisponível é ignorado).
  */
@@ -95,8 +100,8 @@ export const scheduleIdle = (task: () => void | Promise<void>, timeoutMs = 2000)
   else setTimeout(run, 0);
 };
 
-/** Amostras válidas, da mais antiga para a mais recente. */
-export const getPerfSamples = (): PerfSample[] => {
+/** Leitura crua do anel guardado — sem descarregar o buffer de caminho quente. */
+const lerAmostrasGuardadas = (): PerfSample[] => {
   const storage = safeStorage();
   if (!storage) return [];
   try {
@@ -119,6 +124,54 @@ export const getPerfSamples = (): PerfSample[] => {
   }
 };
 
+/** Anexa amostras ao anel guardado. Uma escrita por lote, nunca por amostra. */
+const appendSamples = (novas: PerfSample[]): void => {
+  const storage = safeStorage();
+  if (!storage || novas.length === 0) return;
+  try {
+    storage.setItem(
+      SAMPLES_KEY,
+      JSON.stringify(lerAmostrasGuardadas().concat(novas).slice(-MAX_SAMPLES))
+    );
+  } catch {
+    /* quota/indisponível: a amostra vale só para o log */
+  }
+};
+
+/** Amostras de caminho quente ainda não gravadas no `localStorage`. */
+let amostrasQuentes: PerfSample[] = [];
+let flushAgendado = false;
+
+/**
+ * Descarrega o buffer de caminho quente numa única escrita. Também corre quando
+ * alguém lê o retrato (`getPerfSamples`), por isso uma amostra `save` nunca
+ * desaparece sem aparecer na linha de base.
+ */
+export const flushPerfSamples = (): number => {
+  if (amostrasQuentes.length === 0) return 0;
+  const pendentes = amostrasQuentes;
+  amostrasQuentes = [];
+  appendSamples(pendentes);
+  return pendentes.length;
+};
+
+const agendarFlushAmostrasQuentes = (): void => {
+  if (flushAgendado) return;
+  flushAgendado = true;
+  scheduleIdle(() => {
+    flushAgendado = false;
+    flushPerfSamples();
+  });
+};
+
+/** Amostras válidas, da mais antiga para a mais recente. */
+export const getPerfSamples = (): PerfSample[] => {
+  // O buffer de caminho quente entra antes da leitura: quem lê o retrato vê o
+  // save que acabou de acontecer, mesmo sem o ocioso ter corrido.
+  flushPerfSamples();
+  return lerAmostrasGuardadas();
+};
+
 /** Registra uma duração já medida (ex.: `elapsedMs` de um push). */
 export const recordPerfSample = (
   name: PerfMetricName,
@@ -134,15 +187,12 @@ export const recordPerfSample = (
   };
   const countLabel = sample.count !== undefined ? ` · ${sample.count} registro(s)` : '';
   logger.info(`>>> [PERF] ${name}: ${sample.ms}ms${countLabel}`);
-  const storage = safeStorage();
-  if (storage) {
-    try {
-      const list = getPerfSamples();
-      list.push(sample);
-      storage.setItem(SAMPLES_KEY, JSON.stringify(list.slice(-MAX_SAMPLES)));
-    } catch {
-      /* quota/indisponível: a amostra vale só para o log */
-    }
+  if (name === 'save') {
+    // Caminho quente: fica em memória e desce ao storage no ocioso.
+    amostrasQuentes.push(sample);
+    agendarFlushAmostrasQuentes();
+  } else {
+    appendSamples([sample]);
   }
   return sample;
 };
@@ -179,6 +229,7 @@ export const collectPerfSummary = (): Record<PerfMetricName, PerfSummary> => {
 };
 
 export const clearPerfSamples = (): void => {
+  amostrasQuentes = [];
   try {
     safeStorage()?.removeItem(SAMPLES_KEY);
   } catch {

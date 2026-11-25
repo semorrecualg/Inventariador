@@ -67,7 +67,7 @@ vi.mock('../services/FileSystemStorageService', () => ({
 
 import { saveInventory } from '../services/persistenceService';
 import { DatabaseMode } from '../types';
-import { getPerfSamples } from '../utils/perfMetrics';
+import { clearPerfSamples, getPerfSamples } from '../utils/perfMetrics';
 
 const ativos = (quantidade: number) =>
   Array.from({ length: quantidade }, (_, i) => ({
@@ -92,6 +92,7 @@ const amostrasSave = () => getPerfSamples().filter((amostra) => amostra.name ===
 
 describe('saveInventory no cronómetro (§8)', () => {
   beforeEach(() => {
+    clearPerfSamples();
     localStorage.clear();
     saveInventoryConfig.mockClear();
     bulkInsertAssets.mockClear();
@@ -114,6 +115,24 @@ describe('saveInventory no cronómetro (§8)', () => {
     // É esta separação que permite ler as duas linhas de §8 do mesmo retrato,
     // sem inventar uma métrica por tamanho de base.
     expect(amostrasSave().map((amostra) => amostra.count)).toEqual([1, 300]);
+  });
+
+  it('não escreve no localStorage a cada save — a amostra fica em memória', async () => {
+    // O save é caminho quente (autosave): reescrever o anel de 200 amostras a
+    // cada um custava mais do que o próprio save. A amostra fica em memória e
+    // desce numa escrita só (ocioso ou leitura do retrato).
+    const escrever = vi.spyOn(Storage.prototype, 'setItem');
+    const escritasDeAmostras = () =>
+      escrever.mock.calls.filter((chamada) => String(chamada[0]).includes('gbr_perf_samples')).length;
+
+    for (let i = 0; i < 5; i += 1) await salvar(1);
+
+    // Cinco saves não podem dar cinco escritas: no máximo a do ocioso.
+    expect(escritasDeAmostras()).toBeLessThanOrEqual(1);
+    escrever.mockRestore();
+
+    // E nada se perde: ler o retrato descarrega o buffer.
+    expect(amostrasSave()).toHaveLength(5);
   });
 
   it('grava a amostra mesmo quando o save falha', async () => {

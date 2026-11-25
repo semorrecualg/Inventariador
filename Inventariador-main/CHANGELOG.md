@@ -443,6 +443,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `finally`). A mesma métrica serve os dois tamanhos: lê-se a amostra com
   `count = 1` e a com `count = 300`, sem uma métrica por tamanho de base. O
   cartão do Gestor de Base mostra o rótulo «Save».
+- **Caminho quente:** o save é autosave, por isso a amostra fica em memória e
+  só desce ao `localStorage` numa escrita única — no ocioso ou quando alguém lê
+  o retrato. Serializar o anel de 200 amostras a cada save custava mais do que
+  o próprio save.
 - **Testes:** `saveInventoryPerf` (3) fixa a amostra com 300, a separação 1/300
   pelo `count` e a gravação em caso de falha; `perfMetrics` passa a exigir
   `save` no contrato das métricas.
