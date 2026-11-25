@@ -29,19 +29,32 @@
 -- 1) BACKFILL: linha sem carimbo nunca entra em `updated_at > checkpoint`
 --    (importação antiga, ALTER TABLE ADD COLUMN em base legada).
 UPDATE public.assets
-   SET updated_at = COALESCE(created_at, now())
+   SET updated_at = COALESCE(created_at, clock_timestamp())
  WHERE updated_at IS NULL;
 
-ALTER TABLE public.assets ALTER COLUMN updated_at SET DEFAULT now();
+-- O DEFAULT também passa a `clock_timestamp()`: um INSERT numa transacção longa
+-- herdaria o instante do BEGIN e nasceria já "no passado" para o delta dos
+-- outros aparelhos.
+ALTER TABLE public.assets ALTER COLUMN updated_at SET DEFAULT clock_timestamp();
 
--- 2) Função do carimbo. `now()` é o instante da transacção no servidor, o mesmo
---    para todas as linhas do lote — é isso que o pull delta compara.
+-- 2) Função do carimbo. `clock_timestamp()` e NÃO `now()`.
+--
+--    `now()` é o instante do INÍCIO da transacção: todas as linhas de um lote
+--    levam exactamente o mesmo carimbo, e duas actualizações do mesmo ativo na
+--    mesma transacção ficam com o mesmo valor. O pull delta compara
+--    `updated_at > checkpoint` (`.gt`), por isso a segunda actualização é
+--    invisível para os outros aparelhos.
+--
+--    Pior: uma transacção que começa em t0 e só grava/commita em t3 carimba a
+--    linha com t0. Um aparelho que já tenha checkpoint > t0 nunca mais vê essa
+--    linha. `clock_timestamp()` devolve o instante real da linha, avança dentro
+--    da transacção e volta a ordem monotónica do lado do servidor.
 CREATE OR REPLACE FUNCTION public.touch_updated_at()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  NEW.updated_at := now();
+  NEW.updated_at := clock_timestamp();
   RETURN NEW;
 END;
 $$;
