@@ -12,6 +12,7 @@ import { assetGpsPair } from '../utils/assetGps';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { uniqueAssetsForDisplay } from '../utils/dedupAssets';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
+import { registarResgateEExtincaoDoEspelho } from './migrationEspelhoAssets';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
 export interface DexieAsset {
@@ -301,7 +302,6 @@ class InventoryDexieDatabase extends Dexie {
   // Dois contratos podem ter a MESMA chave de origem (e filial homônima) sem colidir.
   local_assets!: Dexie.Table<DexieAsset, [string, string]>;
   ativos!: Dexie.Table<DexieAsset, [string, string]>;
-  assets!: Dexie.Table<DexieAsset, [string, string]>;
   audit_logs!: Dexie.Table<DexieAuditLog, string>;
   campaigns!: Dexie.Table<DexieCampaign, string>;
   SYSTEM_CONTEXT!: Dexie.Table<DexieSystemContext, string>;
@@ -484,6 +484,10 @@ class InventoryDexieDatabase extends Dexie {
     this.version(9).stores({
       sync_outbox: 'key, primarykey, tenantid, status, next_attempt_at'
     });
+    // v10 e v11 — A.3a.4: resgate do que só existe em `assets` e, depois,
+    // remoção da store. O par vive em `migrationEspelhoAssets` para o teste
+    // exercitar a MESMA função que este upgrade corre.
+    registarResgateEExtincaoDoEspelho(this);
   }
 }
 
@@ -1038,7 +1042,7 @@ export class SqliteService {
     logger.info(`>>> [Dexie SRE Batch] Iniciando bulk insert de ${total} ativos...`);
 
     try {
-      await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      await db.transaction('rw', [db.ativos, db.local_assets], async () => {
         for (let i = 0; i < total; i += CHUNK_SIZE) {
           const chunk = assets.slice(i, i + CHUNK_SIZE);
           
@@ -1298,8 +1302,8 @@ export class SqliteService {
     }
     let repaired = 0;
     let skipped = 0;
-    await db.transaction('rw', db.local_assets, db.ativos, db.assets, db.SYSTEM_CONTEXT, async () => {
-      const tables: Array<'local_assets' | 'ativos' | 'assets'> = ['local_assets', 'ativos', 'assets'];
+    await db.transaction('rw', db.local_assets, db.ativos, db.SYSTEM_CONTEXT, async () => {
+      const tables: Array<'local_assets' | 'ativos'> = ['local_assets', 'ativos'];
       for (const table of tables) {
         const rows = (await db[table].toArray()) as Array<{ tenantid?: unknown; primarykey?: unknown; id?: unknown }>;
         for (const row of rows) {
@@ -1344,13 +1348,13 @@ export class SqliteService {
    */
   public async countAssetMirrors(
     tenantid?: string | null
-  ): Promise<{ local_assets: number; ativos: number; assets: number; total: number }> {
+  ): Promise<{ local_assets: number; ativos: number; total: number }> {
     const t = String(tenantid || '').trim().toUpperCase();
     // Uma leitura só para as três tabelas; falha no marcador = varredura segura.
     const canonicalized = await db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)
       .then(Boolean)
       .catch(() => false);
-    const countTable = async (table: 'local_assets' | 'ativos' | 'assets'): Promise<number> => {
+    const countTable = async (table: 'local_assets' | 'ativos'): Promise<number> => {
       try {
         if (!t) return await db[table].count();
         if (canonicalized) {
@@ -1365,12 +1369,11 @@ export class SqliteService {
         return 0;
       }
     };
-    const [local_assets, ativos, assets] = await Promise.all([
+    const [local_assets, ativos] = await Promise.all([
       countTable('local_assets'),
-      countTable('ativos'),
-      countTable('assets')
+      countTable('ativos')
     ]);
-    return { local_assets, ativos, assets, total: Math.max(local_assets, ativos, assets) };
+    return { local_assets, ativos, total: Math.max(local_assets, ativos) };
   }
 
   public async saveInventoryConfig(config: Record<string, unknown>): Promise<void> {
@@ -1491,8 +1494,8 @@ export class SqliteService {
     };
 
     let removidos = 0;
-    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
-      for (const tabela of [db.ativos, db.assets, db.local_assets]) {
+    await db.transaction('rw', [db.ativos, db.local_assets], async () => {
+      for (const tabela of [db.ativos, db.local_assets]) {
         const chaves = await tabela.filter(pertence).primaryKeys();
         if (chaves.length === 0) continue;
         await tabela.bulkDelete(chaves);
@@ -1510,7 +1513,6 @@ export class SqliteService {
     this.isImportingBatch = true;
     try {
       await db.ativos.clear();
-      await db.assets.clear();
       await db.local_assets.clear();
       await db.audit_logs.clear();
       await db.campaigns.clear();
@@ -1580,9 +1582,8 @@ export class SqliteService {
       delete registo._syncFailReason;
       if (extra) Object.assign(registo, extra);
     };
-    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+    await db.transaction('rw', [db.ativos, db.local_assets], async () => {
       await db.ativos.where('primarykey').anyOf(keys).modify(marcar);
-      await db.assets.where('primarykey').anyOf(keys).modify(marcar);
       await db.local_assets.where('primarykey').anyOf(keys).modify(marcar);
     });
   }
@@ -1610,9 +1611,8 @@ export class SqliteService {
       delete registo._syncFailAt;
       delete registo._syncFailReason;
     };
-    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+    await db.transaction('rw', [db.ativos, db.local_assets], async () => {
       await db.ativos.where('primarykey').anyOf(keys).modify(marcar);
-      await db.assets.where('primarykey').anyOf(keys).modify(marcar);
       await db.local_assets.where('primarykey').anyOf(keys).modify(marcar);
     });
   }
@@ -1657,9 +1657,9 @@ export class SqliteService {
     }
     if (carimbos.size === 0) return 0;
 
-    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+    await db.transaction('rw', [db.ativos, db.local_assets], async () => {
       for (const [primarykey, carimbo] of carimbos) {
-        for (const tabela of [db.ativos, db.assets, db.local_assets]) {
+        for (const tabela of [db.ativos, db.local_assets]) {
           // CORRIDA SUCESSO × FALHA: a tentativa que falhou pode chegar aqui
           // depois de outro caminho (envio em massa, fila, foto, pull) já ter
           // marcado o registo igual à nuvem. Carimbar essa linha deixava-a
@@ -1725,8 +1725,8 @@ export class SqliteService {
 
     const convertidos = new Set<string>();
     let linhas = 0;
-    await db.transaction('rw', db.local_assets, db.ativos, db.assets, db.SYSTEM_CONTEXT, async () => {
-      const tabelas: Array<'local_assets' | 'ativos' | 'assets'> = ['local_assets', 'ativos', 'assets'];
+    await db.transaction('rw', db.local_assets, db.ativos, db.SYSTEM_CONTEXT, async () => {
+      const tabelas: Array<'local_assets' | 'ativos'> = ['local_assets', 'ativos'];
       for (const tabela of tabelas) {
         const rows = (await db[tabela].toArray()) as unknown as Array<Record<string, unknown>>;
         for (const row of rows) {

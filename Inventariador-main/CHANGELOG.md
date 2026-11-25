@@ -451,6 +451,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pelo `count` e a gravação em caso de falha; `perfMetrics` passa a exigir
   `save` no contrato das métricas.
 
+### Alterado — A.3a.4: o terceiro espelho sai do schema (v10 → v11)
+
+- **v10 — resgate.** O Dexie não deixa ler uma store na mesma versão que a
+  apaga (dexie#275/#276), por isso a remoção ficou numa versão própria. A v10
+  compara `assets` com as duas tabelas vivas por `[tenantid+primarykey]` e
+  **acerta os dois espelhos**: se a chave já existe numa delas, é a linha viva
+  que se copia para a que falta — a versão atrasada de `assets` não ganha, para
+  os espelhos não ficarem divergentes; a linha de `assets` só entra quando a
+  chave não existe em nenhuma das duas.
+- **v11 — remoção.** `version(11).stores({ assets: null })` apaga a store.
+- `countAssetMirrors` devolve só `local_assets`, `ativos` e o total (maior
+  espelho); o painel e a linha de base do `perfMetrics` deixaram de mostrar a
+  terceira coluna. `migrateLegacyTenantids`, as marcações de sincronização, a
+  migração de `_conferido` e todas as transações passaram a duas tabelas.
+- O resgate e a declaração das v10/v11 vivem em
+  `services/migrationEspelhoAssets` e o construtor da base chama-os; o teste
+  **chama a mesma função** em vez de reimplementar a migração.
+- Testes: `migracaoV10` (3) prova que a linha que só existia em `assets` é
+  resgatada para as duas tabelas, que a chave já viva propaga a linha viva (nos
+  dois sentidos: `ativos`→`local_assets` e `local_assets`→`ativos`) e que a
+  comparação é pela chave composta (mesmo `primarykey` noutro contrato não
+  colide); e que a store desaparece na v11;
+  `schemaBaseline` fixa a v10 com 10 tabelas; `countAssetMirrors`,
+  `countAtivosByTenant`, `conferidoTipos`, `carimboNoReset`, `migracaoConferido`,
+  `addressSearch`, `assetDedupService`, `assetMirrorCleanupService`,
+  `freshLoadReset` e `importReconciliation` ajustados ao schema sem `assets`.
+
 ### Alterado — A.3a.3: o terceiro espelho deixa de receber escrita
 
 - Criar, editar, carregar planilha, corrigir campo em lote, marcar campanha,

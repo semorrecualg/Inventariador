@@ -35,7 +35,6 @@ const asset = (over: Partial<DexieAsset> & { primarykey: string }): DexieAsset =
 const seed = async (rows: DexieAsset[]) => {
   await db.local_assets.bulkPut(rows);
   await db.ativos.bulkPut(rows);
-  await db.assets.bulkPut(rows);
 };
 
 /**
@@ -47,7 +46,6 @@ describe('assetDedupService — diagnóstico de cópias (não apaga nada)', () =
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.audit_logs.clear();
   });
 
@@ -82,7 +80,6 @@ describe('assetDedupService — diagnóstico de cópias (não apaga nada)', () =
     // Nada foi apagado, em espelho nenhum.
     expect(await db.local_assets.count()).toBe(6);
     expect(await db.ativos.count()).toBe(6);
-    expect(await db.assets.count()).toBe(6);
   });
 
   it('não escreve em audit_logs (diagnóstico é leitura pura)', async () => {

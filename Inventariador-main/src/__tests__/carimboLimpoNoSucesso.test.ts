@@ -62,7 +62,6 @@ const carimbosNosEspelhos = async (): Promise<Array<string | null>> => {
 describe('carimbo da falha no sucesso — uma só regra', () => {
   beforeEach(async () => {
     await db.ativos.clear();
-    await db.assets.clear();
     await db.local_assets.clear();
   });
 

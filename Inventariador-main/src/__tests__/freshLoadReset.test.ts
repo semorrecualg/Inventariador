@@ -39,15 +39,13 @@ describe('resetLocalBaseForFreshLoad', () => {
     clearVirtualSnapshotMock.mockClear();
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.addresses.clear();
     await db.audit_logs.clear();
   });
 
-  it('limpa os três espelhos, os endereços e a auditoria local', async () => {
+  it('limpa os dois espelhos, os endereços e a auditoria local', async () => {
     await db.local_assets.bulkPut([asset('000420'), asset('000421')]);
     await db.ativos.bulkPut([asset('000420'), asset('000421')]);
-    await db.assets.bulkPut([asset('000420'), asset('000421')]);
     await db.addresses.put({ tenantid: 'CICOPAL', filial: '010101', codigo_endereco: 'A-1' } as never);
     await db.audit_logs.put({
       id: 'LOG_1', usuario: 'x', acao: 'SYNC', tabela: 'local_assets',
@@ -59,7 +57,6 @@ describe('resetLocalBaseForFreshLoad', () => {
     expect(result.clearedAssets).toBe(2);
     expect(await db.local_assets.count()).toBe(0);
     expect(await db.ativos.count()).toBe(0);
-    expect(await db.assets.count()).toBe(0);
     expect(await db.addresses.count()).toBe(0);
     expect(await db.audit_logs.count()).toBe(0);
     expect(clearVirtualSnapshotMock).toHaveBeenCalledTimes(1);

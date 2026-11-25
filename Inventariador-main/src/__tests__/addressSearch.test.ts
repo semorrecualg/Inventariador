@@ -61,8 +61,6 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
   /** As linhas destes testes são recortes: a tabela exige o resto em produção. */
   const putAtivos = (rows: Array<Record<string, unknown>>) =>
     db.ativos.bulkPut(rows as unknown as Parameters<typeof db.ativos.bulkPut>[0]);
-  const putAssets = (rows: Array<Record<string, unknown>>) =>
-    db.assets.bulkPut(rows as unknown as Parameters<typeof db.assets.bulkPut>[0]);
   // A.3a.1: a união passou a ser `ativos` + `local_assets`; `assets` saiu das
   // leituras. As linhas «de outra cópia» destes testes vão para o baseline.
   const putLocal = (rows: Array<Record<string, unknown>>) =>
@@ -83,7 +81,6 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     localStorage.clear();
     sessionStorage.setItem('tenantid', 'CICOPAL');
     await db.addresses.clear();
-    await db.assets.clear();
     await db.local_assets.clear();
     await db.ativos.clear();
   });
@@ -148,9 +145,8 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     expect(rows.some(r => r.displayName === 'GERAL - NÃO ESPECIFICADO')).toBe(false);
   });
 
-  it('o mesmo ativo espelhado nas três tabelas conta UMA vez', async () => {
+  it('o mesmo ativo espelhado nas duas tabelas conta UMA vez', async () => {
     const shared = row('151100 PRODUCAO - PV1 MILHO', 0, 'K1');
-    await putAssets([{ ...shared }]);
     await putAtivos([{ ...shared }]);
     await db.local_assets.bulkPut([{ ...shared }] as unknown as Parameters<typeof db.local_assets.bulkPut>[0]);
     await putAtivos([row('151200 CONTABILIDADE - CDC 70104', 0, 'K2')]);
@@ -163,7 +159,7 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
 
   it('`_is_deleted`: a tabela VIVA (`ativos`) manda — vivo nela vence baixado na canónica', async () => {
     await putAtivos([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]); // vivo
-    await putAssets([{ ...row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'), _is_deleted: 1 }]); // baixado
+    await putLocal([{ ...row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'), _is_deleted: 1 }]); // baixado
 
     const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
 
@@ -173,7 +169,7 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
 
   it('`_is_deleted`: baixa feita na tabela viva esconde o ativo mesmo com a canónica viva', async () => {
     await putAtivos([{ ...row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'), _is_deleted: 1 }]); // baixado
-    await putAssets([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]); // vivo
+    await putLocal([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]); // vivo
 
     const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
 
@@ -200,9 +196,9 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
   });
 
   it('conferência feita só numa das cópias conta como conferida', async () => {
-    // O trabalho de campo grava em `ativos`/`local_assets`; `assets` pode ficar
-    // atrás. A união não pode desfazer a conferência já feita.
-    await putAssets([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]);
+    // O trabalho de campo grava em `ativos`; o baseline `local_assets` pode
+    // ficar atrás. A união não pode desfazer a conferência já feita.
+    await putLocal([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]);
     await putAtivos([row('151100 PRODUCAO - PV1 MILHO', 1, 'K1')]);
 
     const rows = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');

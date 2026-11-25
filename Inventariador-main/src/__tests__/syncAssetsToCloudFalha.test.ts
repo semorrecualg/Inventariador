@@ -93,7 +93,6 @@ describe('syncAssetsToCloud — carimbo da recusa no registo local', () => {
     localStorage.setItem('app_database_mode', 'SUPABASE');
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
   });
 
   afterEach(() => {

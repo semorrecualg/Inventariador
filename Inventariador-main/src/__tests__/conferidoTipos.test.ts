@@ -75,7 +75,6 @@ describe('marcaLocalConferida — só a flag local, em qualquer grafia', () => {
 describe('fronteira do banco — as grafias sobrevivem à ida e volta', () => {
   beforeEach(async () => {
     await db.ativos.clear();
-    await db.assets.clear();
     await db.local_assets.clear();
   });
 
@@ -182,20 +181,18 @@ describe('getLocationsWithStats — a mesma chave em duas tabelas conta uma vez'
     store.set('app_current_user', JSON.stringify({ tenantid: TENANT }));
 
     await db.ativos.clear();
-    await db.assets.clear();
     await db.local_assets.clear();
   });
 
   afterEach(async () => {
     vi.unstubAllGlobals();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.local_assets.clear();
   });
 
   it('grafias diferentes da mesma conferência contam 1 de 1, não 2', async () => {
     await db.ativos.put(linhaDaTabela({ _conferido: '1' }));
-    await db.assets.put(linhaDaTabela({ _conferido: true }));
+    await db.local_assets.put(linhaDaTabela({ _conferido: true }));
 
     expect(await ruaUm()).toEqual({ total: 1, checked: 1, ocorrencias: 1 });
   });
@@ -211,33 +208,31 @@ describe('getLocationsWithStats — a mesma chave em duas tabelas conta uma vez'
 
   it('pendente em todas as cópias continua 0 de 1', async () => {
     await db.ativos.put(linhaDaTabela({ _conferido: '0' }));
-    await db.assets.put(linhaDaTabela({ _conferido: false }));
+    await db.local_assets.put(linhaDaTabela({ _conferido: false }));
 
     expect(await ruaUm()).toEqual({ total: 1, checked: 0, ocorrencias: 1 });
   });
 
   it('conferido só pela coluna de auditoria conta pela regra', async () => {
     await db.ativos.put(linhaDaTabela({ _conferido: 0, AUDITOR_STATUS_CONFERENCIA: 'SIM' }));
-    await db.assets.put(linhaDaTabela({ _conferido: '0' }));
+    await db.local_assets.put(linhaDaTabela({ _conferido: '0' }));
 
     expect(await ruaUm()).toEqual({ total: 1, checked: 1, ocorrencias: 1 });
   });
 
-  it('a terceira cópia (baseline) não inflaciona o total', async () => {
+  it('a segunda cópia (baseline) não inflaciona o total', async () => {
     await db.ativos.put(linhaDaTabela({ _conferido: '1' }));
-    await db.assets.put(linhaDaTabela({ _conferido: 1 }));
     await db.local_assets.put(linhaDaTabela({ _conferido: 'true' }));
 
     expect(await ruaUm()).toEqual({ total: 1, checked: 1, ocorrencias: 1 });
   });
 
-  it('desmarcar pelo caminho do ecrã (três tabelas) volta a 0 de 1', async () => {
-    // É esta transacção que sustenta a decisão: a desmarcação escreve as três
-    // cópias, por isso o OR do merge vê três zeros e não uma cópia atrasada.
+  it('desmarcar pelo caminho do ecrã (duas tabelas) volta a 0 de 1', async () => {
+    // É esta transacção que sustenta a decisão: a desmarcação escreve as duas
+    // cópias vivas, por isso o OR do merge vê dois zeros e não uma cópia atrasada.
     await db.ativos.put(
       linhaDaTabela({ _conferido: '1', _dataLeitura: '2026-11-19T10:00:00.000Z' })
     );
-    await db.assets.put(linhaDaTabela({ _conferido: true }));
     await db.local_assets.put(linhaDaTabela({ _conferido: 1 }));
     expect((await ruaUm()).checked).toBe(1);
 

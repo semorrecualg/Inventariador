@@ -31,7 +31,6 @@ const ativo = (over: Record<string, unknown> = {}) =>
 describe('leituras por campanha — `currentCampaignId` sem índice', () => {
   beforeEach(async () => {
     await db.ativos.clear();
-    await db.assets.clear();
     await db.local_assets.clear();
     localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', tenantid: 'CICOPAL' }));
     sessionStorage.setItem('tenantid', 'CICOPAL');

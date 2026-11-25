@@ -26,11 +26,10 @@ export interface FreshLoadResetResult {
 export async function resetLocalBaseForFreshLoad(): Promise<FreshLoadResetResult> {
   let clearedAssets = 0;
 
-  await db.transaction('rw', [db.local_assets, db.ativos, db.assets, db.addresses, db.audit_logs], async () => {
+  await db.transaction('rw', [db.local_assets, db.ativos, db.addresses, db.audit_logs], async () => {
     clearedAssets = await db.local_assets.count();
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.addresses.clear();
     // A trilha local também sai: as chaves a que se refere deixam de existir e
     // o reset da nuvem já limpou `audit_logs` do lado do servidor.

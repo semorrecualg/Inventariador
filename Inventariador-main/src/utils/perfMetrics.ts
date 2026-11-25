@@ -39,7 +39,6 @@ export interface PerfSummary {
 export interface MirrorCounts {
   local_assets: number;
   ativos: number;
-  assets: number;
   total: number;
 }
 
@@ -257,7 +256,7 @@ export const savePerfBaseline = (input: {
   }
   logger.info(
     `>>> [PERF] Linha de base registrada (${baseline.trigger})${baseline.tenantid ? ` (${baseline.tenantid})` : ''}: ` +
-      `mirrors=${baseline.mirrors ? `${baseline.mirrors.local_assets}/${baseline.mirrors.ativos}/${baseline.mirrors.assets}` : 'n/d'} · ` +
+      `mirrors=${baseline.mirrors ? `${baseline.mirrors.local_assets}/${baseline.mirrors.ativos}` : 'n/d'} · ` +
       PERF_METRICS.map(name => {
         const s = baseline.metrics[name];
         return `${name}=${s.samples > 0 ? `${s.p50}ms(p50)/${s.p95}ms(p95) n=${s.samples}` : 'sem amostra'}`;

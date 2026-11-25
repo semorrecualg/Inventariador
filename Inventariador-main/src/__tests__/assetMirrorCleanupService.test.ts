@@ -41,14 +41,12 @@ const asset = (over: Partial<DexieAsset> & { primarykey: string }): DexieAsset =
 const seed = async (rows: DexieAsset[]) => {
   await db.local_assets.bulkPut(rows);
   await db.ativos.bulkPut(rows);
-  await db.assets.bulkPut(rows);
 };
 
 describe('assetMirrorCleanupService — cópias EXATAS (mesma primarykey + conteúdo)', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.audit_logs.clear();
     await db.asset_cleanup_backups.clear();
   });
@@ -71,9 +69,6 @@ describe('assetMirrorCleanupService — cópias EXATAS (mesma primarykey + conte
 
     expect(await db.local_assets.count()).toBe(1);
     expect(await db.ativos.count()).toBe(1);
-    // `assets` não faz parte da limpeza desde A.3a.2: continua com as duas
-    // linhas até a tabela ser removida na A.3a.4.
-    expect(await db.assets.count()).toBe(2);
     expect((await db.local_assets.toArray())[0].tenantid).toBe('CICOPAL');
     // A linha que fica herda o estado de sincronização da cópia removida.
     expect((await db.local_assets.toArray())[0]._is_synced).toBe(1);
@@ -175,7 +170,6 @@ describe('assetMirrorCleanupService — cópias EXATAS (mesma primarykey + conte
     expect(restored).toBe(2);
     expect(await db.local_assets.count()).toBe(2);
     expect(await db.ativos.count()).toBe(2);
-    expect(await db.assets.count()).toBe(2);
 
     const tenants = (await db.local_assets.toArray()).map((row) => row.tenantid).sort();
     expect(tenants).toEqual(['', 'CICOPAL']);

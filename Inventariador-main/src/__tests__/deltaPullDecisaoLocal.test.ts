@@ -131,7 +131,7 @@ describe('mergeDeltaPull — quem volta ao disco', () => {
 
 describe('delta — depois do merge, só a decisão local toca o disco', () => {
   beforeEach(async () => {
-    for (const tabela of [db.ativos, db.assets, db.local_assets]) await tabela.clear();
+    for (const tabela of [db.ativos, db.local_assets]) await tabela.clear();
   });
 
   it('as 200 linhas da nuvem ficam como o download as gravou; 2 voltam ao disco', async () => {

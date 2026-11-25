@@ -111,7 +111,6 @@ describe.skipIf(!ATIVA)('prova da carga — planilha N · base N (CI: sintética
   it('reimporta o arquivo e confere cada linha na base', async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.audit_logs.clear();
 
     const file = new File([lerPlanilha()], CAMINHO ? 'CICOPAL.xlsx' : 'sintetica.xlsx');

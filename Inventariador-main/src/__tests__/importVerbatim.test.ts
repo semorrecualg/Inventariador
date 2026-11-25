@@ -50,7 +50,6 @@ describe('carga da planilha — dados copiados na íntegra', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.audit_logs.clear();
   });
 
@@ -129,7 +128,6 @@ describe('carga da planilha — identidade interna e proveniência', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.audit_logs.clear();
   });
 
@@ -228,7 +226,6 @@ describe('carga da planilha — a conferência entra pelo predicado único', () 
   const limpar = async (): Promise<void> => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.audit_logs.clear();
   };
 

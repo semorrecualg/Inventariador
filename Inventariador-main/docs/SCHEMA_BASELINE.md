@@ -1,12 +1,12 @@
 # GBR KARDEK – Inventariador · Baseline de Schema (Fase 0)
 
-> **Status:** CONGELADO ✅ · **Data:** 2026-08-06 (v4) · **v5:** 2026-08-07 (Fase C4) · **v7:** 2026-08-12 (Muro multi-tenant) · **v8:** 2026-11-22 (backup da limpeza de cópias exatas) · **v9:** 2026-11-25 (fila de subida durável)
-> **Banco:** `InventoryLocalStore` (`class InventoryDexieDatabase`) · **Versão atual:** **9**
+> **Status:** CONGELADO ✅ · **Data:** 2026-08-06 (v4) · **v5:** 2026-08-07 (Fase C4) · **v7:** 2026-08-12 (Muro multi-tenant) · **v8:** 2026-11-22 (backup da limpeza de cópias exatas) · **v9:** 2026-11-25 (fila de subida durável) · **v10:** 2026-11-25 (resgate do terceiro espelho) · **v11:** 2026-11-25 (remoção do terceiro espelho)
+> **Banco:** `InventoryLocalStore` (`class InventoryDexieDatabase`) · **Versão atual:** **11**
 > **Fase:** 0 do plano `docs/MIGRACAO_HIBRIDA.md` (baseline estável) + Fase C4
 > (`docs/PLANO_FASE_C_HIGIENIZACAO.md` §6 — v5 = v4 **sem mudança estrutural**, apenas etapa de dados)
 > + Muro multi-tenant (v6→v7 — chave composta `[tenantid+primarykey]`, ver §1).
 >
-> Este documento é o **snapshot canônico e congelado** do schema local (11 tabelas Dexie +
+> Este documento é o **snapshot canônico e congelado** do schema local (10 tabelas Dexie +
 > `src/constants/schema.ts`). A conformidade é garantida por contrato automatizado:
 > `src/__tests__/schemaBaseline.test.ts` — qualquer mudança não intencional no schema
 > **quebra o teste** e exige decisão explícita (documentar aqui + nova `version(n)`).
@@ -26,6 +26,8 @@
 | **v7** | **Muro multi-tenant (passo 2/2)** — RECREATE com **chave primária composta `[tenantid+primarykey]`** nas 3 tabelas (o `tenantid` normalizado para UPPER canônico garante chaves consistentes; `primarykey` vira **índice**) + restauração a partir dos backups + descarte dos backups. Dois contratos com a mesma chave de origem **coexistem sem colidir** (mesma regra da nuvem: PK composta `(tenantid, id)`). Guard `filterCrossTenantWrites` (`sqliteService`) permanece como invariante de segurança p/ escritas legadas |
 | **v8** | **Backup da limpeza de cópias exatas** — tabela nova `asset_cleanup_backups` (`++seq`, índices `cleanup_id`, `kind`) guarda as linhas removidas pela limpeza do Gestor de Base, na MESMA transação das remoções. Nenhuma tabela existente muda de chave/índices; o «DESFAZER LIMPEZA» restaura por `cleanup_id` |
 | **v9** | **Fila de subida durável** — tabela nova `sync_outbox` (chave `key` = `tenantid|primarykey`; índices `primarykey`, `tenantid`, `status`, `next_attempt_at`). `key` como chave primária torna o reenfileiramento idempotente; `attempts`/`next_attempt_at` dão recuo ao envio e `op` distingue upsert de exclusão. A entrada é escrita na MESMA transação do ativo (`saveCollectedAssetAtomic`) e removida quando a nuvem aceita. Nenhuma tabela existente muda de chave/índices. Módulo: `src/services/syncOutbox.ts` |
+| **v10** | **Resgate do terceiro espelho** — antes de o remover, compara `assets` com `local_assets`/`ativos` por `[tenantid+primarykey]` e **acerta os dois espelhos**: quando a chave já existe numa delas, copia essa linha viva para a que falta (a versão atrasada de `assets` não ganha, para os espelhos não ficarem divergentes); a linha de `assets` só entra quando a chave não existe em nenhuma das duas. A leitura tem de acontecer numa versão anterior à remoção: o Dexie não expõe uma store no upgrade que a apaga (dexie#275/#276). Nenhuma tabela muda de chave/índices; nada é apagado. Prova: `src/__tests__/migracaoV10.test.ts` |
+| **v11** | **Remoção do terceiro espelho** — `assets: null` apaga a store no upgrade. Desde a A.3a.3 ninguém lhe escrevia e desde a A.3a.1 ninguém a lia; o que tinha de único foi resgatado na v10 |
 
 **Regra de evolução:** alterar o schema local = **nova `version(n)`** no
 `InventoryDexieDatabase` (`src/services/sqliteService.ts`) com `upgrade` idempotente,
@@ -33,13 +35,12 @@ atualização **deste** documento e do teste de contrato. Proibido editar `versi
 
 ---
 
-## 2. Tabelas — snapshot canônico v9 (11 tabelas + 3 backups transitórios descartados em v6)
+## 2. Tabelas — snapshot canônico v11 (10 tabelas + 3 backups transitórios descartados em v6)
 
 | Tabela | Chave primária | Índices | Tipo (fonte) |
 |---|---|---|---|
 | `local_assets` | **`[tenantid+primarykey]`** (composta) | `primarykey`, `filial`, `_is_synced`, `[tenantid+filial]` | `DexieAsset` |
 | `ativos` | **`[tenantid+primarykey]`** (composta) | `primarykey`, `filial`, `_is_synced`, `[tenantid+filial]` | `DexieAsset` |
-| `assets` | **`[tenantid+primarykey]`** (composta) | `primarykey`, `filial`, `_is_synced`, `[tenantid+filial]` | `DexieAsset` |
 | `audit_logs` | `id` | `updated_at` | `DexieAuditLog` |
 | `campaigns` | `id` | `tenantid` | `DexieCampaign` |
 | `SYSTEM_CONTEXT` | `key` | — | `DexieSystemContext` |
@@ -58,8 +59,8 @@ composto `[tenantid, primarykey]` (`persistenceService`, `InventoryCard`, `App`)
 
 ## 3. Colunas por tabela (tipos canônicos)
 
-### 3.1 `local_assets` / `ativos` / `assets` → `DexieAsset`
-Três tabelas espelho (mesmo tipo/shape). Isolamento multi-tenant obrigatório por
+### 3.1 `local_assets` / `ativos` → `DexieAsset`
+Duas tabelas espelho (mesmo tipo/shape). `assets` saiu na v11 (resgate na v10). Isolamento multi-tenant obrigatório por
 `tenantid` + `filial`.
 
 | Campo | Tipo | Observação |
@@ -184,14 +185,15 @@ de Base lê (`services/assetMirrorCleanupService`); ver `docs/LIMPEZA_COPIAS_EXA
 ## 5. Garantias do congelamento
 
 1. **Contrato automatizado:** `src/__tests__/schemaBaseline.test.ts` (node) asserta
-   `db.verno === 8`, o conjunto exato das tabelas, a assinatura de chave/índices de cada
+   `db.verno === 11`, o conjunto exato das tabelas, a assinatura de chave/índices de cada
    tabela e a presença dos 21 canônicos em `DB_ASSET_COLUMNS`. Drift → teste vermelho.
 2. **Fingerprint de drift:** a assinatura canônica congelada das 10 tabelas é:
    `local_assets: [tenantid+primarykey],primarykey,filial,_is_synced,[tenantid+filial]` ·
-   `ativos: idem` · `assets: idem` · `audit_logs: id,updated_at` · `campaigns: id,tenantid` ·
+   `ativos: idem` · `audit_logs: id,updated_at` · `campaigns: id,tenantid` ·
    `SYSTEM_CONTEXT: key` · `unit_configs: id,filial` ·
    `campaign_snapshots: id,campaign_id` · `addresses: ++id,[tenantid+filial],codigo_endereco,setor,bloco,_is_synced` ·
-   `asset_cleanup_backups: ++seq,cleanup_id,kind`.
+   `asset_cleanup_backups: ++seq,cleanup_id,kind` ·
+   `sync_outbox: key,primarykey,tenantid,status,next_attempt_at`.
 3. **Proibição:** editar `version(4)`/`version(5)`/`version(6)` retroativo; escrever colunas legadas (`_unitid`,
    `tenantId`, `tenant_id`, `_tenantid`); SQL raw (proibido pelo contrato SRE — só API Dexie).
 4. **Muro multi-tenant:** a chave composta `[tenantid+primarykey]` torna a colisão entre

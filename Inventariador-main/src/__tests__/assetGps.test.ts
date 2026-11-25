@@ -79,7 +79,6 @@ describe('gravação local — a carga da base não perde a coordenada', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
   });
 
   it('persiste latitude/longitude a partir de gps_lat/gps_lng do pull', async () => {

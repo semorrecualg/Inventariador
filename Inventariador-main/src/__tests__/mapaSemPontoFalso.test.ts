@@ -111,7 +111,6 @@ describe('mapa de calor — a proveniência sobrevive ao lote', () => {
     const { db, sqliteService } = await import('../services/sqliteService');
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
 
     await sqliteService.bulkInsertAssetsOfflineFirst([
       {
