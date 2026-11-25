@@ -15,13 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `asset_depreciation_history`, `log_inventario_termico`). Se essas tabelas
   existirem na base, mantinham o `p_all` original — legíveis e escrevíveis com
   a anon key.
-- **Agora:** `docs/supabase_rls_tabelas_legadas.sql` fecha-as de forma
-  **condicional** (`to_regclass`): `tenants`/`filial`/`camposAlterados` ficam com
-  RLS e sem política (nega tudo — o app só as menciona na validação do
-  interceptor); `unit_gps_data` e as cinco do módulo patrimonial ficam com
-  `p_tenant_all` por `tenant_visible` quando têm `tenantid`; a telemetria
-  `log_inventario_termico` (sem contrato) só aceita INSERT autenticado, sem
-  SELECT. Corre também numa base sem estas tabelas, sem falhar.
+- **Agora:** `docs/supabase_rls_tabelas_legadas.sql` executa em três passos:
+  (1) dois `REVOKE` que fecham o `anon` em **todas** as tabelas/views e
+  sequências de `public`, sempre válidos; (2) uma consulta **geradora** (só
+  leitura) que devolve o DDL exacto para as tabelas que a base tem, condicionado
+  à existência da tabela e da coluna `tenantid`; (3) o DDL gerado, para revisão
+  antes de executar. `tenants`/`filial`/`camposAlterados` ficam com RLS e sem
+  política (nega tudo — o app só as menciona na validação do interceptor);
+  `unit_gps_data` e as cinco do módulo patrimonial ficam com `p_tenant_all` por
+  `tenant_visible`; a telemetria `log_inventario_termico` (sem contrato) só
+  aceita INSERT autenticado, sem SELECT. Sem blocos `DO`, para que um fragmento
+  enviado pelo editor não apanhe um `IF` solto (42601 já observado).
 - **Rede de segurança:** `REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon` e
   `... ALL SEQUENCES ...` — mesmo uma tabela que nenhum script conheça deixa de
   ser alcançável pelo anon (views incluídas, que são "tables" para GRANT).

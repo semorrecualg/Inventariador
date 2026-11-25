@@ -1,251 +1,162 @@
 -- ============================================================================
 -- GBR KARDEK — RLS das tabelas legadas / fora do bootstrap
 -- ----------------------------------------------------------------------------
--- Fecha o que sobra fora dos scripts anteriores (supabase_privacidade_storage,
--- supabase_rls_assets_permissoes, supabase_rls_tabelas_restantes). Duas famílias:
+-- Fecha o que sobra fora dos scripts anteriores. Duas famílias:
 --
---   A. LEGADO, que o app NÃO consulta. Só aparecem na lista de validação do
---      interceptor do Supabase (`infrastructureTables`) e/ou na normalização de
---      nomes de coluna:
---        tenants, filial, camposAlterados  → sem política (RLS nega tudo)
+--   A. LEGADO, que o app NÃO consulta (só aparecem na lista de validação do
+--      interceptor e na normalização de nomes de coluna):
+--        tenants, filial, camposAlterados  → fechar (RLS sem política)
 --        unit_gps_data                     → o interceptor reescreve
---                                            `from('unit_gps_data')` para
---                                            `inventory_config`; se a tabela
---                                            existir e tiver `tenantid`, fica
---                                            com a mesma política por contrato
---                                            (builds antigos continuam a ler a
---                                            sua), senão fica sem política.
+--                                            from('unit_gps_data') para
+--                                            inventory_config; se existir e
+--                                            tiver tenantid, fica por contrato
 --
---   B. CONTROLO PATRIMONIAL, que o app consulta (`assetControlService`):
+--   B. CONTROLO PATRIMONIAL, consultado por `assetControlService`:
 --        chart_of_accounts, asset_groups, ncm_classifiers, asset_movements,
---        asset_depreciation_history → `tenantid` + leitura/escrita no contrato
---        log_inventario_termico      → telemetria sem contrato: só INSERT para
---                                      `authenticated`, sem SELECT (ninguém lê
---                                      pelo PostgREST; painéis usam service_role)
+--        asset_depreciation_history → por contrato (tenantid)
+--        log_inventario_termico      → telemetria sem contrato: só INSERT
+--                                      autenticado, sem SELECT
 --
--- Além disso, retira a `anon` o privilégio em TODAS as tabelas e sequências de
--- `public` (inclui views, que são "tables" para GRANT). Isto é a rede de
--- segurança: mesmo que apareça uma tabela que nenhum script conhece, o anon
--- deixa de a alcançar.
+-- PORQUE NÃO HÁ BLOCOS `DO`: um bloco `DO $$ BEGIN … END $$;` só corre inteiro.
+-- Se o editor enviar um fragmento (já aconteceu: 42601 em `IF`), falha. Aqui
+-- cada instrução é autónoma e o DDL condicional é GERADO por uma consulta, para
+-- ser revisto antes de executado.
 --
--- TUDO É CONDICIONAL (`to_regclass`): a base pode não ter estas tabelas e o
--- script não pode falhar por isso. É idempotente e pode correr mais de uma vez.
+-- COMO USAR (três passos, por esta ordem)
 --
--- PRÉ-REQUISITO: docs/supabase_rls_tabelas_restantes.sql (cria
--- `public.tenant_visible(text)`). O PASSO 0 recusa correr sem ela.
+--   PASSO 1 — correr já. Fecha o `anon` em tudo o que existe em `public`
+--             (tabelas, views, matviews e sequências). Não depende de nenhuma
+--             tabela em particular e não pode falhar por tabela em falta.
 --
--- COMO USAR: colar o ficheiro INTEIRO no SQL Editor e executar. Os blocos
--- `DO $$ … $$` são uma unidade: não executar linhas isoladas de dentro deles.
+--   PASSO 2 — correr a consulta GERADORA. É só leitura: devolve o DDL exacto
+--             para as tabelas que a tua base tem (e, nas patrimoniais, só cria
+--             política se existir a coluna `tenantid`). Se devolver o texto
+--             "-- nada a fazer", nenhuma dessas tabelas existe.
 --
--- O QUE ESTE FICHEIRO NÃO FAZ: alterar VIEWS. Uma view sem
--- `security_invoker = true` corre com os privilégios do dono e pode atravessar
--- o RLS das tabelas por baixo. O bloco AUDITORIA no fim lista as views e gera o
--- `ALTER VIEW ... SET (security_invoker = true);` de cada uma — revê e corre à
--- parte o que fizer sentido.
+--   PASSO 3 — copiar o resultado do PASSO 2 e executar. É DDL normal:
+--             ALTER TABLE … / DROP POLICY … / REVOKE … / CREATE POLICY …
+--
+--   Pré-requisito do PASSO 3: `public.tenant_visible(text)`, criada em
+--   docs/supabase_rls_tabelas_restantes.sql. Se não existir, o PASSO 2 avisa.
+--
+-- Idempotente: o PASSO 2 pode ser gerado e executado de novo.
+--
+-- VIEWS: este ficheiro não altera views. Uma view sem `security_invoker = true`
+-- corre com os privilégios do dono e atravessa o RLS das tabelas por baixo. O
+-- bloco AUDITORIA no fim lista as views e gera o comando de cada uma.
 -- ============================================================================
 
-BEGIN;
-
--- ----------------------------------------------------------------------------
--- PASSO 0 — pré-requisito: a regra de contrato dos scripts anteriores
--- ----------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF to_regprocedure('public.tenant_visible(text)') IS NULL THEN
-    RAISE EXCEPTION 'Função em falta: corra primeiro docs/supabase_rls_tabelas_restantes.sql (tenant_visible).';
-  END IF;
-END $$;
-
--- ----------------------------------------------------------------------------
+-- ============================================================================
 -- PASSO 1 — `anon` sem privilégio em nada de `public`
 --   Inclui tabelas, views e matviews (GRANT trata-os como tabelas) e
---   sequências. `email_by_username` e `unit_names` são funções e não são
---   afectadas — o login por username continua a funcionar.
--- ----------------------------------------------------------------------------
+--   sequências. `email_by_username` e `unit_names` são funções: não são
+--   afectadas, o login por username continua a funcionar.
+-- ============================================================================
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;
+
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;
 
--- ----------------------------------------------------------------------------
--- PASSO 2 — legado sem uso pelo app: RLS ligado, sem política (nega tudo)
---   Se algum dia precisares de leitura autenticada, acrescenta uma política
---   explícita — o silêncio do RLS não se abre sozinho.
--- ----------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF to_regclass('public.tenants') IS NOT NULL THEN
-    ALTER TABLE public.tenants ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS p_all ON public.tenants;
-    DROP POLICY IF EXISTS p_tenant_all ON public.tenants;
-    DROP POLICY IF EXISTS p_authenticated_select ON public.tenants;
-    REVOKE ALL ON public.tenants FROM anon;
-    RAISE NOTICE 'tenants: RLS ligado, sem política (fechada).';
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF to_regclass('public.filial') IS NOT NULL THEN
-    ALTER TABLE public.filial ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS p_all ON public.filial;
-    DROP POLICY IF EXISTS p_tenant_all ON public.filial;
-    DROP POLICY IF EXISTS p_authenticated_select ON public.filial;
-    REVOKE ALL ON public.filial FROM anon;
-    RAISE NOTICE 'filial: RLS ligado, sem política (fechada).';
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF to_regclass('public."camposAlterados"') IS NOT NULL THEN
-    ALTER TABLE public."camposAlterados" ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS p_all ON public."camposAlterados";
-    DROP POLICY IF EXISTS p_tenant_all ON public."camposAlterados";
-    DROP POLICY IF EXISTS p_authenticated_select ON public."camposAlterados";
-    REVOKE ALL ON public."camposAlterados" FROM anon;
-    RAISE NOTICE 'camposAlterados: RLS ligado, sem política (fechada).';
-  END IF;
-END $$;
-
--- ----------------------------------------------------------------------------
--- PASSO 3 — unit_gps_data: legado do GPS, reescrito para inventory_config
---   Com `tenantid`, mantém a mesma política por contrato (um APK antigo que
---   ainda a consulte não perde a sua filial nem ganha a dos outros).
--- ----------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF to_regclass('public.unit_gps_data') IS NOT NULL THEN
-    ALTER TABLE public.unit_gps_data ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS p_all ON public.unit_gps_data;
-    DROP POLICY IF EXISTS p_tenant_all ON public.unit_gps_data;
-    DROP POLICY IF EXISTS p_authenticated_select ON public.unit_gps_data;
-    REVOKE ALL ON public.unit_gps_data FROM anon;
-    IF EXISTS (
-      SELECT 1 FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = 'unit_gps_data' AND column_name = 'tenantid'
-    ) THEN
-      CREATE POLICY p_tenant_all ON public.unit_gps_data
-        FOR ALL TO authenticated
-        USING (public.tenant_visible(tenantid))
-        WITH CHECK (public.tenant_visible(tenantid));
-      RAISE NOTICE 'unit_gps_data: política por contrato.';
-    ELSE
-      RAISE NOTICE 'unit_gps_data: sem coluna tenantid — RLS ligado, sem política (fechada).';
-    END IF;
-  END IF;
-END $$;
-
--- ----------------------------------------------------------------------------
--- PASSO 4 — controlo patrimonial: política por contrato
---   Mesmo contrato de `assets`: `tenantid` obrigatório para o app; MASTER
---   atravessa. Sem a coluna, RLS ligado e sem política (nega) — melhor negar
---   do que deixar aberto enquanto se investiga.
--- ----------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF to_regclass('public.chart_of_accounts') IS NOT NULL THEN
-    ALTER TABLE public.chart_of_accounts ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS p_all ON public.chart_of_accounts;
-    DROP POLICY IF EXISTS p_tenant_all ON public.chart_of_accounts;
-    REVOKE ALL ON public.chart_of_accounts FROM anon;
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'chart_of_accounts' AND column_name = 'tenantid') THEN
-      CREATE POLICY p_tenant_all ON public.chart_of_accounts FOR ALL TO authenticated USING (public.tenant_visible(tenantid)) WITH CHECK (public.tenant_visible(tenantid));
-      RAISE NOTICE 'chart_of_accounts: política por contrato.';
-    ELSE
-      RAISE NOTICE 'chart_of_accounts: sem tenantid — fechada.';
-    END IF;
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF to_regclass('public.asset_groups') IS NOT NULL THEN
-    ALTER TABLE public.asset_groups ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS p_all ON public.asset_groups;
-    DROP POLICY IF EXISTS p_tenant_all ON public.asset_groups;
-    REVOKE ALL ON public.asset_groups FROM anon;
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'asset_groups' AND column_name = 'tenantid') THEN
-      CREATE POLICY p_tenant_all ON public.asset_groups FOR ALL TO authenticated USING (public.tenant_visible(tenantid)) WITH CHECK (public.tenant_visible(tenantid));
-      RAISE NOTICE 'asset_groups: política por contrato.';
-    ELSE
-      RAISE NOTICE 'asset_groups: sem tenantid — fechada.';
-    END IF;
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF to_regclass('public.ncm_classifiers') IS NOT NULL THEN
-    ALTER TABLE public.ncm_classifiers ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS p_all ON public.ncm_classifiers;
-    DROP POLICY IF EXISTS p_tenant_all ON public.ncm_classifiers;
-    REVOKE ALL ON public.ncm_classifiers FROM anon;
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ncm_classifiers' AND column_name = 'tenantid') THEN
-      CREATE POLICY p_tenant_all ON public.ncm_classifiers FOR ALL TO authenticated USING (public.tenant_visible(tenantid)) WITH CHECK (public.tenant_visible(tenantid));
-      RAISE NOTICE 'ncm_classifiers: política por contrato.';
-    ELSE
-      RAISE NOTICE 'ncm_classifiers: sem tenantid — fechada.';
-    END IF;
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF to_regclass('public.asset_movements') IS NOT NULL THEN
-    ALTER TABLE public.asset_movements ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS p_all ON public.asset_movements;
-    DROP POLICY IF EXISTS p_tenant_all ON public.asset_movements;
-    REVOKE ALL ON public.asset_movements FROM anon;
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'asset_movements' AND column_name = 'tenantid') THEN
-      CREATE POLICY p_tenant_all ON public.asset_movements FOR ALL TO authenticated USING (public.tenant_visible(tenantid)) WITH CHECK (public.tenant_visible(tenantid));
-      RAISE NOTICE 'asset_movements: política por contrato.';
-    ELSE
-      RAISE NOTICE 'asset_movements: sem tenantid — fechada.';
-    END IF;
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF to_regclass('public.asset_depreciation_history') IS NOT NULL THEN
-    ALTER TABLE public.asset_depreciation_history ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS p_all ON public.asset_depreciation_history;
-    DROP POLICY IF EXISTS p_tenant_all ON public.asset_depreciation_history;
-    REVOKE ALL ON public.asset_depreciation_history FROM anon;
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'asset_depreciation_history' AND column_name = 'tenantid') THEN
-      CREATE POLICY p_tenant_all ON public.asset_depreciation_history FOR ALL TO authenticated USING (public.tenant_visible(tenantid)) WITH CHECK (public.tenant_visible(tenantid));
-      RAISE NOTICE 'asset_depreciation_history: política por contrato.';
-    ELSE
-      RAISE NOTICE 'asset_depreciation_history: sem tenantid — fechada.';
-    END IF;
-  END IF;
-END $$;
-
--- ----------------------------------------------------------------------------
--- PASSO 5 — log_inventario_termico: telemetria sem contrato
---   `telemetryService` só faz INSERT (utilizador, etiqueta, temperatura,
---   bateria, lanterna, hora). Sem SELECT: ninguém lê a telemetria pelo
---   PostgREST; painéis/exportações usam service_role (que ignora RLS).
--- ----------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF to_regclass('public.log_inventario_termico') IS NOT NULL THEN
-    ALTER TABLE public.log_inventario_termico ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS p_all ON public.log_inventario_termico;
-    DROP POLICY IF EXISTS p_tenant_insert ON public.log_inventario_termico;
-    DROP POLICY IF EXISTS p_authenticated_insert ON public.log_inventario_termico;
-    DROP POLICY IF EXISTS p_authenticated_select ON public.log_inventario_termico;
-    REVOKE ALL ON public.log_inventario_termico FROM anon;
-    CREATE POLICY p_authenticated_insert ON public.log_inventario_termico
-      FOR INSERT TO authenticated
-      WITH CHECK (true);
-    RAISE NOTICE 'log_inventario_termico: só INSERT autenticado.';
-  END IF;
-END $$;
-
-COMMIT;
+-- ============================================================================
+-- PASSO 2 — GERADOR (só leitura): o DDL que falta, para as tabelas existentes
+--   `modo`:
+--     fechar → RLS ligado, políticas antigas removidas, nenhuma criada (nega)
+--     tenant → se tiver `tenantid`: p_tenant_all por contrato
+--     insert → p_authenticated_insert (INSERT autenticado, sem SELECT)
+--   A ordem de saída é: ENABLE RLS → DROP POLICY → REVOKE → CREATE POLICY.
+-- ============================================================================
+WITH alvo(tabela, modo) AS (
+  VALUES
+    ('tenants', 'fechar'),
+    ('filial', 'fechar'),
+    ('"camposAlterados"', 'fechar'),
+    ('unit_gps_data', 'tenant'),
+    ('chart_of_accounts', 'tenant'),
+    ('asset_groups', 'tenant'),
+    ('ncm_classifiers', 'tenant'),
+    ('asset_movements', 'tenant'),
+    ('asset_depreciation_history', 'tenant'),
+    ('log_inventario_termico', 'insert')
+),
+existentes AS (
+  SELECT a.tabela,
+         a.modo,
+         to_regclass('public.' || a.tabela) IS NOT NULL AS existe,
+         EXISTS (
+           SELECT 1
+             FROM information_schema.columns c
+            WHERE c.table_schema = 'public'
+              AND c.table_name = replace(a.tabela, '"', '')
+              AND c.column_name = 'tenantid'
+         ) AS tem_tenantid
+    FROM alvo a
+),
+passos AS (
+  SELECT 1 AS ordem,
+         format('ALTER TABLE public.%s ENABLE ROW LEVEL SECURITY;', e.tabela) AS sql
+    FROM existentes e
+   WHERE e.existe
+  UNION ALL
+  SELECT 2,
+         format('DROP POLICY IF EXISTS %I ON public.%s;', p.policyname, e.tabela)
+    FROM existentes e
+    JOIN pg_policies p
+      ON p.schemaname = 'public'
+     AND p.tablename = replace(e.tabela, '"', '')
+   WHERE e.existe
+  UNION ALL
+  -- Drops explícitos dos nomes que este gerador cria: o texto gerado fica
+  -- idempotente mesmo quando reaplicado sem ser regenerado.
+  SELECT 2,
+         format('DROP POLICY IF EXISTS p_tenant_all ON public.%s;', e.tabela)
+    FROM existentes e
+   WHERE e.existe
+     AND e.modo = 'tenant'
+     AND e.tem_tenantid
+  UNION ALL
+  SELECT 2,
+         format('DROP POLICY IF EXISTS p_authenticated_insert ON public.%s;', e.tabela)
+    FROM existentes e
+   WHERE e.existe
+     AND e.modo = 'insert'
+  UNION ALL
+  SELECT 3,
+         format('REVOKE ALL ON public.%s FROM anon;', e.tabela)
+    FROM existentes e
+   WHERE e.existe
+  UNION ALL
+  SELECT 4,
+         CASE
+           WHEN e.modo = 'tenant' AND e.tem_tenantid THEN
+             format('CREATE POLICY p_tenant_all ON public.%s FOR ALL TO authenticated USING (public.tenant_visible(tenantid)) WITH CHECK (public.tenant_visible(tenantid));', e.tabela)
+           WHEN e.modo = 'insert' THEN
+             format('CREATE POLICY p_authenticated_insert ON public.%s FOR INSERT TO authenticated WITH CHECK (true);', e.tabela)
+         END
+    FROM existentes e
+   WHERE e.existe
+     AND e.modo IN ('tenant', 'insert')
+)
+SELECT coalesce(string_agg(p.sql, E'\n' ORDER BY p.ordem, p.sql),
+                '-- nada a fazer: nenhuma destas tabelas existe na base') AS script
+  FROM passos p
+ WHERE p.sql IS NOT NULL;
 
 -- ============================================================================
--- AUDITORIA (só leitura — correr antes e depois de aplicar)
+-- PASSO 3 — executar o resultado do PASSO 2
+--   Exemplo do que sai quando as tabelas existem com `tenantid`:
+--
+--     ALTER TABLE public.tenants ENABLE ROW LEVEL SECURITY;
+--     DROP POLICY IF EXISTS p_all ON public.tenants;
+--     REVOKE ALL ON public.tenants FROM anon;
+--     ...
+--     CREATE POLICY p_tenant_all ON public.unit_gps_data FOR ALL TO authenticated USING (public.tenant_visible(tenantid)) WITH CHECK (public.tenant_visible(tenantid));
+--     CREATE POLICY p_authenticated_insert ON public.log_inventario_termico FOR INSERT TO authenticated WITH CHECK (true);
+--
+--   Copia o texto e corre-o como uma consulta nova. Se a consulta devolver
+--   "-- nada a fazer", não há nada a aplicar.
+-- ============================================================================
+
+-- ============================================================================
+-- AUDITORIA (só leitura)
 -- ----------------------------------------------------------------------------
 -- A) Inventário de tudo o que existe em public, com RLS e políticas:
 --   select c.relname as objeto, case c.relkind when 'r' then 'tabela' when 'p' then 'particionada' when 'v' then 'view' when 'm' then 'matview' end as tipo, c.relrowsecurity as rls, c.relforcerowsecurity as rls_forcada, pg_get_userbyid(c.relowner) as dono, coalesce(array_to_string(c.reloptions, ','), '') as opcoes, coalesce((select string_agg(p.policyname || ' [' || p.cmd || '] ' || array_to_string(p.roles, ','), ' | ') from pg_policies p where p.schemaname = 'public' and p.tablename = c.relname), '(sem políticas)') as politicas from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm') order by 1;
@@ -257,17 +168,21 @@ COMMIT;
 -- C) Privilégios de `anon`/`PUBLIC` em sequências (deve ser 0 linhas):
 --   select c.relname as sequencia, a.privilege_type, coalesce(pg_get_userbyid(a.grantee), 'PUBLIC') as grantee from pg_class c, aclexplode(c.relacl) a where c.relkind = 'S' and c.relnamespace = 'public'::regnamespace and coalesce(pg_get_userbyid(a.grantee), 'PUBLIC') in ('anon', 'PUBLIC');
 --
--- D) Colunas das tabelas por rever (para confirmar `tenantid` e o formato):
+-- D) Colunas das tabelas por rever (confirma `tenantid` e o formato):
 --   select table_name, string_agg(column_name, ', ' order by ordinal_position) as colunas from information_schema.columns where table_schema = 'public' and table_name in ('tenants', 'filial', 'camposAlterados', 'unit_gps_data', 'chart_of_accounts', 'asset_groups', 'ncm_classifiers', 'asset_movements', 'asset_depreciation_history', 'log_inventario_termico') group by 1 order by 1;
 --
--- E) Views e o comando que falta em cada uma (se a coluna `corrigir` vier com
---    ALTER VIEW, a view corre como dono e atravessa o RLS — revê e aplica):
---   select c.relname as view, pg_get_userbyid(c.relowner) as dono, coalesce(array_to_string(c.reloptions, ','), '(sem opções)') as opcoes, case when coalesce(array_to_string(c.reloptions, ','), '') like '%security_invoker=true%' then 'ok (security_invoker)' else format('ALTER VIEW public.%I SET (security_invoker = true);', c.relname) end as corrigir from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'v' order by 1;
+-- E) Views e o comando que falta em cada uma (se vier um ALTER VIEW, a view
+--    corre como dono e atravessa o RLS — revê e aplica):
+--   select c.relname as view, pg_get_userbyid(c.relowner) as dono, coalesce(array_to_string(c.reloptions, ','), '(sem opções)') as opcoes, case when coalesce(array_to_string(c.reloptions, ''), '') like '%security_invoker=true%' then 'ok (security_invoker)' else format('ALTER VIEW public.%I SET (security_invoker = true);', c.relname) end as corrigir from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'v' order by 1;
 --
--- F) Matviews (não aceitam security_invoker; lêem-se com GRANT — confirma que
---    `authenticated` não tem acesso a uma matview com dados de todos):
+-- F) Matviews (não aceitam security_invoker; confirma que `authenticated` não
+--    tem acesso a uma matview com dados de todos):
 --   select c.relname as matview, coalesce(array_to_string(c.relacl, ' | '), '(sem ACL)') as acl from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'm' order by 1;
 --
 -- G) Funções executáveis por `anon` (esperado: email_by_username, unit_names):
 --   select p.proname, pg_get_function_identity_arguments(p.oid) as argumentos from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and has_function_privilege('anon', p.oid, 'EXECUTE') order by 1;
+--
+-- H) Confirmação final do PASSO 3 (as tabelas geradas devem ter política
+--    `p_tenant_all`/`p_authenticated_insert` e nenhuma com `anon`):
+--   select tablename, policyname, cmd, roles from pg_policies where schemaname = 'public' and tablename in ('tenants', 'filial', 'camposAlterados', 'unit_gps_data', 'chart_of_accounts', 'asset_groups', 'ncm_classifiers', 'asset_movements', 'asset_depreciation_history', 'log_inventario_termico') order by 1, 2;
 -- ============================================================================
