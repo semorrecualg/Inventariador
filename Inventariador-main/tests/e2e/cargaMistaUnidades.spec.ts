@@ -68,10 +68,27 @@ const fecharAvisos = async (page: Page) => {
  */
 const escolherContrato = async (page: Page) => {
   const cartao = page.locator('button', { hasText: /filial\(is\) na base/ });
-  if (!(await cartao.first().isVisible().catch(() => false))) return;
+  const filiais = page.locator('[data-testid="filial-options"] > button');
+
+  // O URL muda para `/contexto` antes de o ecrã montar. Esperar por uma das
+  // duas formas — contrato por escolher OU filiais já montadas — em vez de
+  // desistir no primeiro instante: era esta corrida que dava o spec flaky
+  // (falhava à primeira e passava no retry, com o ecrã já quente).
+  await expect
+    .poll(
+      async () =>
+        (await cartao.first().isVisible().catch(() => false)) || (await filiais.count()) > 0,
+      { timeout: 20000, intervals: [250, 500, 1000] }
+    )
+    .toBe(true);
+
+  if ((await filiais.count()) > 0) return; // o contrato já está resolvido
+
+  // O aviso de mudança de modo pode montar depois do ecrã: fechá-lo agora,
+  // senão o toque no cartão do contrato cai no overlay.
+  await fecharAvisos(page);
   await cartao.first().click();
 
-  const filiais = page.locator('[data-testid="filial-options"] > button');
   const acessar = page.getByRole('button', { name: /Acessar o Módulo/i });
   // Em algumas versões a escolha do contrato já monta as filiais na mesma
   // tela; noutras é preciso entrar no módulo. Os dois caminhos são aceites.
