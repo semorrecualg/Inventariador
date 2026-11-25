@@ -112,7 +112,8 @@ describe('carga da planilha — portão planilha N · base N', () => {
     expect(gravadas).toBe(50);
     expect(await db.local_assets.count()).toBe(50);
     expect(await db.ativos.count()).toBe(50);
-    expect(await db.assets.count()).toBe(50);
+    // A.3a.3: `assets` deixou de ser escrito pela carga.
+    expect(await db.assets.count()).toBe(0);
     expect(await db.local_assets.where('filial').equals('010101 CICOPAL GO').count()).toBe(30);
     expect(await db.local_assets.where('filial').equals('010102 CICOPAL GO').count()).toBe(20);
 

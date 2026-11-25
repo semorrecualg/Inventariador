@@ -234,7 +234,6 @@ export const localDb = {
     add: async (asset: Asset, userId?: string) => {
       const dexieAsset = toDexieAsset(asset);
       await db.ativos.put(dexieAsset);
-      await db.assets.put(dexieAsset);
       await db.local_assets.put(dexieAsset);
       handleDemoAuditIncrement();
       if (userId) {
@@ -271,12 +270,11 @@ export const localDb = {
       const bufferCopy = [...localDb.assets._mutationBuffer];
       localDb.assets._mutationBuffer = [];
       
-      await db.transaction('rw', [db.ativos, db.assets, db.local_assets, db.audit_logs], async () => {
+      await db.transaction('rw', [db.ativos, db.local_assets, db.audit_logs], async () => {
         // Bulk insert real dentro da transação única: um `bulkPut` por tabela em
         // vez de 3 `put` por item (antes eram 30 operações para um flush de 10).
         const dexieAssets = bufferCopy.map(item => toDexieAsset(item.asset));
         await db.ativos.bulkPut(dexieAssets);
-        await db.assets.bulkPut(dexieAssets);
         await db.local_assets.bulkPut(dexieAssets);
 
         const auditLogs = bufferCopy
@@ -337,9 +335,8 @@ export const localDb = {
         // SRE ISOLAMENTO (local): preserva registros de outro contrato com chaves
         // coincidentes (mesma proteção do bulkInsertAssetsOfflineFirst).
         const safeChunk = await sqliteService.filterCrossTenantWrites(mappedChunk);
-        await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+        await db.transaction('rw', [db.ativos, db.local_assets], async () => {
           await db.ativos.bulkPut(safeChunk);
-          await db.assets.bulkPut(safeChunk);
           await db.local_assets.bulkPut(safeChunk);
         });
         
@@ -375,7 +372,6 @@ export const localDb = {
             tenantid: String((mappedChanges.tenantid ?? existing.tenantid) || '').trim().toUpperCase()
           };
           await db.ativos.put(updated);
-          await db.assets.put(updated);
           await db.local_assets.put(updated);
         }
       });
@@ -742,11 +738,10 @@ export const localDb = {
       const allAtivos = await db.ativos
         .filter((a) => String(a.currentCampaignId || '') === String(campaignId))
         .toArray();
-      await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      await db.transaction('rw', [db.ativos, db.local_assets], async () => {
         for (const asset of allAtivos) {
           asset.currentCampaignId = null;
           await db.ativos.put(asset);
-          await db.assets.put(asset);
           await db.local_assets.put(asset);
         }
       });

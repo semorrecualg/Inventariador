@@ -451,6 +451,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pelo `count` e a gravação em caso de falha; `perfMetrics` passa a exigir
   `save` no contrato das métricas.
 
+### Alterado — A.3a.3: o terceiro espelho deixa de receber escrita
+
+- Criar, editar, carregar planilha, corrigir campo em lote, marcar campanha,
+  restaurar backup e sincronizar gravam só em `ativos` + `local_assets`.
+  `db.assets` saiu de 14 pontos de escrita e das transações que os envolviam
+  (`localDbService`, `DatabaseLoaderService`, `sqliteService`,
+  `DatabaseManagerScreen`).
+- `assets` continua no schema e continua a ser **limpo** nos resets/expurgo — o
+  que evita lixo do antigo espelho — mas já ninguém lhe escreve dados. A
+  remoção da tabela é a A.3a.4.
+- Testes: `escritasSemTerceiroEspelho` (3) prova a invariante em criar,
+  `patchAsset` e retirar campanha; `carimboLimpoNoSucesso`, `pullEmLotes` e
+  `importReconciliation` passaram a contar duas tabelas (e `assets` a zero).
+
 ### Corrigido — leituras por campanha rebentavam por chave sem índice
 
 - **O que era:** `getMapData` e `removeCampaignFromAssets` filtravam com
