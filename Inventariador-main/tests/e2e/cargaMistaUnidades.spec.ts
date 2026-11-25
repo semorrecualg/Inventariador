@@ -79,6 +79,13 @@ const confirmarUnidadeSemCopias = async (page: Page) => {
   await abrirEcra(page, 'WORK_CONTEXT_SELECTION');
   await page.waitForURL(/#\/contexto$/, { timeout: 15000 });
 
+  // Admin global (sem tenantid no perfil): o contrato da base carregada é
+  // escolhido antes das filiais. Sem este passo o contrato fica na seleção de
+  // tenantid e não há cartões de filial para contar.
+  const escolherContrato = page.getByRole('button', { name: /CICOPAL/ }).first();
+  await escolherContrato.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+  if (await escolherContrato.isVisible().catch(() => false)) await escolherContrato.click();
+
   // Um cartão por filial — as linhas sem tenantid não criam uma unidade extra.
   await expect(page.locator('[data-testid="filial-options"] > button')).toHaveCount(2, { timeout: 20000 });
   await expect(page.getByText(FILIAL_GO, { exact: true })).toHaveCount(1);
