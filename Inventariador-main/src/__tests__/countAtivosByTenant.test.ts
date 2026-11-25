@@ -53,7 +53,6 @@ describe('sqliteService.countAssetMirrors (contra-prova do Gestor de Base)', () 
   beforeEach(async () => {
     await db.ativos.clear();
     await db.local_assets.clear();
-    await db.assets.clear();
   });
 
   it('devolve cada espelho e o total canónico (maior espelho)', async () => {
@@ -62,10 +61,10 @@ describe('sqliteService.countAssetMirrors (contra-prova do Gestor de Base)', () 
     await putMirror('ativos', 'CICOPAL', 'PK-002');
 
     const counts = await sqliteService.countAssetMirrors('CICOPAL');
-    expect(counts).toEqual({ local_assets: 1, ativos: 2, assets: 0, total: 2 });
+    expect(counts).toEqual({ local_assets: 1, ativos: 2, total: 2 });
   });
 
-  it('não anuncia 0 quando os dados vivem apenas em assets/ativos', async () => {
+  it('não anuncia 0 quando os dados vivem apenas na tabela viva', async () => {
     await putMirror('ativos', 'CICOPAL', 'PK-001');
     expect((await sqliteService.countAssetMirrors()).total).toBe(1);
   });

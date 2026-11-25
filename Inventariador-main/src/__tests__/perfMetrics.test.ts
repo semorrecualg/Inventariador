@@ -49,7 +49,7 @@ describe('summarizeSamples', () => {
       at: '2026-11-14T12:00:00.000Z',
       trigger: 'pull.full',
       tenantid: 'CICOPAL',
-      mirrors: { local_assets: 12636, ativos: 12636, assets: 12636, total: 12636 },
+      mirrors: { local_assets: 12636, ativos: 12636, total: 12636 },
       metrics: {
         boot: { samples: 1, p50: 900, p95: 900, last: 900 },
         'pull.full': { samples: 1, p50: 1200, p95: 1200, last: 1200 },
@@ -68,7 +68,7 @@ describe('summarizeSamples', () => {
     const legacy = {
       at: '2026-11-01T08:00:00.000Z',
       tenantid: 'CICOPAL',
-      mirrors: { local_assets: 12636, ativos: 12636, assets: 12636, total: 12636 },
+      mirrors: { local_assets: 12636, ativos: 12636, total: 12636 },
       metrics: {
         boot: { samples: 1, p50: 800, p95: 800, last: 800 },
         'pull.full': { samples: 0, p50: null, p95: null, last: null },

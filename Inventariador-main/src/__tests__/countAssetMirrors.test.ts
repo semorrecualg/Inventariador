@@ -27,7 +27,6 @@ describe('countAssetMirrors (F0)', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     // Sem o marcador, a contagem usa a varredura e a migração volta a correr.
     await db.SYSTEM_CONTEXT.clear();
   });
@@ -38,19 +37,13 @@ describe('countAssetMirrors (F0)', () => {
       row('CICOPAL', 'b'),
       row('OUTRO', 'c')
     ]);
-    await db.ativos.bulkPut([row('CICOPAL', 'a')]);
-    await db.assets.bulkPut([
-      row('CICOPAL', 'a'),
-      row('CICOPAL', 'b'),
-      row('OUTRO', 'd')
-    ]);
+    await db.ativos.bulkPut([row('CICOPAL', 'a'), row('CICOPAL', 'b')]);
     // A migração não tem resíduo para tratar e só deixa o marcador.
     await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
 
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
       local_assets: 2,
-      ativos: 1,
-      assets: 2,
+      ativos: 2,
       total: 2
     });
   });
@@ -62,7 +55,6 @@ describe('countAssetMirrors (F0)', () => {
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
       local_assets: 2,
       ativos: 0,
-      assets: 0,
       total: 2
     });
     await expect(db.local_assets.get(['cicopal', 'b'])).resolves.not.toBeUndefined();
@@ -79,7 +71,6 @@ describe('countAssetMirrors (F0)', () => {
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
       local_assets: 2,
       ativos: 0,
-      assets: 0,
       total: 2
     });
   });
@@ -99,7 +90,6 @@ describe('countAssetMirrors (F0)', () => {
     await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
       local_assets: 1,
       ativos: 0,
-      assets: 0,
       total: 1
     });
   });
@@ -193,12 +183,11 @@ describe('countAssetMirrors (F0)', () => {
   });
 
   it('sem tenant conta a tabela inteira', async () => {
-    await db.assets.bulkPut([row('CICOPAL', 'a'), row('OUTRO', 'b')]);
+    await db.local_assets.bulkPut([row('CICOPAL', 'a'), row('OUTRO', 'b')]);
 
     await expect(sqliteService.countAssetMirrors()).resolves.toEqual({
-      local_assets: 0,
+      local_assets: 2,
       ativos: 0,
-      assets: 2,
       total: 2
     });
   });

@@ -40,13 +40,11 @@ const linha = (over: Record<string, unknown> = {}): DexieAsset =>
 const semear = async (registo: DexieAsset): Promise<void> => {
   await db.local_assets.put({ ...registo });
   await db.ativos.put({ ...registo });
-  await db.assets.put({ ...registo });
 };
 
 const porEspelho = async (primarykey: string): Promise<Array<DexieAsset | undefined>> => [
   (await db.local_assets.where('primarykey').equals(primarykey).first()) as DexieAsset | undefined,
   (await db.ativos.where('primarykey').equals(primarykey).first()) as DexieAsset | undefined,
-  (await db.assets.where('primarykey').equals(primarykey).first()) as DexieAsset | undefined,
 ];
 
 describe('normalizarMarcaConferencia — a regra pura', () => {
@@ -106,7 +104,6 @@ describe('migrateLegacyConferencia — uma passagem, idempotente', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.SYSTEM_CONTEXT.delete(CONFERIDO_MARKER);
   });
 

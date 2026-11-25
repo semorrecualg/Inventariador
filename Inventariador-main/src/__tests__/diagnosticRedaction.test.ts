@@ -150,7 +150,7 @@ describe('redactDiagnosticText — pacote de diagnóstico seguro para partilha',
       at: '2026-11-17T00:36:57.123Z',
       trigger: 'manual',
       tenantid: 'CICOPAL',
-      mirrors: { local_assets: 12636, ativos: 12636, assets: 12636, total: 12636 },
+      mirrors: { local_assets: 12636, ativos: 12636, total: 12636 },
       metrics: {
         boot: { samples: 3, p50: 1200, p95: 2400, last: 1300 },
         'pull.full': { samples: 1, p50: 9000, p95: 9000, last: 9000 },

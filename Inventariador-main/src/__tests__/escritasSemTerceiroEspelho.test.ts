@@ -34,15 +34,17 @@ describe('A.3a.3 — escritas não tocam no terceiro espelho', () => {
   beforeEach(async () => {
     await db.ativos.clear();
     await db.local_assets.clear();
-    await db.assets.clear();
   });
 
-  it('criar um ativo grava nas duas tabelas e deixa `assets` vazio', async () => {
+  // A.3a.4: a tabela deixou de existir no schema (v10).
+  const temTerceiroEspelho = () => db.tables.some((t) => t.name === 'assets');
+
+  it('criar um ativo grava só nas duas tabelas vivas', async () => {
     await localDb.assets.add(ativo() as never);
 
     expect(await db.ativos.count()).toBe(1);
     expect(await db.local_assets.count()).toBe(1);
-    expect(await db.assets.count()).toBe(0);
+    expect(temTerceiroEspelho()).toBe(false);
   });
 
   it('corrigir um campo (`patchAsset`) não escreve em `assets`', async () => {
@@ -51,7 +53,8 @@ describe('A.3a.3 — escritas não tocam no terceiro espelho', () => {
 
     await sqliteService.patchAsset('CICOPAL', 'PK-1', { status: 'Baixado' });
 
-    expect(await db.assets.count()).toBe(0);
+    expect(temTerceiroEspelho()).toBe(false);
+    expect(temTerceiroEspelho()).toBe(false);
     expect((await db.ativos.get(['CICOPAL', 'PK-1']))?.status).toBe('Baixado');
     expect((await db.local_assets.get(['CICOPAL', 'PK-1']))?.status).toBe('Baixado');
   });
@@ -62,7 +65,8 @@ describe('A.3a.3 — escritas não tocam no terceiro espelho', () => {
 
     await localDb.assets.removeCampaignFromAssets('CAMP-1');
 
-    expect(await db.assets.count()).toBe(0);
+    expect(temTerceiroEspelho()).toBe(false);
+    expect(temTerceiroEspelho()).toBe(false);
     expect((await db.ativos.get(['CICOPAL', 'PK-1']))?.currentCampaignId).toBeNull();
     expect((await db.local_assets.get(['CICOPAL', 'PK-1']))?.currentCampaignId).toBeNull();
   });

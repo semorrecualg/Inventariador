@@ -351,7 +351,7 @@ export const localDb = {
 
     update: async (id: string, changes: Partial<Asset>, userId?: string) => {
       const cleanId = String(id);
-      await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      await db.transaction('rw', [db.ativos, db.local_assets], async () => {
         // Chave composta [tenantid+primarykey] (v6): resolve o tenant pelo próprio
         // objeto de alteração quando presente, senão pelo tenant da sessão.
         const tenantKey = String((changes as Record<string, unknown>).tenantid || getCurrentTenantid() || '').trim().toUpperCase();
@@ -400,7 +400,6 @@ export const localDb = {
 
     clear: async () => {
       await db.ativos.clear();
-      await db.assets.clear();
       await db.local_assets.clear();
     },
 
@@ -1048,7 +1047,6 @@ export const localDb = {
 
       // 2. Limpeza síncrona e exclusiva com as tabelas ativas do Dexie.js (.clear())
       await db.ativos.clear();
-      await db.assets.clear();
       await db.local_assets.clear();
       await db.audit_logs.clear();
       await db.unit_configs.clear();

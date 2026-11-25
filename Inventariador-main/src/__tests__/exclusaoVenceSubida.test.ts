@@ -80,7 +80,6 @@ describe('exclusão vence a subida — o upsert consulta a nuvem antes de escrev
     localStorage.setItem('app_database_mode', 'SUPABASE');
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.audit_logs.clear();
   });
 

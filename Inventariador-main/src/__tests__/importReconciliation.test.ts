@@ -102,7 +102,6 @@ describe('carga da planilha — portão planilha N · base N', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.audit_logs.clear();
   });
 
@@ -112,8 +111,8 @@ describe('carga da planilha — portão planilha N · base N', () => {
     expect(gravadas).toBe(50);
     expect(await db.local_assets.count()).toBe(50);
     expect(await db.ativos.count()).toBe(50);
-    // A.3a.3: `assets` deixou de ser escrito pela carga.
-    expect(await db.assets.count()).toBe(0);
+    // A.3a.4: `assets` saiu do schema (v10).
+    expect(db.tables.some((t) => t.name === 'assets')).toBe(false);
     expect(await db.local_assets.where('filial').equals('010101 CICOPAL GO').count()).toBe(30);
     expect(await db.local_assets.where('filial').equals('010102 CICOPAL GO').count()).toBe(20);
 

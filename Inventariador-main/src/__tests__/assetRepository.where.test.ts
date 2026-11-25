@@ -77,14 +77,12 @@ beforeEach(async () => {
 
   await db.open();
   await db.ativos.clear();
-  await db.assets.clear();
   await db.local_assets.clear();
 });
 
 afterEach(async () => {
   vi.unstubAllGlobals();
   await db.ativos.clear();
-  await db.assets.clear();
   await db.local_assets.clear();
   await db.close();
 });

@@ -32,7 +32,6 @@ describe('assetKey · caminhos de escrita gravam a mesma chave', () => {
   beforeEach(async () => {
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
     await db.audit_logs.clear();
   });
 

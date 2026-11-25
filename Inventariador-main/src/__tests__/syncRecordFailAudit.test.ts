@@ -94,7 +94,6 @@ beforeEach(async () => {
   upsert.mockResolvedValue({ error: RLS_ERROR });
   await db.local_assets.clear();
   await db.ativos.clear();
-  await db.assets.clear();
   await db.audit_logs.clear();
   await db.sync_outbox.clear();
   localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));

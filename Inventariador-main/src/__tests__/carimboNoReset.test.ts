@@ -113,7 +113,6 @@ const semear = async (ativos: Asset[]): Promise<void> => {
     const linha = { ...asset, tenantid: String(asset.tenantid).toUpperCase() } as unknown as DexieAsset;
     await db.local_assets.put(linha);
     await db.ativos.put(linha);
-    await db.assets.put(linha);
   }
   await localforageMock.setItem(CHAVE_ATIVOS, ativos);
 };
@@ -136,8 +135,8 @@ const chavesDeContingencia = (): string[] => {
   return chaves.sort();
 };
 
-type Espelho = 'local_assets' | 'ativos' | 'assets';
-const ESPELHOS: Espelho[] = ['local_assets', 'ativos', 'assets'];
+type Espelho = 'local_assets' | 'ativos';
+const ESPELHOS: Espelho[] = ['local_assets', 'ativos'];
 
 const chavesDoEspelho = async (tabela: Espelho): Promise<string[]> => {
   const linhas = (await db[tabela].toArray()) as unknown as Array<Record<string, unknown>>;
@@ -145,7 +144,7 @@ const chavesDoEspelho = async (tabela: Espelho): Promise<string[]> => {
 };
 
 const carimbosPorEspelho = async (): Promise<Record<Espelho, string[]>> => {
-  const resultado = { local_assets: [], ativos: [], assets: [] } as Record<Espelho, string[]>;
+  const resultado = { local_assets: [], ativos: [] } as Record<Espelho, string[]>;
   for (const tabela of ESPELHOS) {
     const linhas = (await db[tabela].toArray()) as unknown as Array<Record<string, unknown>>;
     resultado[tabela] = linhas
@@ -173,7 +172,6 @@ describe('carimbo da falha no reset/limpeza local', () => {
     flushAssetBackupMirror();
     await db.local_assets.clear();
     await db.ativos.clear();
-    await db.assets.clear();
   });
 
   afterEach(() => {
@@ -261,14 +259,13 @@ describe('carimbo da falha no reset/limpeza local', () => {
     }
   });
 
-  it('higienização do Gestor de Base: as três tabelas saem juntas e nenhum carimbo sobrevive', async () => {
+  it('higienização do Gestor de Base: as duas tabelas saem juntas e nenhum carimbo sobrevive', async () => {
     await semear([ativo('PK-A1', 'UNIDADE-A'), ativo('PK-B1', 'UNIDADE-B')]);
 
     // Mesma transação de `DatabaseManagerScreen.handleCompleteDatabasePurge`.
-    await db.transaction('rw', [db.local_assets, db.ativos, db.assets], async () => {
+    await db.transaction('rw', [db.local_assets, db.ativos], async () => {
       await db.local_assets.clear();
       await db.ativos.clear();
-      await db.assets.clear();
     });
 
     const carimbos = await carimbosPorEspelho();

@@ -1061,11 +1061,11 @@ const announceBaseGenerationOnce = (message: string): void => {
   }
 };
 
-/** `true` enquanto houver inventário local (as três tabelas espelho). */
+/** `true` enquanto houver inventário local (as duas tabelas espelho). */
 const baseLocalTemInventario = async (): Promise<boolean> => {
   try {
     const counts = await sqliteService.countAssetMirrors();
-    return counts.local_assets + counts.ativos + counts.assets > 0;
+    return counts.local_assets + counts.ativos > 0;
   } catch {
     // Na dúvida nunca se adota: adotar é o caminho que permite enviar.
     return true;

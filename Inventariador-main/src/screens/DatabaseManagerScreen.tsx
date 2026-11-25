@@ -82,7 +82,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const [cloudBase, setCloudBase] = useState<CloudBaseCount>({ state: 'loading', count: null });
   // Contra-prova física: cada espelho é contado em separado, para o painel poder
   // explicar uma diferença em vez de a esconder num único número.
-  const [mirrors, setMirrors] = useState<{ local_assets: number; ativos: number; assets: number }>({ local_assets: 0, ativos: 0, assets: 0 });
+  const [mirrors, setMirrors] = useState<{ local_assets: number; ativos: number }>({ local_assets: 0, ativos: 0 });
   // F0: resumo das amostras locais (boot/delta/push) + último retrato registrado.
   const [perfSummaries, setPerfSummaries] = useState<Partial<Record<PerfMetricName, PerfSummary>>>({});
   const [baseline, setBaseline] = useState<PerfBaseline | null>(() => readPerfBaseline());
@@ -165,7 +165,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       '',
       `- local_assets: ${mirrors.local_assets}`,
       `- ativos: ${mirrors.ativos}`,
-      `- assets: ${mirrors.assets}`,
+      `- assets: removida do schema na v10 (A.3a.4)`,
       `- Espelho virtual (sandbox): ${virtualCount}`,
       `- Ativos exibidos no painel: ${assetCount}`,
       `- Base na Nuvem (Supabase, lida agora): ${cloudBase.count ?? '—'} (${CLOUD_STATE_LABEL[cloudBase.state]})`,
@@ -283,9 +283,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
 
         // Backup pode trazer tenantid em qualquer casing: invalida a migração.
         await invalidateTenantCaseMarker();
-        await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+        await db.transaction('rw', [db.ativos, db.local_assets], async () => {
           await db.ativos.clear();
-          await db.assets.clear();
           await db.local_assets.clear();
           
           await db.ativos.bulkPut(parsed);
@@ -457,11 +456,10 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           if (userStr) tid = String(JSON.parse(userStr)?.tenantid || '').trim().toUpperCase();
         } catch { /* ignore */ }
       }
-      // Contagem contra os TRÊS espelhos (local_assets · ativos · assets), com a
-      // mesma regra do resto do app (maior espelho). Antes contava só
-      // `local_assets` e anunciava 0 ativos com dados vivos noutro espelho.
+      // Contagem contra os DOIS espelhos vivos (local_assets · ativos), com a
+      // mesma regra do resto do app (maior espelho). `assets` saiu na v10.
       const counts = await sqliteService.countAssetMirrors(tid || null);
-      setMirrors({ local_assets: counts.local_assets, ativos: counts.ativos, assets: counts.assets });
+      setMirrors({ local_assets: counts.local_assets, ativos: counts.ativos });
       setPerfSummaries(collectPerfSummary());
       const aCount = counts.total;
 
@@ -488,7 +486,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       if (vCount > 0) {
         addLog(`[SRE_STATS] Banco local vazio, mas existe espelho virtual com ${vCount} ativos (origem do número mostrado na Unidade Operacional).`);
       } else {
-        addLog(`[SRE_STATS] Espelhos: local_assets=${counts.local_assets} · ativos=${counts.ativos} · assets=${counts.assets}.`);
+        addLog(`[SRE_STATS] Espelhos: local_assets=${counts.local_assets} · ativos=${counts.ativos}.`);
       }
     } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
       console.error("[SRE STATS ERR]", err);
@@ -599,7 +597,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setBaseline(saved);
       setPerfSummaries(saved.metrics);
       addLog(
-        `[F0] Linha de base registrada: local_assets=${counts.local_assets} · ativos=${counts.ativos} · assets=${counts.assets} · ` +
+        `[F0] Linha de base registrada: local_assets=${counts.local_assets} · ativos=${counts.ativos} · ` +
         `boot=${fmtPerf(saved.metrics.boot)} · pull.full=${fmtPerf(saved.metrics['pull.full'])} · ` +
         `pull.delta=${fmtPerf(saved.metrics['pull.delta'])} · push=${fmtPerf(saved.metrics.push)}`
       );
@@ -1012,13 +1010,10 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     addLog("[SRE_PURGE] Iniciando higienização estrutural de tabelas...");
     
     try {
-      await db.transaction('rw', [db.local_assets, db.addresses, db.ativos, db.assets], async () => {
+      await db.transaction('rw', [db.local_assets, db.addresses, db.ativos], async () => {
         await db.local_assets.clear();
         await db.addresses.clear();
         await db.ativos.clear();
-        // `assets` ainda é limpo para não sobrar lixo do antigo terceiro
-        // espelho; já não recebe escrita desde a A.3a.3.
-        await db.assets.clear();
       });
       // Espelho virtual (sandbox): alimentava a Unidade Operacional com milhares
       // de ativos depois de o banco local ser higienizado.
@@ -1140,7 +1135,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{activeTenantid ? 'Ativos do Contrato' : 'Ativos Locais'}</span>
           <span className="text-xl font-black text-emerald-400 mt-1 font-mono">{assetCount}</span>
           <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider mt-1 leading-tight">
-            local_assets {mirrors.local_assets} · ativos {mirrors.ativos} · assets {mirrors.assets}
+            local_assets {mirrors.local_assets} · ativos {mirrors.ativos}
           </span>
           {virtualCount > 0 && (
             <span className="text-[8px] font-bold text-amber-400 uppercase tracking-wider mt-1 leading-tight">
@@ -1214,7 +1209,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         </div>
         <div className="mt-2 text-[8px] font-mono text-slate-500 uppercase tracking-wider break-all">
           {baseline
-            ? `Última: ${new Date(baseline.at).toLocaleString('pt-BR')} · ${baseline.trigger} · local_assets ${baseline.mirrors?.local_assets ?? '—'} · ativos ${baseline.mirrors?.ativos ?? '—'} · assets ${baseline.mirrors?.assets ?? '—'}`
+            ? `Última: ${new Date(baseline.at).toLocaleString('pt-BR')} · ${baseline.trigger} · local_assets ${baseline.mirrors?.local_assets ?? '—'} · ativos ${baseline.mirrors?.ativos ?? '—'}`
             : 'Nenhuma linha de base registrada neste aparelho.'}
         </div>
       </div>

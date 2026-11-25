@@ -44,7 +44,7 @@ const guardado = async (key: string): Promise<DexieAsset | undefined> =>
 
 describe('persistAssetsBatch — só o subconjunto com decisão local', () => {
   beforeEach(async () => {
-    for (const tabela of [db.ativos, db.assets, db.local_assets]) await tabela.clear();
+    for (const tabela of [db.ativos, db.local_assets]) await tabela.clear();
     await sqliteService.bulkInsertAssetsOfflineFirst(
       [
         linha({ primarykey: 'PK-1', latitude: 0, longitude: 0, gps_lat: 0, gps_lng: 0 }),

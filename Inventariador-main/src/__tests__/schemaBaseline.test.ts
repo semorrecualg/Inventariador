@@ -53,12 +53,12 @@ function normalize(sig: string): string {
     .join(', ');
 }
 
-// Baseline congelado (docs/SCHEMA_BASELINE.md §2) — schema v6: chave primária
-// composta `[tenantid+primarykey]` nas 3 tabelas de ativos; `primarykey` virou índice.
+// Baseline congelado (docs/SCHEMA_BASELINE.md §2) — schema v10: chave primária
+// composta `[tenantid+primarykey]` nas 2 tabelas de ativos; `primarykey` virou
+// índice. `assets` saiu na v10 (A.3a.4).
 const BASELINE: Record<string, string> = {
   local_assets: '[tenantid+primarykey], primarykey, [tenantid+filial], filial, _is_synced',
   ativos: '[tenantid+primarykey], primarykey, [tenantid+filial], filial, _is_synced',
-  assets: '[tenantid+primarykey], primarykey, [tenantid+filial], filial, _is_synced',
   audit_logs: 'id, updated_at',
   campaigns: 'id, tenantid',
   SYSTEM_CONTEXT: 'key',
@@ -79,12 +79,12 @@ const LOADER_CONTRACT_21 = [
 ];
 
 describe('schemaBaseline — congelamento do InventoryLocalStore (Fase 0)', () => {
-  it('banco canônico `InventoryLocalStore` na versão de schema v9', () => {
+  it('banco canônico `InventoryLocalStore` na versão de schema v10', () => {
     expect(db.name).toBe('InventoryLocalStore');
-    expect(db.verno).toBe(9);
+    expect(db.verno).toBe(10);
   });
 
-  it('conjunto exato de 11 tabelas (sem tabelas órfãs nem faltantes)', () => {
+  it('conjunto exato de 10 tabelas (sem tabelas órfãs nem faltantes)', () => {
     const names = db.tables.map((t) => t.name).sort();
     expect(names).toEqual(Object.keys(BASELINE).sort());
   });

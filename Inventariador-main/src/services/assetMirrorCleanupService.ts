@@ -306,7 +306,6 @@ export async function cleanExactAssetCopies(tenantid?: string | null): Promise<E
     'rw',
     db.local_assets,
     db.ativos,
-    db.assets,
     db.asset_cleanup_backups,
     async () => {
       const planos: PlanoTabela[] = [];
@@ -447,7 +446,7 @@ export async function restoreExactCopyCleanup(cleanupId: string): Promise<{ rest
   }
 
   let restored = 0;
-  await db.transaction('rw', db.local_assets, db.ativos, db.assets, async () => {
+  await db.transaction('rw', db.local_assets, db.ativos, async () => {
     for (const [table, rows] of porTabela) {
       if (rows.length === 0) continue;
       await db[table].bulkPut(rows as never[]);
