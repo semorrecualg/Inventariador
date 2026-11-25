@@ -170,7 +170,7 @@ function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
 }
 
 /**
- * Uma linha das três tabelas de ativos, para a união de cópias.
+ * Uma linha de qualquer espelho de ativos, para a união de cópias.
  * (Só os campos que a contagem por localidade lê.)
  */
 export type CopiaDeAtivo = {
@@ -302,7 +302,7 @@ export const localDb = {
 
     getMapData: async (campaignId: string): Promise<Asset[]> => {
       const tenant = getCurrentTenantid().trim().toUpperCase();
-      const results = await db.assets
+      const results = await db.ativos
         .where('currentCampaignId')
         .equals(campaignId)
         .toArray();
@@ -396,7 +396,7 @@ export const localDb = {
 
     count: async () => {
       const tenant = getCurrentTenantid().trim().toUpperCase();
-      const all = await db.assets.toArray();
+      const all = await db.ativos.toArray();
       return all.filter(a => String(a.tenantid || a.tenantid || '').trim().toUpperCase() === tenant).length;
     },
 
@@ -499,11 +499,11 @@ export const localDb = {
       // Dashboard, a Consulta e o Mapa leem). Ler só `assets`/`local_assets`
       // deixava o ecrã vazio num aparelho com os ativos carregados em `ativos`.
       //
-      // As três tabelas são UNIDAS — nunca «a primeira que tem linhas»: uma
-      // filial pode ter em `assets` só as linhas sem endereço e as localidades
+      // As duas tabelas são UNIDAS — nunca «a primeira que tem linhas»: uma
+      // filial pode ter no baseline só as linhas sem endereço e as localidades
       // em `ativos`, e parar na primeira deixava o ecrã vazio. A união é feita
       // pela chave do ativo (`[tenantid+primarykey]`), para o mesmo ativo
-      // espelhado nas três tabelas contar UMA vez nas estatísticas.
+      // espelhado nas duas tabelas contar UMA vez nas estatísticas.
       const unitMatch = normalizeUnitMatchKey(unitId);
       /**
        * Endereço EFETIVO do ativo — a MESMA regra do inventário
@@ -530,13 +530,13 @@ export const localDb = {
         return rows.filter(r => normalizeUnitMatchKey(r.filial) === unitMatch);
       };
       // ORDEM = PRECEDÊNCIA da união. `ativos` é a tabela VIVA (é onde o
-      // trabalho de campo grava e apaga); `assets` é a canónica do último
-      // carregamento e `local_assets` o baseline do restore. A ordem só decide
+      // trabalho de campo grava e apaga); `local_assets` é o baseline do
+      // restore. `assets` saiu da união (A.3a.1): era o terceiro espelho e
+      // alimentava as estatísticas com linhas antigas. A ordem só decide
       // `_is_deleted` (ver `mergeAssetCopies`) — endereço e conferência são
       // combinados, não sobrepostos.
       const workTables: UnitTable[] = [
         db.ativos as unknown as UnitTable,
-        db.assets as unknown as UnitTable,
         db.local_assets as unknown as UnitTable
       ];
       const addressRows = async (): Promise<DexieAddress[]> => {
@@ -546,11 +546,11 @@ export const localDb = {
         return (await doContrato(table)) as unknown as DexieAddress[];
       };
       /**
-       * Ativos da filial nas TRÊS tabelas, pela ordem de precedência (`ativos`
-       * viva → `assets` canónica → `local_assets` baseline), com índice exato
-       * em cada uma e a varredura tolerante do mesmo contrato quando a tabela
-       * não tem o índice exato. A união é deduplicada pela chave do ativo;
-       * linhas sem chave são mantidas individualmente.
+       * Ativos da filial nas DUAS tabelas da união, pela ordem de precedência
+       * (`ativos` viva → `local_assets` baseline), com índice exato em cada uma
+       * e a varredura tolerante do mesmo contrato quando a tabela não tem o
+       * índice exato. A união é deduplicada pela chave do ativo; linhas sem
+       * chave são mantidas individualmente.
        */
       const assetRows = async (): Promise<CopiaDeAtivo[]> => {
         const byKey = new Map<string, CopiaDeAtivo>();

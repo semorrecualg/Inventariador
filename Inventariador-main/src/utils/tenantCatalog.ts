@@ -70,8 +70,10 @@ export async function listContracts(): Promise<ContractSummary[]> {
   };
 
   try {
+    // A.3a.1: `local_assets` já traz o mesmo contrato/filial que `assets`
+    // trazia — a segunda varredura era o terceiro espelho a alimentar o
+    // catálogo com linhas antigas.
     await db.local_assets.each((asset) => add(asset.tenantid, asset.filial));
-    await db.assets.each((asset) => add(asset.tenantid, asset.filial));
   } catch {
     /* base local indisponível — segue com perfis e licenças */
   }

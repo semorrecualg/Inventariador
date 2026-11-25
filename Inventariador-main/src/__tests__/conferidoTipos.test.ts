@@ -200,9 +200,11 @@ describe('getLocationsWithStats — a mesma chave em duas tabelas conta uma vez'
     expect(await ruaUm()).toEqual({ total: 1, checked: 1, ocorrencias: 1 });
   });
 
-  it('conferido só na cópia de `assets` também conta (e uma vez só)', async () => {
+  it('conferido só na cópia do baseline (`local_assets`) também conta (e uma vez só)', async () => {
+    // A.3a.1: a união de leitura é `ativos` + `local_assets`; a cópia que ainda
+    // não recebeu a conferência fica neste último espelho.
     await db.ativos.put(linhaDaTabela({ _conferido: 0 }));
-    await db.assets.put(linhaDaTabela({ _conferido: 'true' }));
+    await db.local_assets.put(linhaDaTabela({ _conferido: 'true' }));
 
     expect(await ruaUm()).toEqual({ total: 1, checked: 1, ocorrencias: 1 });
   });

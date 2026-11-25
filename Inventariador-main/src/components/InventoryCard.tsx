@@ -336,13 +336,11 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         String(ativoDetalhado.tenantid || '').trim().toUpperCase(),
         String(ativoDetalhado.primarykey || '')
       ];
+      // A.3a.1: a verificação em `assets` duplicava a de `ativos` (o terceiro
+      // espelho já não é lido por ninguém). Fica uma só.
       const existsAtivos = await db.ativos.get(detalhadoKey);
       if (existsAtivos) {
         await db.ativos.put({ ...updatedItem, tenantid: detalhadoKey[0] });
-      }
-      const existsAssets = await db.assets.get(detalhadoKey);
-      if (existsAssets) {
-        await db.assets.put({ ...updatedItem, tenantid: detalhadoKey[0] });
       }
 
       // Log de auditoria local pelo ponto único (contrato no nascimento).

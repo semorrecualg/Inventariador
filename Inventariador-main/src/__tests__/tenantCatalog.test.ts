@@ -77,8 +77,9 @@ describe('listContracts — filiais da configuração operacional', () => {
     expect(outro?.filiais).toEqual(['020101 OUTRA UNIDADE']);
   });
 
-  it('mantém as fontes antigas (ativos, perfis e licenças) e ignora sentinelas', async () => {
-    data.assets.push({ tenantid: 'CICOPAL', filial: '010105 CICOPAL PA' });
+  it('mantém as fontes vivas (baseline, perfis e licenças) e ignora sentinelas', async () => {
+    // A.3a.1: o catálogo lê `local_assets`; `assets` deixou de ser fonte.
+    data.localAssets.push({ tenantid: 'CICOPAL', filial: '010105 CICOPAL PA' });
     data.users.push({ tenantid: 'CICOPAL', filial: '010301 FEIRA BOA BA' });
     data.provisioned.push({ tenantid: 'NOVO_CONTRATO' });
     data.unitConfigs.push({ tenantid: 'CICOPAL', filial: 'TODAS' });
