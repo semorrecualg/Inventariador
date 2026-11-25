@@ -13,6 +13,11 @@ type Modo = 'INTERNAL' | 'SUPABASE';
 
 const semear = async (page: Page, opcoes: { mode: Modo; locked: boolean }) => {
   await page.addInitScript(({ mode, locked }) => {
+    // Só a PRIMEIRA entrada do contexto é semeada: `addInitScript` volta a
+    // correr em cada navegação e, sem este guarda, o reload da troca de base
+    // reescrevia INTERNAL+blindado por cima do que a app tinha gravado.
+    if (sessionStorage.getItem('__e2e_modo_base_semeado') === '1') return;
+    sessionStorage.setItem('__e2e_modo_base_semeado', '1');
     localStorage.setItem('gbr_persisted_session', JSON.stringify({
       user: {
         id: 'e2e-admin',
