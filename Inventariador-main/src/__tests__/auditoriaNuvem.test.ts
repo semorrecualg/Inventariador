@@ -89,8 +89,13 @@ describe('fila da trilha — Base Oficial', () => {
     expect(resultado).toMatchObject({ success: true, enviados: 1, falhados: 0, pendentes: 0 });
     expect(fromMock).toHaveBeenCalledWith('audit_logs');
 
-    const [payload, opcoes] = upsertMock.mock.calls[0] as [Record<string, unknown>[], { onConflict: string }];
-    expect(opcoes).toEqual({ onConflict: 'client_event_id' });
+    const [payload, opcoes] = upsertMock.mock.calls[0] as [
+      Record<string, unknown>[],
+      { onConflict: string; ignoreDuplicates?: boolean },
+    ];
+    // Append-only na nuvem (só SELECT/INSERT em audit_logs): ON CONFLICT DO
+    // NOTHING, para o reenvio não exigir UPDATE nem reescrever a linha.
+    expect(opcoes).toEqual({ onConflict: 'client_event_id', ignoreDuplicates: true });
     expect(payload).toHaveLength(1);
     expect(payload[0]).toMatchObject({
       client_event_id: 'LOG_1',

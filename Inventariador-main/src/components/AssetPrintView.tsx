@@ -4,6 +4,7 @@ import { Asset, InventoryCampaign, CampaignStatus } from '../types';
 import { ArrowLeft, Printer, ShieldCheck, AlertCircle } from 'lucide-react';
 import { APP_VERSION_LABEL } from '../utils/appVersion';
 import { isConferido } from '../utils/conferencia';
+import { useSignedPhotoUrl } from '../hooks/useSignedPhotoUrl';
 
 interface AssetPrintViewProps {
   assets: Asset[];
@@ -13,6 +14,31 @@ interface AssetPrintViewProps {
   mode?: 'PARTIAL' | 'FINAL';
   responsibleName?: string;
 }
+
+/** Evidência fotográfica com URL assinada (o bucket `asset-photos` é privado). */
+const AssetEvidencePhoto: React.FC<{ value?: string | null }> = ({ value }) => {
+  const src = useSignedPhotoUrl(value);
+
+  if (value && src) {
+    return (
+      <div className="relative group">
+        <img
+          src={src}
+          alt="Foto do Ativo"
+          className="w-full h-48 object-cover rounded-2xl border-2 border-slate-100 shadow-sm transition-all grayscale-[0.5] print:grayscale-0"
+          referrerPolicy="no-referrer"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full h-48 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-300">
+      <Printer size={24} strokeWidth={1} />
+      <span className="text-[8px] font-black uppercase mt-2 tracking-widest">Sem evidência</span>
+    </div>
+  );
+};
 
 const AssetPrintView: React.FC<AssetPrintViewProps> = ({ 
     assets, 
@@ -192,21 +218,7 @@ const AssetPrintView: React.FC<AssetPrintViewProps> = ({
                 <div className="col-span-4 flex flex-col items-center justify-start space-y-6">
                   <div className="w-full">
                     <p className="text-[7px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 text-center">Evidência Fotográfica</p>
-                    {asset._photoUrl ? (
-                        <div className="relative group">
-                            <img 
-                                src={asset._photoUrl} 
-                                alt="Foto do Ativo" 
-                                className="w-full h-48 object-cover rounded-2xl border-2 border-slate-100 shadow-sm transition-all grayscale-[0.5] print:grayscale-0"
-                                referrerPolicy="no-referrer"
-                            />
-                        </div>
-                    ) : (
-                        <div className="w-full h-48 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-300">
-                            <Printer size={24} strokeWidth={1} />
-                            <span className="text-[8px] font-black uppercase mt-2 tracking-widest">Sem evidência</span>
-                        </div>
-                    )}
+                    <AssetEvidencePhoto value={asset._photoUrl} />
                   </div>
                   
                   {/* Assinatura Digital do Auditor para este item (se houver snapshot) */}

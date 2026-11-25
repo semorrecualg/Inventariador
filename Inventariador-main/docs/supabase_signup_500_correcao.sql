@@ -90,16 +90,11 @@ SET search_path = public
 AS $$
 DECLARE
   meta jsonb := NEW.raw_user_meta_data;
-  v_role text := COALESCE(meta ->> 'role', 'AUDITOR');
-  -- A coluna `units` é text[] (schema legado/real). Converte o array jsonb do
-  -- metadata para text[] — senão o INSERT falha com 42804 (jsonb vs text[])
-  -- e o signUp retorna 500 "Database error saving new user".
-  v_units text[] := CASE
-    WHEN meta IS NOT NULL AND meta ? 'units' AND jsonb_typeof(meta -> 'units') = 'array'
-    THEN ARRAY(SELECT jsonb_array_elements_text(meta -> 'units'))
-    ELSE ARRAY[]::text[]
-  END;
 BEGIN
+  -- Papel, is_admin, contrato, filial e unidades NUNCA vêm do metadata: ele é
+  -- escrito pelo cliente do signUp e permitia entrar como ADMIN no contrato de
+  -- outra pessoa. O perfil nasce AUDITOR e sem contrato; o vínculo é dado por
+  -- um admin (docs/supabase_rls_assets_permissoes.sql).
   INSERT INTO public.user_permissions (
     id, email, username, name, role, tenantid, filial, units, is_admin, created_at, updated_at
   )
@@ -108,11 +103,11 @@ BEGIN
     COALESCE(NEW.email, ''),
     COALESCE(meta ->> 'username', split_part(COALESCE(NEW.email, ''), '@', 1)),
     COALESCE(meta ->> 'name',     split_part(COALESCE(NEW.email, ''), '@', 1)),
-    v_role,
-    COALESCE(meta ->> 'tenantid', ''),
-    COALESCE(meta ->> 'filial',   ''),
-    v_units,
-    (v_role IN ('ADMIN', 'MASTER')),
+    'AUDITOR',
+    '',
+    '',
+    ARRAY[]::text[],
+    false,
     now(),
     now()
   )
@@ -138,9 +133,10 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
 
--- B.4 — Garantir que o RLS da user_permissions permite a escrita
+-- B.4 — RLS de user_permissions
+-- O trigger acima é SECURITY DEFINER: grava sem precisar de política. O RLS
+-- fechado (sem p_all, sem privilégio para anon) vive em
+-- docs/supabase_rls_assets_permissoes.sql. NÃO recriar aqui o p_all —
+-- reabriria a leitura da tabela a `anon`.
 ALTER TABLE public.user_permissions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS p_all ON public.user_permissions;
-CREATE POLICY p_all ON public.user_permissions
-  FOR ALL TO anon, authenticated
-  USING (true) WITH CHECK (true);

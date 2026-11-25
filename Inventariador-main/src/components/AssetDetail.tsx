@@ -48,6 +48,7 @@ import { reverseGeocode } from '../services/geocodingService';
 import { determineAssetTag, getTagMetadata, normalizeString } from '../services/tagService';
 import { resolveTenantId } from '../utils/tenantUtils';
 import { logger } from '../utils/logger';
+import { useSignedPhotoUrl } from '../hooks/useSignedPhotoUrl';
 
 const formatReadingTime = (isoStr?: string) => {
   if (!isoStr) return '';
@@ -124,6 +125,8 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
   }, [assets, initialAssetId, tenantid, dexieAssets.length]);
   const isBatch = (assets?.length || 0) > 1;
   const [workingAsset, setWorkingAsset] = useState<Asset>(() => ({ ...assets?.[0] } as Asset));
+  // Bucket privado: o registo guarda o caminho e a imagem usa uma URL assinada.
+  const signedPhotoUrl = useSignedPhotoUrl(workingAsset._photoUrl);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
@@ -680,9 +683,9 @@ const AssetDetail: React.FC<AssetDetailProps> = ({
             <div className="flex items-center space-x-4 mb-4">
               <div className="relative group">
                 <div className="w-24 h-24 bg-white/20 rounded-2xl border border-white/30 backdrop-blur-md overflow-hidden flex items-center justify-center shadow-lg">
-                  {workingAsset._photoUrl ? (
+                  {workingAsset._photoUrl && signedPhotoUrl ? (
                     <img 
-                      src={workingAsset._photoUrl} 
+                      src={signedPhotoUrl} 
                       alt="Ativo" 
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"

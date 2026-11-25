@@ -2,15 +2,25 @@ import { supabase } from './supabaseService';
 import { localDb } from './localDbService';
 import { db } from './sqliteService';
 import { logger } from '../utils/logger';
+import { firstTenantid } from '../utils/tenantUtils';
 
 export const backupService = {
   /**
    * Realiza backup automatizado em background para usuários MOBILE_SINGLE
    */
-  performMobileSingleBackup: async (userId: string): Promise<{ success: boolean; error?: string }> => {
+  performMobileSingleBackup: async (userId: string, tenantid: string | string[]): Promise<{ success: boolean; error?: string }> => {
     try {
       if (!navigator.onLine) {
         return { success: false, error: 'Dispositivo em modo offline' };
+      }
+
+      // O bucket `asset-photos` é privado e as políticas só dão acesso à pasta
+      // do tenant do utilizador autenticado: o backup tem de viver lá dentro.
+      // O perfil pode trazer uma lista de tenants; a política aceita uma só
+      // pasta, por isso o array tem de ser reduzido ao primeiro tenant.
+      const tenantidClean = firstTenantid(tenantid);
+      if (!tenantidClean) {
+        return { success: false, error: 'Backup cloud requer o tenantid do utilizador.' };
       }
 
       logger.info(`>>> [Backup Service] Iniciando backup automático em cloud para o usuário: ${userId}`);
@@ -38,7 +48,7 @@ export const backupService = {
 
       const backupString = JSON.stringify(backupPayload, null, 2);
       const backupBlob = new Blob([backupString], { type: 'application/json' });
-      const filePath = `backups/${userId}/backup_v24.json`;
+      const filePath = `photos/${tenantidClean}/backups/${userId}/backup_v24.json`;
 
       // 4. Salva a cópia estruturada diretamente no bucket do Supabase
       const { error: uploadError } = await supabase.storage

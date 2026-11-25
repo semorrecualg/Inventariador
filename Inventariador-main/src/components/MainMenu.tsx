@@ -102,6 +102,8 @@ interface MainMenuProps {
   onToggleGpsBypass?: (val: boolean) => void;
   isGpsBypassed?: boolean;
   onCheckIntegrity?: () => Promise<{ success: boolean; message: string }>;
+  /** Desbloqueio explícito da blindagem (confirmação + auditoria vivem no App). */
+  onUnlockSovereignty?: () => void;
   showModal: (title: string, message: string, type: 'success' | 'error' | 'info' | 'confirm' | 'warning') => void;
   onOpenHelp?: () => void;
   campaignsCount?: number;
@@ -159,6 +161,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onToggleGpsBypass,
   isGpsBypassed = false,
   onCheckIntegrity,
+  onUnlockSovereignty,
   showModal,
   onOpenHelp,
   accessDiagnostic
@@ -180,6 +183,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [isCheckingIntegrity, setIsCheckingIntegrity] = useState(false);
   const [isExportingPackage, setIsExportingPackage] = useState(false);
   const [isSystemLocked, setIsSystemLocked] = useState(() => localStorage.getItem('is_system_locked') === 'true');
+
+  // O desbloqueio é confirmado no App (modal + auditoria). Ao concluir, o App
+  // avisa por evento para o cartão reler o selo sem obrigar a fechar o painel.
+  useEffect(() => {
+    const aoMudarBlindagem = () => setIsSystemLocked(localStorage.getItem('is_system_locked') === 'true');
+    window.addEventListener('gbr_sovereignty_changed', aoMudarBlindagem);
+    return () => window.removeEventListener('gbr_sovereignty_changed', aoMudarBlindagem);
+  }, []);
   const [integrityKey, setIntegrityKey] = useState(() => localStorage.getItem('gbr_integrity_key') || '');
 
   const handleCheckIntegrity = async () => {
@@ -320,6 +331,19 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const handleValidateSovereignty = async () => {
     // Flag ou controle visual para evitar clique duplo e sobrecarga na ponte nativa
     if (isCheckingIntegrity) return; 
+
+    // Blindagem e Base Oficial são incompatíveis: o selo suspende a nuvem e o
+    // arranque seguinte força BASE LOCAL. Sem esta guarda, o operador selava o
+    // aparelho em modo oficial e a escolha desaparecia no reload, sem aviso.
+    if (databaseMode !== DatabaseMode.INTERNAL) {
+      showModal(
+        'Blindagem exige Base Local',
+        'A blindagem «Pronto para Campo» suspende a sincronização com a nuvem — no próximo arranque o sistema voltaria a operar na Base Local. ' +
+          'Troque para a Base Local em «Modo de Base» antes de validar a soberania. Nada foi alterado.',
+        'warning'
+      );
+      return;
+    }
     
     try {
       logger.info(">>> [Soberania] Iniciando validação definitiva da base de dados pelo Administrador...");
@@ -985,6 +1009,25 @@ const MainMenu: React.FC<MainMenuProps> = ({
                       <p className="text-[7px] font-mono font-bold text-emerald-400/60 uppercase tracking-widest">CHAVE DE VERIFICAÇÃO DE INTEGRIDADE:</p>
                       <p className="text-[8px] font-mono font-bold text-emerald-300 break-all select-all mt-1">{integrityKey}</p>
                     </div>
+                  )}
+
+                  {/* Desbloqueio EXPLÍCITO: a blindagem suspende a nuvem e força
+                      BASE LOCAL no arranque, por isso a Base Oficial só fica
+                      disponível depois de a remover aqui — com confirmação e
+                      registo de auditoria no App. */}
+                  {isSystemLocked ? (
+                    <button
+                      type="button"
+                      onClick={() => onUnlockSovereignty?.()}
+                      className="mt-3 w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-amber-500/15 border border-amber-400/40 text-amber-300 text-[9px] font-black uppercase tracking-widest hover:bg-amber-500/25 active:scale-[0.98] transition-all"
+                    >
+                      <ShieldCheck size={12} />
+                      <span>Desbloquear blindagem</span>
+                    </button>
+                  ) : (
+                    <p className="mt-3 text-[8px] font-bold text-emerald-500/60 uppercase tracking-widest text-center">
+                      Sem blindagem ativa — a Base Oficial pode ser escolhida
+                    </p>
                   )}
                 </div>
               </div>

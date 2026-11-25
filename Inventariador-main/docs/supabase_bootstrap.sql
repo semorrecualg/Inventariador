@@ -337,6 +337,53 @@ ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS id uuid;
 CREATE UNIQUE INDEX IF NOT EXISTS user_permissions_email_key
   ON public.user_permissions (email);
 
+-- 4-B. AUTO-REGISTO — o perfil nasce AUDITOR, sem contrato
+-- `raw_user_meta_data` é escrito pelo cliente do signUp: qualquer pessoa com a
+-- anon key envia role=ADMIN e tenantid=<contrato alheio>. Este trigger ignora
+-- esses campos (papel, is_admin, contrato, filial e unidades são fixos) e deixa
+-- só username/nome, que são cosméticos. O vínculo ao contrato é dado por um
+-- admin depois de a conta existir (política p_admin_all — ver 7-A).
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  meta jsonb := NEW.raw_user_meta_data;
+  v_username text := coalesce(NULLIF(meta ->> 'username', ''), split_part(coalesce(NEW.email, ''), '@', 1));
+BEGIN
+  INSERT INTO public.user_permissions (
+    id, email, username, name, role, tenantid, filial, units, is_admin
+  )
+  VALUES (
+    NEW.id,
+    lower(coalesce(NEW.email, '')),
+    v_username,
+    coalesce(NULLIF(meta ->> 'name', ''), v_username),
+    'AUDITOR',
+    '',
+    '',
+    ARRAY[]::text[],
+    false
+  )
+  ON CONFLICT (email) DO UPDATE SET
+    id         = EXCLUDED.id,
+    updated_at = now()
+  WHERE public.user_permissions.id IS NULL;
+
+  RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS handle_new_user           ON auth.users;
+DROP TRIGGER IF EXISTS on_user_created           ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_user();
+
 -- ============================================================================
 -- 5. LOCATIONS — unidades/endereços (unique name+tenantid exigido pelo app)
 -- ============================================================================
@@ -503,11 +550,19 @@ ALTER TABLE public.unit_configs ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public."asset-photos" ALTER COLUMN id SET DEFAULT gen_random_uuid();
 
 -- ============================================================================
--- 7. RLS — políticas PERMISSIVAS (MVP), estáticas e idempotentes.
---    O app usa a anon key; sem políticas, toda gravação da nuvem falharia com
---    401/42501 (o app tolera, mas nada sincronizaria).
---    HARDENING depois: restringir por tenantid via JWT.
---    Nome de política fixo `p_all` (único por tabela) — nunca interpolado.
+-- 7. RLS — políticas estáticas e idempotentes.
+--    Sem políticas, toda gravação da nuvem falharia com 401/42501 (o app
+--    tolera, mas nada sincronizaria).
+--    Nenhuma tabela do app fica com `p_all`: `assets`, `user_permissions`,
+--    `asset-photos` e as tabelas de operação (inventory_config, unit_configs,
+--    audit_logs, locations, campaigns, campaign_snapshots, asset_logs,
+--    base_generation) ficam limitadas ao contrato do utilizador, com MASTER a
+--    atravessar, e `anon` perde o privilégio de tabela — ver 7-A,
+--    docs/supabase_rls_assets_permissoes.sql e
+--    docs/supabase_rls_tabelas_restantes.sql.
+--    Nome de política fixo (`p_all` / `p_tenant_all` / `p_self_*` /
+--    `p_admin_all` / `p_tenant_select|insert` / `p_authenticated_select`) —
+--    nunca interpolado.
 -- ============================================================================
 ALTER TABLE public.assets            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_config  ENABLE ROW LEVEL SECURITY;
@@ -520,35 +575,474 @@ ALTER TABLE public.campaign_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.asset_logs        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."asset-photos"    ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS p_all ON public.assets;
-CREATE POLICY p_all ON public.assets FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+-- ============================================================================
+-- 7-A. FUNÇÕES DE APOIO E GUARDA DE user_permissions
+-- ----------------------------------------------------------------------------
+-- Todas SECURITY DEFINER: as políticas chamam-nas e elas leem
+-- user_permissions — sem isso, a política de user_permissions chamar-se-ia a
+-- si mesma (erro 42P17, "infinite recursion detected in policy").
+-- O SQL Editor / service_role (auth.uid() nulo) não é afectado pelas guardas.
+-- ============================================================================
+SET LOCAL check_function_bodies = off;
 
+-- get_tenantid(): contrato do utilizador autenticado. Casa pelo id do Auth e,
+-- como rede de segurança, pelo e-mail do JWT — há perfis legados com `id`
+-- nulo/desalinhado, e o app só os corrige depois de ler o perfil.
+CREATE OR REPLACE FUNCTION public.get_tenantid()
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT up.tenantid
+  FROM public.user_permissions up
+  WHERE public.is_self_row(up.id, up.email)
+  ORDER BY (up.id = auth.uid()) DESC
+  LIMIT 1
+$$;
+
+-- is_self_row(): a linha pertence ao utilizador do pedido (por id ou e-mail).
+-- Recebe os valores por parâmetro para poder ser usada nas políticas sem
+-- provocar leitura recursiva da tabela.
+CREATE OR REPLACE FUNCTION public.is_self_row(p_id uuid, p_email text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT auth.uid() IS NOT NULL
+     AND (
+       p_id = auth.uid()
+       OR (
+         btrim(coalesce(auth.jwt() ->> 'email', '')) <> ''
+         AND lower(btrim(coalesce(p_email, ''))) = lower(btrim(coalesce(auth.jwt() ->> 'email', '')))
+       )
+     )
+$$;
+
+-- is_master(): único perfil com visão entre contratos (dono global).
+CREATE OR REPLACE FUNCTION public.is_master()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.user_permissions up
+    WHERE public.is_self_row(up.id, up.email)
+      AND upper(btrim(coalesce(up.role, ''))) = 'MASTER'
+  )
+$$;
+
+-- is_tenant_admin(): ADMIN/MASTER do próprio contrato (gestão de utilizadores).
+CREATE OR REPLACE FUNCTION public.is_tenant_admin()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.user_permissions up
+    WHERE public.is_self_row(up.id, up.email)
+      AND (
+        coalesce(up.is_admin, false)
+        OR upper(btrim(coalesce(up.role, ''))) IN ('ADMIN', 'MASTER')
+      )
+  )
+$$;
+
+-- email_by_username(): a ÚNICA consulta que `anon` pode fazer a
+-- user_permissions (login por username antes do signIn). Devolve só o e-mail e
+-- só por igualdade exata — não permite listar nem ler o resto da linha.
+CREATE OR REPLACE FUNCTION public.email_by_username(p_username text)
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT up.email
+  FROM public.user_permissions up
+  WHERE btrim(coalesce(p_username, '')) <> ''
+    AND lower(btrim(coalesce(up.username, ''))) = lower(btrim(coalesce(p_username, '')))
+  LIMIT 1
+$$;
+
+SET LOCAL check_function_bodies = on;
+
+REVOKE ALL ON FUNCTION public.get_tenantid() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_tenantid() FROM anon;
+GRANT EXECUTE ON FUNCTION public.get_tenantid() TO authenticated;
+
+REVOKE ALL ON FUNCTION public.is_self_row(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.is_self_row(uuid, text) FROM anon;
+GRANT EXECUTE ON FUNCTION public.is_self_row(uuid, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.is_master() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.is_master() FROM anon;
+GRANT EXECUTE ON FUNCTION public.is_master() TO authenticated;
+
+REVOKE ALL ON FUNCTION public.is_tenant_admin() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.is_tenant_admin() FROM anon;
+GRANT EXECUTE ON FUNCTION public.is_tenant_admin() TO authenticated;
+
+REVOKE ALL ON FUNCTION public.email_by_username(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.email_by_username(text) TO anon, authenticated;
+
+-- O login por username já não faz SELECT na tabela: este índice serve a RPC.
+CREATE INDEX IF NOT EXISTS user_permissions_username_lower_idx
+  ON public.user_permissions (lower(btrim(coalesce(username, ''))));
+
+-- Guarda dos campos privilegiados: as políticas dão acesso à LINHA, não à
+-- COLUNA. Sem esta guarda, qualquer utilizador podia fazer UPDATE da própria
+-- linha e tornar-se ADMIN, mudar de contrato ou entrar noutro tenant.
+CREATE OR REPLACE FUNCTION public.guard_user_permissions()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF auth.uid() IS NULL OR public.is_master() THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    -- ADMIN do contrato a provisionar outro utilizador: deixa passar (a
+    -- política de INSERT limita o contrato ao dele).
+    IF public.is_tenant_admin() AND NOT public.is_self_row(NEW.id, NEW.email) THEN
+      RETURN NEW;
+    END IF;
+    -- Auto-registo público: nunca cria administrador nem entra num contrato.
+    -- Sem contrato, o utilizador só recebe dados depois de um admin o vincular.
+    NEW.role := 'AUDITOR';
+    NEW.is_admin := false;
+    NEW.tenantid := '';
+    NEW.units := '{}';
+    RETURN NEW;
+  END IF;
+
+  IF NOT public.is_self_row(OLD.id, OLD.email) THEN
+    RETURN NEW; -- gestão de outro utilizador pelo admin do contrato
+  END IF;
+
+  -- O app corrige `id` a partir do e-mail no primeiro login; é a única mudança
+  -- de chave permitida, e só para o próprio uid do Auth.
+  IF NEW.id IS DISTINCT FROM OLD.id AND NEW.id IS DISTINCT FROM auth.uid() THEN
+    RAISE EXCEPTION 'user_permissions: o id só pode ser reclamado pelo próprio utilizador'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF NEW.email IS DISTINCT FROM OLD.email
+     OR coalesce(NEW.is_admin, false) IS DISTINCT FROM coalesce(OLD.is_admin, false)
+     OR upper(btrim(coalesce(NEW.role, ''))) IS DISTINCT FROM upper(btrim(coalesce(OLD.role, '')))
+     OR NEW.tenantid IS DISTINCT FROM OLD.tenantid
+     OR NEW.units IS DISTINCT FROM OLD.units THEN
+    RAISE EXCEPTION 'user_permissions: um utilizador não altera o próprio papel, contrato ou permissões'
+      USING ERRCODE = '42501';
+  END IF;
+
+  RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS user_permissions_guard ON public.user_permissions;
+CREATE TRIGGER user_permissions_guard
+  BEFORE INSERT OR UPDATE ON public.user_permissions
+  FOR EACH ROW EXECUTE FUNCTION public.guard_user_permissions();
+
+-- tenant_visible(): a regra de contrato das tabelas de operação (7-C), num só
+-- sítio. MASTER atravessa; perfil com contrato vê o seu; perfil sem contrato
+-- só alcança linhas sem contrato (eventos de login de contas novas).
+CREATE OR REPLACE FUNCTION public.tenant_visible(p_tenantid text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT public.is_master()
+      OR (
+        btrim(coalesce(public.get_tenantid(), '')) <> ''
+        AND lower(btrim(coalesce(p_tenantid, ''))) = lower(btrim(coalesce(public.get_tenantid(), '')))
+      )
+      OR (
+        btrim(coalesce(public.get_tenantid(), '')) = ''
+        AND btrim(coalesce(p_tenantid, '')) = ''
+      )
+$$;
+
+REVOKE ALL ON FUNCTION public.tenant_visible(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.tenant_visible(text) FROM anon;
+GRANT EXECUTE ON FUNCTION public.tenant_visible(text) TO authenticated;
+
+-- Grafia legada (`tenant_id`) das trilhas: triggers criados fora do repositório
+-- gravam essa coluna. As políticas olham só para `tenantid`; este trigger copia
+-- o valor antes da verificação. Lê por `to_jsonb(NEW)`, que devolve NULL quando
+-- a coluna não existe — referenciá-la na política daria 42703.
+CREATE OR REPLACE FUNCTION public.tenantid_de_log_legado()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF btrim(coalesce(NEW.tenantid, '')) = '' THEN
+    NEW.tenantid := nullif(btrim(coalesce(to_jsonb(NEW) ->> 'tenant_id', '')), '');
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS audit_logs_tenantid_legado ON public.audit_logs;
+CREATE TRIGGER audit_logs_tenantid_legado
+  BEFORE INSERT ON public.audit_logs
+  FOR EACH ROW EXECUTE FUNCTION public.tenantid_de_log_legado();
+
+DROP TRIGGER IF EXISTS asset_logs_tenantid_legado ON public.asset_logs;
+CREATE TRIGGER asset_logs_tenantid_legado
+  BEFORE INSERT ON public.asset_logs
+  FOR EACH ROW EXECUTE FUNCTION public.tenantid_de_log_legado();
+
+-- assets: só authenticated, limitado ao contrato (MASTER atravessa).
+DROP POLICY IF EXISTS p_all ON public.assets;
+DROP POLICY IF EXISTS p_tenant_all ON public.assets;
+CREATE POLICY p_tenant_all ON public.assets
+  FOR ALL TO authenticated
+  USING (
+    public.is_master()
+    OR (
+      btrim(coalesce(public.get_tenantid(), '')) <> ''
+      AND lower(btrim(coalesce(tenantid, ''))) = lower(btrim(coalesce(public.get_tenantid(), '')))
+    )
+  )
+  WITH CHECK (
+    public.is_master()
+    OR (
+      btrim(coalesce(public.get_tenantid(), '')) <> ''
+      AND lower(btrim(coalesce(tenantid, ''))) = lower(btrim(coalesce(public.get_tenantid(), '')))
+    )
+  );
+
+REVOKE ALL ON public.assets FROM anon;
+
+-- 7-C. TABELAS DE OPERAÇÃO — contrato, sem anon (docs/supabase_rls_tabelas_restantes.sql)
+--    inventory_config/unit_configs/locations/campaigns: contrato inteiro;
+--    MASTER atravessa.
+--    campaign_snapshots/asset_logs/audit_logs: append-only (só SELECT/INSERT) —
+--    a trilha e os laudos não são reescrevíveis pelo PostgREST. A grafia legada
+--    `tenant_id` é copiada para `tenantid` pelo trigger do 7-A.
+--    base_generation: só leitura para authenticated; escrita pelo SQL de reset.
 DROP POLICY IF EXISTS p_all ON public.inventory_config;
-CREATE POLICY p_all ON public.inventory_config FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_all ON public.inventory_config;
+CREATE POLICY p_tenant_all ON public.inventory_config
+  FOR ALL TO authenticated
+  USING (public.tenant_visible(tenantid))
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.inventory_config FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.unit_configs;
-CREATE POLICY p_all ON public.unit_configs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_all ON public.unit_configs;
+CREATE POLICY p_tenant_all ON public.unit_configs
+  FOR ALL TO authenticated
+  USING (public.tenant_visible(tenantid))
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.unit_configs FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.audit_logs;
-CREATE POLICY p_all ON public.audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_select ON public.audit_logs;
+DROP POLICY IF EXISTS p_tenant_insert ON public.audit_logs;
+CREATE POLICY p_tenant_select ON public.audit_logs
+  FOR SELECT TO authenticated
+  USING (public.tenant_visible(tenantid));
+CREATE POLICY p_tenant_insert ON public.audit_logs
+  FOR INSERT TO authenticated
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.audit_logs FROM anon;
 
+-- user_permissions: sem anon; cada um na sua linha; admin no contrato.
 DROP POLICY IF EXISTS p_all ON public.user_permissions;
-CREATE POLICY p_all ON public.user_permissions FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_self_select ON public.user_permissions;
+DROP POLICY IF EXISTS p_self_insert ON public.user_permissions;
+DROP POLICY IF EXISTS p_self_update ON public.user_permissions;
+DROP POLICY IF EXISTS p_admin_all ON public.user_permissions;
+
+CREATE POLICY p_self_select ON public.user_permissions
+  FOR SELECT TO authenticated
+  USING (public.is_self_row(id, email));
+
+CREATE POLICY p_self_insert ON public.user_permissions
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    public.is_self_row(id, email)
+    AND (id IS NULL OR id = auth.uid())
+  );
+
+CREATE POLICY p_self_update ON public.user_permissions
+  FOR UPDATE TO authenticated
+  USING (public.is_self_row(id, email))
+  WITH CHECK (public.is_self_row(id, email));
+
+CREATE POLICY p_admin_all ON public.user_permissions
+  FOR ALL TO authenticated
+  USING (
+    public.is_master()
+    OR (
+      public.is_tenant_admin()
+      AND (
+        btrim(coalesce(tenantid, '')) = ''
+        OR (
+          btrim(coalesce(public.get_tenantid(), '')) <> ''
+          AND lower(btrim(coalesce(tenantid, ''))) = lower(btrim(coalesce(public.get_tenantid(), '')))
+        )
+      )
+    )
+  )
+  WITH CHECK (
+    public.is_master()
+    OR (
+      public.is_tenant_admin()
+      AND (
+        btrim(coalesce(tenantid, '')) = ''
+        OR (
+          btrim(coalesce(public.get_tenantid(), '')) <> ''
+          AND lower(btrim(coalesce(tenantid, ''))) = lower(btrim(coalesce(public.get_tenantid(), '')))
+        )
+      )
+    )
+  );
+
+REVOKE ALL ON public.user_permissions FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.locations;
-CREATE POLICY p_all ON public.locations FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_all ON public.locations;
+CREATE POLICY p_tenant_all ON public.locations
+  FOR ALL TO authenticated
+  USING (public.tenant_visible(tenantid))
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.locations FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.campaigns;
-CREATE POLICY p_all ON public.campaigns FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_all ON public.campaigns;
+CREATE POLICY p_tenant_all ON public.campaigns
+  FOR ALL TO authenticated
+  USING (public.tenant_visible(tenantid))
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.campaigns FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.campaign_snapshots;
-CREATE POLICY p_all ON public.campaign_snapshots FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_select ON public.campaign_snapshots;
+DROP POLICY IF EXISTS p_tenant_insert ON public.campaign_snapshots;
+CREATE POLICY p_tenant_select ON public.campaign_snapshots
+  FOR SELECT TO authenticated
+  USING (public.tenant_visible(tenantid));
+CREATE POLICY p_tenant_insert ON public.campaign_snapshots
+  FOR INSERT TO authenticated
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.campaign_snapshots FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.asset_logs;
-CREATE POLICY p_all ON public.asset_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_select ON public.asset_logs;
+DROP POLICY IF EXISTS p_tenant_insert ON public.asset_logs;
+CREATE POLICY p_tenant_select ON public.asset_logs
+  FOR SELECT TO authenticated
+  USING (public.tenant_visible(tenantid));
+CREATE POLICY p_tenant_insert ON public.asset_logs
+  FOR INSERT TO authenticated
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.asset_logs FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public."asset-photos";
-CREATE POLICY p_all ON public."asset-photos" FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_all ON public."asset-photos";
+CREATE POLICY p_tenant_all ON public."asset-photos" FOR ALL TO authenticated
+  USING (lower(tenantid) = lower(public.get_tenantid()))
+  WITH CHECK (lower(tenantid) = lower(public.get_tenantid()));
+
+-- ============================================================================
+-- 7-B. BUCKET asset-photos PRIVADO (mesmo SQL de docs/supabase_privacidade_storage.sql)
+-- ----------------------------------------------------------------------------
+-- O bucket de fotos era público: qualquer pessoa com o URL lia a evidência
+-- fotográfica de qualquer contrato. Passa a privado; a app guarda o CAMINHO em
+-- `_photoUrl` e pede uma URL assinada (`createSignedUrl`, 1 h) quando mostra.
+-- As quatro políticas de storage.objects só dão acesso à pasta do tenant do
+-- utilizador autenticado (photos/{tenantid}/...).
+-- ============================================================================
+-- get_tenantid(), is_self_row(), is_master(), is_tenant_admin(), a guarda de
+-- user_permissions e email_by_username() são criadas em 7-A (as políticas de
+-- `assets` e `user_permissions` precisam delas antes). Não duplicar aqui para
+-- as duas cópias não divergirem.
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('asset-photos', 'asset-photos', false)
+ON CONFLICT (id) DO UPDATE SET public = false;
+
+DROP POLICY IF EXISTS p_asset_photos_tenant_select ON storage.objects;
+CREATE POLICY p_asset_photos_tenant_select ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'asset-photos'
+    AND (storage.foldername(name))[1] = 'photos'
+    AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
+  );
+
+DROP POLICY IF EXISTS p_asset_photos_tenant_insert ON storage.objects;
+CREATE POLICY p_asset_photos_tenant_insert ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'asset-photos'
+    AND (storage.foldername(name))[1] = 'photos'
+    AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
+  );
+
+DROP POLICY IF EXISTS p_asset_photos_tenant_update ON storage.objects;
+CREATE POLICY p_asset_photos_tenant_update ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (
+    bucket_id = 'asset-photos'
+    AND (storage.foldername(name))[1] = 'photos'
+    AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
+  )
+  WITH CHECK (
+    bucket_id = 'asset-photos'
+    AND (storage.foldername(name))[1] = 'photos'
+    AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
+  );
+
+DROP POLICY IF EXISTS p_asset_photos_tenant_delete ON storage.objects;
+CREATE POLICY p_asset_photos_tenant_delete ON storage.objects
+  FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'asset-photos'
+    AND (storage.foldername(name))[1] = 'photos'
+    AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
+  );
+
+-- Objectos antigos fora de `photos/{tenantid}/...` deixariam de ser alcançáveis
+-- por política: passam a viver dentro da pasta do tenant (nada é apagado).
+UPDATE storage.objects o
+SET name = 'photos/' || up.tenantid || '/backups/'
+           || split_part(o.name, '/', 2) || '/' || split_part(o.name, '/', 3)
+FROM public.user_permissions up
+WHERE o.bucket_id = 'asset-photos'
+  AND o.name LIKE 'backups/%'
+  AND up.id::text = split_part(o.name, '/', 2);
+
+UPDATE storage.objects o
+SET name = 'photos/' || o.name
+WHERE o.bucket_id = 'asset-photos'
+  AND o.name NOT LIKE 'photos/%'
+  AND o.name NOT LIKE 'backups/%'
+  AND EXISTS (
+    SELECT 1
+    FROM public.user_permissions up
+    WHERE lower(up.tenantid) = lower(split_part(o.name, '/', 1))
+  );
 
 -- ============================================================================
 -- 8. SELO DE GERAÇÃO DA BASE (uma linha) — ver docs/GERACAO_BASE.md
@@ -572,7 +1066,11 @@ CREATE TABLE IF NOT EXISTS public.base_generation (
 ALTER TABLE public.base_generation ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS p_all ON public.base_generation;
-CREATE POLICY p_all ON public.base_generation FOR SELECT TO anon, authenticated USING (true);
+DROP POLICY IF EXISTS p_authenticated_select ON public.base_generation;
+CREATE POLICY p_authenticated_select ON public.base_generation
+  FOR SELECT TO authenticated
+  USING (true);
+REVOKE ALL ON public.base_generation FROM anon;
 
 INSERT INTO public.base_generation (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 

@@ -613,7 +613,9 @@ export const photoSyncManager = {
         try {
           const fileExt = 'jpg';
           const tenantidClean = String(rawTenant).trim();
-          const filePath = `${tenantidClean}/${item.assetId}/${item.id}.${fileExt}`;
+          // A política do bucket privado só aceita `photos/{tenantid}/...`:
+          // o caminho antigo (`{tenantid}/...`, sem o prefixo) é recusado.
+          const filePath = `photos/${tenantidClean}/${item.assetId}/${item.id}.${fileExt}`;
 
           const { error: uploadError } = await supabase.storage
             .from('asset-photos')
@@ -624,10 +626,9 @@ export const photoSyncManager = {
 
           if (uploadError) throw uploadError;
 
-          const { data: { publicUrl } } = supabase.storage
-            .from('asset-photos')
-            .getPublicUrl(filePath);
-
+          // O bucket é privado: guarda-se o CAMINHO. A URL assinada é gerada
+          // quando a foto é mostrada (`getSignedPhotoUrl`), não aqui.
+          //
           // Atualização nas tabelas oficiais via Dexie (IndexedDB) sem usar SQL puro.
           // Chave composta [tenantid+primarykey] (v6): flags são aplicadas por
           // primarykey via índice (todas as linhas da chave, qualquer contrato).
@@ -635,7 +636,7 @@ export const photoSyncManager = {
           // `_is_synced = 1` e do `_photoUrl`, apaga o carimbo de recusa — um
           // registo igual à nuvem não pode ficar com selo vermelho agarrado.
           const assetKey = String(item.assetId).trim();
-          await sqliteService.markAssetsSynced([assetKey], { _photoUrl: publicUrl });
+          await sqliteService.markAssetsSynced([assetKey], { _photoUrl: filePath });
 
           await photoQueueStore.removeItem(key);
           uploadCount++;

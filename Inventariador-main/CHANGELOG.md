@@ -7,6 +7,156 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Segurança — tabelas legadas e de controlo patrimonial
+
+- **O que era:** nenhum script cobria `tenants`, `filial`, `camposAlterados`,
+  `unit_gps_data` nem o módulo patrimonial (`chart_of_accounts`,
+  `asset_groups`, `ncm_classifiers`, `asset_movements`,
+  `asset_depreciation_history`, `log_inventario_termico`). Se essas tabelas
+  existirem na base, mantinham o `p_all` original — legíveis e escrevíveis com
+  a anon key.
+- **Agora:** `docs/supabase_rls_tabelas_legadas.sql` executa em três passos:
+  (1) dois `REVOKE` que fecham o `anon` em **todas** as tabelas/views e
+  sequências de `public`, sempre válidos; (2) uma consulta **geradora** (só
+  leitura) que devolve o DDL exacto para as tabelas que a base tem, condicionado
+  à existência da tabela e da coluna `tenantid`; (3) o DDL gerado, para revisão
+  antes de executar. `tenants`/`filial`/`camposAlterados` ficam com RLS e sem
+  política (nega tudo — o app só as menciona na validação do interceptor);
+  `unit_gps_data` e as cinco do módulo patrimonial ficam com `p_tenant_all` por
+  `tenant_visible`; a telemetria `log_inventario_termico` (sem contrato) só
+  aceita INSERT autenticado, sem SELECT. Sem blocos `DO`, para que um fragmento
+  enviado pelo editor não apanhe um `IF` solto (42601 já observado).
+- **Rede de segurança:** `REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon` e
+  `... ALL SEQUENCES ...` — mesmo uma tabela que nenhum script conheça deixa de
+  ser alcançável pelo anon (views incluídas, que são "tables" para GRANT).
+- **Views:** o script não altera views às cegas; o bloco AUDITORIA lista-as com
+  `security_invoker` e gera o `ALTER VIEW ... SET (security_invoker = true);`
+  de cada uma, mais matviews, grants e funções executáveis por `anon`.
+- **Testes:** `rlsTabelasLegadas` fixa o fecho condicional, a ausência de
+  `p_all`, as políticas por contrato, o INSERT-only da telemetria e a auditoria.
+
+### Segurança — RLS das tabelas de operação
+
+- **O que era:** `inventory_config`, `unit_configs`, `audit_logs`, `locations`,
+  `campaigns`, `campaign_snapshots`, `asset_logs` e `base_generation` ainda
+  tinham `p_all` para `anon`: a anon key lia (e apagava) a âncora GPS de todas
+  as filiais, a config/âncora de cada unidade, a trilha de auditoria completa,
+  as campanhas e os laudos fechados, o histórico por ativo e as localidades de
+  qualquer contrato.
+- **Agora:** `docs/supabase_rls_tabelas_restantes.sql` (e a secção 7-C do
+  bootstrap) troca o `p_all` por políticas só para `authenticated`, limitadas
+  ao contrato do perfil por `tenant_visible()` — `role = 'MASTER'` continua a
+  atravessar contratos e um perfil ainda sem contrato só alcança linhas sem
+  contrato. `anon` perde o privilégio de tabela nas sete.
+- **Append-only:** `audit_logs`, `asset_logs` e `campaign_snapshots` só têm
+  SELECT e INSERT — sem política de UPDATE/DELETE, o PostgREST não reescreve
+  nem apaga a trilha nem o laudo. A grafia legada `tenant_id` (triggers criados
+  fora do repositório) é copiada para `tenantid` por um trigger `BEFORE INSERT`
+  que a lê via `to_jsonb(NEW)`: as políticas não a referenciam, porque numa base
+  sem essa coluna o script rebentava com 42703. A fila de auditoria passa a
+  `ignoreDuplicates` (`ON CONFLICT DO NOTHING`), para o reenvio idempotente não
+  exigir UPDATE. `base_generation` fica só de leitura; a escrita continua no
+  SQL de reset.
+- **Aplicação:** o ficheiro é autónomo (recria as funções de que precisa) e cada
+  instrução está completa numa só linha, para o SQL Editor do Supabase e para
+  editores que executam por linhas/trechos. As políticas não referenciam
+  `tenant_id`; a grafia legada é copiada para `tenantid` por um trigger
+  `BEFORE INSERT` que a lê via `to_jsonb(NEW)` (sem 42703 onde a coluna não
+  existe).
+- **Cobertura:** com `unit_configs` incluído, não fica nenhuma tabela do app
+  com `p_all` para `anon`. `tenants`/`filial`, se existirem na base, são fora do
+  app e devem ser revistas à parte.
+- **Testes:** `rlsTabelasRestantes` fixa a ausência de políticas para `anon`, a
+  regra de contrato, a trilha append-only, o `ignoreDuplicates` da fila e a
+  paridade com o bootstrap.
+
+### Segurança — RLS de assets e user_permissions
+
+- **O que era:** `public.assets` e `public.user_permissions` continuavam com
+  `p_all` para `anon`: a base de qualquer contrato era legível e apagável sem
+  sessão, e ainda se liam os e-mails, papéis, contratos e filiais de todos os
+  utilizadores.
+- **Agora:** `docs/supabase_rls_assets_permissoes.sql` (e a secção 7/7-A do
+  bootstrap) troca o `p_all` de `assets` por `p_tenant_all`, só para
+  `authenticated` e limitada ao contrato do perfil; `role = 'MASTER'` (dono
+  global) mantém a visão entre contratos. Em `user_permissions`, `anon` perde o
+  privilégio de tabela e o login por username passa pela RPC
+  `email_by_username(text)` — devolve só o e-mail, por igualdade exata. Cada
+  utilizador lê e corrige a própria linha (o app sincroniza o `id` com o Auth);
+  uma guarda `BEFORE INSERT OR UPDATE` impede que se torne ADMIN, mude de
+  contrato ou entre noutro tenant, e um ADMIN só gere os utilizadores do seu
+  contrato.
+- **Auto-registo:** o trigger `handle_new_user()` deixou de ler `role`,
+  `is_admin`, `tenantid`, `filial` e `units` do `raw_user_meta_data` (escrito
+  pelo cliente do signUp, portanto forjável com a anon key) — era assim que o
+  ecrã de registo entrava como ADMIN no contrato de outra pessoa. O perfil nasce
+  sempre AUDITOR, sem contrato e sem `is_admin`; só username e nome vêm do
+  metadata. O vínculo ao contrato passa a ser dado por um administrador, já com
+  a conta criada. O ecrã de registo diz isso mesmo.
+- **Testes:** `rlsAssetsPermissoes` fixa a ausência de políticas para `anon`, a
+  RPC, a guarda de colunas, o trigger de auto-registo e a paridade com o
+  bootstrap.
+
+### Segurança — bucket de fotos privado e Kardex fechado
+
+- **O que era:** o bucket `asset-photos` era público e o app gravava em
+  `_photoUrl` o URL `/object/public/...`: quem tivesse o link lia a evidência
+  fotográfica de qualquer contrato. A tabela `asset-photos` tinha `p_all` para
+  `anon` e o Kardex aceitava `?d=` — o ativo inteiro (descrição, série, valores,
+  endereço) em base64 no URL — e consultava a nuvem por etiqueta **sem**
+  tenantid quando não havia sessão.
+- **Agora:** `docs/supabase_privacidade_storage.sql` (e a secção 7-B do
+  bootstrap) fecha o bucket, cria quatro políticas em `storage.objects` que só
+  dão acesso à pasta do tenant do utilizador autenticado
+  (`photos/{tenantid}/...`), troca o `p_all` de `asset-photos` por
+  `p_tenant_all` e move os backups automáticos legados para dentro dessa pasta.
+  O app guarda o **caminho** no bucket e assina a URL (`createSignedUrl`, 1 h)
+  na altura de mostrar (ficha e impressão); o upload devolve caminho, o delete
+  aceita caminho ou URL antigo e o backup passa a gravar em
+  `photos/{tenantid}/backups/...`. O `?d=` foi removido (o URL é limpo) e o
+  `?etq=` só consulta a nuvem com o tenant do utilizador.
+- **Testes:** `photoStoragePrivado` fixa a extração do caminho nos três
+  formatos de URL, o TTL, o SQL e a ausência de `getPublicUrl`/`?d=`.
+- **Revisão pós-commit:** o backup automático normaliza o tenant (o perfil pode
+  trazer uma lista — `photos/A,B/...` violava a política) e a fila de fotos
+  passou a gravar em `photos/{tenantid}/...`; o SQL move também as fotos antigas
+  guardadas fora dessa pasta.
+
+### Adicionado — selo global de base e sincronização
+
+- **O que era:** o modo ativo só era legível em duas telas (cartão «Modo de
+  Base» e barra amarela do Gestor). Fora delas, nada dizia se o aparelho
+  operava em Base Local ou na Base Oficial, nem se havia fila por subir.
+- **Agora:** um selo fixo e discreto no canto inferior esquerdo acompanha todas
+  as telas do shell: a primeira luz diz **Base Local** (vermelha, nada sai do
+  aparelho) ou **Supabase** (verde). A segunda é a da sincronização — verde
+  quando está tudo enviado, âmbar a piscar enquanto sincroniza ou com fila
+  pendente, vermelha sem rede ou com o envio parado, e cinza em Base Local (a
+  nuvem está desligada por desenho, não é falha). Não intercepta toques.
+- **Testes:** `baseModeBeacon` (10) fixa a regra da luz e o selo nos cinco
+  estados.
+
+### Corrigido — troca para Base Oficial que voltava a BASE LOCAL
+
+- **O que era:** com a blindagem física («Pronto para Campo», `PROTEGIDO`), o
+  botão «VALIDAR SOBERANIA» grava `is_system_locked` e o arranque força
+  BASE LOCAL. Ao escolher Base Oficial, o diálogo anunciava «MODO NUVEM»; no
+  reload, todas as telas voltavam a dizer BASE LOCAL — a troca nunca valia.
+- **Agora:** a troca para Base Oficial com blindagem ativa mostra o bloqueio e
+  explica o caminho, sem alterar o modo nem remover a blindagem por conta
+  própria; sem as chaves do Supabase no build, a troca é recusada antes de
+  gravar o modo, em vez de anunciar uma nuvem que não existe. O desbloqueio é
+  uma ação explícita no cartão «Status de Blindagem» («Desbloquear
+  blindagem»), com confirmação e registo de auditoria — só depois a Base
+  Oficial fica disponível. No sentido inverso, «VALIDAR SOBERANIA» passa a
+  recusar selar o aparelho enquanto a Base Oficial estiver ativa (a blindagem
+  voltaria a forçar BASE LOCAL no arranque).
+- **Placar do Gestor:** em BASE LOCAL ou com blindagem ativa o cartão do
+  protocolo SRE já não dispara uma leitura à nuvem que ficava eternamente em
+  «CONSULTANDO»; mostra `SUPABASE n/d · não consultada (base local)` e regista
+  no terminal que nenhuma chamada foi feita.
+- **Testes:** `sreProtocol` (5) cobre o estado de Base Local no placar.
+
 ### Adicionado — selo de geração da base
 
 - **O que era:** o reset da nuvem só limpava o aparelho onde «Preparar Nova Carga»

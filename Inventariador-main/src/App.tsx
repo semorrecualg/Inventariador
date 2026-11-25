@@ -13,7 +13,7 @@ import { effectiveAssetAddress, rotuloDePara } from './utils/assetAddress';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
-import { normalizeFlag, pickCanonical } from './utils/normalize';
+import { normalizeFlag } from './utils/normalize';
 import {
   summarizeDistinctKeys,
   summarizeDuplicateAssetKeys,
@@ -87,7 +87,7 @@ import AssetControlModule from './components/AssetControlModule';
 import TenantWorkSelector from './components/TenantWorkSelector';
 import WorkContextSelector from './components/WorkContextSelector';
 import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturnHubToWorkContext, historicoAposVoltar, SupabaseUserProfile } from './utils/routingUtils';
-import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
+import { resolveTenantId, firstTenantid, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, campaignUnitKeys, collectConfiguredUnitNames, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
@@ -117,6 +117,7 @@ import ThemePalette from './components/ThemePalette';
 import AssetPrintView from './components/AssetPrintView';
 import SyncManager from './components/SyncManager';
 import SyncBadge from './components/SyncBadge';
+import BaseModeBeacon from './components/BaseModeBeacon';
 import UnitConfigurator from './components/UnitConfigurator';
 import StressTestManager from './components/StressTestManager';
 
@@ -2821,7 +2822,11 @@ useEffect(() => {
       setIsSyncing(true);
       try {
         const { backupService } = await import('./services/backupService');
-        const res = await backupService.performMobileSingleBackup(user.id || user.email);
+        // `explicitTenantid` chega como string OU lista (perfil multi-filial):
+        // sem normalizar, o caminho saía «photos/A,B/backups/...» e a política
+        // do bucket (uma só pasta de tenant) negava o upload. Fica a primeira.
+        const backupTenant = firstTenantid(explicitTenantid || user.tenantid);
+        const res = await backupService.performMobileSingleBackup(user.id || user.email, backupTenant);
         if (res.success) {
           setLastSyncTime(new Date().toISOString());
           setSyncError(null);
@@ -3843,33 +3848,35 @@ useEffect(() => {
   useEffect(() => {
     if (!isDataLoaded) return;
 
-    // Check for URL parameters (e.g., ?etq=006731 or ?d=base64)
+    // Check for URL parameters (e.g., ?etq=006731)
     const params = new URLSearchParams(window.location.search);
     const etqParam = params.get('etq');
-    const dataParam = params.get('d');
 
-    if (dataParam && !publicAsset) {
-      try {
-        const decoded = JSON.parse(decodeURIComponent(escape(atob(dataParam))));
-        if (decoded && pickCanonical(decoded as Record<string, unknown>, 'etiqueta')) {
-          setPublicAsset(decoded as Asset);
-        }
-      } catch (e) {
-        logger.error('Erro ao decodificar dados do QR Code:', e);
-      }
-    } else if (etqParam && !publicAsset) {
+    if (params.has('d')) {
+      // QR antigos punham o ativo INTEIRO em base64 no URL (descrição, série,
+      // valores, endereço). O Kardex público foi fechado: o parâmetro é
+      // descartado e o URL limpo, para não ficar no histórico.
+      logger.warn('[Kardex] Parâmetro legado ?d= recusado: o payload do ativo não viaja em URL.');
+      const url = new URL(window.location.href);
+      url.searchParams.delete('d');
+      window.history.replaceState({}, document.title, url.pathname + url.search);
+    } else if (etqParam && !publicAsset && user?.tenantid) {
       // 1. Tenta encontrar no inventário local primeiro (mais rápido)
       const foundLocal = inventoryRef.current.assets.find(a => normalizeKey(a.etiqueta || "") === normalizeKey(etqParam));
       if (foundLocal) {
         setPublicAsset(foundLocal);
       } else {
         // 2. Se não estiver local, tenta buscar no Supabase (para novos usuários/dispositivos)
-        getAssetByTag(etqParam, user?.tenantid).then(foundCloud => {
+        //    Sempre com o tenant do utilizador: a consulta sem tenant lia a
+        //    primeira etiqueta que aparecesse na tabela.
+        getAssetByTag(etqParam, user.tenantid).then(foundCloud => {
           if (foundCloud) {
             setPublicAsset(foundCloud);
           }
         });
       }
+    } else if (etqParam && !publicAsset) {
+      logger.warn('[Kardex] Consulta por etiqueta recusada: é preciso sessão com tenant.');
     }
 
     const currentScreen = history[history.length - 1] || AppScreen.LOGIN;
@@ -5166,6 +5173,19 @@ useEffect(() => {
   };
 
   const handleUpdateDatabaseMode = async (mode: DatabaseMode) => {
+    // Sem as chaves do Supabase (build INTERNAL) a Base Oficial não existe: o
+    // arranque seguinte voltaria a resolver INTERNAL e a troca seria um
+    // no-op que ainda anunciava «MODO NUVEM». Falha antes de gravar o modo.
+    if (mode !== DatabaseMode.INTERNAL && isInternalMode) {
+      setModalConfig({
+        isOpen: true,
+        title: 'Base Oficial indisponível',
+        message: 'Este build não foi compilado com as chaves do Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). O sistema continua a operar na Base Local. Use um APK ou uma versão web com as chaves configuradas.',
+        type: 'warning'
+      });
+      return;
+    }
+
     setIsSyncing(true);
     try {
       // 1. Salva o estado atual no modo atual antes de trocar para garantir persistência
@@ -5289,6 +5309,56 @@ useEffect(() => {
   };
 
   /**
+   * DESBLOQUEIO EXPLÍCITO DA BLINDAGEM FÍSICA.
+   *
+   * A blindagem («Pronto para Campo», `is_system_locked`) suspende a nuvem e
+   * mantém o app na Base Local no arranque. Removê-la é uma decisão do
+   * operador, tomada no cartão da blindagem — nunca como efeito colateral de
+   * pedir a Base Oficial. Pede confirmação, fica registada na auditoria e avisa
+   * as telas abertas para relerem o selo.
+   */
+  const handleUnlockSovereignty = () => {
+    if (localStorage.getItem('is_system_locked') !== 'true') {
+      setModalConfig({
+        isOpen: true,
+        title: 'Blindagem já removida',
+        message: 'Este aparelho não está blindado: a Base Oficial já pode ser escolhida em «Modo de Base».',
+        type: 'info'
+      });
+      return;
+    }
+
+    setModalConfig({
+      isOpen: true,
+      title: 'Desbloquear a blindagem física?',
+      message: 'A blindagem «Pronto para Campo» suspende a sincronização com a nuvem e mantém o app na Base Local. ' +
+        'Ao confirmar, a blindagem é removida e a Base Oficial (Supabase) volta a poder ser escolhida em «Modo de Base». ' +
+        'A base local, a trilha de diretório e as fotos pendentes ficam intactas. Continuar?',
+      type: 'confirm',
+      confirmText: 'Desbloquear',
+      onConfirm: () => {
+        localStorage.removeItem('is_system_locked');
+        localStorage.removeItem('gbr_integrity_key');
+        window.dispatchEvent(new Event('gbr_sovereignty_changed'));
+        logger.info('>>> [Soberania] Blindagem física removida por ação explícita do operador.');
+        logAuditEvent({
+          user_email: user?.email || 'unknown',
+          action: 'UPDATE',
+          table_name: 'config',
+          details: 'Blindagem física removida (desbloqueio explícito no cartão da blindagem)',
+          tenantid: user?.tenantid || readSessionTenantId() || ''
+        });
+        setModalConfig({
+          isOpen: true,
+          title: 'Blindagem removida',
+          message: 'O aparelho deixou de estar blindado. Em «Gestão e Manutenção → Modo de Base» já pode escolher a Base Oficial (precisa de internet). A base local continua intacta.',
+          type: 'success'
+        });
+      }
+    });
+  };
+
+  /**
    * Pedido de troca de modo vindo do hub (painel DADOS). Confirma antes de
    * aplicar: as bases LOCAL e NUVEM são independentes e a troca salva o estado
    * atual no modo de origem antes de recarregar o outro banco.
@@ -5312,6 +5382,24 @@ useEffect(() => {
         isOpen: true,
         title: 'Nuvem indisponível',
         message: 'Este build não foi compilado com as chaves do Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). A Base Oficial só pode ser aberta em um APK/versão web com essas chaves configuradas.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    // BLINDAGEM FÍSICA × NUVEM: com `is_system_locked` gravado (botão
+    // «VALIDAR SOBERANIA» → PROTEGIDO), o arranque força BASE LOCAL e a
+    // sincronização é suspensa por desenho. A troca NÃO desfaz a blindagem:
+    // mostra o bloqueio e o caminho do desbloqueio explícito, que vive no
+    // cartão da blindagem (confirmação + auditoria). O modo atual fica como está.
+    if (mode !== DatabaseMode.INTERNAL && localStorage.getItem('is_system_locked') === 'true') {
+      setModalConfig({
+        isOpen: true,
+        title: 'Blindagem ativa — Base Oficial bloqueada',
+        message: 'Este aparelho está blindado («Pronto para Campo») e a blindagem suspende a sincronização com a nuvem. ' +
+          'Enquanto ela estiver ativa, o app opera na Base Local e a Base Oficial não pode ser ativada. ' +
+          'Para desbloquear, abra Gestão e Manutenção → Status de Blindagem → «Desbloquear blindagem» (pede confirmação e fica registado na auditoria). ' +
+          'Nada foi alterado: o modo atual e a base local continuam intactos.',
         type: 'warning'
       });
       return;
@@ -7554,6 +7642,7 @@ useEffect(() => {
             setPublicAsset(null);
             const url = new URL(window.location.href);
             url.searchParams.delete('etq');
+            url.searchParams.delete('d');
             window.history.replaceState({}, document.title, url.pathname + url.search);
           }} 
         />
@@ -7635,6 +7724,18 @@ useEffect(() => {
             </div>
           </div>
         )}
+
+        {/* SELO GLOBAL: base ativa + estado da sincronização, presente em todas
+            as telas do shell (as telas que devolvem cedo têm as suas próprias
+            barras). Sem toques: não tapa botões nem diálogos. */}
+        <BaseModeBeacon
+          isOnlineMode={isOnlineDatabaseMode(databaseMode)}
+          isSyncing={isSyncing}
+          pendingData={unsyncedAssetsCount + auditoriaPendenteCount}
+          pendingPhotos={pendingPhotosCount}
+          isSyncLocked={isSyncLocked}
+          syncError={syncError}
+        />
 
         {/* BASE LOCAL é hermética: aviso permanente de que nada sai do aparelho. */}
         {!isOnlineDatabaseMode(databaseMode) && screen !== AppScreen.LOGIN && (
@@ -7804,6 +7905,7 @@ useEffect(() => {
             onToggleGpsBypass={handleToggleGpsBypass}
             isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
             onCheckIntegrity={handleCheckIntegrity}
+            onUnlockSovereignty={handleUnlockSovereignty}
             campaignsCount={campaigns.length}
             currentCampaignId={inventory.currentCampaignId}
             accessDiagnostic={accessDiagnostic}

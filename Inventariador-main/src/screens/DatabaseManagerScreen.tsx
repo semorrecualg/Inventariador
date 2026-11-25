@@ -4,7 +4,7 @@ import { showRecoveryToast as originalShowRecoveryToast } from '../services/Navi
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
-import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets } from '../services/supabaseService';
+import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets, getDatabaseMode, isOnlineDatabaseMode } from '../services/supabaseService';
 import { contarAuditoriaPendente, contarAuditoriaNuvem, type ContagemAuditoriaNuvem } from '../services/auditoriaNuvem';
 import { isAdminUser } from '../utils/authUtils';
 import { CloudPushPolicyError } from '../utils/cloudPushGuard';
@@ -359,6 +359,23 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const loadCloudCount = useCallback(async () => {
     if (isInternalMode) {
       setCloudBase({ state: 'internal', count: null, message: 'Supabase não configurado neste ambiente.' });
+      return;
+    }
+    // BASE LOCAL e blindagem física não falam com a nuvem: sem esta guarda o
+    // placar ficava eternamente em «CONSULTANDO» (a chamada pendurava sem rede
+    // ou sem nuvem) enquanto o resto da tela dizia BASE LOCAL.
+    const blindado = typeof localStorage !== 'undefined' && localStorage.getItem('is_system_locked') === 'true';
+    if (!isOnlineDatabaseMode(getDatabaseMode()) || blindado) {
+      setCloudBase({
+        state: 'local',
+        count: null,
+        message: blindado
+          ? 'Blindagem física ativa — a Nuvem não é consultada.'
+          : 'BASE LOCAL — a Nuvem não é consultada.'
+      });
+      addLog(
+        `[SRE_BASES] ${blindado ? 'Blindagem física ativa' : 'BASE LOCAL'}: nenhuma chamada à Nuvem foi feita.`
+      );
       return;
     }
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -1108,8 +1125,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           <button
             type="button"
             onClick={() => { void loadCloudCount(); }}
-            disabled={cloudBase.state === 'loading'}
-            title="Reler o total da Nuvem (só leitura)"
+            disabled={cloudBase.state === 'loading' || cloudBase.state === 'local'}
+            title={cloudBase.state === 'local' ? 'Base Local: a Nuvem não é consultada' : 'Reler o total da Nuvem (só leitura)'}
             className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-sky-900/40 hover:bg-sky-900/70 disabled:bg-slate-900 disabled:text-slate-600 text-sky-200 text-[8px] font-black uppercase tracking-widest border border-sky-800/60 transition-all cursor-pointer shrink-0"
           >
             <RefreshCw size={12} className={cloudBase.state === 'loading' ? 'animate-spin' : ''} />
@@ -1124,7 +1141,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           </div>
           <div className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
             <div className="text-[8px] font-bold text-slate-500 uppercase tracking-wider">Supabase</div>
-            <div className="text-sm font-black font-mono text-sky-300 mt-0.5">{cloudBase.count ?? '—'}</div>
+            <div className="text-sm font-black font-mono text-sky-300 mt-0.5">
+              {cloudBase.state === 'local' ? 'n/d' : (cloudBase.count ?? '—')}
+            </div>
             <div className="text-[8px] font-mono text-slate-500 uppercase tracking-wider">{CLOUD_STATE_LABEL[cloudBase.state]}</div>
           </div>
         </div>
