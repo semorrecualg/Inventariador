@@ -188,7 +188,7 @@ const marcarFalha = async (logs: DexieAuditLog[], mensagem: string): Promise<voi
 };
 
 /**
- * Envia um lote da trilha local para a nuvem.
+ * Envia um lote da trilha local para a nuvem (append-only: reenvio ignorado).
  *
  * Devolve sempre um resultado (nunca lança): o ciclo de fundo não pode morrer
  * por causa da trilha, e uma falha tem de deixar a linha na fila com o motivo.
@@ -215,8 +215,12 @@ export const enviarFilaAuditoria = async (): Promise<ResultadoFilaAuditoria> => 
     const tenantFallback = getCurrentTenantid() || null;
     const payload = pendentes.map((log) => mapearLogParaNuvem(log, tenantFallback));
 
+    // `ignoreDuplicates` = ON CONFLICT DO NOTHING: a trilha na nuvem é
+    // append-only (as políticas de `audit_logs` só têm SELECT/INSERT), pelo que
+    // um reenvio com `client_event_id` já arquivado é ignorado em vez de exigir
+    // UPDATE — nada é reescrito e o evento continua confirmado.
     const resposta = await Promise.race([
-      supabase.from('audit_logs').upsert(payload, { onConflict: 'client_event_id' }),
+      supabase.from('audit_logs').upsert(payload, { onConflict: 'client_event_id', ignoreDuplicates: true }),
       new Promise<{ error: { message: string } }>((_, reject) =>
         setTimeout(() => reject(new Error('AUDIT_PUSH_TIMEOUT')), TEMPO_LIMITE_ENVIO_MS)
       ),

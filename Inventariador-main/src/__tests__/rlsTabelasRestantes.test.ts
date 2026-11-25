@@ -1,0 +1,165 @@
+// src/__tests__/rlsTabelasRestantes.test.ts
+// Regressão para docs/supabase_rls_tabelas_restantes.sql:
+//  - `anon` deixa de ler/escrever inventory_config, audit_logs, locations,
+//    campaigns, campaign_snapshots, asset_logs e base_generation;
+//  - tudo fica limitado ao contrato (MASTER atravessa; perfil sem contrato só
+//    alcança linhas sem contrato);
+//  - a trilha e os laudos são append-only (sem UPDATE/DELETE);
+//  - a fila de auditoria passa a `ignoreDuplicates` (ON CONFLICT DO NOTHING),
+//    que é o que mantém o reenvio idempotente sem política de UPDATE;
+//  - o bootstrap repete as mesmas políticas (sem divergir do ficheiro).
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const sqlNovo = readFileSync(join(process.cwd(), 'docs', 'supabase_rls_tabelas_restantes.sql'), 'utf8');
+const sqlBootstrap = readFileSync(join(process.cwd(), 'docs', 'supabase_bootstrap.sql'), 'utf8');
+const filaAuditoria = readFileSync(join(process.cwd(), 'src', 'services', 'auditoriaNuvem.ts'), 'utf8');
+
+const TABELAS = [
+  'inventory_config',
+  'audit_logs',
+  'locations',
+  'campaigns',
+  'campaign_snapshots',
+  'asset_logs',
+  'base_generation',
+] as const;
+
+/** Linhas de código: remove comentários `--` e linhas vazias. */
+const codigo = (sql: string) =>
+  sql
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('--'));
+
+/** Corpo de uma função SQL (entre o `$$` de abertura e o `$$;`). */
+const corpoFuncao = (sql: string, assinatura: string) => {
+  const inicio = sql.indexOf(assinatura);
+  expect(inicio).toBeGreaterThan(-1);
+  const corpo = sql.slice(inicio);
+  return corpo.slice(0, corpo.indexOf('$$;'));
+};
+
+describe('docs/supabase_rls_tabelas_restantes.sql — tabelas de operação', () => {
+  it('envolve tudo numa transacção, é idempotente e retira o p_all das 7 tabelas', () => {
+    const linhas = codigo(sqlNovo);
+    expect(linhas.filter((l) => l === 'BEGIN;').length).toBe(1);
+    expect(linhas.filter((l) => l === 'COMMIT;').length).toBe(1);
+    expect(linhas.some((l) => l.startsWith('CREATE POLICY p_all'))).toBe(false);
+    for (const t of TABELAS) {
+      expect(linhas).toContain(`DROP POLICY IF EXISTS p_all ON public.${t};`);
+      expect(linhas).toContain(`ALTER TABLE public.${t} ENABLE ROW LEVEL SECURITY;`);
+    }
+  });
+
+  it('nenhuma política destas tabelas alcança anon', () => {
+    const politicas = sqlNovo.split('CREATE POLICY').slice(1);
+    expect(politicas.length).toBe(10);
+    for (const p of politicas) {
+      const cabecalho = p.slice(0, 220);
+      expect(cabecalho).toContain('TO authenticated');
+      expect(cabecalho).not.toMatch(/\bTO anon\b/);
+    }
+  });
+
+  it('retira o privilégio de tabela a anon (defesa em profundidade)', () => {
+    for (const t of TABELAS) {
+      expect(sqlNovo).toContain(`REVOKE ALL ON public.${t} FROM anon;`);
+    }
+  });
+
+  it('tenant_visible(): MASTER atravessa, contrato igual ou ambos sem contrato', () => {
+    const corpo = corpoFuncao(sqlNovo, 'FUNCTION public.tenant_visible(p_tenantid text)');
+    expect(corpo).toContain('SECURITY DEFINER');
+    expect(corpo).toContain('public.is_master()');
+    expect(corpo).toContain('public.get_tenantid()');
+    // Perfil com contrato só casa com o mesmo contrato…
+    expect(corpo).toContain("btrim(coalesce(public.get_tenantid(), '')) <> ''");
+    // …e perfil sem contrato só alcança linhas também sem contrato.
+    expect(corpo).toContain("btrim(coalesce(public.get_tenantid(), '')) = ''");
+    expect(sqlNovo).toContain('GRANT EXECUTE ON FUNCTION public.tenant_visible(text) TO authenticated;');
+    expect(sqlNovo).toContain('REVOKE ALL ON FUNCTION public.tenant_visible(text) FROM anon;');
+  });
+
+  it('a função é criada antes das políticas que a usam', () => {
+    const posFuncao = sqlNovo.indexOf('FUNCTION public.tenant_visible');
+    expect(posFuncao).toBeGreaterThan(-1);
+    expect(sqlNovo.indexOf('CREATE POLICY p_tenant_all ON public.inventory_config')).toBeGreaterThan(posFuncao);
+    expect(sqlNovo.indexOf('CREATE POLICY p_tenant_select ON public.audit_logs')).toBeGreaterThan(posFuncao);
+  });
+
+  it('trilha e laudos são append-only: só SELECT e INSERT', () => {
+    for (const t of ['audit_logs', 'asset_logs', 'campaign_snapshots']) {
+      expect(sqlNovo).toContain(`CREATE POLICY p_tenant_select ON public.${t}`);
+      expect(sqlNovo).toContain(`CREATE POLICY p_tenant_insert ON public.${t}`);
+      expect(sqlNovo).not.toMatch(
+        new RegExp(`CREATE POLICY \\w+ ON public\\.${t}\\s+FOR (?:UPDATE|DELETE|ALL)`)
+      );
+    }
+    // audit_logs e asset_logs toleram a grafia legada `tenant_id` dos triggers.
+    const auditSelect = sqlNovo.slice(
+      sqlNovo.indexOf('CREATE POLICY p_tenant_select ON public.audit_logs'),
+      sqlNovo.indexOf('REVOKE ALL ON public.audit_logs')
+    );
+    expect(auditSelect).toContain('coalesce(tenantid, tenant_id)');
+  });
+
+  it('base_generation é só leitura para authenticated (escrita no SQL Editor)', () => {
+    const policy = sqlNovo.slice(
+      sqlNovo.indexOf('CREATE POLICY p_authenticated_select ON public.base_generation'),
+      sqlNovo.indexOf('REVOKE ALL ON public.base_generation')
+    );
+    expect(policy).toContain('FOR SELECT TO authenticated');
+    expect(policy).not.toMatch(/FOR (?:INSERT|UPDATE|DELETE|ALL)/);
+  });
+
+  it('recusa correr sem as funções do ficheiro anterior (pré-requisito explícito)', () => {
+    expect(sqlNovo).toContain('docs/supabase_rls_assets_permissoes.sql');
+    expect(sqlNovo).toContain("to_regprocedure('public.get_tenantid()')");
+    expect(sqlNovo).toContain("to_regprocedure('public.is_master()')");
+    expect(sqlNovo).toContain('RAISE EXCEPTION');
+  });
+
+  it('não toca em unit_configs — é a exposição seguinte, não uma falsa cobertura', () => {
+    expect(sqlNovo).not.toContain('ON public.unit_configs');
+    expect(sqlNovo).toContain('unit_configs');
+  });
+});
+
+describe('docs/supabase_bootstrap.sql — mesmas políticas (paridade)', () => {
+  it('nenhuma das 7 tabelas volta a criar p_all', () => {
+    for (const t of TABELAS) {
+      expect(sqlBootstrap).not.toContain(`CREATE POLICY p_all ON public.${t}`);
+      expect(sqlBootstrap).toContain(`REVOKE ALL ON public.${t} FROM anon;`);
+    }
+  });
+
+  it('cria tenant_visible antes de a usar e define as políticas por contrato', () => {
+    const posFuncao = sqlBootstrap.indexOf('FUNCTION public.tenant_visible');
+    expect(posFuncao).toBeGreaterThan(sqlBootstrap.indexOf('FUNCTION public.is_master'));
+    for (const t of ['inventory_config', 'locations', 'campaigns']) {
+      expect(sqlBootstrap).toContain(`CREATE POLICY p_tenant_all ON public.${t}`);
+      expect(sqlBootstrap.indexOf(`CREATE POLICY p_tenant_all ON public.${t}`)).toBeGreaterThan(posFuncao);
+    }
+    for (const t of ['audit_logs', 'asset_logs', 'campaign_snapshots']) {
+      expect(sqlBootstrap).toContain(`CREATE POLICY p_tenant_select ON public.${t}`);
+      expect(sqlBootstrap).toContain(`CREATE POLICY p_tenant_insert ON public.${t}`);
+    }
+    expect(sqlBootstrap).toContain('CREATE POLICY p_authenticated_select ON public.base_generation');
+  });
+
+  it('as trilhas do bootstrap também não ganham UPDATE/DELETE', () => {
+    for (const t of ['audit_logs', 'asset_logs', 'campaign_snapshots']) {
+      expect(sqlBootstrap).not.toMatch(
+        new RegExp(`CREATE POLICY \\w+ ON public\\.${t}\\s+FOR (?:UPDATE|DELETE|ALL)`)
+      );
+    }
+  });
+});
+
+describe('fila de auditoria — escrita compatível com a trilha append-only', () => {
+  it('reenvia com ignoreDuplicates (ON CONFLICT DO NOTHING), sem exigir UPDATE', () => {
+    expect(filaAuditoria).toContain("onConflict: 'client_event_id', ignoreDuplicates: true");
+  });
+});

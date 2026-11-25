@@ -32,6 +32,10 @@
 --   • contas criadas pelo ecrã de registo nascem AUDITOR e SEM contrato: o
 --     vínculo passa a ser dado por um administrador.
 --
+-- Seguinte: docs/supabase_rls_tabelas_restantes.sql fecha inventory_config,
+-- audit_logs, locations, campaigns, campaign_snapshots, asset_logs e
+-- base_generation (unit_configs fica assinalada como exposição em aberto).
+--
 -- Como usar: colar o ficheiro inteiro no SQL Editor do Supabase. Se falhar, a
 -- transacção reverte tudo. Pode ser executado mais de uma vez.
 -- ============================================================================

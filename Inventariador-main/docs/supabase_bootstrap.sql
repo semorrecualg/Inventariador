@@ -553,12 +553,16 @@ ALTER TABLE public."asset-photos" ALTER COLUMN id SET DEFAULT gen_random_uuid();
 -- 7. RLS — políticas estáticas e idempotentes.
 --    Sem políticas, toda gravação da nuvem falharia com 401/42501 (o app
 --    tolera, mas nada sincronizaria).
---    `asset-photos` (7-B), `assets` e `user_permissions` são as exceções: não
---    têm `p_all`. As duas primeiras ficam limitadas ao contrato do utilizador
---    (MASTER atravessa) e `user_permissions` deixa de ser legível por `anon` —
---    ver 7-A e docs/supabase_rls_assets_permissoes.sql.
+--    Só `unit_configs` mantém `p_all` (exposição seguinte, ainda em aberto —
+--    ver docs/GOVERNANCA.md). `assets`, `user_permissions`, `asset-photos` e as
+--    tabelas de operação (inventory_config, audit_logs, locations, campaigns,
+--    campaign_snapshots, asset_logs, base_generation) ficam limitadas ao
+--    contrato do utilizador, com MASTER a atravessar, e `anon` perde o
+--    privilégio de tabela — ver 7-A, docs/supabase_rls_assets_permissoes.sql e
+--    docs/supabase_rls_tabelas_restantes.sql.
 --    Nome de política fixo (`p_all` / `p_tenant_all` / `p_self_*` /
---    `p_admin_all`) — nunca interpolado.
+--    `p_admin_all` / `p_tenant_select|insert` / `p_authenticated_select`) —
+--    nunca interpolado.
 -- ============================================================================
 ALTER TABLE public.assets            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_config  ENABLE ROW LEVEL SECURITY;
@@ -753,6 +757,31 @@ CREATE TRIGGER user_permissions_guard
   BEFORE INSERT OR UPDATE ON public.user_permissions
   FOR EACH ROW EXECUTE FUNCTION public.guard_user_permissions();
 
+-- tenant_visible(): a regra de contrato das tabelas de operação (7-C), num só
+-- sítio. MASTER atravessa; perfil com contrato vê o seu; perfil sem contrato
+-- só alcança linhas sem contrato (eventos de login de contas novas).
+CREATE OR REPLACE FUNCTION public.tenant_visible(p_tenantid text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT public.is_master()
+      OR (
+        btrim(coalesce(public.get_tenantid(), '')) <> ''
+        AND lower(btrim(coalesce(p_tenantid, ''))) = lower(btrim(coalesce(public.get_tenantid(), '')))
+      )
+      OR (
+        btrim(coalesce(public.get_tenantid(), '')) = ''
+        AND btrim(coalesce(p_tenantid, '')) = ''
+      )
+$$;
+
+REVOKE ALL ON FUNCTION public.tenant_visible(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.tenant_visible(text) FROM anon;
+GRANT EXECUTE ON FUNCTION public.tenant_visible(text) TO authenticated;
+
 -- assets: só authenticated, limitado ao contrato (MASTER atravessa).
 DROP POLICY IF EXISTS p_all ON public.assets;
 DROP POLICY IF EXISTS p_tenant_all ON public.assets;
@@ -775,14 +804,34 @@ CREATE POLICY p_tenant_all ON public.assets
 
 REVOKE ALL ON public.assets FROM anon;
 
+-- 7-C. TABELAS DE OPERAÇÃO — contrato, sem anon (docs/supabase_rls_tabelas_restantes.sql)
+--    inventory_config/locations/campaigns: contrato inteiro; MASTER atravessa.
+--    campaign_snapshots/asset_logs/audit_logs: append-only (só SELECT/INSERT) —
+--    a trilha e os laudos não são reescrevíveis pelo PostgREST.
+--    base_generation: só leitura para authenticated; escrita pelo SQL de reset.
+--    FORA DO ÂMBITO: `unit_configs` continua com p_all (exposição seguinte).
 DROP POLICY IF EXISTS p_all ON public.inventory_config;
-CREATE POLICY p_all ON public.inventory_config FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_all ON public.inventory_config;
+CREATE POLICY p_tenant_all ON public.inventory_config
+  FOR ALL TO authenticated
+  USING (public.tenant_visible(tenantid))
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.inventory_config FROM anon;
 
+-- unit_configs: ainda aberta a anon — a próxima exposição a fechar.
 DROP POLICY IF EXISTS p_all ON public.unit_configs;
 CREATE POLICY p_all ON public.unit_configs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS p_all ON public.audit_logs;
-CREATE POLICY p_all ON public.audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_select ON public.audit_logs;
+DROP POLICY IF EXISTS p_tenant_insert ON public.audit_logs;
+CREATE POLICY p_tenant_select ON public.audit_logs
+  FOR SELECT TO authenticated
+  USING (public.tenant_visible(coalesce(tenantid, tenant_id)));
+CREATE POLICY p_tenant_insert ON public.audit_logs
+  FOR INSERT TO authenticated
+  WITH CHECK (public.tenant_visible(coalesce(tenantid, tenant_id)));
+REVOKE ALL ON public.audit_logs FROM anon;
 
 -- user_permissions: sem anon; cada um na sua linha; admin no contrato.
 DROP POLICY IF EXISTS p_all ON public.user_permissions;
@@ -839,16 +888,42 @@ CREATE POLICY p_admin_all ON public.user_permissions
 REVOKE ALL ON public.user_permissions FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.locations;
-CREATE POLICY p_all ON public.locations FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_all ON public.locations;
+CREATE POLICY p_tenant_all ON public.locations
+  FOR ALL TO authenticated
+  USING (public.tenant_visible(tenantid))
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.locations FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.campaigns;
-CREATE POLICY p_all ON public.campaigns FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_all ON public.campaigns;
+CREATE POLICY p_tenant_all ON public.campaigns
+  FOR ALL TO authenticated
+  USING (public.tenant_visible(tenantid))
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.campaigns FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.campaign_snapshots;
-CREATE POLICY p_all ON public.campaign_snapshots FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_select ON public.campaign_snapshots;
+DROP POLICY IF EXISTS p_tenant_insert ON public.campaign_snapshots;
+CREATE POLICY p_tenant_select ON public.campaign_snapshots
+  FOR SELECT TO authenticated
+  USING (public.tenant_visible(tenantid));
+CREATE POLICY p_tenant_insert ON public.campaign_snapshots
+  FOR INSERT TO authenticated
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.campaign_snapshots FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.asset_logs;
-CREATE POLICY p_all ON public.asset_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_select ON public.asset_logs;
+DROP POLICY IF EXISTS p_tenant_insert ON public.asset_logs;
+CREATE POLICY p_tenant_select ON public.asset_logs
+  FOR SELECT TO authenticated
+  USING (public.tenant_visible(coalesce(tenantid, tenant_id)));
+CREATE POLICY p_tenant_insert ON public.asset_logs
+  FOR INSERT TO authenticated
+  WITH CHECK (public.tenant_visible(coalesce(tenantid, tenant_id)));
+REVOKE ALL ON public.asset_logs FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public."asset-photos";
 DROP POLICY IF EXISTS p_tenant_all ON public."asset-photos";
@@ -958,7 +1033,11 @@ CREATE TABLE IF NOT EXISTS public.base_generation (
 ALTER TABLE public.base_generation ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS p_all ON public.base_generation;
-CREATE POLICY p_all ON public.base_generation FOR SELECT TO anon, authenticated USING (true);
+DROP POLICY IF EXISTS p_authenticated_select ON public.base_generation;
+CREATE POLICY p_authenticated_select ON public.base_generation
+  FOR SELECT TO authenticated
+  USING (true);
+REVOKE ALL ON public.base_generation FROM anon;
 
 INSERT INTO public.base_generation (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Segurança — RLS das tabelas de operação
+
+- **O que era:** `inventory_config`, `audit_logs`, `locations`, `campaigns`,
+  `campaign_snapshots`, `asset_logs` e `base_generation` ainda tinham `p_all`
+  para `anon`: a anon key lia (e apagava) a âncora GPS de todas as filiais, a
+  trilha de auditoria completa, as campanhas e os laudos fechados, o histórico
+  por ativo e as localidades de qualquer contrato.
+- **Agora:** `docs/supabase_rls_tabelas_restantes.sql` (e a secção 7-C do
+  bootstrap) troca o `p_all` por políticas só para `authenticated`, limitadas
+  ao contrato do perfil por `tenant_visible()` — `role = 'MASTER'` continua a
+  atravessar contratos e um perfil ainda sem contrato só alcança linhas sem
+  contrato. `anon` perde o privilégio de tabela nas sete.
+- **Append-only:** `audit_logs`, `asset_logs` e `campaign_snapshots` só têm
+  SELECT e INSERT — sem política de UPDATE/DELETE, o PostgREST não reescreve
+  nem apaga a trilha nem o laudo. A fila de auditoria passa a
+  `ignoreDuplicates` (`ON CONFLICT DO NOTHING`), para o reenvio idempotente não
+  exigir UPDATE. `base_generation` fica só de leitura; a escrita continua no
+  SQL de reset.
+- **Fora do âmbito:** `unit_configs` mantém `p_all` — é a exposição seguinte,
+  assinalada em `docs/GOVERNANCA.md`. A base não deve ser dada como fechada
+  antes disso.
+- **Testes:** `rlsTabelasRestantes` fixa a ausência de políticas para `anon`, a
+  regra de contrato, a trilha append-only, o `ignoreDuplicates` da fila e a
+  paridade com o bootstrap.
+
 ### Segurança — RLS de assets e user_permissions
 
 - **O que era:** `public.assets` e `public.user_permissions` continuavam com

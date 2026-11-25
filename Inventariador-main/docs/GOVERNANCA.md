@@ -179,10 +179,14 @@ nunca entra em variável `VITE_*`.
 - **Multi-tenant:** todo dado é escopado por `tenantid` (+ `filial`). Upsert de
   ativos usa `onConflict('tenantid, id')` — nunca `id` sozinho.
 - **RBAC é do app** (`rbacService.ts`); a nuvem não decide papel.
-- **RLS:** o bootstrap cria políticas permissivas (`p_all`). Isso é aceitável para
-  MVP, **não** para multi-cliente real. Hardening pendente: escopo por `tenantid`
-  derivado do JWT (`auth.jwt() ->> 'tenantid'`). Enquanto permissivo, a anon key
-  permite leitura ampla — trate como risco aberto.
+- **RLS:** `assets`, `user_permissions`, `asset-photos` e as tabelas de operação
+  (`inventory_config`, `audit_logs`, `locations`, `campaigns`,
+  `campaign_snapshots`, `asset_logs`, `base_generation`) já estão limitadas ao
+  contrato do perfil (`public.tenant_visible`), com `role = 'MASTER'` a
+  atravessar contratos; `anon` perdeu o privilégio de tabela. **Continua aberta**
+  `unit_configs` (`p_all` para `anon`) — é o risco restante e a próxima
+  migração. Ver `docs/supabase_rls_assets_permissoes.sql` e
+  `docs/supabase_rls_tabelas_restantes.sql`.
 - **Migrações:** apenas os `scripts/*.sql` versionados, sempre idempotentes e com
   backup/export antes. `DROP TABLE` só com backup e aviso no PR.
 - **Backup:** exportar pelo painel (Database → Backups) antes de qualquer DDL e
@@ -294,7 +298,7 @@ Detalhes da chave e do custo de a manter no repositório:
 | # | Pendência | Impacto | Depende de |
 |---|---|---|---|
 | 1 | Secrets `VITE_SUPABASE_*` não cadastrados no GitHub (Actions) | APK nasce INTERNAL | Passo 5 do runbook (§ 7.2) — é ação no painel, em minutos |
-| 2 | RLS permissiva (`p_all`) | Anon key lê além do tenant | Hardening por `tenantid` (pós-reconexão) |
+| 2 | `unit_configs` com `p_all` para `anon` | Anon key lê a config/âncora de todas as unidades | Aplicar a receita de `docs/supabase_rls_tabelas_restantes.sql` a `unit_configs` |
 | 3 | E2E Playwright fora do CI | Regressão de fluxo só manual | Decisão de custo/benefício |
 | 4 | Teste de login real no Supabase | AUTH saudável e tabelas OK, mas nenhum signup/sessão de ponta a ponta validado | Conta de teste no projeto |
 
