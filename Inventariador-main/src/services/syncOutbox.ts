@@ -130,33 +130,51 @@ export async function marcarEnviadosOutbox(primarykeys: Array<string | null | un
 
 /**
  * Envio recusado/interrompido: incrementa `attempts` e empurra a próxima
- * tentativa. Só toca em entradas existentes — um registo que nunca passou pela
- * outbox continua a ser tratado pela fila legada.
+ * tentativa.
+ *
+ * Cria a entrada quando ela não existe. Antes só tocava em envelopes já
+ * gravados, e um registo que nunca passou pela outbox — importação de planilha,
+ * exclusão, escrita de outro caminho — era retentado a cada ciclo de 60 s sem
+ * recuo nenhum: o `next_attempt_at` só existia para quem já tinha envelope.
+ * Agora a falha é o que cria o envelope, com `op` e contrato tirados do próprio
+ * registo.
  */
 export async function marcarFalhasOutbox(
-  primarykeys: Array<string | null | undefined>,
+  registos: Array<RegistoParaOutbox | null | undefined>,
   motivo: string
 ): Promise<number> {
-  const chaves = Array.from(
-    new Set(primarykeys.map((chave) => sanitizeAssetKey(String(chave ?? ''))).filter(Boolean))
-  );
-  if (chaves.length === 0) return 0;
+  const porChave = new Map<string, RegistoParaOutbox>();
+  for (const registo of registos) {
+    if (!registo) continue;
+    const primarykey = sanitizeAssetKey(String(registo.primarykey ?? registo.id ?? ''));
+    const tenantid = String(registo.tenantid ?? '').trim().toUpperCase();
+    // Sem chave ou sem contrato não há envelope possível: a fila legada segue
+    // a tratá-lo como antes (nada pior do que era).
+    if (!primarykey || !tenantid) continue;
+    porChave.set(chaveOutbox(tenantid, primarykey), registo);
+  }
+  if (porChave.size === 0) return 0;
 
-  const entradas = await db.sync_outbox.where('primarykey').anyOf(chaves).toArray();
-  if (entradas.length === 0) return 0;
+  const existentes = await db.sync_outbox.where('key').anyOf(Array.from(porChave.keys())).toArray();
+  const porKey = new Map(existentes.map((entrada) => [entrada.key, entrada]));
 
   const agora = Date.now();
-  const atualizadas: DexieSyncOutbox[] = entradas.map((entrada) => {
-    const attempts = Number(entrada.attempts || 0) + 1;
-    return {
-      ...entrada,
+  const iso = new Date(agora).toISOString();
+  const atualizadas: DexieSyncOutbox[] = [];
+
+  for (const [key, registo] of porChave) {
+    const existente = porKey.get(key);
+    const attempts = Number(existente?.attempts || 0) + 1;
+    const base = existente ?? entradaOutbox(registo, new Date(agora));
+    atualizadas.push({
+      ...base,
       status: 'FALHA' as OutboxStatus,
       attempts,
       next_attempt_at: agora + recuoDe(attempts),
-      updated_at: new Date(agora).toISOString(),
+      updated_at: iso,
       last_error: String(motivo || '').slice(0, 240)
-    };
-  });
+    });
+  }
   await db.sync_outbox.bulkPut(atualizadas);
   return atualizadas.length;
 }

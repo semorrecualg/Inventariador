@@ -432,6 +432,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   de regressão (nuvem a responder sem sessão depois do login local) em
   `bootCloudCheck`.
 
+### Corrigido — recuo para o registo que falha sem envelope
+
+- **O que era:** o recuo (`next_attempt_at`) só existia para quem já tinha
+  entrada na outbox. Um registo que nunca passou por ela — importação de
+  planilha, exclusão, escrita de outro caminho — falhava e voltava a ser tentado
+  a cada ciclo de 60 s, sem recuo nenhum.
+- **Agora:** a falha é o que cria o envelope. `marcarFalhasOutbox` recebe os
+  registos (não só as chaves), cria a entrada em falta com `op` e contrato
+  tirados do próprio ativo, `attempts = 1` e a primeira espera de 60 s; entradas
+  existentes continuam a subir o recuo exponencial até 30 min. Sem chave ou sem
+  contrato não há envelope possível e a fila legada trata o registo como antes.
+- **Testes:** `syncOutbox` passa a exigir a criação da entrada; `syncPushQueue`
+  fixa o caminho completo — falha sem envelope cria a entrada e o ciclo seguinte
+  não volta a tentar.
+
 ## [3.1.0] — 2026-11-25
 
 ### Adicionado — fila de subida durável (`sync_outbox`, schema v9)

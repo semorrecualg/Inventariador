@@ -107,7 +107,7 @@ describe('sync_outbox — fila de subida durável', () => {
     await enfileirarOutbox(ativo({ primarykey: 'PK-1' }));
     const antes = Date.now();
 
-    const atualizadas = await marcarFalhasOutbox(['PK-1'], 'RLS recusou');
+    const atualizadas = await marcarFalhasOutbox([ativo({ primarykey: 'PK-1' })], 'RLS recusou');
     const entrada = (await db.sync_outbox.toArray())[0];
 
     expect(atualizadas).toBe(1);
@@ -122,13 +122,29 @@ describe('sync_outbox — fila de subida durável', () => {
   it('resumo separa pendentes de falhas', async () => {
     await enfileirarOutbox(ativo({ primarykey: 'PK-1' }));
     await enfileirarOutbox(ativo({ primarykey: 'PK-2' }));
-    await marcarFalhasOutbox(['PK-2'], 'rede');
+    await marcarFalhasOutbox([ativo({ primarykey: 'PK-2', id: 'PK-2' })], 'rede');
 
     await expect(resumoOutbox()).resolves.toEqual({ pendentes: 1, falhas: 1, total: 2 });
   });
 
-  it('marcar falha de um ativo que nunca passou pela outbox não cria linha', async () => {
-    await expect(marcarFalhasOutbox(['PK-XXXX'], 'rede')).resolves.toBe(0);
-    expect(await db.sync_outbox.count()).toBe(0);
+  it('marcar falha de um ativo que nunca passou pela outbox cria a entrada com recuo', async () => {
+    // Antes esta função só tocava em envelopes existentes, e este ativo ficava
+    // sem recuo: era tentado a cada ciclo de 60 s.
+    const criadas = await marcarFalhasOutbox(
+      [{ primarykey: 'PK-XXXX', tenantid: 'CICOPAL', _is_deleted: 0 }],
+      'rede'
+    );
+    const entrada = (await db.sync_outbox.toArray())[0];
+
+    expect(criadas).toBe(1);
+    expect(entrada).toMatchObject({
+      key: 'CICOPAL|PK-XXXX',
+      primarykey: 'PK-XXXX',
+      tenantid: 'CICOPAL',
+      op: 'UPSERT',
+      status: 'FALHA',
+      attempts: 1
+    });
+    expect(entrada.next_attempt_at).toBeGreaterThan(Date.now());
   });
 });

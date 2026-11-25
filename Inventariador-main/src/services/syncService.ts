@@ -15,7 +15,13 @@ import { purgarAuditoriaAntiga } from './auditoriaRetencao';
 import { assetGpsColumns } from '../utils/assetGps';
 import { assinaturaDeFalha, inicioDoDiaDaFalha } from '../utils/syncFalha';
 import { normalizeFlag } from '../utils/normalize';
-import { semearOutboxDePendentes, marcarEnviadosOutbox, marcarFalhasOutbox, chavesEmRecuo } from './syncOutbox';
+import {
+  semearOutboxDePendentes,
+  marcarEnviadosOutbox,
+  marcarFalhasOutbox,
+  chavesEmRecuo,
+  type RegistoParaOutbox
+} from './syncOutbox';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -749,9 +755,9 @@ const _syncService = {
       // RECUO (v9): a outbox diz quando cada ativo pode voltar a ser tentado.
       // Sem esta leitura o `next_attempt_at` era um campo que ninguém lia e uma
       // recusa era repetida a cada ciclo de 60 s — a rede e a trilha pagavam
-      // por isso. Registos sem entrada na outbox não são bloqueados: nesta fase
-      // a fonte continua a ser `_is_synced` e o envelope só cobre o que passou
-      // por ela (semeadura + conferência).
+      // por isso. Um registo ainda sem envelope é tentado (primeira tentativa,
+      // é o certo); se falhar, o caminho de falha cria a entrada e a partir daí
+      // o recuo vale para ele também.
       const recuo = await chavesEmRecuo(tenantidClean);
       const tentaveis = recuo.size === 0
         ? records
@@ -774,6 +780,9 @@ const _syncService = {
 
       const syncedPrimaryKeys: string[] = [];
       const failedPrimaryKeys: string[] = [];
+      // Os registos que falharam, e não só as chaves: a outbox precisa do
+      // contrato e da operação para criar o envelope de quem ainda não tinha.
+      const failedRecords: RegistoParaOutbox[] = [];
       // Assinaturas das recusas já auditadas na janela. Carregadas no primeiro
       // erro do ciclo (não em todos os ciclos) e actualizadas a cada registo.
       let failureSignatures: Set<string> | null = null;
@@ -916,6 +925,7 @@ const _syncService = {
             await markRecordSynced(String(pKey));
           } else {
             failedPrimaryKeys.push(String(pKey));
+            failedRecords.push(record as unknown as RegistoParaOutbox);
             const errObj = supabaseErr as { status?: string | number; code?: string | number; message?: string };
             const statusStr = errObj.status || errObj.code || 'SYNC_FAIL';
             const baseDetails = `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`;
@@ -940,6 +950,7 @@ const _syncService = {
           }
         } catch (err: unknown) {
           failedPrimaryKeys.push(String(pKey));
+          failedRecords.push(record as unknown as RegistoParaOutbox);
           const errMsg = err instanceof Error ? err.message : String(err);
 
           // TIMEOUT ≠ RECUSA. O servidor pode só não ter respondido em 15 s
@@ -995,11 +1006,13 @@ const _syncService = {
         }
       }
 
-      if (failedPrimaryKeys.length > 0) {
+      if (failedRecords.length > 0) {
         // Recuo na outbox: a próxima tentativa deste registo não tem de esperar
-        // o ciclo de 60 s. Best-effort — nunca altera o resultado do ciclo.
+        // o ciclo de 60 s — e quem ainda não tinha envelope ganha-o aqui, senão
+        // continuaria a ser tentado a cada ciclo. Best-effort: nunca altera o
+        // resultado do ciclo.
         try {
-          await marcarFalhasOutbox(failedPrimaryKeys, 'envio recusado ou interrompido no ciclo');
+          await marcarFalhasOutbox(failedRecords, 'envio recusado ou interrompido no ciclo');
         } catch (outboxErr) {
           logger.warn('>>> [Outbox] Falha ao registar o recuo dos envios falhados:', outboxErr);
         }
