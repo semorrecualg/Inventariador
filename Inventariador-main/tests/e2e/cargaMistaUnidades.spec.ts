@@ -2,16 +2,16 @@ import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 
 /**
- * Carga mista no Gestor de Base → CONTRATO DE TRABALHO (unidade fundida).
+ * Carga no Gestor de Base → CONTRATO DE TRABALHO (unidade fundida).
  *
- * A planilha mistura linhas COM e SEM `tenantid` nas mesmas filiais. O
- * contrato SRE só exige que a coluna exista no índice 0 e que ao menos uma
- * linha traga valor — o resto pode vir vazio.
+ * O contrato SRE exige `tenantid` em CADA linha preenchida: uma linha sem
+ * contrato bloqueia a carga inteira e a mensagem nomeia as linhas do arquivo
+ * (1 = cabeçalho). Antes aceitava-se a coluna vazia nalgumas linhas, e essas
+ * linhas entravam com a chave composta `['', primarykey]`.
  *
  * O que se confirma no CONTRATO DE TRABALHO (`/contexto`), que herdou a
  * contagem por filial da antiga Unidade Operacional (`/unit`):
- *  - UM cartão por filial (não um por linha, nem um «SEM CONTRATO» a mais por
- *    causa das linhas sem tenantid);
+ *  - UM cartão por filial (não um por linha);
  *  - a contagem por filial («N ATIVOS») e o total da secção são iguais ao
  *    número de linhas da planilha;
  *  - reimportar a MESMA planilha não cria cópias: continuam 2 cartões e N
@@ -28,20 +28,32 @@ const CABECALHO = [
 const FILIAL_GO = '010101 CICOPAL GO';
 const FILIAL_PA = '010102 CICOPAL PA';
 
-/** 6 linhas: GO com 2 tenantid + 1 vazio; PA com 1 tenantid + 2 vazios. */
+/** 6 linhas, 3 por filial — todas com o contrato preenchido. */
 const LINHAS: string[][] = [
   ['CICOPAL', FILIAL_GO, 'Em uso', 'ETQ-MISTA-1', '1', 'ATIVO MISTO 1', 'SER-1', '31/12/2025', '', 'Fornecedor XPTO', 'NF-1', 'A 1', 'REG-1', '', '', '', 'PK-MISTA-1', '', '1000', '1', '1'],
   ['CICOPAL', FILIAL_GO, 'Em uso', 'ETQ-MISTA-2', '1', 'ATIVO MISTO 2', 'SER-2', '31/12/2025', '', 'Fornecedor XPTO', 'NF-2', 'A 2', 'REG-2', '', '', '', 'PK-MISTA-2', '', '2000', '2', '2'],
-  ['', FILIAL_GO, 'Em uso', 'ETQ-MISTA-3', '1', 'ATIVO MISTO 3', 'SER-3', '31/12/2025', '', 'Fornecedor XPTO', 'NF-3', 'A 3', 'REG-3', '', '', '', 'PK-MISTA-3', '', '3000', '3', '3'],
+  ['CICOPAL', FILIAL_GO, 'Em uso', 'ETQ-MISTA-3', '1', 'ATIVO MISTO 3', 'SER-3', '31/12/2025', '', 'Fornecedor XPTO', 'NF-3', 'A 3', 'REG-3', '', '', '', 'PK-MISTA-3', '', '3000', '3', '3'],
   ['CICOPAL', FILIAL_PA, 'Em uso', 'ETQ-MISTA-4', '1', 'ATIVO MISTO 4', 'SER-4', '31/12/2025', '', 'Fornecedor XPTO', 'NF-4', 'B 1', 'REG-4', '', '', '', 'PK-MISTA-4', '', '4000', '4', '4'],
-  ['', FILIAL_PA, 'Em uso', 'ETQ-MISTA-5', '1', 'ATIVO MISTO 5', 'SER-5', '31/12/2025', '', 'Fornecedor XPTO', 'NF-5', 'B 2', 'REG-5', '', '', '', 'PK-MISTA-5', '', '5000', '5', '5'],
-  ['', FILIAL_PA, 'Em uso', 'ETQ-MISTA-6', '1', 'ATIVO MISTO 6', 'SER-6', '31/12/2025', '', 'Fornecedor XPTO', 'NF-6', 'B 3', 'REG-6', '', '', '', 'PK-MISTA-6', '', '6000', '6', '6']
+  ['CICOPAL', FILIAL_PA, 'Em uso', 'ETQ-MISTA-5', '1', 'ATIVO MISTO 5', 'SER-5', '31/12/2025', '', 'Fornecedor XPTO', 'NF-5', 'B 2', 'REG-5', '', '', '', 'PK-MISTA-5', '', '5000', '5', '5'],
+  ['CICOPAL', FILIAL_PA, 'Em uso', 'ETQ-MISTA-6', '1', 'ATIVO MISTO 6', 'SER-6', '31/12/2025', '', 'Fornecedor XPTO', 'NF-6', 'B 3', 'REG-6', '', '', '', 'PK-MISTA-6', '', '6000', '6', '6']
 ];
 
 const TOTAL_DE_LINHAS = LINHAS.length;
 
 const planilhaCsv = () =>
   [CABECALHO, ...LINHAS].map((linha) => linha.join(',')).join('\n');
+
+/** Índice da linha de dados que fica sem `tenantid` no teste de bloqueio. */
+const INDICE_SEM_TENANTID = 4;
+/** Linha física no arquivo (1 = cabeçalho). */
+const LINHA_SEM_TENANTID = INDICE_SEM_TENANTID + 2;
+
+/** A mesma planilha, com uma linha sem contrato — tem de bloquear a carga. */
+const planilhaSemTenantid = () => {
+  const linhas = LINHAS.map((linha) => [...linha]);
+  linhas[INDICE_SEM_TENANTID][0] = '';
+  return [CABECALHO, ...linhas].map((linha) => linha.join(',')).join('\n');
+};
 
 /**
  * Fecha os avisos que se sobrepõem ao ecrã (o mais comum é «Operando na Base
@@ -140,12 +152,12 @@ const confirmarUnidadeSemCopias = async (page: Page) => {
   await escolherContrato(page);
   await fecharAvisos(page);
 
-  // Um cartão por filial — as linhas sem tenantid não criam uma unidade extra.
+  // Um cartão por filial.
   await expect(page.locator('[data-testid="filial-options"] > button')).toHaveCount(2, { timeout: 20000 });
   await expect(page.getByText(FILIAL_GO, { exact: true })).toHaveCount(1);
   await expect(page.getByText(FILIAL_PA, { exact: true })).toHaveCount(1);
 
-  // 3 linhas em cada filial, ainda que só algumas tragam tenantid.
+  // 3 linhas em cada filial.
   await expect(page.getByText(/3 ATIVOS/)).toHaveCount(2);
 
   // Resumo da secção: o total é o número de linhas da planilha.
@@ -166,11 +178,30 @@ const entrarNoGestorDeBase = async (page: Page) => {
   if (!page.url().includes('/db-manager')) await abrirEcra(page, 'DATABASE_MANAGER');
 };
 
-test.describe('Carga mista — um cartão por filial e total do cabeçalho', () => {
-  test('planilha com e sem tenantid mantém 2 cartões e o total igual às linhas', async ({ page }) => {
+test.describe('Carga — um cartão por filial e total do cabeçalho', () => {
+  test('planilha completa mantém 2 cartões e o total igual às linhas', async ({ page }) => {
     await entrarNoGestorDeBase(page);
     await carregarPlanilha(page);
     await confirmarUnidadeSemCopias(page);
+  });
+
+  test('linha sem tenantid bloqueia a carga e nomeia a linha do arquivo', async ({ page }) => {
+    await entrarNoGestorDeBase(page);
+
+    await expect(page.locator('#file-loader')).toBeAttached({ timeout: 20000 });
+    await page.setInputFiles('#file-loader', {
+      name: 'carga-sem-tenantid.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(planilhaSemTenantid(), 'utf-8')
+    });
+
+    // A carga inteira é bloqueada (não entra nenhuma linha) e a mensagem dá a
+    // linha física a corrigir no Excel.
+    await expect(
+      page.getByText(/CARGA BLOQUEADA: 1 linha\(s\) sem 'tenantid'/)
+    ).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(new RegExp(`Linhas: linha ${LINHA_SEM_TENANTID}\\b`))).toBeVisible();
+    await expect(page.getByText(/ativos injetados com sucesso/)).toHaveCount(0);
   });
 
   test('reimportar a mesma planilha não duplica cartões nem ativos', async ({ page }) => {

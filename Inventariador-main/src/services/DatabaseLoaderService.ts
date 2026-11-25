@@ -77,6 +77,66 @@ const mirrorFilial = (value: unknown): string => {
   return raw;
 };
 
+/** Colunas aceites como 'filial' da planilha (o contrato fixa a posição 1). */
+const FILIAL_KEYS = ['filial', 'unidade', 'unit', 'unitid', 'unit_id'] as const;
+
+/** Filial utilizável da célula: vazio, `null` e `undefined` não contam. */
+const usableFilial = (value: unknown): string => {
+  if (value === null || value === undefined) return '';
+  const raw = String(value);
+  const probe = raw.trim().toLowerCase();
+  return probe === '' || probe === 'null' || probe === 'undefined' ? '' : raw;
+};
+
+/**
+ * FILIAL ÚNICA das três vias de carga (`injetarDadosEmLotes`,
+ * `processExcelFile`, `importExcelBulkData`).
+ *
+ * Antes, `processExcelFile`/`importExcelBulkData` liam
+ * `filial || unidade || unit || unitid || unit_id` com fallback para a unidade
+ * do operador, e `injetarDadosEmLotes` (o caminho do Gestor de Base) lia só
+ * `filial`. A MESMA linha do arquivo saía com filiais diferentes — e, como a
+ * identidade derivada (`fallbackAssetKey`) usa a filial, reimportar o mesmo
+ * ficheiro por outra via criava registos novos em vez de os substituir.
+ */
+const resolveFilialRaw = (row: Record<string, unknown>, unitId?: string): string =>
+  mirrorFilial(usableFilial(getRowValue(row, ...FILIAL_KEYS)) || usableFilial(unitId));
+
+/** Linha sem nenhuma célula preenchida — não é um registo da planilha. */
+const isEmptySpreadsheetRow = (row: Record<string, unknown> | unknown[]): boolean => {
+  const cells = Array.isArray(row) ? row : Object.values(row);
+  return cells.every((cell) => cell === undefined || cell === null || String(cell).trim() === '');
+};
+
+/**
+ * CONTRATO SRE (planilha): TODA a linha preenchida tem de trazer `tenantid`.
+ *
+ * Antes só se bloqueava quando a coluna estava vazia em todas as linhas. Uma
+ * linha isolada sem tenantid entrava com a chave composta `['', primarykey]`,
+ * misturando contratos diferentes no mesmo registo. A mensagem nomeia as linhas
+ * do arquivo (1 = cabeçalho) para o operador as corrigir.
+ */
+function assertTenantInEveryRow(
+  rows: Array<Record<string, unknown> | unknown[]>,
+  lineOf: (index: number) => number
+): void {
+  const missing: number[] = [];
+  rows.forEach((row, index) => {
+    if (isEmptySpreadsheetRow(row)) return;
+    const value = Array.isArray(row) ? row[0] : getRowValue(row, 'tenantid');
+    if (value === undefined || value === null || String(value).trim() === '') missing.push(lineOf(index));
+  });
+  if (missing.length === 0) return;
+
+  const shown = missing.slice(0, 10).map((line) => `linha ${line}`).join(', ');
+  const more = missing.length > 10 ? `, … e mais ${missing.length - 10}` : '';
+  const msg =
+    `CARGA BLOQUEADA: ${missing.length} linha(s) sem 'tenantid' (Índice 0). ` +
+    `Preencha o tenantid de cada ativo na planilha antes de carregar. Linhas: ${shown}${more}.`;
+  logger.error(`[SRE_LOADER] ${msg}`);
+  throw new Error(msg);
+}
+
 const CONTRACT_HEADERS = [
   'tenantid', 'filial', 'status', 'etiqueta', 'qt', 'descricaodoativo', 'serial',
   'dataaqusic', 'cnpj', 'nomefornecedor', 'notafiscal', 'endereco', 'registro',
@@ -188,18 +248,10 @@ function validateSpreadsheetContract(worksheet: XLSX.WorkSheet): void {
     throw new Error(msg);
   }
 
-  const hasTenantValue = aoa.slice(1).some(row => {
-    const v = row[0];
-    return v !== undefined && v !== null && String(v).trim() !== '';
-  });
-
-  if (!hasTenantValue) {
-    const msg =
-      "CARGA BLOQUEADA: a coluna 'tenantid' (Índice 0) está VAZIA em todas as linhas. " +
-      "Preencha o tenantid de cada ativo na planilha antes de carregar.";
-    logger.error(`[SRE_LOADER] ${msg}`);
-    throw new Error(msg);
-  }
+  // 3) Cada linha preenchida tem de trazer tenantid — com o número da linha.
+  const range = worksheet['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : null;
+  const firstRow = range ? range.s.r : 0;
+  assertTenantInEveryRow(aoa.slice(1), (index) => firstRow + index + 2);
 }
 
 export class DatabaseLoaderService {
@@ -251,12 +303,41 @@ export class DatabaseLoaderService {
         found.push({
           tenantid: String(row.tenantid ?? ''),
           filial: String(row.filial_raw || row.filial || ''),
-          primarykey: String(row.primarykey ?? '')
+          primarykey: String(row.primarykey ?? ''),
+          source_primarykey: row.source_primarykey ?? null,
+          import_batch: row.import_batch ?? null
         });
       });
     }
 
-    const report = reconcileImport(carregadas, found);
+    // Linhas que ficaram na base dos escopos tocados por esta carga: é aqui que
+    // se procura o que uma reimportação deixou para trás (identidade antiga da
+    // MESMA chave de origem). Lê-se após a gravação, por (tenantid + filial).
+    const existentes: LoadedAssetRef[] = [];
+    const escopos = new Map<string, [string, string]>();
+    for (const ref of carregadas) {
+      const tenantid = String(ref.tenantid ?? '').trim().toUpperCase();
+      if (!tenantid) continue;
+      const filial = String(ref.filial ?? '').trim().toUpperCase();
+      escopos.set(`${tenantid}\u0000${filial}`, [tenantid, filial]);
+    }
+    for (const [tenantid, filial] of escopos.values()) {
+      const rows = (await db.local_assets
+        .where('[tenantid+filial]')
+        .equals([tenantid, filial])
+        .toArray()) as unknown as DexieAsset[];
+      rows.forEach((row) => {
+        existentes.push({
+          tenantid: String(row.tenantid ?? ''),
+          filial: String(row.filial_raw || row.filial || ''),
+          primarykey: String(row.primarykey ?? ''),
+          source_primarykey: row.source_primarykey ?? null,
+          import_batch: row.import_batch ?? null
+        });
+      });
+    }
+
+    const report = reconcileImport(carregadas, found, existentes);
     report.lines.forEach((line) => (report.ok ? logger.info(line) : logger.error(line)));
 
     try {
@@ -275,6 +356,8 @@ export class DatabaseLoaderService {
           duplicateKeys: report.duplicateKeys,
           missing: report.missing,
           wrongFilial: report.wrongFilial,
+          orphans: report.orphans.length,
+          orphanKeys: report.orphans.slice(0, 50).map((orphan) => orphan.primarykey),
           perFilial: report.perFilial
         })
       });
@@ -309,15 +392,22 @@ export class DatabaseLoaderService {
     return XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) as unknown[];
   }
 
-  static async injetarDadosEmLotes(dadosBrutos: unknown[], onProgresso?: (porcentagem: number) => void): Promise<number> {
+  static async injetarDadosEmLotes(
+    dadosBrutos: unknown[],
+    onProgresso?: (porcentagem: number) => void,
+    unitId?: string
+  ): Promise<number> {
     // Carga nova pode reintroduzir tenantid não canónico: invalida o marcador.
     await invalidateTenantCaseMarker();
+    // Regra do contrato também neste caminho: sem tenantid a chave composta
+    // viraria `['', primarykey]`. Número da linha = ordem da linha de dados.
+    assertTenantInEveryRow(dadosBrutos as Array<Record<string, unknown>>, (index) => index + 1);
     let registrosProcessados = 0;
     // Fase 2 — identidade INTERNA + proveniência da linha (source_row/import_batch).
     const importBatch = newImportBatchId();
     const identityCandidate = (row: Record<string, unknown>): AssetIdentityCandidate => ({
       tenantid: String(getRowValue(row, 'tenantid') || '').trim().toUpperCase(),
-      filial: mirrorFilial(row.filial),
+      filial: resolveFilialRaw(row, unitId),
       sourcePrimarykey: getRowValue(row, 'primarykey'),
       etiqueta: getRowValue(row, 'etiqueta', 'tag'),
       tag: getRowValue(row, 'tag'),
@@ -336,7 +426,7 @@ export class DatabaseLoaderService {
         // REGRA DE CONTRATO (planilha): o tenantid NUNCA tem valor fixo/fallback.
         // Ele vem EXCLUSIVAMENTE da coluna 'tenantid' (Índice 0) da planilha.
         const tenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
-        const rawFilial = mirrorFilial(row.filial);
+        const rawFilial = resolveFilialRaw(row, unitId);
         // Fase 2 — identidade INTERNA: `primarykey` da planilha quando ela é
         // única no arquivo; repetida recebe chave derivada (pk + conteúdo) para
         // a segunda linha NÃO substituir a primeira. `source_primarykey` guarda
@@ -413,7 +503,8 @@ export class DatabaseLoaderService {
       loteHigienizado.forEach((asset) => carregadas.push({
         tenantid: asset.tenantid,
         filial: asset.filial_raw || asset.filial,
-        primarykey: asset.primarykey
+        primarykey: asset.primarykey,
+        source_primarykey: asset.source_primarykey ?? null
       }));
 
       // Transação ACID atômica por bloco para mitigar Race Conditions
@@ -500,7 +591,7 @@ export class DatabaseLoaderService {
     const importBatch = newImportBatchId();
     const identityCandidate = (row: Record<string, unknown>): AssetIdentityCandidate => ({
       tenantid: String(getRowValue(row, 'tenantid') || '').trim().toUpperCase(),
-      filial: mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId),
+      filial: resolveFilialRaw(row, unitId),
       sourcePrimarykey: getRowValue(row, 'primarykey'),
       etiqueta: getRowValue(row, 'etiqueta', 'tag'),
       tag: getRowValue(row, 'tag'),
@@ -537,7 +628,7 @@ export class DatabaseLoaderService {
 
         for (let chunkIndex = 0; chunkIndex < chunk.length; chunkIndex++) {
           const row = chunk[chunkIndex];
-          const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
+          const finalFilialRaw = resolveFilialRaw(row as Record<string, unknown>, unitId);
           const finalFilial = finalFilialRaw.toUpperCase();
           const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
           // Fase 2 — identidade INTERNA (mesmo algoritmo em todos os caminhos):
@@ -661,7 +752,8 @@ export class DatabaseLoaderService {
         assetsToInsert.forEach((asset) => carregadas.push({
           tenantid: asset.tenantid,
           filial: asset.filial_raw || asset.filial,
-          primarykey: asset.primarykey
+          primarykey: asset.primarykey,
+          source_primarykey: asset.source_primarykey ?? null
         }));
 
         // Transação ACID atômica do Dexie com Fail-Fast
@@ -806,7 +898,7 @@ export class DatabaseLoaderService {
     const importBatch = newImportBatchId();
     const identityCandidate = (row: Record<string, unknown>): AssetIdentityCandidate => ({
       tenantid: String(getRowValue(row, 'tenantid') || '').trim().toUpperCase(),
-      filial: mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId),
+      filial: resolveFilialRaw(row, unitId),
       sourcePrimarykey: getRowValue(row, 'primarykey'),
       etiqueta: getRowValue(row, 'etiqueta', 'tag'),
       tag: getRowValue(row, 'tag'),
@@ -841,7 +933,7 @@ export class DatabaseLoaderService {
 
         for (let chunkIndex = 0; chunkIndex < chunk.length; chunkIndex++) {
           const row = chunk[chunkIndex];
-          const finalFilialRaw = mirrorFilial(getRowValue(row, 'filial', 'unidade', 'unit', 'unitid', 'unit_id') || unitId);
+          const finalFilialRaw = resolveFilialRaw(row, unitId);
           const finalFilial = finalFilialRaw.toUpperCase();
           const finalTenantid = String(getRowValue(row, 'tenantid') || '').trim().toUpperCase();
           // Fase 2 — identidade INTERNA (mesmo algoritmo em todos os caminhos):
@@ -959,7 +1051,8 @@ export class DatabaseLoaderService {
         assetsToInsert.forEach((asset) => carregadas.push({
           tenantid: asset.tenantid,
           filial: asset.filial_raw || asset.filial,
-          primarykey: asset.primarykey
+          primarykey: asset.primarykey,
+          source_primarykey: asset.source_primarykey ?? null
         }));
 
         // DESCARGA NO ARMAZENAMENTO LOCAL (Transação ACID atômica com Fail-Fast)

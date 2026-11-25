@@ -13,11 +13,28 @@
  * batem. Não apaga nada: só mede e explica.
  */
 
+import { sanitizeAssetKey } from './assetKey';
+
 export interface LoadedAssetRef {
   tenantid: string;
   /** Rótulo da filial tal como ficou na base (`filial_raw`, quando existir). */
   filial: string;
   primarykey: string;
+  /**
+   * Chave de origem (`source_primarykey`) — liga o registo à linha da planilha.
+   * Só as linhas com chave de origem entram na deteção de órfãs.
+   */
+  source_primarykey?: string | null;
+  /** Carga (`CARGA-…`) que gravou a linha; só existe nas lidas de volta da base. */
+  import_batch?: string | null;
+}
+
+/** Registo que ficou na base com uma identidade que esta carga já não usa. */
+export interface OrphanAssetRef {
+  tenantid: string;
+  primarykey: string;
+  source_primarykey: string;
+  import_batch?: string | null;
 }
 
 export interface FilialReconciliation {
@@ -42,14 +59,25 @@ export interface ImportReconciliation {
   missing: string[];
   /** Chaves que existem, mas noutra filial (colisão entre filiais). */
   wrongFilial: { key: string; expected: string; found: string }[];
+  /**
+   * Registos de cargas anteriores com a MESMA chave de origem (`source_primarykey`)
+   * mas uma identidade que esta carga não usa — sobras de uma reimportação em que
+   * a identidade interna da linha mudou. Não perdem linhas da planilha atual e
+   * por isso não bloqueiam a carga: só ficam registados para limpeza explícita.
+   */
+  orphans: OrphanAssetRef[];
   perFilial: FilialReconciliation[];
   /** Texto pronto para o terminal do Gestor de Base. */
   lines: string[];
 }
 
+/** Contrato normalizado. */
+const tenantOf = (ref: Pick<LoadedAssetRef, 'tenantid'>): string =>
+  String(ref.tenantid ?? '').trim().toUpperCase();
+
 /** Chave de comparação: contrato + chave primária. */
-const keyOf = (ref: LoadedAssetRef): string =>
-  `${String(ref.tenantid ?? '').trim().toUpperCase()}\u0000${String(ref.primarykey ?? '').trim().toUpperCase()}`;
+const keyOf = (ref: Pick<LoadedAssetRef, 'tenantid' | 'primarykey'>): string =>
+  `${tenantOf(ref)}\u0000${String(ref.primarykey ?? '').trim().toUpperCase()}`;
 
 /** Rótulo comparável da filial (caixa/espaços não são divergência). */
 const filialOf = (ref: LoadedAssetRef): string =>
@@ -61,12 +89,61 @@ const labelOf = (ref: LoadedAssetRef): string =>
 const shortKey = (key: string): string => key.replace('\u0000', ' · ');
 
 /**
+ * ÓRFÃS DA REIMPORTAÇÃO — registos que a base ainda tem com a identidade antiga
+ * da mesma linha da planilha.
+ *
+ * A identidade de um registo depende do CONTEÚDO e da chave de origem (Fase 2):
+ * se a planilha ganhou uma chave repetida, as suas linhas passam a ter
+ * identidades derivadas e a identidade anterior fica na base como sobra. A carga
+ * atual está correta (planilha N = base N para as chaves dela); o que sobra é de
+ * cargas anteriores. Compara-se por (contrato + filial + chave de origem
+ * sanitizada) para não apanhar chaves legítimas de outra filial.
+ */
+export function findOrphanRows(
+  expected: LoadedAssetRef[],
+  existing: LoadedAssetRef[]
+): OrphanAssetRef[] {
+  const expectedKeys = new Set(expected.map(keyOf));
+  const expectedBySource = new Map<string, Set<string>>();
+
+  for (const ref of expected) {
+    const source = sanitizeAssetKey(ref.source_primarykey);
+    if (!source) continue;
+    const scope = `${tenantOf(ref)}\u0000${filialOf(ref)}\u0000${source}`;
+    const keys = expectedBySource.get(scope) || new Set<string>();
+    keys.add(String(ref.primarykey ?? '').trim().toUpperCase());
+    expectedBySource.set(scope, keys);
+  }
+  if (expectedBySource.size === 0) return [];
+
+  const orphans = new Map<string, OrphanAssetRef>();
+  for (const row of existing) {
+    const source = sanitizeAssetKey(row.source_primarykey);
+    if (!source) continue;
+    const scope = `${tenantOf(row)}\u0000${filialOf(row)}\u0000${source}`;
+    const expectedIds = expectedBySource.get(scope);
+    if (!expectedIds) continue;
+    const key = keyOf(row);
+    if (expectedKeys.has(key)) continue;
+    orphans.set(key, {
+      tenantid: tenantOf(row),
+      primarykey: String(row.primarykey ?? ''),
+      source_primarykey: String(row.source_primarykey ?? ''),
+      import_batch: row.import_batch ?? null
+    });
+  }
+  return Array.from(orphans.values());
+}
+
+/**
  * Compara as linhas da planilha com as linhas que a base devolveu para as
- * mesmas chaves. `found` deve conter apenas linhas lidas de volta da base.
+ * mesmas chaves. `found` e `existing` devem conter apenas linhas lidas de volta
+ * da base (`existing` nos escopos tocados pela carga, para a deteção de órfãs).
  */
 export function reconcileImport(
   expected: LoadedAssetRef[],
-  found: LoadedAssetRef[]
+  found: LoadedAssetRef[],
+  existing: LoadedAssetRef[] = []
 ): ImportReconciliation {
   const expectedByKey = new Map<string, LoadedAssetRef>();
   const countsByKey = new Map<string, number>();
@@ -116,6 +193,8 @@ export function reconcileImport(
     if (entry) entry.gravadas += 1;
   });
 
+  const orphans = findOrphanRows(expected, existing);
+
   // Chaves repetidas no arquivo perdem linhas na gravação: contam como
   // divergência mesmo que a base devolva a chave uma vez.
   const ok = missing.length === 0 && wrongFilial.length === 0 && duplicateKeys.length === 0;
@@ -131,6 +210,16 @@ export function reconcileImport(
   perFilial.forEach((entry) => {
     lines.push(`[CARGA] ${entry.filial}: planilha ${entry.planilha} → base ${entry.gravadas}`);
   });
+  if (orphans.length > 0) {
+    lines.push(
+      `[CARGA] ${orphans.length} registo(s) órfão(s) de carga anterior (mesma chave de origem, identidade antiga) — nada é apagado automaticamente.`
+    );
+    orphans.slice(0, 5).forEach((orphan) => {
+      const carga = orphan.import_batch ? ` · carga ${orphan.import_batch}` : '';
+      lines.push(`[CARGA] órfão: ${shortKey(keyOf(orphan))} · origem ${orphan.source_primarykey}${carga}`);
+    });
+    if (orphans.length > 5) lines.push(`[CARGA] … e mais ${orphans.length - 5} órfão(s).`);
+  }
   duplicateKeys.slice(0, 5).forEach((dup) => {
     lines.push(`[CARGA] chave repetida no arquivo (${dup.rows} linhas): ${shortKey(dup.key)}`);
   });
@@ -153,6 +242,7 @@ export function reconcileImport(
     duplicateKeys,
     missing,
     wrongFilial,
+    orphans,
     perFilial,
     lines
   };

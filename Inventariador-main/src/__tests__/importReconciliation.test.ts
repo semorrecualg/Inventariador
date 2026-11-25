@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { db } from '../services/sqliteService';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import {
+  findOrphanRows,
   reconcileImport,
   type LoadedAssetRef
 } from '../utils/importReconciliation';
@@ -94,6 +95,34 @@ describe('reconcileImport — planilha × base por filial', () => {
     expect(report.perFilial).toEqual([
       { filial: '010101 CICOPAL GO', planilha: 1, gravadas: 0 },
       { filial: '010102 CICOPAL GO', planilha: 1, gravadas: 1 }
+    ]);
+  });
+});
+
+describe('findOrphanRows — sobras de identidade da mesma chave de origem', () => {
+  it('deteta a identidade antiga e ignora outras filiais e outras origens', () => {
+    const expected: LoadedAssetRef[] = [
+      { ...refOf('CICOPAL', '010101 CICOPAL GO', 'D1'), source_primarykey: '008810 CICOPAL' },
+      { ...refOf('CICOPAL', '010101 CICOPAL GO', 'D2'), source_primarykey: '008810 CICOPAL' }
+    ];
+    const existing: LoadedAssetRef[] = [
+      // Sobra da carga anterior: mesma origem, identidade canónica antiga.
+      { ...refOf('CICOPAL', '010101 CICOPAL GO', '008810CICOPAL'), source_primarykey: '008810 CICOPAL', import_batch: 'CARGA-1' },
+      // Linha que esta carga gravou: não é órfã.
+      { ...refOf('CICOPAL', '010101 CICOPAL GO', 'D1'), source_primarykey: '008810 CICOPAL', import_batch: 'CARGA-2' },
+      // Mesma origem noutra filial: é outro escopo, não é órfã.
+      { ...refOf('CICOPAL', '010102 CICOPAL GO', '008810CICOPAL'), source_primarykey: '008810 CICOPAL', import_batch: 'CARGA-1' },
+      // Outra chave de origem: fora do escopo desta carga.
+      { ...refOf('CICOPAL', '010101 CICOPAL GO', 'OUTRA'), source_primarykey: 'OUTRA-PK', import_batch: 'CARGA-1' }
+    ];
+
+    expect(findOrphanRows(expected, existing)).toEqual([
+      {
+        tenantid: 'CICOPAL',
+        primarykey: '008810CICOPAL',
+        source_primarykey: '008810 CICOPAL',
+        import_batch: 'CARGA-1'
+      }
     ]);
   });
 });
