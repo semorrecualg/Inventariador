@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — runbook de medição do A.3a.0
+
+- `docs/RUNBOOK-A3a0.md`: procedimento para o operador medir a base real no
+  aparelho (linha de base F0, pacote F7 com checksum por tabela,
+  `navigator.storage.estimate()`, arranque Android × PWA, `save` com 1 e 300
+  ativos) e preencher a coluna «Base» de §8. Sem alterações de código.
+
 ### Adicionado — selo de geração da base
 
 - **O que era:** o reset da nuvem só limpava o aparelho onde «Preparar Nova Carga»
