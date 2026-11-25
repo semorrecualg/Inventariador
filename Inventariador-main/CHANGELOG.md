@@ -432,6 +432,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   de regressão (nuvem a responder sem sessão depois do login local) em
   `bootCloudCheck`.
 
+## [3.1.0] — 2026-11-25
+
+### Adicionado — fila de subida durável (`sync_outbox`, schema v9)
+
+- **O que era:** a fila de envio era o próprio ativo com `_is_synced = 0`.
+  Durável, mas sem tentativas, sem recuo e sem ordem: dois ciclos a falhar o
+  mesmo registo ficavam indistinguíveis e cada volta tinha de redescobrir o
+  estado na nuvem.
+- **Agora:** a tabela `sync_outbox` guarda uma linha por ativo pendente, com
+  `op` (UPSERT/DELETE), `attempts`, `next_attempt_at` e `last_error`. A chave
+  primária é `key` (`tenantid|primarykey`), por isso reenfileirar é idempotente.
+  A entrada é escrita na **mesma transacção** da gravação do ativo
+  (`saveCollectedAssetAtomic`) e é removida quando a nuvem aceita o envio
+  (`markRecordSynced`); as recusas incrementam tentativas com recuo de 30 s a
+  30 min.
+- **Compatibilidade:** a drenagem continua a ler `_is_synced = 0` — a outbox é
+  o envelope, não (ainda) a fonte única; isso chega na Fase 2. Na primeira
+  sincronização da sessão, a outbox é semeada com o que a fila legada já tinha,
+  sem reiniciar o recuo de quem já falhou. Nenhuma tabela existente muda de
+  chave ou de índices (v9 é aditiva, como a v8).
+- **Servidor (Fase 0):** o trigger `assets_touch_updated_at` passa a carimbar
+  com `clock_timestamp()` em vez de `now()`. `now()` é o instante do BEGIN da
+  transacção: duas actualizações do mesmo ativo no mesmo lote ficavam com o
+  mesmo `updated_at` e a segunda era invisível ao pull delta
+  (`updated_at > checkpoint`); uma transacção longa ainda podia carimbar uma
+  linha "no passado" em relação a um checkpoint já distribuído. O `DEFAULT` da
+  coluna segue a mesma regra.
+- **Testes:** `syncOutbox` (8) fixa a normalização da chave, a idempotência, a
+  semeadura a partir da fila legada, a remoção no sucesso e o recuo na falha;
+  `schemaBaseline` passa a travar `verno === 9` e as 11 tabelas.
+
 ## [3.0.0] — 2026-11-21
 
 ### Notas da versão

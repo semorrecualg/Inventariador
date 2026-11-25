@@ -1,12 +1,12 @@
 # GBR KARDEK – Inventariador · Baseline de Schema (Fase 0)
 
-> **Status:** CONGELADO ✅ · **Data:** 2026-08-06 (v4) · **v5:** 2026-08-07 (Fase C4) · **v7:** 2026-08-12 (Muro multi-tenant) · **v8:** 2026-11-22 (backup da limpeza de cópias exatas)
-> **Banco:** `InventoryLocalStore` (`class InventoryDexieDatabase`) · **Versão atual:** **8**
+> **Status:** CONGELADO ✅ · **Data:** 2026-08-06 (v4) · **v5:** 2026-08-07 (Fase C4) · **v7:** 2026-08-12 (Muro multi-tenant) · **v8:** 2026-11-22 (backup da limpeza de cópias exatas) · **v9:** 2026-11-25 (fila de subida durável)
+> **Banco:** `InventoryLocalStore` (`class InventoryDexieDatabase`) · **Versão atual:** **9**
 > **Fase:** 0 do plano `docs/MIGRACAO_HIBRIDA.md` (baseline estável) + Fase C4
 > (`docs/PLANO_FASE_C_HIGIENIZACAO.md` §6 — v5 = v4 **sem mudança estrutural**, apenas etapa de dados)
 > + Muro multi-tenant (v6→v7 — chave composta `[tenantid+primarykey]`, ver §1).
 >
-> Este documento é o **snapshot canônico e congelado** do schema local (10 tabelas Dexie +
+> Este documento é o **snapshot canônico e congelado** do schema local (11 tabelas Dexie +
 > `src/constants/schema.ts`). A conformidade é garantida por contrato automatizado:
 > `src/__tests__/schemaBaseline.test.ts` — qualquer mudança não intencional no schema
 > **quebra o teste** e exige decisão explícita (documentar aqui + nova `version(n)`).
@@ -25,6 +25,7 @@
 | **v6** | **Muro multi-tenant (passo 1/2)** — o Dexie **não suporta trocar a chave primária num upgrade direto** ("Not yet support for changing primary key"); a receita oficial é REMOVER numa versão e RECRIAR na seguinte. v6: DROP das 3 tabelas de ativos (`local_assets`, `ativos`, `assets`) + cópia **integral** para backups `_v6_bkp_local/_v6_bkp_ativos/_v6_bkp_assets` |
 | **v7** | **Muro multi-tenant (passo 2/2)** — RECREATE com **chave primária composta `[tenantid+primarykey]`** nas 3 tabelas (o `tenantid` normalizado para UPPER canônico garante chaves consistentes; `primarykey` vira **índice**) + restauração a partir dos backups + descarte dos backups. Dois contratos com a mesma chave de origem **coexistem sem colidir** (mesma regra da nuvem: PK composta `(tenantid, id)`). Guard `filterCrossTenantWrites` (`sqliteService`) permanece como invariante de segurança p/ escritas legadas |
 | **v8** | **Backup da limpeza de cópias exatas** — tabela nova `asset_cleanup_backups` (`++seq`, índices `cleanup_id`, `kind`) guarda as linhas removidas pela limpeza do Gestor de Base, na MESMA transação das remoções. Nenhuma tabela existente muda de chave/índices; o «DESFAZER LIMPEZA» restaura por `cleanup_id` |
+| **v9** | **Fila de subida durável** — tabela nova `sync_outbox` (chave `key` = `tenantid|primarykey`; índices `primarykey`, `tenantid`, `status`, `next_attempt_at`). `key` como chave primária torna o reenfileiramento idempotente; `attempts`/`next_attempt_at` dão recuo ao envio e `op` distingue upsert de exclusão. A entrada é escrita na MESMA transação do ativo (`saveCollectedAssetAtomic`) e removida quando a nuvem aceita. Nenhuma tabela existente muda de chave/índices. Módulo: `src/services/syncOutbox.ts` |
 
 **Regra de evolução:** alterar o schema local = **nova `version(n)`** no
 `InventoryDexieDatabase` (`src/services/sqliteService.ts`) com `upgrade` idempotente,
@@ -32,7 +33,7 @@ atualização **deste** documento e do teste de contrato. Proibido editar `versi
 
 ---
 
-## 2. Tabelas — snapshot canônico v8 (10 tabelas + 3 backups transitórios descartados em v6)
+## 2. Tabelas — snapshot canônico v9 (11 tabelas + 3 backups transitórios descartados em v6)
 
 | Tabela | Chave primária | Índices | Tipo (fonte) |
 |---|---|---|---|
@@ -46,10 +47,11 @@ atualização **deste** documento e do teste de contrato. Proibido editar `versi
 | `campaign_snapshots` | `id` | `campaign_id` | `DexieCampaignSnapshot` |
 | `addresses` | `++id` (auto) | `[tenantid+filial]`, `codigo_endereco`, `setor`, `bloco`, `_is_synced` | `DexieAddress` |
 | `asset_cleanup_backups` | `++seq` (auto) | `cleanup_id`, `kind` | `DexieAssetCleanupBackup` |
+| `sync_outbox` | `key` (`tenantid\|primarykey`) | `primarykey`, `tenantid`, `status`, `next_attempt_at` | `DexieSyncOutbox` |
 
 Fonte das definições: `src/services/sqliteService.ts` (interfaces exportadas;
 classe `InventoryDexieDatabase`). Declaração das tabelas no Dexie:
-`version(8).stores({ asset_cleanup_backups: '++seq, cleanup_id, kind' })` (ver §1) — a leitura por chave em código usa o par
+`version(9).stores({ sync_outbox: 'key, primarykey, tenantid, status, next_attempt_at' })` (ver §1) — a leitura por chave em código usa o par
 composto `[tenantid, primarykey]` (`persistenceService`, `InventoryCard`, `App`).
 
 ---
