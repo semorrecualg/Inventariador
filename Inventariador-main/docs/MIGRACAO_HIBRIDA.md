@@ -5,6 +5,11 @@
 > **sem perda de dados**, com conectividade e manutenção via **Supabase**.
 > Este documento é o registro canônico do plano; o acompanhamento operacional
 > fica na **GitHub Issue** vinculada ao repositório `semorrecualg/Inventariador`.
+>
+> **Estado do schema (2026-11-25):** o baseline atual é a **v11** e a store local
+> `assets` foi removida (A.3a.4 — resgate na v10, extinção na v11). As menções a
+> `assets` nas fases históricas deste plano (v4–v7 e a decisão DBA de 2026-08-06)
+> ficam como registro; o estado atual está em `docs/SCHEMA_BASELINE.md` §2.
 
 ---
 
@@ -42,13 +47,13 @@ uma **única camada de repositórios** por trás das telas:
 
 | Item | Situação |
 |---|---|
-| Persistência real | 100% **Dexie/IndexedDB** — banco `InventoryLocalStore` (schema **v7** — chave composta `[tenantid+primarykey]`; baseline congelado em `docs/SCHEMA_BASELINE.md`) |
+| Persistência real | 100% **Dexie/IndexedDB** — banco `InventoryLocalStore` (schema **v11** — chave composta `[tenantid+primarykey]`; baseline congelado em `docs/SCHEMA_BASELINE.md`) |
 | `sqliteService.getStorageSource()` | Retorna `'DEXIE_INDEXEDDB'` (hardcoded) |
 | `sql.js`, `jeep-sqlite`, `@capacitor-community/sqlite` | **Instalados + assets wasm configurados, mas NÃO usados em código** (grep em `src` = zero) |
 | Checagens `'PHYSICAL'`/`'CACHE'` no App.tsx | Código morto (nunca casam) |
 | Supabase | **Integração ativa** (~30 funções: auth, sync, realtime, storage, auditoria) — modo SUPABASE quando `VITE_SUPABASE_URL`+`VITE_SUPABASE_ANON_KEY` presentes; INTERNAL (offline) sem elas |
 | Pontos de contato com dados | **292** em `src` (excl. testes) — base histórica; ver status atual em `docs/SPEC.md` |
-| Tabelas Dexie | `local_assets`, `ativos`, `assets`, `addresses`, `audit_logs`, `campaigns`, `SYSTEM_CONTEXT`, `unit_configs`, `campaign_snapshots` |
+| Tabelas Dexie | `local_assets`, `ativos`, `addresses`, `audit_logs`, `campaigns`, `SYSTEM_CONTEXT`, `unit_configs`, `campaign_snapshots`, `asset_cleanup_backups`, `sync_outbox` (o espelho local `assets` saiu na v11) |
 | Backups existentes | Capacitor `GBR_KARDEK_DATA/local_assets_secure.dat`, File System Access (Windows), `backupService` (nuvem), `persistenceService` (export/restore) |
 
 ---
@@ -104,6 +109,9 @@ uma **única camada de repositórios** por trás das telas:
       **`local_assets` = baseline imutável** (comparação), **`ativos` = legado → sai na
       Fase 1** (`version(5)` idempotente com dry-run). Registro:
       `docs/ANALISE_TABELAS_ATIVOS_ASSETS.md`.
+      **Superado pela A.3a.4 (2026-11-25):** o espelho local `assets` foi removido
+      na v11; `local_assets` é a tabela de estado operacional e `ativos` o espelho
+      legado de leitura. A tabela `assets` que resta é a **da nuvem** (`public.assets`).
 - **Critério de aceite:** `tsc` limpo em `src/`; 295 testes verdes (30 arquivos); restore validado.
 - **Risco:** baixo. **Rollback:** n/a (não altera runtime).
 
@@ -177,8 +185,8 @@ uma **única camada de repositórios** por trás das telas:
   IMOBILIZADO — `InventoryCard.tsx` vai para o módulo `ASSET_CONTROL_HOME`
   (`/asset-control`) como card de entrada; a tela `INVENTORY` (`/inventory`) passa a
   renderizar `Inventory.tsx` (motor da listagem). Todas as conexões de leitura/escrita
-  do componente corrigido devem apontar para a **tabela de trabalho `assets`**
-  (canônica — decisão aprovada). Execução no repositório real (`src/` não está neste
+  do componente corrigido devem apontar para a **tabela de estado `local_assets`**
+  (o antigo espelho local `assets` foi removido na v11). Execução no repositório real (`src/` não está neste
   workspace); registro: `docs/CORRECAO_INVENTORYCARD_MODULO_ATIVO.md`.
 - **Em paralelo/sequencial:** Fase 1 (repositórios) pode coexistir com correções de UI,
   pois não muda comportamento.
@@ -209,9 +217,10 @@ uma **única camada de repositórios** por trás das telas:
 - `src/services/persistenceService.ts`, `backupService.ts`, `FileSystemStorageService.ts` — backup/restore
 - `src/constants/schema.ts` — dicionário de colunas (mapeamento de importação)
 - `docs/ANALISE_TABELAS_ATIVOS_ASSETS.md` — análise DBA da redundância das tabelas-espelho
-  (canônica `assets`, baseline `local_assets`, `ativos` legado) — pendência pós-export
+  (papéis históricos: canônica `assets`, baseline `local_assets`, `ativos` legado;
+  estado atual: `local_assets` + `ativos`, com o `assets` local removido na v11) — pendência pós-export
 - `docs/CORRECAO_INVENTORYCARD_MODULO_ATIVO.md` — correção `InventoryCard` ↔ `Inventory`
   (card no módulo ATIVO IMOBILIZADO; `Inventory.tsx` no fluxo de inventário; conexões
-  com a tabela de trabalho `assets`) — pendência de UI registrada 2026-08-06
+  com a tabela de estado `local_assets`) — pendência de UI registrada 2026-08-06
 - `vite.config.ts` — assets wasm já copiados (sql.js); `optimizeDeps.exclude` já pronto
 - `src/types.ts` — `DatabaseMode`, `AppScreen`, `User`

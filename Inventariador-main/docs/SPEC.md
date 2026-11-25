@@ -107,17 +107,22 @@ contagem por filial, a geocerca, a carga de base e a sincronização vivem em
 
 ---
 
-## 4. Modelo de dados (Dexie/IndexedDB — schema v7, baseline congelado em `docs/SCHEMA_BASELINE.md`)
+## 4. Modelo de dados (Dexie/IndexedDB — schema v11, baseline congelado em `docs/SCHEMA_BASELINE.md`)
 
 | Tabela | Chave / índices | Observação |
 |---|---|---|
-| `local_assets`, `ativos`, `assets` (DexieAsset) | **`[tenantid+primarykey]`** (chave composta), `primarykey, filial, _is_synced, [tenantid+filial]` | Ativos físicos — o muro entre contratos é o `tenantid` |
+| `local_assets`, `ativos` (DexieAsset) | **`[tenantid+primarykey]`** (chave composta), `primarykey, filial, _is_synced, [tenantid+filial]` | Ativos físicos — o muro entre contratos é o `tenantid` |
 | `addresses` | `++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced` | Endereços físicos |
 | `audit_logs` | `id, updated_at` | Auditoria |
 | `campaigns` | `id, tenantid` | Campanhas |
 | `SYSTEM_CONTEXT` | `key` | Contexto |
 | `unit_configs` | `id, filial` | Configurações por unidade |
 | `campaign_snapshots` | `id, campaign_id` | Snapshots |
+
+> **Terceiro espelho removido (A.3a.4):** a store local `assets` saiu na
+> `version(11)` do Dexie — resgate na v10, extinção na v11
+> (`docs/SCHEMA_BASELINE.md` §1). A única tabela `assets` que resta é a **da
+> nuvem** (`public.assets`), destino do sync; não existe `db.assets` local.
 
 **Convenções:** isolamento multi-tenant por `tenantid` + `filial` — chave composta
 `[tenantid+primarykey]` (colisão entre contratos estruturalmente impossível) + guard

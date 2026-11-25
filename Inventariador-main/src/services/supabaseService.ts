@@ -3358,6 +3358,11 @@ export const fetchAssetLogs = async (tenantid: string, assetId?: string): Promis
  * F2. O `client_event_id` liga a linha ao evento local; sem esta leitura, um
  * aparelho reinstalado via só o histórico dos triggers de `asset_logs` e
  * perdia de vista o que a própria fila já tinha arquivado.
+ *
+ * O filtro pelos três `table_name` é intencional: `assets` é o nome que a carga
+ * (IMPORT) e os eventos de ativo usam na nuvem, `local_assets` é a tabela de
+ * estado local atual e `ativos` é o espelho legado que ainda assina eventos
+ * antigos. Restringir a `local_assets` faria esse histórico desaparecer da tela.
  */
 export const fetchAssetAuditLogs = async (tenantid: string, limit = 500): Promise<Record<string, unknown>[]> => {
   if (!supabase) return [];

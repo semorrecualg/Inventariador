@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentado — fim do terceiro espelho local e filtro de auditoria da nuvem
+
+- `docs/SPEC.md`, `docs/ARCHITECTURE.md`, `docs/MIGRACAO_HIBRIDA.md`,
+  `docs/LIMPEZA_COPIAS_EXATAS.md`, `docs/VISAO_MALHA_AUDITORIA_CAMPO.md` e
+  `docs/PERFORMANCE_SINCRONIZACAO.md` deixam de tratar `assets` como tabela
+  local: a store saiu na `version(11)` e as contagens/transações usam
+  `local_assets` + `ativos`. A tabela `assets` que resta é a da nuvem
+  (`public.assets`).
+- `fetchAssetAuditLogs` (`services/supabaseService.ts`): documentado o filtro
+  `table_name in ('assets','ativos','local_assets')` — os três nomes são o
+  histórico real do campo (carga/eventos na nuvem, tabela local atual e espelho
+  legado), não um resto da store removida.
+
 ### Corrigido — carga da planilha: tenantid por linha, filial única e órfãs
 
 - **`tenantid` em cada linha:** a carga passa a bloquear quando qualquer linha

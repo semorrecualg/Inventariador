@@ -28,7 +28,7 @@ MESMA linha duas vezes (25.272 linhas para 12.636 ativos) enquanto a nuvem tem
 ## Contagens antes e depois
 
 A pré-visualização (a confirmação) e o log do SRE mostram, por espelho
-(`local_assets` · `ativos` · `assets`), `antes → depois · cópias`, além de
+(`local_assets` · `ativos` — o `assets` local saiu na v11), `antes → depois · cópias`, além de
 grupos de cópia, chaves distintas antes/depois e os grupos preservados por
 conteúdo diferente. **Chaves distintas têm de ser iguais antes e depois** — a
 limpeza só remove cópias da mesma chave; se o número mudasse, a transação
@@ -37,7 +37,7 @@ abortava sem apagar nada.
 ## Como reverter
 
 1. **«DESFAZER LIMPEZA»** (mesmo cartão): devolve as linhas da última limpeza
-   aos três espelhos, com as chaves exatas que tinham (inclui `tenantid` vazio).
+   aos dois espelhos, com as chaves exatas que tinham (inclui `tenantid` vazio).
    O backup não é apagado — desfazer é repetível e idempotente.
 2. **JSON de backup** («RECONECTAR BACKUP FÍSICO» no Gestor): restaura a base
    inteira a partir do ficheiro exportado antes da operação. É a segunda via,

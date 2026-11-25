@@ -158,16 +158,16 @@ Guarda: `DATABASE_MANAGER` só para `isSuperAdmin` ou `semorr@gmail.com`.
 
 ### 7.1 O "SQLite" local é Dexie/IndexedDB
 Apesar do nome `sqliteService`, no browser/Web o motor é **Dexie sobre IndexedDB**:
-- Banco: `InventoryLocalStore` (`class InventoryDexieDatabase`, versões 1→7 — **baseline
+- Banco: `InventoryLocalStore` (`class InventoryDexieDatabase`, versões 1→11 — **baseline
   congelado em `docs/SCHEMA_BASELINE.md`**, Fase 0 do plano de migração).
 - `sqliteService = new Proxy({}, …)` — inicialização lazy.
 - `getStorageSource()` → `'IndexedDB://InventoryLocalStore'` (no Capacitor nativo há
   caminho físico; em Web `persist()` é no-op).
 
-**Tabelas (v7 canônica — snapshot congelado em `docs/SCHEMA_BASELINE.md`):**
+**Tabelas (v11 canônica — snapshot congelado em `docs/SCHEMA_BASELINE.md`):**
 | Tabela | Chave/índices |
 |---|---|
-| `local_assets`, `ativos`, `assets` (DexieAsset) | **`[tenantid+primarykey]`** (composta), `primarykey, filial, _is_synced, [tenantid+filial]` |
+| `local_assets`, `ativos` (DexieAsset) | **`[tenantid+primarykey]`** (composta), `primarykey, filial, _is_synced, [tenantid+filial]` |
 | `addresses` | `++id, [tenantid+filial], codigo_endereco, setor, bloco, _is_synced` |
 | `audit_logs` | `id, updated_at` |
 | `campaigns` | `id, tenantid` |
@@ -175,11 +175,16 @@ Apesar do nome `sqliteService`, no browser/Web o motor é **Dexie sobre IndexedD
 | `unit_configs` | `id, filial` |
 | `campaign_snapshots` | `id, campaign_id` |
 
+> **Terceiro espelho removido (A.3a.4):** a store local `assets` saiu na
+> `version(11)` — resgate na v10, extinção na v11. Restam `local_assets` e
+> `ativos`; a tabela `assets` que o sync usa é a **da nuvem** (`public.assets`).
+> Ver `docs/SCHEMA_BASELINE.md` §1–§2.
+
 ### 7.2 Carga da base (DATABASE_MANAGER)
 `services/DatabaseLoaderService.ts`:
 `extrairDadosDaPlanilha(file)` → parse de **Excel (.xlsx/.csv)** →
 `injetarDadosEmLotes(raw, onProgresso)` / `processExcelFile` / `importExcelBulkData`
-→ grava em **lotes** via `db.transaction('rw', [ativos, assets, local_assets, …])`
+→ grava em **lotes** via `db.transaction('rw', [local_assets, ativos, …])`
 (ACID, com progresso na UI — `DatabaseProgressBar`).
 
 **Contrato do loader (planilha):** o arquivo deve ter **exatamente 21 colunas**, com nomes
@@ -509,6 +514,15 @@ diagnóstico condicional, descoberta das colunas `NOT NULL` e teste de `upsert` 
 transação) está em [docs/MIGRACAO_AUDITORIA_CLIENT_EVENT_ID.md](MIGRACAO_AUDITORIA_CLIENT_EVENT_ID.md).
 As linhas lidas da nuvem passam por `textoDoDetails`: a coluna `details` de
 produção é `json` e chega como objeto, não como texto.
+
+**Filtro de auditoria da nuvem (três nomes, de propósito).** `fetchAssetAuditLogs`
+(`services/supabaseService.ts`) lê `public.audit_logs` com
+`table_name in ('assets', 'ativos', 'local_assets')`. Os três nomes são o
+histórico real do campo, **não** um resto da store local removida: `assets` é o
+nome com que a carga (`IMPORT`, no Gestor de Base) e os eventos de ativo gravam
+na nuvem; `local_assets` é a tabela de estado local atual; `ativos` é o espelho
+legado que ainda assina eventos antigos. Restringir o filtro a `local_assets`
+faria o histórico anterior à A.3a.4 desaparecer da tela de auditoria.
 
 **Modos de falha da credencial** (diagnóstico rápido):
 

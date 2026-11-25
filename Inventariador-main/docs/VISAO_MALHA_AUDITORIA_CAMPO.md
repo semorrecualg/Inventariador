@@ -24,9 +24,9 @@ inteiro, e depois todos voltam para a rede** — hoje tem três furos:
 | Não existe "posse" de território | Dois auditores auditam o mesmo corredor sem saber; retrabalho e leituras duplicadas. |
 | Reconexão não é um acordo | O app envia e baixa, mas não existe recibo dos dois lados, nem retomada segura se a conexão cair no meio do envio. |
 
-Some-se a isso: hoje a mesma informação mora em três tabelas locais
-(`local_assets`, `ativos`, `assets`), o que multiplica a chance de divergirem
-entre si.
+Some-se a isso: hoje a mesma informação mora em duas tabelas locais
+(`local_assets`, `ativos` — o terceiro espelho `assets` foi removido na v11),
+o que multiplica a chance de divergirem entre si.
 
 O que os concorrentes entregam é "cache offline + última escrita vence". É aí que
 está a oportunidade.
@@ -246,17 +246,18 @@ create table if not exists sync_sessions (
 );
 ```
 
-`assets` continua existindo como **projeção** (é o que os relatórios e o painel
-leem hoje). A diferença é que ela passa a ser escrita **só** pelo projetor, nunca
-pela tela.
+`public.assets` (nuvem) continua existindo como **projeção** (é o que os
+relatórios e o painel leem hoje). A diferença é que ela passa a ser escrita
+**só** pelo projetor, nunca pela tela.
 
 ### 5.2 Local (Dexie v8)
 
 Novas tabelas: `field_events` (índices `event_id`, `[tenantid+filial]`,
 `[tenantid+asset_key]`, `_synced`), `territory_claims` (`[tenantid+filial+territory_key]`)
-e `sync_sessions`. Redução das três cópias de ativo a **uma**: `local_assets`
-passa a ser a única tabela de estado; `ativos` e `assets` viram aliases de leitura
-durante a migração e saem na versão seguinte.
+e `sync_sessions`. Redução das cópias locais de ativo a **uma**: `local_assets`
+passa a ser a única tabela de estado; `ativos` vira alias de leitura durante a
+migração e sai na versão seguinte. O terceiro espelho local `assets` já saiu na
+v11 (A.3a.4).
 
 ---
 
@@ -280,7 +281,7 @@ durante a migração e saem na versão seguinte.
 | 3 | **F1 — Eventos + projeção** | Mudança mais profunda; entra por baixo, sem trocar a tela, já com sync confiável. |
 | 4 | **F3 — Posse de território** | Depende do log de eventos (`POSSE`) e do sync com recibo. |
 | 5 | **F4 — Painel de convergência** | Depende de F1 (projeção) e F3 (posse); é a única fase que pode atrasar sem travar o campo. |
-| 6 | **F5 — Redução das três cópias** | Só com F1 estável: a projeção passa a ser dona do estado. |
+| 6 | **F5 — Redução das cópias locais** | Só com F1 estável: a projeção passa a ser dona do estado. |
 
 Dependências duras: **F2 → F1** (recibo antes da migração), **F1 → F3**,
 **F1 + F3 → F4**, **F1 → F5**. F0 não bloqueia código, mas bloqueia o *aceite*
@@ -292,7 +293,7 @@ das fases seguintes, porque define as metas.
   - **Aceite:** tempos p50/p95 de abertura a frio, delta de 1 filial e push de 500 eventos, em aparelho real.
   - **Evidência:** tabela de tempos anexada à issue/PR da fase.
 - [ ] **F0.2** Linha de base do estado atual (contagem por espelho, duração do pull de 12.636 ativos).
-  - **Aceite:** números datados, com aparelho e versão; divergência entre `local_assets`, `ativos` e `assets` medida, não estimada.
+  - **Aceite:** números datados, com aparelho e versão; divergência entre `local_assets` e `ativos` medida, não estimada.
   - **Evidência:** saída do Gestor de Base + log do pull.
 - [ ] **F0.3** Metas numéricas acordadas por fase.
   - **Aceite:** metas escritas (ex.: push de 500 eventos < X s; abertura < Y s; F5 sem regressão > 10%).
@@ -307,10 +308,11 @@ ganhou o cartão **Linha de Base (F0)**, com p50/p95 por métrica e os botões
 **Registrar**, **Copiar** e **Exportar** (JSON). O retrato
 (`gbr_perf_baseline_v1`) é gravado **automaticamente no fim do boot e de cada
 pull completo** — depois da persistência, para a contagem por espelho já
-refletir a base nova. A contagem dos três espelhos roda em **momento ocioso**
-(`requestIdleCallback`, com `setTimeout` de fallback) para não pesar no boot e
-usa o índice `[tenantid+primarykey]` (prefixo), sem varrer a tabela. Resíduos com
-`tenantid` fora do UPPER canónico são normalizados **uma única vez por base**
+refletir a base nova. A contagem dos dois espelhos (`local_assets` / `ativos`)
+roda em **momento ocioso** (`requestIdleCallback`, com `setTimeout` de fallback)
+para não pesar no boot e usa o índice `[tenantid+primarykey]` (prefixo), sem
+varrer a tabela.
+Resíduos com `tenantid` fora do UPPER canónico são normalizados **uma única vez por base**
 (marcador em `SYSTEM_CONTEXT`) por uma migração explícita em transação, no boot
 e nunca dentro da contagem. Em colisão, a linha canónica é preservada intacta e
 a variante legada não é apagada nem contada em duplicado. Até a migração correr,
@@ -333,9 +335,9 @@ O retrato automático aparece no cartão **Linha de Base (F0)** do Gestor de Bas
 e sai em JSON pelos botões **Copiar** / **Exportar**. Basta colar o JSON na
 issue/chat para preencher a tabela com os valores reais.
 
-| Data | Aparelho / versão | local_assets | ativos | assets | Pull completo (12.636) | Boot p50/p95 | Delta p50/p95 | Push p50/p95 |
-|---|---|---|---|---|---|---|---|---|
-| pendente de medição | — | — | — | — | — | — | — | — |
+| Data | Aparelho / versão | local_assets | ativos | Pull completo (12.636) | Boot p50/p95 | Delta p50/p95 | Push p50/p95 |
+|---|---|---|---|---|---|---|---|
+| pendente de medição | — | — | — | — | — | — | — |
 
 **Saída da fase:** baseline + metas publicadas; nenhuma mudança de comportamento.
 
@@ -399,14 +401,14 @@ issue/chat para preencher a tabela com os valores reais.
 
 **Saída da fase:** conflito real de duas leituras aparece com ambos os lados e a decisão fica registada.
 
-### 6.7 F5 — Redução das três cópias (3–5 dias)
+### 6.7 F5 — Redução das cópias locais (3–5 dias)
 
-- [ ] **F5.1** Uma única tabela de estado; `ativos` e `assets` viram aliases de leitura durante a migração.
-  - **Aceite:** nenhuma escrita nova em `ativos`/`assets`; leituras antigas continuam funcionando.
+- [ ] **F5.1** Uma única tabela de estado; `ativos` vira alias de leitura durante a migração (o `assets` local já saiu na v11).
+  - **Aceite:** nenhuma escrita nova em `ativos`; leituras antigas continuam funcionando.
 - [ ] **F5.2** Migração idempotente com dry-run: divergências `ativos → local_assets` resolvidas antes de remover.
   - **Aceite:** dry-run lista cada divergência com chave e decisão; segunda execução = zero escritas.
 - [ ] **F5.3** Remoção de `ativos` na versão seguinte do schema.
-  - **Aceite:** `docs/SCHEMA_BASELINE.md` e `src/__tests__/schemaBaseline.test.ts` com 8 tabelas; nenhuma referência de código a `db.ativos`.
+  - **Aceite:** `docs/SCHEMA_BASELINE.md` e `src/__tests__/schemaBaseline.test.ts` com 9 tabelas; nenhuma referência de código a `db.ativos`.
 - [ ] **F5.4** Ensaio na base real de 12.636 ativos.
   - **Aceite:** contagem e checksum por tabela iguais antes/depois; rollback testado (reverter PR + restaurar backup).
 - [ ] **F5.5** Atualizar `docs/ARCHITECTURE.md` e este documento (estado final).
