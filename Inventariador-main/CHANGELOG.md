@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   para Base Local»), sem cliques extra. Na reconexão, o pendente é tratado em
   segundo plano (fila da nuvem quando aplicável; gravação física em Base Local),
   com log e sem interromper o operador.
+- **Fecho determinístico:** o fim do fluxo guiado já não depende de um
+  `setTimeout(350)`. A auditoria do desbloqueio e a da troca são aguardadas
+  (com teto de 2 s para o utilizador nunca ficar preso se o IndexedDB bloquear),
+  o diálogo fecha com commit síncrono no DOM e só então a app reinicia — o
+  evento de auditoria deixa de se perder no reload.
 - **Cartões 100% passivos:** saíram «VALIDAR SOBERANIA» e «Desbloquear
   blindagem». Os cartões «Status de Blindagem» e «Vínculo de Diretório» só
   refletem o estado real (PROTEGIDO/MONITORANDO, ONLINE/OFFLINE/SINCRONIZANDO);
@@ -53,9 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no terminal que nenhuma chamada foi feita.
 - **Testes:** `sreProtocol` (5) cobre o estado de Base Local no placar;
   `baseModeTransition` (6) fixa a decisão do seletor, `sovereignty` (4) o
-  selo/remoção e o evento, `cartoesStatusPassivos` (2) a ausência de botões, e
-  o E2E `modoBase` cobre offline, o modal único, o selo automático e os cartões
-  passivos.
+  selo/remoção e o evento, `baseModeRestart` (4) a ordem auditoria → fecho →
+  reinício, `cartoesStatusPassivos` (2) a ausência de botões, e o E2E `modoBase`
+  cobre offline, o modal único, o selo automático e os cartões passivos.
 
 ### Adicionado — selo de geração da base
 

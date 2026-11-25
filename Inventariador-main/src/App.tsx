@@ -2,6 +2,7 @@
 // Inventariador GBR v2.6 - Force Update to MPULMON Project
 logger.info(">>> [System] Iniciando Inventariador GBR v2.6 - Modo de Isolamento Ativo...");
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { Routes, Route } from 'react-router-dom';
 import { PermissionGate } from './components/PermissionGate';
 import { Capacitor } from '@capacitor/core';
@@ -90,6 +91,7 @@ import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturn
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { isSovereigntyLocked, sealSovereignty, unsealSovereignty, notifySovereigntyChanged } from './utils/sovereignty';
 import { planBaseModeSwitch } from './utils/baseModeTransition';
+import { fecharComAuditoriaGravada } from './utils/baseModeRestart';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, campaignUnitKeys, collectConfiguredUnitNames, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
@@ -5168,9 +5170,26 @@ useEffect(() => {
     }
   };
 
+  /**
+   * Fecho determinístico da troca de base (ver `utils/baseModeRestart`).
+   * O `flushSync` aplica o fecho no DOM antes de o app reiniciar — sem espera
+   * fixa e sem deixar o overlay a meio da navegação.
+   */
+  const fecharModalDeTroca = useCallback(() => {
+    flushSync(() => {
+      setModalConfig((prev: ModalConfig) => ({ ...prev, isOpen: false }));
+    });
+  }, []);
+
+  /** Reinício da troca: autoriza a saída para o guard de fecho não perguntar. */
+  const reiniciarAposTroca = useCallback(() => {
+    sessionStorage.setItem('__gbr_allow_reload', 'true');
+    window.location.reload();
+  }, []);
+
   const handleUpdateDatabaseMode = async (
     mode: DatabaseMode,
-    options?: { sealSovereignty?: boolean; silentSuccess?: boolean }
+    options?: { sealSovereignty?: boolean; silentSuccess?: boolean; pendingAudit?: Promise<unknown> }
   ) => {
     // Sem as chaves do Supabase (build INTERNAL) a Base Oficial não existe: o
     // arranque seguinte voltaria a resolver INTERNAL e a troca seria um
@@ -5201,8 +5220,9 @@ useEffect(() => {
         await applyLocalSovereigntySeal('troca para Base Local');
       }
 
-      // Log de Auditoria
-      logAuditEvent({
+      // Log de Auditoria — no fluxo guiado o evento é aguardado antes do
+      // reinício (`fecharComAuditoriaGravada`), para o reload não o perder.
+      const auditoriaDoModo = logAuditEvent({
         user_email: user?.email || 'unknown',
         action: 'UPDATE',
         table_name: 'config',
@@ -5230,10 +5250,18 @@ useEffect(() => {
       }
       
       // Fluxo guiado (blindagem removida + troca): o único modal já foi o de
-      // confirmação — aqui só se reinicia para os serviços lerem o novo modo.
+      // confirmação. O fecho é determinístico — espera a auditoria do
+      // desbloqueio e a da troca ficarem gravadas, fecha o diálogo no DOM e só
+      // então reinicia. Antes havia um `setTimeout(350)`, que podia reiniciar
+      // antes de o Dexie gravar o evento.
       if (options?.silentSuccess) {
-        sessionStorage.setItem('__gbr_allow_reload', 'true');
-        window.setTimeout(() => window.location.reload(), 350);
+        await fecharComAuditoriaGravada({
+          pendentes: [options.pendingAudit, auditoriaDoModo],
+          fechar: fecharModalDeTroca,
+          reiniciar: reiniciarAposTroca,
+          aoFalhar: (origem, erro) =>
+            logger.warn(`>>> [ModeSwitch] Fecho da troca falhou (${origem}):`, erro)
+        });
         return;
       }
 
@@ -5429,10 +5457,11 @@ useEffect(() => {
         confirmText: 'Conectar',
         onConfirm: () => {
           const removida = unsealSovereignty(localStorage);
+          let auditoriaDoDesbloqueio: Promise<unknown> | undefined;
           if (removida) {
             notifySovereigntyChanged();
             logger.info('>>> [Soberania] Blindagem removida automaticamente na troca para Base Oficial.');
-            void logAuditEvent({
+            auditoriaDoDesbloqueio = logAuditEvent({
               user_email: user?.email || 'unknown',
               action: 'UPDATE',
               table_name: 'config',
@@ -5440,8 +5469,13 @@ useEffect(() => {
               tenantid: user?.tenantid || readSessionTenantId() || ''
             });
           }
-          // Mesma sequência, sem segundo modal: ativa a Base Oficial já.
-          void handleUpdateDatabaseMode(mode, { silentSuccess: true });
+          // Mesma sequência, sem segundo modal: ativa a Base Oficial já. A
+          // auditoria do desbloqueio segue como pendência do fecho — fica
+          // gravada antes de o app reiniciar.
+          void handleUpdateDatabaseMode(mode, {
+            silentSuccess: true,
+            pendingAudit: auditoriaDoDesbloqueio
+          });
         }
       });
       return;
