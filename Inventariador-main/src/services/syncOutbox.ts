@@ -161,6 +161,30 @@ export async function marcarFalhasOutbox(
   return atualizadas.length;
 }
 
+/**
+ * Chaves em recuo: entradas cujo `next_attempt_at` ainda não chegou.
+ *
+ * É o que faz o recuo valer — a drenagem salta estes registos em vez de os
+ * tentar a cada ciclo de 60 s. Falha para o lado seguro: sem outbox legível,
+ * devolve vazio e a fila continua como antes (nenhum ativo fica preso por um
+ * erro de leitura desta tabela).
+ */
+export async function chavesEmRecuo(tenantid: string): Promise<Set<string>> {
+  const contrato = String(tenantid || '').trim().toUpperCase();
+  if (!contrato) return new Set();
+  try {
+    const entradas = await db.sync_outbox.where('next_attempt_at').above(Date.now()).toArray();
+    return new Set(
+      entradas
+        .filter((entrada) => String(entrada.tenantid || '').trim().toUpperCase() === contrato)
+        .map((entrada) => entrada.primarykey)
+    );
+  } catch (err) {
+    logger.warn('[Outbox] Recuo indisponível — a fila segue sem ele:', err);
+    return new Set();
+  }
+}
+
 /** Contagens para diagnóstico (Gestor de Base / selo). Leitura pura. */
 export async function resumoOutbox(): Promise<{ pendentes: number; falhas: number; total: number }> {
   const entradas = await db.sync_outbox.toArray();

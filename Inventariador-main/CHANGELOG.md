@@ -452,6 +452,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sincronização da sessão, a outbox é semeada com o que a fila legada já tinha,
   sem reiniciar o recuo de quem já falhou. Nenhuma tabela existente muda de
   chave ou de índices (v9 é aditiva, como a v8).
+- **Recuo com efeito:** a drenagem passou a saltar os registos cujo
+  `next_attempt_at` ainda não chegou (`chavesEmRecuo`). Antes o campo era escrito
+  e ninguém o lia: a recusa voltava a ser tentada a cada ciclo de 60 s. Um ciclo
+  em que todos os pendentes estão em recuo devolve 0 envios sem os descartar nem
+  os auditar como perdidos; um registo sem entrada na outbox segue sem bloqueio
+  (a fonte continua a ser `_is_synced` até à Fase 2).
 - **Servidor (Fase 0):** o trigger `assets_touch_updated_at` passa a carimbar
   com `clock_timestamp()` em vez de `now()`. `now()` é o instante do BEGIN da
   transacção: duas actualizações do mesmo ativo no mesmo lote ficavam com o
@@ -461,7 +467,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   coluna segue a mesma regra.
 - **Testes:** `syncOutbox` (8) fixa a normalização da chave, a idempotência, a
   semeadura a partir da fila legada, a remoção no sucesso e o recuo na falha;
-  `schemaBaseline` passa a travar `verno === 9` e as 11 tabelas.
+  `syncPushQueue` prova que um registo em recuo **não** é tentado e que volta a
+  sê-lo quando o prazo passa; `schemaBaseline` passa a travar `verno === 9` e as
+  11 tabelas.
 
 ## [3.0.0] — 2026-11-21
 

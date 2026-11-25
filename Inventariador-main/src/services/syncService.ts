@@ -15,7 +15,7 @@ import { purgarAuditoriaAntiga } from './auditoriaRetencao';
 import { assetGpsColumns } from '../utils/assetGps';
 import { assinaturaDeFalha, inicioDoDiaDaFalha } from '../utils/syncFalha';
 import { normalizeFlag } from '../utils/normalize';
-import { semearOutboxDePendentes, marcarEnviadosOutbox, marcarFalhasOutbox } from './syncOutbox';
+import { semearOutboxDePendentes, marcarEnviadosOutbox, marcarFalhasOutbox, chavesEmRecuo } from './syncOutbox';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -746,13 +746,30 @@ const _syncService = {
         return { success: true, processedCount: 0, failedCount: 0 };
       }
 
+      // RECUO (v9): a outbox diz quando cada ativo pode voltar a ser tentado.
+      // Sem esta leitura o `next_attempt_at` era um campo que ninguém lia e uma
+      // recusa era repetida a cada ciclo de 60 s — a rede e a trilha pagavam
+      // por isso. Registos sem entrada na outbox não são bloqueados: nesta fase
+      // a fonte continua a ser `_is_synced` e o envelope só cobre o que passou
+      // por ela (semeadura + conferência).
+      const recuo = await chavesEmRecuo(tenantidClean);
+      const tentaveis = recuo.size === 0
+        ? records
+        : records.filter((record) => !recuo.has(sanitizeAssetKey(String(record.primarykey || record.id || ''))));
+      if (tentaveis.length === 0) {
+        logger.info(
+          `>>> [Sync] ${records.length} pendente(s) em recuo — nova tentativa quando o prazo passar.`
+        );
+        return { success: true, processedCount: 0, failedCount: 0 };
+      }
+
       // EXCLUSÃO VENCE A SUBIDA: o upsert não lê o estado remoto, por isso um
       // aparelho offline reenviava a cópia ativa de um ativo apagado noutro
       // lado e reactivava-o em todos. A nuvem é consultada UMA vez por ciclo
       // (nunca por registo) e os apagados ficam fora do envio.
       const apagadasNaNuvem = await fetchCloudDeletedKeys(
         [tenantidClean],
-        records.map(record => String(record.primarykey || record.id || ''))
+        tentaveis.map(record => String(record.primarykey || record.id || ''))
       );
 
       const syncedPrimaryKeys: string[] = [];
@@ -762,7 +779,7 @@ const _syncService = {
       let failureSignatures: Set<string> | null = null;
       let exceptionSignatures: Set<string> | null = null;
 
-      for (const record of records) {
+      for (const record of tentaveis) {
         // GUARDA DE CONECTIVIDADE EM TEMPO REAL: Evita enchentes de erros caso o sinal caia no meio do laço
         if (!navigator.onLine) {
           logger.warn(">>> [Sync Guard] Conectividade perdida no meio do laço de processamento. Abortando ciclo.");
