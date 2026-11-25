@@ -1050,7 +1050,6 @@ export class SqliteService {
           // (mesma regra aplicada na nuvem com onConflict 'tenantid, id').
           const safeChunk = await this.filterCrossTenantWrites(mappedChunk);
           await db.ativos.bulkPut(safeChunk);
-          await db.assets.bulkPut(safeChunk);
           await db.local_assets.bulkPut(safeChunk);
 
           processed += chunk.length;
@@ -1148,7 +1147,6 @@ export class SqliteService {
       gps_lng: null
     };
     await db.ativos.put(item);
-    await db.assets.put(item);
     await db.local_assets.put(item);
   }
 
@@ -1549,9 +1547,8 @@ export class SqliteService {
     if (assets.length === 0) return 0;
     const mapped = assets.map(asset => this.mapAssetToDexie(asset, false));
     const safe = await this.filterCrossTenantWrites(mapped);
-    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+    await db.transaction('rw', [db.ativos, db.local_assets], async () => {
       await db.ativos.bulkPut(safe);
-      await db.assets.bulkPut(safe);
       await db.local_assets.bulkPut(safe);
     });
     return safe.length;
@@ -1693,9 +1690,8 @@ export class SqliteService {
     const tenantKey = String(tenantid || '').trim().toUpperCase();
     const key = String(primarykey || '').trim();
     if (!tenantKey || !key) return;
-    await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+    await db.transaction('rw', [db.ativos, db.local_assets], async () => {
       await db.ativos.update([tenantKey, key], changes);
-      await db.assets.update([tenantKey, key], changes);
       await db.local_assets.update([tenantKey, key], changes);
     });
   }
@@ -1895,7 +1891,6 @@ export class SqliteService {
         } as DexieAsset;
         
         await db.ativos.put(updatedItem);
-        await db.assets.put(updatedItem);
         await db.local_assets.put(updatedItem);
 
         const details = `Alteração do campo ${change.field} de ${change.oldValue || 'NULO'} para ${change.newValue || 'NULO'}`;

@@ -417,9 +417,8 @@ export class DatabaseLoaderService {
       }));
 
       // Transação ACID atômica por bloco para mitigar Race Conditions
-      await db.transaction('rw', [db.ativos, db.assets, db.local_assets], async () => {
+      await db.transaction('rw', [db.ativos, db.local_assets], async () => {
         await db.ativos.bulkPut(loteHigienizado);
-        await db.assets.bulkPut(loteHigienizado);
         await db.local_assets.bulkPut(loteHigienizado);
       });
 
@@ -667,7 +666,7 @@ export class DatabaseLoaderService {
 
         // Transação ACID atômica do Dexie com Fail-Fast
         try {
-          await db.transaction('rw', [db.local_assets, db.ativos, db.assets, db.audit_logs], async () => {
+          await db.transaction('rw', [db.local_assets, db.ativos, db.audit_logs], async () => {
             // Validação estrita de chaves primárias antes de inserir
             for (const asset of assetsToInsert) {
               if (!asset.id || !asset.primarykey) {
@@ -677,7 +676,6 @@ export class DatabaseLoaderService {
 
             await db.local_assets.bulkPut(assetsToInsert);
             await db.ativos.bulkPut(assetsToInsert);
-            await db.assets.bulkPut(assetsToInsert);
 
             // Grava logs de correção se houverem
             for (const corr of correctionsToLog) {
@@ -966,7 +964,7 @@ export class DatabaseLoaderService {
 
         // DESCARGA NO ARMAZENAMENTO LOCAL (Transação ACID atômica com Fail-Fast)
         try {
-          await db.transaction('rw', [db.local_assets, db.ativos, db.assets, db.audit_logs], async () => {
+          await db.transaction('rw', [db.local_assets, db.ativos, db.audit_logs], async () => {
             // Validação estrita antes da gravação
             for (const asset of assetsToInsert) {
               if (!asset.id || !asset.primarykey) {
@@ -976,7 +974,6 @@ export class DatabaseLoaderService {
 
             await db.local_assets.bulkPut(assetsToInsert);
             await db.ativos.bulkPut(assetsToInsert);
-            await db.assets.bulkPut(assetsToInsert);
 
             // Gravação dos logs de correção
             for (const corr of correctionsToLog) {

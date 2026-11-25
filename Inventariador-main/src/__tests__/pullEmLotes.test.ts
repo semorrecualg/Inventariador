@@ -56,7 +56,7 @@ describe('persistAssetsBatch — só o subconjunto com decisão local', () => {
     );
   });
 
-  it('grava a linha com o GPS do aparelho nas duas grafias e nos três espelhos', async () => {
+  it('grava a linha com o GPS do aparelho nas duas grafias e nas duas tabelas', async () => {
     const merged = linha({
       primarykey: 'PK-1',
       latitude: -15.79,
@@ -72,7 +72,8 @@ describe('persistAssetsBatch — só o subconjunto com decisão local', () => {
     const gravadas = await sqliteService.persistAssetsBatch([merged]);
 
     expect(gravadas).toBe(1);
-    for (const tabela of [db.ativos, db.assets, db.local_assets]) {
+    // A.3a.3: o terceiro espelho já não recebe escrita.
+    for (const tabela of [db.ativos, db.local_assets]) {
       const row = (await tabela.where('primarykey').equals('PK-1').first()) as DexieAsset | undefined;
       expect(row?.latitude).toBe(-15.79);
       expect(row?.gps_lat).toBe(-15.79);

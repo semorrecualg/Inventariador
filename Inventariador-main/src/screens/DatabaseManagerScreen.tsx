@@ -289,7 +289,6 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           await db.local_assets.clear();
           
           await db.ativos.bulkPut(parsed);
-          await db.assets.bulkPut(parsed);
           await db.local_assets.bulkPut(parsed);
         });
 
@@ -1017,8 +1016,8 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         await db.local_assets.clear();
         await db.addresses.clear();
         await db.ativos.clear();
-        // `assets` também é espelho do inventário: sem o limpar, a higienização
-        // deixava dados vivos e as contagens por espelho divergiam.
+        // `assets` ainda é limpo para não sobrar lixo do antigo terceiro
+        // espelho; já não recebe escrita desde a A.3a.3.
         await db.assets.clear();
       });
       // Espelho virtual (sandbox): alimentava a Unidade Operacional com milhares

@@ -43,14 +43,14 @@ const linha = (over: Record<string, unknown> = {}): DexieAsset =>
 const semear = async (over: Record<string, unknown> = {}): Promise<DexieAsset> => {
   const registo = linha(over);
   await db.ativos.put({ ...registo } as DexieAsset);
-  await db.assets.put({ ...registo } as DexieAsset);
   await db.local_assets.put({ ...registo } as DexieAsset);
   return registo;
 };
 
+// A.3a.3: `assets` deixou de receber escrita — as provas olham para as duas
+// tabelas vivas.
 const porEspelho = async (): Promise<Array<DexieAsset | undefined>> => [
   (await db.ativos.where('primarykey').equals('PK-1').first()) as DexieAsset | undefined,
-  (await db.assets.where('primarykey').equals('PK-1').first()) as DexieAsset | undefined,
   (await db.local_assets.where('primarykey').equals('PK-1').first()) as DexieAsset | undefined
 ];
 
@@ -79,12 +79,12 @@ describe('carimbo da falha no sucesso — uma só regra', () => {
     expect(original._is_synced).toBe(0);
   });
 
-  it('fila/envio em massa (`markAssetsSynced`) apaga o carimbo nos três espelhos', async () => {
+  it('fila/envio em massa (`markAssetsSynced`) apaga o carimbo nas duas tabelas', async () => {
     await semear({ _syncFailAt: CARIMBO, _syncFailReason: MOTIVO });
 
     await sqliteService.markAssetsSynced(['PK-1']);
 
-    expect(await carimbosNosEspelhos()).toEqual([null, null, null]);
+    expect(await carimbosNosEspelhos()).toEqual([null, null]);
     const registos = await porEspelho();
     registos.forEach(r => expect(Number(r?._is_synced)).toBe(1));
   });
@@ -101,7 +101,7 @@ describe('carimbo da falha no sucesso — uma só regra', () => {
       expect(r?._syncFailAt).toBeUndefined();
       expect(r?._syncFailReason).toBeUndefined();
     });
-    expect(syncFailureInfo(registos[2])).toBeNull();
+    expect(syncFailureInfo(registos[1])).toBeNull();
   });
 
   it('o pull (`markSynced`) deixa o registo igual à nuvem sem carimbo', async () => {
@@ -113,7 +113,7 @@ describe('carimbo da falha no sucesso — uma só regra', () => {
       { markSynced: true }
     );
 
-    expect(await carimbosNosEspelhos()).toEqual([null, null, null]);
+    expect(await carimbosNosEspelhos()).toEqual([null, null]);
     const registos = await porEspelho();
     registos.forEach(r => expect(Number(r?._is_synced)).toBe(1));
   });
@@ -122,11 +122,11 @@ describe('carimbo da falha no sucesso — uma só regra', () => {
     await semear();
 
     await sqliteService.markAssetsFailed([{ primarykey: 'PK-1', motivo: MOTIVO }]);
-    expect((await carimbosNosEspelhos())[2]).toBeTruthy();
+    expect((await carimbosNosEspelhos())[1]).toBeTruthy();
 
     await sqliteService.markAssetsSynced(['PK-1']);
 
-    expect(await carimbosNosEspelhos()).toEqual([null, null, null]);
+    expect(await carimbosNosEspelhos()).toEqual([null, null]);
   });
 
   it('corrida — sucesso primeiro, falha atrasada depois: a falha não carimba um registo sincronizado', async () => {
@@ -138,7 +138,7 @@ describe('carimbo da falha no sucesso — uma só regra', () => {
       { primarykey: 'PK-1', motivo: MOTIVO, registo: { _is_synced: 0 } }
     ]);
 
-    expect(await carimbosNosEspelhos()).toEqual([null, null, null]);
+    expect(await carimbosNosEspelhos()).toEqual([null, null]);
     const registos = await porEspelho();
     registos.forEach(r => expect(Number(r?._is_synced)).toBe(1));
     const pendentes = await db.local_assets.where('_is_synced').equals(0).toArray();
