@@ -97,12 +97,21 @@ describe('docs/supabase_rls_tabelas_restantes.sql — tabelas de operação', ()
         new RegExp(`CREATE POLICY \\w+ ON public\\.${t}\\s+FOR (?:UPDATE|DELETE|ALL)`)
       );
     }
-    // audit_logs e asset_logs toleram a grafia legada `tenant_id` dos triggers.
-    const auditSelect = sqlNovo.slice(
+    // As políticas não referenciam `tenant_id`: numa base onde a coluna não
+    // existe isso rebentava o script com 42703. A grafia legada é copiada para
+    // `tenantid` por um trigger que a lê via `to_jsonb`.
+    const policyAudit = sqlNovo.slice(
       sqlNovo.indexOf('CREATE POLICY p_tenant_select ON public.audit_logs'),
       sqlNovo.indexOf('REVOKE ALL ON public.audit_logs')
     );
-    expect(auditSelect).toContain('coalesce(tenantid, tenant_id)');
+    expect(policyAudit).toContain('public.tenant_visible(tenantid)');
+    expect(sqlNovo).not.toContain('coalesce(tenantid, tenant_id)');
+    const trigger = corpoFuncao(sqlNovo, 'FUNCTION public.tenantid_de_log_legado()');
+    expect(trigger).toContain("to_jsonb(NEW) ->> 'tenant_id'");
+    expect(trigger).toContain('NEW.tenantid');
+    for (const t of ['audit_logs', 'asset_logs']) {
+      expect(sqlNovo).toContain(`BEFORE INSERT ON public.${t}`);
+    }
   });
 
   it('base_generation é só leitura para authenticated (escrita no SQL Editor)', () => {
@@ -150,6 +159,14 @@ describe('docs/supabase_bootstrap.sql — mesmas políticas (paridade)', () => {
   });
 
   it('as trilhas do bootstrap também não ganham UPDATE/DELETE', () => {
+    // O bootstrap copia a grafia legada para `tenantid` e não a referencia nas
+    // políticas (42703 numa base sem essa coluna).
+    expect(sqlBootstrap).toContain('FUNCTION public.tenantid_de_log_legado()');
+    for (const t of ['audit_logs', 'asset_logs']) {
+      expect(sqlBootstrap).toContain(`BEFORE INSERT ON public.${t}`);
+    }
+    expect(sqlBootstrap).not.toContain('public.tenant_visible(coalesce(tenantid, tenant_id))');
+
     for (const t of ['audit_logs', 'asset_logs', 'campaign_snapshots']) {
       expect(sqlBootstrap).not.toMatch(
         new RegExp(`CREATE POLICY \\w+ ON public\\.${t}\\s+FOR (?:UPDATE|DELETE|ALL)`)

@@ -21,7 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contrato. `anon` perde o privilégio de tabela nas sete.
 - **Append-only:** `audit_logs`, `asset_logs` e `campaign_snapshots` só têm
   SELECT e INSERT — sem política de UPDATE/DELETE, o PostgREST não reescreve
-  nem apaga a trilha nem o laudo. A fila de auditoria passa a
+  nem apaga a trilha nem o laudo. A grafia legada `tenant_id` (triggers criados
+  fora do repositório) é copiada para `tenantid` por um trigger `BEFORE INSERT`
+  que a lê via `to_jsonb(NEW)`: as políticas não a referenciam, porque numa base
+  sem essa coluna o script rebentava com 42703. A fila de auditoria passa a
   `ignoreDuplicates` (`ON CONFLICT DO NOTHING`), para o reenvio idempotente não
   exigir UPDATE. `base_generation` fica só de leitura; a escrita continua no
   SQL de reset.

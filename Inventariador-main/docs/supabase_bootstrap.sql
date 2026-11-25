@@ -782,6 +782,34 @@ REVOKE ALL ON FUNCTION public.tenant_visible(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.tenant_visible(text) FROM anon;
 GRANT EXECUTE ON FUNCTION public.tenant_visible(text) TO authenticated;
 
+-- Grafia legada (`tenant_id`) das trilhas: triggers criados fora do repositório
+-- gravam essa coluna. As políticas olham só para `tenantid`; este trigger copia
+-- o valor antes da verificação. Lê por `to_jsonb(NEW)`, que devolve NULL quando
+-- a coluna não existe — referenciá-la na política daria 42703.
+CREATE OR REPLACE FUNCTION public.tenantid_de_log_legado()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF btrim(coalesce(NEW.tenantid, '')) = '' THEN
+    NEW.tenantid := nullif(btrim(coalesce(to_jsonb(NEW) ->> 'tenant_id', '')), '');
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS audit_logs_tenantid_legado ON public.audit_logs;
+CREATE TRIGGER audit_logs_tenantid_legado
+  BEFORE INSERT ON public.audit_logs
+  FOR EACH ROW EXECUTE FUNCTION public.tenantid_de_log_legado();
+
+DROP TRIGGER IF EXISTS asset_logs_tenantid_legado ON public.asset_logs;
+CREATE TRIGGER asset_logs_tenantid_legado
+  BEFORE INSERT ON public.asset_logs
+  FOR EACH ROW EXECUTE FUNCTION public.tenantid_de_log_legado();
+
 -- assets: só authenticated, limitado ao contrato (MASTER atravessa).
 DROP POLICY IF EXISTS p_all ON public.assets;
 DROP POLICY IF EXISTS p_tenant_all ON public.assets;
@@ -807,7 +835,8 @@ REVOKE ALL ON public.assets FROM anon;
 -- 7-C. TABELAS DE OPERAÇÃO — contrato, sem anon (docs/supabase_rls_tabelas_restantes.sql)
 --    inventory_config/locations/campaigns: contrato inteiro; MASTER atravessa.
 --    campaign_snapshots/asset_logs/audit_logs: append-only (só SELECT/INSERT) —
---    a trilha e os laudos não são reescrevíveis pelo PostgREST.
+--    a trilha e os laudos não são reescrevíveis pelo PostgREST. A grafia legada
+--    `tenant_id` é copiada para `tenantid` pelo trigger do 7-A.
 --    base_generation: só leitura para authenticated; escrita pelo SQL de reset.
 --    FORA DO ÂMBITO: `unit_configs` continua com p_all (exposição seguinte).
 DROP POLICY IF EXISTS p_all ON public.inventory_config;
@@ -827,10 +856,10 @@ DROP POLICY IF EXISTS p_tenant_select ON public.audit_logs;
 DROP POLICY IF EXISTS p_tenant_insert ON public.audit_logs;
 CREATE POLICY p_tenant_select ON public.audit_logs
   FOR SELECT TO authenticated
-  USING (public.tenant_visible(coalesce(tenantid, tenant_id)));
+  USING (public.tenant_visible(tenantid));
 CREATE POLICY p_tenant_insert ON public.audit_logs
   FOR INSERT TO authenticated
-  WITH CHECK (public.tenant_visible(coalesce(tenantid, tenant_id)));
+  WITH CHECK (public.tenant_visible(tenantid));
 REVOKE ALL ON public.audit_logs FROM anon;
 
 -- user_permissions: sem anon; cada um na sua linha; admin no contrato.
@@ -919,10 +948,10 @@ DROP POLICY IF EXISTS p_tenant_select ON public.asset_logs;
 DROP POLICY IF EXISTS p_tenant_insert ON public.asset_logs;
 CREATE POLICY p_tenant_select ON public.asset_logs
   FOR SELECT TO authenticated
-  USING (public.tenant_visible(coalesce(tenantid, tenant_id)));
+  USING (public.tenant_visible(tenantid));
 CREATE POLICY p_tenant_insert ON public.asset_logs
   FOR INSERT TO authenticated
-  WITH CHECK (public.tenant_visible(coalesce(tenantid, tenant_id)));
+  WITH CHECK (public.tenant_visible(tenantid));
 REVOKE ALL ON public.asset_logs FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public."asset-photos";

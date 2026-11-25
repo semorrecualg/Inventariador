@@ -103,10 +103,45 @@ GRANT EXECUTE ON FUNCTION public.tenant_visible(text) TO authenticated;
 -- Colunas de contrato das trilhas (bases legadas podem ter só uma das grafias;
 -- sem elas o `coalesce` das políticas falharia com 42703 e o script inteiro
 -- reverteria).
+-- A coluna de contrato das tabelas de operação: uma base legada pode não a ter
+-- (as políticas rebentariam com 42703, como aconteceu com `tenant_id`).
+ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.locations ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS tenant_id text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.asset_logs ADD COLUMN IF NOT EXISTS tenant_id text;
+
+-- Grafia legada (`tenant_id`) das trilhas: triggers criados fora do repositório
+-- gravam essa coluna. Em vez de a referenciar nas políticas — o que rebenta com
+-- 42703 numa base onde a coluna não existe —, este trigger copia o valor para
+-- `tenantid` ANTES da verificação da política. Lê a coluna por `to_jsonb(NEW)`,
+-- que devolve NULL quando ela não existe, em vez de falhar a compilar.
+CREATE OR REPLACE FUNCTION public.tenantid_de_log_legado()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF btrim(coalesce(NEW.tenantid, '')) = '' THEN
+    NEW.tenantid := nullif(btrim(coalesce(to_jsonb(NEW) ->> 'tenant_id', '')), '');
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS audit_logs_tenantid_legado ON public.audit_logs;
+CREATE TRIGGER audit_logs_tenantid_legado
+  BEFORE INSERT ON public.audit_logs
+  FOR EACH ROW EXECUTE FUNCTION public.tenantid_de_log_legado();
+
+DROP TRIGGER IF EXISTS asset_logs_tenantid_legado ON public.asset_logs;
+CREATE TRIGGER asset_logs_tenantid_legado
+  BEFORE INSERT ON public.asset_logs
+  FOR EACH ROW EXECUTE FUNCTION public.tenantid_de_log_legado();
 
 -- ============================================================================
 -- PASSO 2 — inventory_config: âncora GPS e config por filial, no contrato
@@ -174,10 +209,10 @@ REVOKE ALL ON public.campaign_snapshots FROM anon;
 
 -- ============================================================================
 -- PASSO 6 — asset_logs: histórico por ativo, append-only
---   `coalesce(tenantid, tenant_id)`: triggers criados fora do repositório
---   gravam a grafia legada `tenant_id`. Sem o coalesce, uma linha legada sem
---   `tenantid` seria recusada e — por ser escrita por um trigger AFTER em
---   `assets` — abortaria o upsert do ativo inteiro.
+--   A política olha só para `tenantid`; o trigger do PASSO 1 já copiou a grafia
+--   legada `tenant_id` para lá. Sem isso, uma linha legada sem `tenantid` seria
+--   recusada e — por ser escrita por um trigger AFTER em `assets` — abortaria o
+--   upsert do ativo inteiro.
 -- ============================================================================
 ALTER TABLE public.asset_logs ENABLE ROW LEVEL SECURITY;
 
@@ -186,11 +221,11 @@ DROP POLICY IF EXISTS p_tenant_select ON public.asset_logs;
 DROP POLICY IF EXISTS p_tenant_insert ON public.asset_logs;
 CREATE POLICY p_tenant_select ON public.asset_logs
   FOR SELECT TO authenticated
-  USING (public.tenant_visible(coalesce(tenantid, tenant_id)));
+  USING (public.tenant_visible(tenantid));
 
 CREATE POLICY p_tenant_insert ON public.asset_logs
   FOR INSERT TO authenticated
-  WITH CHECK (public.tenant_visible(coalesce(tenantid, tenant_id)));
+  WITH CHECK (public.tenant_visible(tenantid));
 
 REVOKE ALL ON public.asset_logs FROM anon;
 
@@ -207,11 +242,11 @@ DROP POLICY IF EXISTS p_tenant_select ON public.audit_logs;
 DROP POLICY IF EXISTS p_tenant_insert ON public.audit_logs;
 CREATE POLICY p_tenant_select ON public.audit_logs
   FOR SELECT TO authenticated
-  USING (public.tenant_visible(coalesce(tenantid, tenant_id)));
+  USING (public.tenant_visible(tenantid));
 
 CREATE POLICY p_tenant_insert ON public.audit_logs
   FOR INSERT TO authenticated
-  WITH CHECK (public.tenant_visible(coalesce(tenantid, tenant_id)));
+  WITH CHECK (public.tenant_visible(tenantid));
 
 REVOKE ALL ON public.audit_logs FROM anon;
 
@@ -260,9 +295,9 @@ REVOKE ALL ON public.base_generation FROM anon;
 --   union all select 'campaign_snapshots', count(*) from public.campaign_snapshots
 --    where btrim(coalesce(tenantid, '')) = ''
 --   union all select 'asset_logs', count(*) from public.asset_logs
---    where btrim(coalesce(coalesce(tenantid, tenant_id), '')) = ''
+--    where btrim(coalesce(tenantid, '')) = ''
 --   union all select 'audit_logs', count(*) from public.audit_logs
---    where btrim(coalesce(coalesce(tenantid, tenant_id), '')) = '';
+--    where btrim(coalesce(tenantid, '')) = '';
 --
 -- 4) Trilha append-only (nenhuma política de UPDATE/DELETE nestas duas):
 --   select tablename, cmd from pg_policies
