@@ -432,6 +432,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   de regressão (nuvem a responder sem sessão depois do login local) em
   `bootCloudCheck`.
 
+### Alterado — A.3a.1: leituras deixam de passar pelo terceiro espelho
+
+- **O que era:** quatro leitores ainda iam a `assets`, o espelho canónico do
+  último carregamento, que só recebe escrita nos caminhos antigos. Além de ler
+  dados velhos, `assets` alimentava as contagens de unidade e as estatísticas de
+  localidade.
+- **Agora:** o catálogo de contratos lê `local_assets` (o contrato/filial que
+  `assets` trazia é o mesmo e a varredura do catálogo já passava por lá);
+  `localDb.getMapData` e `localDb.count` leem `ativos` (a tabela viva); a união
+  de trabalho das estatísticas de endereço passou de três para **duas** tabelas
+  (`ativos` + `local_assets`, com `assets` fora); a conferência do cartão deixa
+  de replicar em `assets` — a verificação em `ativos` já cobria o caso.
+- **Testes:** as provas que fixavam a união de três tabelas foram actualizadas
+  para o contrato de duas (incluindo o fallback de `_is_deleted`, que agora desce
+  para o baseline) — nenhuma foi removida nem enfraquecida.
+- **Observação:** `getMapData` filtra por `currentCampaignId`, que não é índice
+  em `ativos` nem era em `assets`; o comportamento é o mesmo de antes (corrigir a
+  query não é desta etapa).
+
 ### Corrigido — recuo para o registo que falha sem envelope
 
 - **O que era:** o recuo (`next_attempt_at`) só existia para quem já tinha

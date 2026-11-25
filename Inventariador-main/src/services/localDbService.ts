@@ -302,7 +302,7 @@ export const localDb = {
 
     getMapData: async (campaignId: string): Promise<Asset[]> => {
       const tenant = getCurrentTenantid().trim().toUpperCase();
-      const results = await db.assets
+      const results = await db.ativos
         .where('currentCampaignId')
         .equals(campaignId)
         .toArray();
@@ -396,7 +396,7 @@ export const localDb = {
 
     count: async () => {
       const tenant = getCurrentTenantid().trim().toUpperCase();
-      const all = await db.assets.toArray();
+      const all = await db.ativos.toArray();
       return all.filter(a => String(a.tenantid || a.tenantid || '').trim().toUpperCase() === tenant).length;
     },
 
@@ -530,13 +530,13 @@ export const localDb = {
         return rows.filter(r => normalizeUnitMatchKey(r.filial) === unitMatch);
       };
       // ORDEM = PRECEDÊNCIA da união. `ativos` é a tabela VIVA (é onde o
-      // trabalho de campo grava e apaga); `assets` é a canónica do último
-      // carregamento e `local_assets` o baseline do restore. A ordem só decide
+      // trabalho de campo grava e apaga); `local_assets` é o baseline do
+      // restore. `assets` saiu da união (A.3a.1): era o terceiro espelho e
+      // alimentava as estatísticas com linhas antigas. A ordem só decide
       // `_is_deleted` (ver `mergeAssetCopies`) — endereço e conferência são
       // combinados, não sobrepostos.
       const workTables: UnitTable[] = [
         db.ativos as unknown as UnitTable,
-        db.assets as unknown as UnitTable,
         db.local_assets as unknown as UnitTable
       ];
       const addressRows = async (): Promise<DexieAddress[]> => {

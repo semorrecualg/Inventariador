@@ -63,6 +63,10 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     db.ativos.bulkPut(rows as unknown as Parameters<typeof db.ativos.bulkPut>[0]);
   const putAssets = (rows: Array<Record<string, unknown>>) =>
     db.assets.bulkPut(rows as unknown as Parameters<typeof db.assets.bulkPut>[0]);
+  // A.3a.1: a união passou a ser `ativos` + `local_assets`; `assets` saiu das
+  // leituras. As linhas «de outra cópia» destes testes vão para o baseline.
+  const putLocal = (rows: Array<Record<string, unknown>>) =>
+    db.local_assets.bulkPut(rows as unknown as Parameters<typeof db.local_assets.bulkPut>[0]);
   const putAddresses = (rows: Array<Record<string, unknown>>) =>
     db.addresses.bulkPut(rows as unknown as Parameters<typeof db.addresses.bulkPut>[0]);
   const address = (codigo_endereco: string) => ({
@@ -105,8 +109,8 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     expect(rows.find(r => r.displayName === 'SEM LOCAL')).toMatchObject({ total: 1, checked: 0 });
   });
 
-  it('junta as três tabelas: `assets` e `ativos` contribuem para a lista', async () => {
-    await putAssets([
+  it('junta as duas tabelas de trabalho: `local_assets` e `ativos` contribuem para a lista', async () => {
+    await putLocal([
       { tenantid: 'CICOPAL', primarykey: 'A1', id: 'A1', filial: '010101_CICOPAL_GO', endereco: 'ADMINISTRACAO CENTRAL', _is_deleted: 0, _conferido: 0 }
     ]);
     await putAtivos([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]);
@@ -119,10 +123,10 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     ]);
   });
 
-  it('cenário misto: `assets` com linhas SEM endereço e as localidades em `ativos`', async () => {
+  it('cenário misto: `local_assets` com linhas SEM endereço e as localidades em `ativos`', async () => {
     // Regressão real: parar na primeira tabela não vazia deixava este caso
-    // vazio — `assets` tem a filial, mas nenhuma das linhas tem localidade.
-    await putAssets([
+    // vazio — `local_assets` tem a filial, mas nenhuma das linhas tem localidade.
+    await putLocal([
       { tenantid: 'CICOPAL', primarykey: 'A1', id: 'A1', filial: '010101_CICOPAL_GO', endereco: '', _is_deleted: 0, _conferido: 0 },
       { tenantid: 'CICOPAL', primarykey: 'A2', id: 'A2', filial: '010101_CICOPAL_GO', _is_deleted: 0, _conferido: 0 }
     ]);
@@ -179,20 +183,20 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     expect(rows[0]).toMatchObject({ total: 0, checked: 0 });
   });
 
-  it('`_is_deleted`: sem o campo na tabela viva, desce para a canónica', async () => {
+  it('`_is_deleted`: sem o campo na tabela viva, desce para o baseline', async () => {
     const semFlag = row('151100 PRODUCAO - PV1 MILHO', 0, 'K1');
     delete semFlag._is_deleted;
     await putAtivos([semFlag]);
-    await putAssets([{ ...row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'), _is_deleted: 1 }]);
+    await putLocal([{ ...row('151100 PRODUCAO - PV1 MILHO', 0, 'K1'), _is_deleted: 1 }]);
 
-    const comBaixaNaCanonica = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
-    expect(comBaixaNaCanonica[0]).toMatchObject({ total: 0 });
+    const comBaixaNoBaseline = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+    expect(comBaixaNoBaseline[0]).toMatchObject({ total: 0 });
 
-    await db.assets.clear();
-    await putAssets([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]); // canónica viva
+    await db.local_assets.clear();
+    await putLocal([row('151100 PRODUCAO - PV1 MILHO', 0, 'K1')]); // baseline vivo
 
-    const comCanonicaViva = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
-    expect(comCanonicaViva[0]).toMatchObject({ total: 1 });
+    const comBaselineVivo = await localDb.assets.getLocationsWithStats('010101 CICOPAL GO');
+    expect(comBaselineVivo[0]).toMatchObject({ total: 1 });
   });
 
   it('conferência feita só numa das cópias conta como conferida', async () => {
@@ -272,15 +276,15 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
     expect(rows.find(r => r.displayName === 'SEM LOCAL')).toMatchObject({ total: 2, checked: 1 });
   });
 
-  it('cenário misto real: localidades no índice `addresses` e ativos sem endereço em `assets`', async () => {
+  it('cenário misto real: localidades no índice `addresses` e ativos sem endereço no baseline', async () => {
     // Formato de produção: o índice tem as localidades da filial e os ativos
-    // sem coluna de endereço vivem na tabela canónica. Sem a entrada
-    // sintética, estes ativos não tinham caminho nenhum a partir do ecrã.
+    // sem coluna de endereço vivem no baseline. Sem a entrada sintética, estes
+    // ativos não tinham caminho nenhum a partir do ecrã.
     await putAddresses([
       address('151100 PRODUCAO - PV1 MILHO'),
       address('151200 CONTABILIDADE - CDC 70104')
     ]);
-    await putAssets([
+    await putLocal([
       { tenantid: 'CICOPAL', primarykey: 'A1', id: 'A1', filial: '010101_CICOPAL_GO', _is_deleted: 0, _conferido: 0 },
       { tenantid: 'CICOPAL', primarykey: 'A2', id: 'A2', filial: '010101_CICOPAL_GO', endereco: '', _is_deleted: 0, _conferido: 1 }
     ]);
@@ -311,7 +315,7 @@ describe('getLocationsWithStats — a tabela de trabalho do modo INTERNAL conta'
 
   it('linha do índice com endereço vazio não vira «GERAL - NÃO ESPECIFICADO» nem duplica «SEM LOCAL»', async () => {
     await putAddresses([address('')]);
-    await putAssets([
+    await putLocal([
       { tenantid: 'CICOPAL', primarykey: 'A1', id: 'A1', filial: '010101_CICOPAL_GO', _is_deleted: 0, _conferido: 0 }
     ]);
 
