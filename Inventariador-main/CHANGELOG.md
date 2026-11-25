@@ -23,8 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uma guarda `BEFORE INSERT OR UPDATE` impede que se torne ADMIN, mude de
   contrato ou entre noutro tenant, e um ADMIN só gere os utilizadores do seu
   contrato.
+- **Auto-registo:** o trigger `handle_new_user()` deixou de ler `role`,
+  `is_admin`, `tenantid`, `filial` e `units` do `raw_user_meta_data` (escrito
+  pelo cliente do signUp, portanto forjável com a anon key) — era assim que o
+  ecrã de registo entrava como ADMIN no contrato de outra pessoa. O perfil nasce
+  sempre AUDITOR, sem contrato e sem `is_admin`; só username e nome vêm do
+  metadata. O vínculo ao contrato passa a ser dado por um administrador, já com
+  a conta criada. O ecrã de registo diz isso mesmo.
 - **Testes:** `rlsAssetsPermissoes` fixa a ausência de políticas para `anon`, a
-  RPC, a guarda de colunas e a paridade com o bootstrap.
+  RPC, a guarda de colunas, o trigger de auto-registo e a paridade com o
+  bootstrap.
 
 ### Segurança — bucket de fotos privado e Kardex fechado
 

@@ -149,3 +149,52 @@ describe('docs/supabase_bootstrap.sql — mesmas regras', () => {
     expect(corpo).toContain("rpc('email_by_username'");
   });
 });
+
+describe('auto-registo — o metadata do signUp não escolhe papel nem contrato', () => {
+  const fontes = [
+    ['supabase_rls_assets_permissoes.sql', sqlRls],
+    ['supabase_bootstrap.sql', sqlBootstrap],
+  ] as const;
+
+  it.each(fontes)('%s: handle_new_user ignora role/tenantid/filial/units do metadata', (_nome, sql) => {
+    const corpo = corpoFuncao(sql, 'FUNCTION public.handle_new_user()');
+    expect(corpo).toContain("'AUDITOR'");
+    expect(corpo).toContain('ARRAY[]::text[]');
+    expect(corpo).not.toMatch(/->>\s*'role'/);
+    expect(corpo).not.toMatch(/->>\s*'tenantid'/);
+    expect(corpo).not.toMatch(/->>\s*'is_admin'/);
+    expect(corpo).not.toMatch(/->>\s*'filial'/);
+    expect(corpo).not.toMatch(/->>\s*'units'/);
+    // Uma conta pré-criada pelo admin sem id adopta o id do Auth; uma já
+    // vinculada não é reescrita pelo signUp.
+    expect(corpo).toContain('WHERE public.user_permissions.id IS NULL');
+  });
+
+  it.each(fontes)('%s: substitui as variações antigas do trigger antes de criar o único', (_nome, sql) => {
+    expect(sql).toContain('DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users');
+    expect(sql).toContain('DROP TRIGGER IF EXISTS handle_new_user           ON auth.users');
+    expect(sql).toContain('DROP TRIGGER IF EXISTS on_user_created           ON auth.users');
+    expect(sql).toContain('CREATE TRIGGER on_auth_user_created');
+    expect(sql).toContain('EXECUTE FUNCTION public.handle_new_user();');
+    expect(sql.indexOf('CREATE TRIGGER on_auth_user_created')).toBeGreaterThan(
+      sql.indexOf('FUNCTION public.handle_new_user()')
+    );
+  });
+
+  it('os runbooks de signup deixam de copiar papel/contrato do metadata', () => {
+    for (const doc of ['supabase_signup_500_correcao.sql', 'supabase_signup_500_diagnostico.sql']) {
+      const sql = readFileSync(join(process.cwd(), 'docs', doc), 'utf8');
+      const corpo = corpoFuncao(sql, 'FUNCTION public.handle_new_user()');
+      expect(corpo).toContain("'AUDITOR'");
+      expect(corpo).not.toMatch(/->>\s*'role'/);
+      expect(corpo).not.toMatch(/->>\s*'tenantid'/);
+      expect(corpo).not.toMatch(/->>\s*'is_admin'/);
+    }
+  });
+
+  it('o ecrã de registo avisa que o vínculo é do administrador', () => {
+    const register = readFileSync(join(process.cwd(), 'src', 'components', 'Register.tsx'), 'utf8');
+    expect(register).toContain('auditor e sem contrato');
+    expect(register).toContain('confirmado por um administrador');
+  });
+});

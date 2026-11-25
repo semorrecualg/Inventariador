@@ -337,6 +337,53 @@ ALTER TABLE public.user_permissions ADD COLUMN IF NOT EXISTS id uuid;
 CREATE UNIQUE INDEX IF NOT EXISTS user_permissions_email_key
   ON public.user_permissions (email);
 
+-- 4-B. AUTO-REGISTO — o perfil nasce AUDITOR, sem contrato
+-- `raw_user_meta_data` é escrito pelo cliente do signUp: qualquer pessoa com a
+-- anon key envia role=ADMIN e tenantid=<contrato alheio>. Este trigger ignora
+-- esses campos (papel, is_admin, contrato, filial e unidades são fixos) e deixa
+-- só username/nome, que são cosméticos. O vínculo ao contrato é dado por um
+-- admin depois de a conta existir (política p_admin_all — ver 7-A).
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  meta jsonb := NEW.raw_user_meta_data;
+  v_username text := coalesce(NULLIF(meta ->> 'username', ''), split_part(coalesce(NEW.email, ''), '@', 1));
+BEGIN
+  INSERT INTO public.user_permissions (
+    id, email, username, name, role, tenantid, filial, units, is_admin
+  )
+  VALUES (
+    NEW.id,
+    lower(coalesce(NEW.email, '')),
+    v_username,
+    coalesce(NULLIF(meta ->> 'name', ''), v_username),
+    'AUDITOR',
+    '',
+    '',
+    ARRAY[]::text[],
+    false
+  )
+  ON CONFLICT (email) DO UPDATE SET
+    id         = EXCLUDED.id,
+    updated_at = now()
+  WHERE public.user_permissions.id IS NULL;
+
+  RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS handle_new_user           ON auth.users;
+DROP TRIGGER IF EXISTS on_user_created           ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_user();
+
 -- ============================================================================
 -- 5. LOCATIONS — unidades/endereços (unique name+tenantid exigido pelo app)
 -- ============================================================================

@@ -70,6 +70,8 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
         <h2 className="text-2xl font-bold text-ink uppercase tracking-tight">Acesso Criado!</h2>
         <p className="text-ink-muted mt-4 text-xs font-medium leading-relaxed max-w-xs">
           Seu acesso foi registrado com sucesso. <br/><br/>
+          O perfil é criado como <strong>auditor e sem contrato</strong>: um
+          administrador tem de o vincular ao grupo antes de ver dados. <br/><br/>
           <span className="text-amber-600 font-bold uppercase tracking-widest">Importante:</span> <br/>
           Verifique seu e-mail (<span className="text-ink font-bold">{email}</span>) para confirmar o cadastro. 
           Não esqueça de olhar a pasta de <span className="text-amber-600 font-bold">SPAM</span>.
@@ -116,7 +118,8 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onGoToLogin }) => {
             placeholder="EX: NOME_DO_GRUPO"
           />
           <p className="text-[7px] text-ink-muted uppercase tracking-widest ml-1">
-            Identificador único do seu grupo de empresas.
+            Identificador do grupo. O vínculo é confirmado por um administrador
+            depois do registo.
           </p>
         </div>
         <div className="space-y-1">

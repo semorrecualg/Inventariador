@@ -28,7 +28,9 @@
 -- Antes de aplicar (só leitura) — ver o bloco VERIFICAÇÃO no fim:
 --   • ativos com `tenantid` vazio ficam invisíveis para não-MASTER;
 --   • o dono global precisa de `role = 'MASTER'` para continuar a ver tudo;
---   • perfis com `id` nulo continuam a entrar (get_tenantid casa pelo e-mail).
+--   • perfis com `id` nulo continuam a entrar (get_tenantid casa pelo e-mail);
+--   • contas criadas pelo ecrã de registo nascem AUDITOR e SEM contrato: o
+--     vínculo passa a ser dado por um administrador.
 --
 -- Como usar: colar o ficheiro inteiro no SQL Editor do Supabase. Se falhar, a
 -- transacção reverte tudo. Pode ser executado mais de uma vez.
@@ -310,8 +312,68 @@ CREATE POLICY p_admin_all ON public.user_permissions
 REVOKE ALL ON public.user_permissions FROM anon;
 
 -- ============================================================================
+-- PASSO 5 — auto-registo: o perfil nasce AUDITOR, sem contrato
+-- ----------------------------------------------------------------------------
+-- `raw_user_meta_data` é escrito pelo cliente do signUp: qualquer pessoa com a
+-- anon key envia role=ADMIN e tenantid=<contrato alheio>. O trigger antigo
+-- criava o perfil com esses valores, pelo que o ecrã de registo era uma porta
+-- para o contrato de outra pessoa. Aqui o papel, `is_admin`, contrato, filial e
+-- unidades são FIXOS; só o username e o nome vêm do metadata (cosméticos).
+-- O vínculo ao contrato passa a ser dado por um admin, já com o utilizador
+-- criado (política p_admin_all). Uma conta pré-criada pelo admin sem `id`
+-- adopta o id do Auth; uma conta já vinculada não é tocada.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  meta jsonb := NEW.raw_user_meta_data;
+  v_username text := coalesce(NULLIF(meta ->> 'username', ''), split_part(coalesce(NEW.email, ''), '@', 1));
+BEGIN
+  INSERT INTO public.user_permissions (
+    id, email, username, name, role, tenantid, filial, units, is_admin
+  )
+  VALUES (
+    NEW.id,
+    lower(coalesce(NEW.email, '')),
+    v_username,
+    coalesce(NULLIF(meta ->> 'name', ''), v_username),
+    'AUDITOR',
+    '',
+    '',
+    ARRAY[]::text[],
+    false
+  )
+  ON CONFLICT (email) DO UPDATE SET
+    id         = EXCLUDED.id,
+    updated_at = now()
+  WHERE public.user_permissions.id IS NULL;
+
+  RETURN NEW;
+END
+$$;
+
+-- Remove variações antigas do mesmo trigger antes de recriar (senão o perfil
+-- chegaria a ser gravado duas vezes, uma delas com o metadata do cliente).
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS handle_new_user           ON auth.users;
+DROP TRIGGER IF EXISTS on_user_created           ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_user();
+
+-- ============================================================================
 -- VERIFICAÇÃO (descomentar depois do COMMIT, é só leitura)
 -- ----------------------------------------------------------------------------
+-- 0) Auto-registo: o trigger actual não lê papel nem contrato do metadata.
+--   select prosrc from pg_proc where proname = 'handle_new_user';  -- sem "->> 'role'"/"->> 'tenantid'"
+--   select tgname, tgenabled from pg_trigger
+--    where tgrelid = 'auth.users'::regclass and not tgisinternal;  -- só on_auth_user_created
+--
 -- 1) Políticas das duas tabelas (nenhuma deve listar `anon`):
 --   select tablename, policyname, cmd, roles from pg_policies
 --    where schemaname = 'public' and tablename in ('assets', 'user_permissions')
