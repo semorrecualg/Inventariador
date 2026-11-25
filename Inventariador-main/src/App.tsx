@@ -88,6 +88,8 @@ import TenantWorkSelector from './components/TenantWorkSelector';
 import WorkContextSelector from './components/WorkContextSelector';
 import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturnHubToWorkContext, historicoAposVoltar, SupabaseUserProfile } from './utils/routingUtils';
 import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
+import { isSovereigntyLocked, sealSovereignty, unsealSovereignty, notifySovereigntyChanged } from './utils/sovereignty';
+import { planBaseModeSwitch } from './utils/baseModeTransition';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, campaignUnitKeys, collectConfiguredUnitNames, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
@@ -5166,7 +5168,10 @@ useEffect(() => {
     }
   };
 
-  const handleUpdateDatabaseMode = async (mode: DatabaseMode) => {
+  const handleUpdateDatabaseMode = async (
+    mode: DatabaseMode,
+    options?: { sealSovereignty?: boolean; silentSuccess?: boolean }
+  ) => {
     // Sem as chaves do Supabase (build INTERNAL) a Base Oficial não existe: o
     // arranque seguinte voltaria a resolver INTERNAL e a troca seria um
     // no-op que ainda anunciava «MODO NUVEM». Falha antes de gravar o modo.
@@ -5189,6 +5194,12 @@ useEffect(() => {
       // 2. Troca o modo no localStorage e no estado de controle
       setDatabaseMode(mode);
       localStorage.setItem('app_database_mode', mode);
+
+      // Base Local: a blindagem entra sozinha, DEPOIS de o modo local estar
+      // gravado (nunca com a Base Oficial ativa) — sem um clique à parte.
+      if (mode === DatabaseMode.INTERNAL && options?.sealSovereignty) {
+        await applyLocalSovereigntySeal('troca para Base Local');
+      }
 
       // Log de Auditoria
       logAuditEvent({
@@ -5218,11 +5229,19 @@ useEffect(() => {
         }
       }
       
+      // Fluxo guiado (blindagem removida + troca): o único modal já foi o de
+      // confirmação — aqui só se reinicia para os serviços lerem o novo modo.
+      if (options?.silentSuccess) {
+        sessionStorage.setItem('__gbr_allow_reload', 'true');
+        window.setTimeout(() => window.location.reload(), 350);
+        return;
+      }
+
       setModalConfig({
         isOpen: true,
         title: 'Modo Alterado',
         message: mode === DatabaseMode.INTERNAL 
-          ? 'O sistema agora está operando em Modo INTERNO (Mobile Puro). Todas as conexões com a nuvem foram suspensas para garantir estabilidade máxima.' 
+          ? 'O sistema agora está operando na Base Local. A blindagem foi aplicada automaticamente e as conexões com a nuvem ficaram suspensas.' 
           : 'O sistema agora está operando em Modo NUVEM (Supabase). A sincronização automática foi reativada.',
         type: 'success',
         onConfirm: () => {
@@ -5303,65 +5322,72 @@ useEffect(() => {
   };
 
   /**
-   * DESBLOQUEIO EXPLÍCITO DA BLINDAGEM FÍSICA.
+   * SELO AUTOMÁTICO AO ENTRAR NA BASE LOCAL.
    *
-   * A blindagem («Pronto para Campo», `is_system_locked`) suspende a nuvem e
-   * mantém o app na Base Local no arranque. Removê-la é uma decisão do
-   * operador, tomada no cartão da blindagem — nunca como efeito colateral de
-   * pedir a Base Oficial. Pede confirmação, fica registada na auditoria e avisa
-   * as telas abertas para relerem o selo.
+   * A blindagem («Pronto para Campo») passou a acompanhar o modo: escolher a
+   * Base Local sela o aparelho nos bastidores, sem botão técnico e sem clique
+   * extra. O invariante é verificado aqui — o modo local tem de estar gravado
+   * antes de selar, para nunca existir blindagem com a Base Oficial ativa.
    */
-  const handleUnlockSovereignty = () => {
-    if (localStorage.getItem('is_system_locked') !== 'true') {
-      setModalConfig({
-        isOpen: true,
-        title: 'Blindagem já removida',
-        message: 'Este aparelho não está blindado: a Base Oficial já pode ser escolhida em «Modo de Base».',
-        type: 'info'
-      });
+  const applyLocalSovereigntySeal = async (origem: string) => {
+    if (localStorage.getItem('app_database_mode') !== DatabaseMode.INTERNAL) {
+      logger.warn('>>> [Soberania] Selo recusado: o modo gravado não é a Base Local.');
       return;
     }
+    if (isSovereigntyLocked(localStorage)) return;
 
-    setModalConfig({
-      isOpen: true,
-      title: 'Desbloquear a blindagem física?',
-      message: 'A blindagem «Pronto para Campo» suspende a sincronização com a nuvem e mantém o app na Base Local. ' +
-        'Ao confirmar, a blindagem é removida e a Base Oficial (Supabase) volta a poder ser escolhida em «Modo de Base». ' +
-        'A base local, a trilha de diretório e as fotos pendentes ficam intactas. Continuar?',
-      type: 'confirm',
-      confirmText: 'Desbloquear',
-      onConfirm: () => {
-        localStorage.removeItem('is_system_locked');
-        localStorage.removeItem('gbr_integrity_key');
-        window.dispatchEvent(new Event('gbr_sovereignty_changed'));
-        logger.info('>>> [Soberania] Blindagem física removida por ação explícita do operador.');
-        logAuditEvent({
-          user_email: user?.email || 'unknown',
-          action: 'UPDATE',
-          table_name: 'config',
-          details: 'Blindagem física removida (desbloqueio explícito no cartão da blindagem)',
-          tenantid: user?.tenantid || readSessionTenantId() || ''
-        });
-        setModalConfig({
-          isOpen: true,
-          title: 'Blindagem removida',
-          message: 'O aparelho deixou de estar blindado. Em «Gestão e Manutenção → Modo de Base» já pode escolher a Base Oficial (precisa de internet). A base local continua intacta.',
-          type: 'success'
-        });
-      }
+    let contarAtivos = 0;
+    try {
+      contarAtivos = await sqliteService.getAssetCount();
+    } catch (err) {
+      logger.warn('>>> [Soberania] Não foi possível contar os ativos para o selo:', err);
+    }
+
+    const integrityKey = sealSovereignty(localStorage, contarAtivos);
+    if (!integrityKey) return;
+
+    notifySovereigntyChanged();
+    logger.info(`>>> [Soberania] Blindagem aplicada automaticamente (${origem}).`);
+    void logAuditEvent({
+      user_email: user?.email || 'unknown',
+      action: 'UPDATE',
+      table_name: 'config',
+      details: 'Blindagem física aplicada automaticamente na troca para Base Local',
+      tenantid: user?.tenantid || readSessionTenantId() || ''
     });
+
+    // A validação de soberania fecha com a gravação física no disco.
+    try {
+      await sqliteService.forceSync();
+    } catch (err) {
+      logger.warn('>>> [Soberania] Disk flush após selar falhou:', err);
+    }
   };
 
   /**
-   * Pedido de troca de modo vindo do hub (painel DADOS). Confirma antes de
-   * aplicar: as bases LOCAL e NUVEM são independentes e a troca salva o estado
-   * atual no modo de origem antes de recarregar o outro banco.
+   * Pedido de troca de modo vindo do hub (painel DADOS).
+   *
+   * A decisão é única (`planBaseModeSwitch`): mesmo modo, build sem chaves,
+   * offline, desbloqueio guiado ou troca. O que o utilizador vê corresponde ao
+   * que o App executa — e nenhum caminho altera a blindagem «pela metade»:
+   *   • Base Oficial offline → recusa, blindagem e modo intactos;
+   *   • Base Oficial blindada → UM modal e, ao confirmar, desbloqueio +
+   *     auditoria + troca na mesma sequência;
+   *   • Base Local → troca imediata e selo automático (funciona offline).
    */
   const handleRequestDatabaseModeSwitch = (mode: DatabaseMode) => {
     const atual = databaseMode === DatabaseMode.INTERNAL ? 'Base Local' : 'Base Oficial (Nuvem)';
     const destino = mode === DatabaseMode.INTERNAL ? 'Base Local' : 'Base Oficial (Nuvem)';
 
-    if (mode === databaseMode) {
+    const plan = planBaseModeSwitch({
+      current: databaseMode,
+      target: mode,
+      hasCloudKeys: !isInternalMode,
+      isOnline: navigator.onLine,
+      isLocked: isSovereigntyLocked(localStorage)
+    });
+
+    if (plan.action === 'same') {
       setModalConfig({
         isOpen: true,
         title: 'Modo já ativo',
@@ -5371,42 +5397,68 @@ useEffect(() => {
       return;
     }
 
-    if (mode !== DatabaseMode.INTERNAL && isInternalMode) {
+    if (plan.action === 'missing-keys') {
       setModalConfig({
         isOpen: true,
-        title: 'Nuvem indisponível',
-        message: 'Este build não foi compilado com as chaves do Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). A Base Oficial só pode ser aberta em um APK/versão web com essas chaves configuradas.',
+        title: 'Base Oficial indisponível',
+        message: 'Este build não foi compilado com as chaves do Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). A Base Oficial só pode ser aberta em um APK/versão web com essas chaves configuradas. O sistema continua na Base Local.',
         type: 'warning'
       });
       return;
     }
 
-    // BLINDAGEM FÍSICA × NUVEM: com `is_system_locked` gravado (botão
-    // «VALIDAR SOBERANIA» → PROTEGIDO), o arranque força BASE LOCAL e a
-    // sincronização é suspensa por desenho. A troca NÃO desfaz a blindagem:
-    // mostra o bloqueio e o caminho do desbloqueio explícito, que vive no
-    // cartão da blindagem (confirmação + auditoria). O modo atual fica como está.
-    if (mode !== DatabaseMode.INTERNAL && localStorage.getItem('is_system_locked') === 'true') {
+    if (plan.action === 'offline') {
       setModalConfig({
         isOpen: true,
-        title: 'Blindagem ativa — Base Oficial bloqueada',
-        message: 'Este aparelho está blindado («Pronto para Campo») e a blindagem suspende a sincronização com a nuvem. ' +
-          'Enquanto ela estiver ativa, o app opera na Base Local e a Base Oficial não pode ser ativada. ' +
-          'Para desbloquear, abra Gestão e Manutenção → Status de Blindagem → «Desbloquear blindagem» (pede confirmação e fica registado na auditoria). ' +
-          'Nada foi alterado: o modo atual e a base local continuam intactos.',
+        title: 'Sem internet',
+        message: 'Você está sem internet. Conecte-se a uma rede de dados ou Wi-Fi para acessar a Base Oficial. ' +
+          'Nada foi alterado: a base local, o modo atual e a blindagem continuam como estavam.',
         type: 'warning'
       });
       return;
     }
 
-    const precisaAutenticar = mode !== DatabaseMode.INTERNAL;
+    if (plan.action === 'unseal-and-switch') {
+      setModalConfig({
+        isOpen: true,
+        title: 'Conectar à Base Oficial?',
+        message: 'Este aparelho está com a blindagem local ativa para trabalhar em campo. ' +
+          'Para usar a Base Oficial, essa blindagem será pausada e o sistema passará a sincronizar com a nuvem pela sua internet. ' +
+          'Sua base local, as fotos e o histórico continuam guardados no aparelho. Deseja conectar agora?',
+        type: 'confirm',
+        confirmText: 'Conectar',
+        onConfirm: () => {
+          const removida = unsealSovereignty(localStorage);
+          if (removida) {
+            notifySovereigntyChanged();
+            logger.info('>>> [Soberania] Blindagem removida automaticamente na troca para Base Oficial.');
+            void logAuditEvent({
+              user_email: user?.email || 'unknown',
+              action: 'UPDATE',
+              table_name: 'config',
+              details: 'Blindagem física removida automaticamente na troca para Base Oficial',
+              tenantid: user?.tenantid || readSessionTenantId() || ''
+            });
+          }
+          // Mesma sequência, sem segundo modal: ativa a Base Oficial já.
+          void handleUpdateDatabaseMode(mode, { silentSuccess: true });
+        }
+      });
+      return;
+    }
+
+    if (mode === DatabaseMode.INTERNAL) {
+      // Offline-first: voltar para a Base Local não pede rede nem confirmação;
+      // o selo automático entra no executor, com o modo local já gravado.
+      void handleUpdateDatabaseMode(mode, { sealSovereignty: true });
+      return;
+    }
+
     setModalConfig({
       isOpen: true,
       title: `Trocar para ${destino}?`,
       message: `As bases são independentes: o progresso da ${atual} fica salvo e não é enviado automaticamente para a ${destino}. ` +
-        (precisaAutenticar
-          ? 'Na Base Oficial os dados vêm da nuvem e exigem sessão autenticada no Supabase — se ainda não autenticou, você verá a base vazia até fazer login. '
-          : 'A Base Local mostra apenas os ativos gravados neste dispositivo. ') +
+        'Na Base Oficial os dados vêm da nuvem e exigem sessão autenticada no Supabase — se ainda não autenticou, você verá a base vazia até fazer login. ' +
         'Deseja continuar?',
       type: 'confirm',
       onConfirm: () => {
@@ -5590,8 +5642,25 @@ useEffect(() => {
   }, [databaseMode, scheduleCloudFlush]);
 
   // Reenvia a fila quando a rede volta e fecha o timer no desmonte.
+  // `modeRef` evita fechar o listener com o modo do arranque: em BASE LOCAL a
+  // reconexão continua a gravar a base local no disco, sem interromper o ecrã.
+  const databaseModeRef = useRef(databaseMode);
+  useEffect(() => {
+    databaseModeRef.current = databaseMode;
+  }, [databaseMode]);
+
   useEffect(() => {
     const onOnline = () => {
+      logger.info('>>> [Network Guard] Rede restaurada: retomando sincronização pendente em segundo plano.');
+      if (databaseModeRef.current === DatabaseMode.INTERNAL) {
+        // Base Local: não há nuvem a contactar (a blindagem suspende-a). O
+        // pendente é a gravação física; falha em silêncio para não interromper
+        // o operador no meio do inventário.
+        void sqliteService.forceSync()
+          .then(() => logger.info('>>> [Network Guard] Base Local gravada no disco após reconexão.'))
+          .catch((err) => logger.warn('>>> [Network Guard] Falha ao gravar a base local após reconexão:', err));
+        return;
+      }
       if (cloudQueueRef.current.size > 0) void flushCloudQueueRef.current();
       // F5: a âncora marcada sem rede (ou em BASE LOCAL) sobe quando a ligação volta.
       void flushAncorasPendentes();
@@ -7898,7 +7967,6 @@ useEffect(() => {
             onToggleGpsBypass={handleToggleGpsBypass}
             isGpsBypassed={localStorage.getItem('gbr_gps_bypass') === 'true'}
             onCheckIntegrity={handleCheckIntegrity}
-            onUnlockSovereignty={handleUnlockSovereignty}
             campaignsCount={campaigns.length}
             currentCampaignId={inventory.currentCampaignId}
             accessDiagnostic={accessDiagnostic}

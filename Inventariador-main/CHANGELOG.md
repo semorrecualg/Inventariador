@@ -21,26 +21,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testes:** `baseModeBeacon` (10) fixa a regra da luz e o selo nos cinco
   estados.
 
-### Corrigido — troca para Base Oficial que voltava a BASE LOCAL
+### Alterado — «Modo de Base» guiado, offline-first e cartões passivos
 
 - **O que era:** com a blindagem física («Pronto para Campo», `PROTEGIDO`), o
-  botão «VALIDAR SOBERANIA» grava `is_system_locked` e o arranque força
+  botão «VALIDAR SOBERANIA» gravava `is_system_locked` e o arranque forçava
   BASE LOCAL. Ao escolher Base Oficial, o diálogo anunciava «MODO NUVEM»; no
   reload, todas as telas voltavam a dizer BASE LOCAL — a troca nunca valia.
-- **Agora:** a troca para Base Oficial com blindagem ativa mostra o bloqueio e
-  explica o caminho, sem alterar o modo nem remover a blindagem por conta
-  própria; sem as chaves do Supabase no build, a troca é recusada antes de
-  gravar o modo, em vez de anunciar uma nuvem que não existe. O desbloqueio é
-  uma ação explícita no cartão «Status de Blindagem» («Desbloquear
-  blindagem»), com confirmação e registo de auditoria — só depois a Base
-  Oficial fica disponível. No sentido inverso, «VALIDAR SOBERANIA» passa a
-  recusar selar o aparelho enquanto a Base Oficial estiver ativa (a blindagem
-  voltaria a forçar BASE LOCAL no arranque).
+- **Base Oficial, sem adivinhação:** build sem chaves do Supabase recusa a
+  troca; **sem internet a troca é recusada de imediato** («Você está sem
+  internet. Conecte-se a uma rede de dados ou Wi-Fi para acessar a Base
+  Oficial») sem alterar a blindagem nem o modo atual. Online e blindado, **um
+  único modal** explica que a blindagem local será pausada; ao confirmar, o app
+  remove `is_system_locked` e a chave de integridade, registra «Blindagem física
+  removida automaticamente na troca para Base Oficial», avisa as telas abertas e
+  ativa a Base Oficial na sequência — sem segundo modal.
+- **Base Local, resiliente:** a troca funciona online e offline, encerra o modo
+  oficial e **sela o aparelho nos bastidores** (`is_system_locked` + chave de
+  integridade, auditoria «Blindagem física aplicada automaticamente na troca
+  para Base Local»), sem cliques extra. Na reconexão, o pendente é tratado em
+  segundo plano (fila da nuvem quando aplicável; gravação física em Base Local),
+  com log e sem interromper o operador.
+- **Cartões 100% passivos:** saíram «VALIDAR SOBERANIA» e «Desbloquear
+  blindagem». Os cartões «Status de Blindagem» e «Vínculo de Diretório» só
+  refletem o estado real (PROTEGIDO/MONITORANDO, ONLINE/OFFLINE/SINCRONIZANDO);
+  o selo global continua a mostrar base e sincronização em todas as telas.
+- **Invariantes:** nunca se sela com a Base Oficial ativa e nunca se inicia a
+  troca para a nuvem sem rede ou sem chaves do Supabase.
 - **Placar do Gestor:** em BASE LOCAL ou com blindagem ativa o cartão do
   protocolo SRE já não dispara uma leitura à nuvem que ficava eternamente em
   «CONSULTANDO»; mostra `SUPABASE n/d · não consultada (base local)` e regista
   no terminal que nenhuma chamada foi feita.
-- **Testes:** `sreProtocol` (5) cobre o estado de Base Local no placar.
+- **Testes:** `sreProtocol` (5) cobre o estado de Base Local no placar;
+  `baseModeTransition` (6) fixa a decisão do seletor, `sovereignty` (4) o
+  selo/remoção e o evento, `cartoesStatusPassivos` (2) a ausência de botões, e
+  o E2E `modoBase` cobre offline, o modal único, o selo automático e os cartões
+  passivos.
 
 ### Adicionado — selo de geração da base
 
