@@ -187,8 +187,18 @@ nunca entra em variável `VITE_*`.
   os logs por ativo e os laudos são append-only. Ver
   `docs/supabase_rls_assets_permissoes.sql` e
   `docs/supabase_rls_tabelas_restantes.sql`.
-- **Tabelas fora do app:** `tenants`/`filial`, se existirem na base, não são
-  geridas pelo código e ficam fora destes scripts — revê-las à parte.
+- **Tabelas legadas e fora do bootstrap:** `docs/supabase_rls_tabelas_legadas.sql`
+  fecha, de forma condicional (`to_regclass`), `tenants`, `filial`,
+  `camposAlterados` e `unit_gps_data` (legado sem uso pelo app) e o módulo
+  patrimonial (`chart_of_accounts`, `asset_groups`, `ncm_classifiers`,
+  `asset_movements`, `asset_depreciation_history`, `log_inventario_termico`).
+  Retira também a `anon` o privilégio em **todas** as tabelas e sequências de
+  `public`. Fica uma pendência de revisão: `unit_names(text)` continua
+  executável por `anon` (devolve só os nomes distintos de filial do contrato
+  indicado) — revogar se o seletor de unidades não correr antes do login.
+- **Views:** uma view sem `security_invoker = true` corre como dono e atravessa o
+  RLS das tabelas por baixo. O bloco AUDITORIA do script das tabelas legadas
+  lista-as e gera o comando a aplicar.
 - **Migrações:** apenas os `scripts/*.sql` versionados, sempre idempotentes e com
   backup/export antes. `DROP TABLE` só com backup e aviso no PR.
 - **Backup:** exportar pelo painel (Database → Backups) antes de qualquer DDL e

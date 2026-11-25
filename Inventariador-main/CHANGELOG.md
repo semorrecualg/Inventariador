@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Segurança — tabelas legadas e de controlo patrimonial
+
+- **O que era:** nenhum script cobria `tenants`, `filial`, `camposAlterados`,
+  `unit_gps_data` nem o módulo patrimonial (`chart_of_accounts`,
+  `asset_groups`, `ncm_classifiers`, `asset_movements`,
+  `asset_depreciation_history`, `log_inventario_termico`). Se essas tabelas
+  existirem na base, mantinham o `p_all` original — legíveis e escrevíveis com
+  a anon key.
+- **Agora:** `docs/supabase_rls_tabelas_legadas.sql` fecha-as de forma
+  **condicional** (`to_regclass`): `tenants`/`filial`/`camposAlterados` ficam com
+  RLS e sem política (nega tudo — o app só as menciona na validação do
+  interceptor); `unit_gps_data` e as cinco do módulo patrimonial ficam com
+  `p_tenant_all` por `tenant_visible` quando têm `tenantid`; a telemetria
+  `log_inventario_termico` (sem contrato) só aceita INSERT autenticado, sem
+  SELECT. Corre também numa base sem estas tabelas, sem falhar.
+- **Rede de segurança:** `REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon` e
+  `... ALL SEQUENCES ...` — mesmo uma tabela que nenhum script conheça deixa de
+  ser alcançável pelo anon (views incluídas, que são "tables" para GRANT).
+- **Views:** o script não altera views às cegas; o bloco AUDITORIA lista-as com
+  `security_invoker` e gera o `ALTER VIEW ... SET (security_invoker = true);`
+  de cada uma, mais matviews, grants e funções executáveis por `anon`.
+- **Testes:** `rlsTabelasLegadas` fixa o fecho condicional, a ausência de
+  `p_all`, as políticas por contrato, o INSERT-only da telemetria e a auditoria.
+
 ### Segurança — RLS das tabelas de operação
 
 - **O que era:** `inventory_config`, `unit_configs`, `audit_logs`, `locations`,
