@@ -187,6 +187,6 @@ encadeados.
   do módulo; as últimas
   200 amostras ficam em `gbr_perf_samples_v1`. **Gestor de Base → Linha de Base
   (F0)** grava `gbr_perf_baseline_v1` com p50/p95 e a contagem por espelho
-  (`local_assets` / `ativos` / `assets`) — automaticamente no fim do boot e de
+  (`local_assets` / `ativos` — o `assets` local saiu na v11) — automaticamente no fim do boot e de
   cada pull completo (contagem em momento ocioso), ou pelo botão Registrar. **Copiar** e **Exportar** devolvem
   o snapshot em JSON para enviar no suporte.
