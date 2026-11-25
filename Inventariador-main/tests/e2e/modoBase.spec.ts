@@ -96,14 +96,27 @@ test.describe('Modo de Base — offline-first e cartões passivos', () => {
     }
 
     await expect(page.getByText(/blindagem local/i)).toBeVisible();
-    await confirmar.click();
 
-    await page.waitForFunction(
-      () => localStorage.getItem('app_database_mode') === 'SUPABASE'
-        && localStorage.getItem('is_system_locked') === null,
-      { timeout: 30000 }
-    );
-    expect(await page.evaluate(() => localStorage.getItem('gbr_integrity_key'))).toBeNull();
+    // O fluxo guiado reinicia assim que a auditoria fica gravada (sem espera
+    // fixa). A leitura do estado tem de sobreviver a esse reload: espera-se o
+    // carregamento seguinte e só depois se confronta o que ficou persistido.
+    const reinicio = page.waitForEvent('load', { timeout: 30000 });
+    await confirmar.click();
+    await reinicio;
+
+    await expect
+      .poll(
+        () =>
+          page
+            .evaluate(() => ({
+              mode: localStorage.getItem('app_database_mode'),
+              locked: localStorage.getItem('is_system_locked'),
+              key: localStorage.getItem('gbr_integrity_key')
+            }))
+            .catch(() => null),
+        { timeout: 30000 }
+      )
+      .toEqual({ mode: 'SUPABASE', locked: null, key: null });
   });
 
   test('Base Local sela o aparelho automaticamente (sem clique extra)', async ({ page }) => {
