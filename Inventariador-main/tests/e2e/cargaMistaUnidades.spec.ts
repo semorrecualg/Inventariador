@@ -66,8 +66,10 @@ const carregarPlanilha = async (page: Page) => {
   ).toBeVisible({ timeout: 60000 });
 
   // Aviso de mudança para BASE LOCAL (só aparece quando o modo muda). O modal
-  // usa «CONFIRMAR»; deixá-lo aberto bloqueia o contrato e dava 0 filiais.
-  const confirmar = page.getByRole('button', { name: /^(OK|CONFIRMAR|Confirmar)$/i }).first();
+  // pode montar depois do log de sucesso: esperar por ele antes de decidir. O
+  // botão diz «CONFIRMAR»; deixá-lo aberto bloqueia o contrato e dava 0 filiais.
+  const confirmar = page.getByRole('button', { name: /^(OK|CONFIRMAR)$/i }).first();
+  await confirmar.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
   if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
   await expect(page.getByText('OPERANDO NA BASE LOCAL')).toHaveCount(0);
 };
