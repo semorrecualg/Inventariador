@@ -451,15 +451,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pelo `count` e a gravação em caso de falha; `perfMetrics` passa a exigir
   `save` no contrato das métricas.
 
-### Alterado — A.3a.4: o terceiro espelho sai do schema (v10)
+### Alterado — A.3a.4: o terceiro espelho sai do schema (v10 → v11)
 
-- `version(10).stores({ assets: null })` apaga a store no upgrade. O conteúdo
-  era réplica de `local_assets`/`ativos`, por isso não há cópia de dados.
+- **v10 — resgate.** O Dexie não deixa ler uma store na mesma versão que a
+  apaga (dexie#275/#276), por isso a remoção ficou numa versão própria. A v10
+  compara `assets` com as duas tabelas vivas por `[tenantid+primarykey]` e
+  copia para `local_assets` e `ativos` **só o que falta** — linha existente não
+  é sobrescrita, porque o espelho que o app lê é a fonte de verdade.
+- **v11 — remoção.** `version(11).stores({ assets: null })` apaga a store.
 - `countAssetMirrors` devolve só `local_assets`, `ativos` e o total (maior
   espelho); o painel e a linha de base do `perfMetrics` deixaram de mostrar a
   terceira coluna. `migrateLegacyTenantids`, as marcações de sincronização, a
   migração de `_conferido` e todas as transações passaram a duas tabelas.
-- Testes: `migracaoV10` prova que a store desaparece e as linhas vivas ficam;
+- Testes: `migracaoV10` (3) prova que a linha que só existia em `assets` é
+  resgatada para as duas tabelas, que a linha viva não é sobrescrita e que a
+  comparação é pela chave composta (mesmo `primarykey` noutro contrato não
+  colide); e que a store desaparece na v11;
   `schemaBaseline` fixa a v10 com 10 tabelas; `countAssetMirrors`,
   `countAtivosByTenant`, `conferidoTipos`, `carimboNoReset`, `migracaoConferido`,
   `addressSearch`, `assetDedupService`, `assetMirrorCleanupService`,
