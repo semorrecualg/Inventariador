@@ -66,13 +66,18 @@ const carregarPlanilha = async (page: Page) => {
   ).toBeVisible({ timeout: 60000 });
 
   // Aviso de mudança para BASE LOCAL (só aparece quando o modo muda). O botão
-  // já foi «OK» e hoje é «Confirmar»; aceita os dois e espera o aviso fechar,
-  // senão a camada modal interceta o toque no contrato.
-  const aviso = page.getByText(/Operando na Base Local/i).first();
-  if (await aviso.isVisible().catch(() => false)) {
-    const confirmar = page.getByRole('button', { name: /^(OK|Confirmar)$/ }).first();
-    if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
-  }
+  // já foi «OK» e hoje é «Confirmar». Espera-o aparecer — decidir num instante
+  // deixava a camada modal aberta e o toque seguinte ficava bloqueado.
+  await fecharAvisoBaseLocal(page);
+};
+
+/** Fecha o aviso «Operando na Base Local», esperando que ele monte/feche. */
+const fecharAvisoBaseLocal = async (page: Page) => {
+  const aviso = page.getByRole('heading', { name: /Operando na Base Local/i });
+  await aviso.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined);
+  if (!(await aviso.isVisible().catch(() => false))) return;
+  await page.getByRole('button', { name: /^(OK|Confirmar)$/ }).first().click();
+  await aviso.waitFor({ state: 'hidden', timeout: 15000 }).catch(() => undefined);
 };
 
 /** Abre o CONTRATO DE TRABALHO e confere filiais, contagens e total. */
@@ -81,11 +86,22 @@ const confirmarUnidadeSemCopias = async (page: Page) => {
   await page.waitForURL(/#\/contexto$/, { timeout: 15000 });
 
   // Admin global sem contrato no perfil: a tela abre no seletor de contrato e
-  // só depois da escolha explícita mostra as filiais da base.
+  // só depois da escolha explícita mostra as filiais da base. O catálogo chega
+  // depois do URL — esperar em vez de decidir no primeiro instante.
   const filiais = page.locator('[data-testid="filial-options"] > button');
+  const contrato = page.getByRole('button', { name: /CICOPAL/ }).first();
+  await expect
+    .poll(
+      async () => (await filiais.count()) > 0 || (await contrato.isVisible().catch(() => false)),
+      { timeout: 20000 }
+    )
+    .toBe(true);
+
   if ((await filiais.count()) === 0) {
-    const contrato = page.getByRole('button', { name: /CICOPAL/ }).first();
-    if (await contrato.isVisible().catch(() => false)) await contrato.click();
+    // Um aviso tardio pode ter ficado por cima do seletor.
+    const confirmarModal = page.getByRole('button', { name: /^(OK|Confirmar)$/ }).first();
+    if (await confirmarModal.isVisible().catch(() => false)) await confirmarModal.click();
+    await contrato.click();
   }
 
   // Um cartão por filial — as linhas sem tenantid não criam uma unidade extra.
