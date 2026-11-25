@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ignoreDuplicates` (`ON CONFLICT DO NOTHING`), para o reenvio idempotente não
   exigir UPDATE. `base_generation` fica só de leitura; a escrita continua no
   SQL de reset.
+- **Aplicação:** o ficheiro é autónomo (recria as funções de que precisa) e cada
+  instrução está completa numa só linha, para o SQL Editor do Supabase e para
+  editores que executam por linhas/trechos. As políticas não referenciam
+  `tenant_id`; a grafia legada é copiada para `tenantid` por um trigger
+  `BEFORE INSERT` que a lê via `to_jsonb(NEW)` (sem 42703 onde a coluna não
+  existe).
 - **Fora do âmbito:** `unit_configs` mantém `p_all` — é a exposição seguinte,
   assinalada em `docs/GOVERNANCA.md`. A base não deve ser dada como fechada
   antes disso.

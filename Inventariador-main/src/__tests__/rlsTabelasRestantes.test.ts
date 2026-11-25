@@ -33,12 +33,12 @@ const codigo = (sql: string) =>
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith('--'));
 
-/** Corpo de uma função SQL (entre o `$$` de abertura e o `$$;`). */
+/** Corpo de uma função SQL (da assinatura até ao fecho `$fn$;`). */
 const corpoFuncao = (sql: string, assinatura: string) => {
   const inicio = sql.indexOf(assinatura);
   expect(inicio).toBeGreaterThan(-1);
   const corpo = sql.slice(inicio);
-  return corpo.slice(0, corpo.indexOf('$$;'));
+  return corpo.slice(0, corpo.indexOf('$fn$;'));
 };
 
 describe('docs/supabase_rls_tabelas_restantes.sql — tabelas de operação', () => {
@@ -54,12 +54,11 @@ describe('docs/supabase_rls_tabelas_restantes.sql — tabelas de operação', ()
   });
 
   it('nenhuma política destas tabelas alcança anon', () => {
-    const politicas = sqlNovo.split('CREATE POLICY').slice(1);
+    const politicas = codigo(sqlNovo).filter((l) => l.startsWith('CREATE POLICY'));
     expect(politicas.length).toBe(10);
     for (const p of politicas) {
-      const cabecalho = p.slice(0, 220);
-      expect(cabecalho).toContain('TO authenticated');
-      expect(cabecalho).not.toMatch(/\bTO anon\b/);
+      expect(p).toContain('TO authenticated');
+      expect(p).not.toMatch(/\bTO anon\b/);
     }
   });
 
@@ -123,11 +122,18 @@ describe('docs/supabase_rls_tabelas_restantes.sql — tabelas de operação', ()
     expect(policy).not.toMatch(/FOR (?:INSERT|UPDATE|DELETE|ALL)/);
   });
 
-  it('recusa correr sem as funções do ficheiro anterior (pré-requisito explícito)', () => {
-    expect(sqlNovo).toContain('docs/supabase_rls_assets_permissoes.sql');
-    expect(sqlNovo).toContain("to_regprocedure('public.get_tenantid()')");
-    expect(sqlNovo).toContain("to_regprocedure('public.is_master()')");
-    expect(sqlNovo).toContain('RAISE EXCEPTION');
+  it('é autónomo: cria as funções de que precisa (sem bloco DO nem pré-requisito)', () => {
+    // Um editor que execute por linhas/trechos parte um `DO $$ … $$` e uma
+    // função multi-linha; cada instrução fica completa numa só linha.
+    for (const fn of ['get_tenantid', 'is_self_row', 'is_master', 'tenant_visible', 'tenantid_de_log_legado']) {
+      expect(sqlNovo).toContain(`FUNCTION public.${fn}`);
+    }
+    expect(sqlNovo).not.toMatch(/^DO \$\$/m);
+    expect(sqlNovo).not.toContain('to_regprocedure');
+    // Uma instrução por linha: nenhuma linha começa por USING/WITH CHECK.
+    for (const linha of codigo(sqlNovo)) {
+      expect(linha.startsWith('USING') || linha.startsWith('WITH CHECK')).toBe(false);
+    }
   });
 
   it('não toca em unit_configs — é a exposição seguinte, não uma falsa cobertura', () => {
