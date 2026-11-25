@@ -170,7 +170,7 @@ function toReactAsset(row: DexieAsset | Record<string, unknown>): Asset {
 }
 
 /**
- * Uma linha das três tabelas de ativos, para a união de cópias.
+ * Uma linha de qualquer espelho de ativos, para a união de cópias.
  * (Só os campos que a contagem por localidade lê.)
  */
 export type CopiaDeAtivo = {
@@ -499,11 +499,11 @@ export const localDb = {
       // Dashboard, a Consulta e o Mapa leem). Ler só `assets`/`local_assets`
       // deixava o ecrã vazio num aparelho com os ativos carregados em `ativos`.
       //
-      // As três tabelas são UNIDAS — nunca «a primeira que tem linhas»: uma
-      // filial pode ter em `assets` só as linhas sem endereço e as localidades
+      // As duas tabelas são UNIDAS — nunca «a primeira que tem linhas»: uma
+      // filial pode ter no baseline só as linhas sem endereço e as localidades
       // em `ativos`, e parar na primeira deixava o ecrã vazio. A união é feita
       // pela chave do ativo (`[tenantid+primarykey]`), para o mesmo ativo
-      // espelhado nas três tabelas contar UMA vez nas estatísticas.
+      // espelhado nas duas tabelas contar UMA vez nas estatísticas.
       const unitMatch = normalizeUnitMatchKey(unitId);
       /**
        * Endereço EFETIVO do ativo — a MESMA regra do inventário
@@ -546,11 +546,11 @@ export const localDb = {
         return (await doContrato(table)) as unknown as DexieAddress[];
       };
       /**
-       * Ativos da filial nas TRÊS tabelas, pela ordem de precedência (`ativos`
-       * viva → `assets` canónica → `local_assets` baseline), com índice exato
-       * em cada uma e a varredura tolerante do mesmo contrato quando a tabela
-       * não tem o índice exato. A união é deduplicada pela chave do ativo;
-       * linhas sem chave são mantidas individualmente.
+       * Ativos da filial nas DUAS tabelas da união, pela ordem de precedência
+       * (`ativos` viva → `local_assets` baseline), com índice exato em cada uma
+       * e a varredura tolerante do mesmo contrato quando a tabela não tem o
+       * índice exato. A união é deduplicada pela chave do ativo; linhas sem
+       * chave são mantidas individualmente.
        */
       const assetRows = async (): Promise<CopiaDeAtivo[]> => {
         const byKey = new Map<string, CopiaDeAtivo>();
