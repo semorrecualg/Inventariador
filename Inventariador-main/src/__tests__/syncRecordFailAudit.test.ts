@@ -43,7 +43,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
 });
 
 import { db } from '../services/sqliteService';
-import { processDataSyncQueue } from '../services/syncService';
+import { processDataSyncQueue as drenarFilaReal } from '../services/syncService';
 import { inicioDoDiaDaFalha } from '../utils/syncFalha';
 
 const RLS_ERROR = { code: '42501', message: 'new row violates row-level security policy' };
@@ -75,6 +75,20 @@ const failureLogs = () =>
 const exceptionLogs = () =>
   db.audit_logs.filter((log) => log.acao === 'SYNC_RECORD_EXCEPTION').toArray();
 
+/**
+ * Os ciclos destes testes correm em milissegundos; na produção distam 60 s. O
+ * recuo da outbox (`next_attempt_at`) é tempo real, por isso cada chamada aqui
+ * simula o ciclo seguinte recuando o prazo dos envelopes ao passado. Sem isto
+ * os ciclos seguintes saltavam o registo e não se media a janela da trilha.
+ */
+const processDataSyncQueue = async () => {
+  const entradas = await db.sync_outbox.toArray();
+  if (entradas.length > 0) {
+    await db.sync_outbox.bulkPut(entradas.map((entrada) => ({ ...entrada, next_attempt_at: 0 })));
+  }
+  return drenarFilaReal();
+};
+
 beforeEach(async () => {
   upsert.mockReset();
   upsert.mockResolvedValue({ error: RLS_ERROR });
@@ -82,6 +96,7 @@ beforeEach(async () => {
   await db.ativos.clear();
   await db.assets.clear();
   await db.audit_logs.clear();
+  await db.sync_outbox.clear();
   localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));
   localStorage.removeItem('filial');
   sessionStorage.setItem('filial', '010101 CICOPAL GO');

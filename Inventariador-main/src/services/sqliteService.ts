@@ -271,6 +271,30 @@ export interface DexieAddress {
   _is_synced: number;
 }
 
+/**
+ * Fila de subida durável (schema v9).
+ *
+ * Uma linha por ativo pendente, na MESMA base Dexie para poder ser gravada na
+ * mesma transacção do ativo. `attempts`/`next_attempt_at` dão recuo ao envio e
+ * `op` diz se o que sobe é um upsert ou uma exclusão. A chave primária é
+ * `key` (`tenantid|primarykey`), por isso reenfileirar o mesmo ativo é
+ * idempotente.
+ */
+export interface DexieSyncOutbox {
+  /** `tenantid|primarykey` — contrato em caixa alta (mesma regra do muro). */
+  key: string;
+  primarykey: string;
+  tenantid: string;
+  op: 'UPSERT' | 'DELETE';
+  status: 'PENDENTE' | 'FALHA';
+  attempts: number;
+  /** Epoch ms: antes disto a entrada está em recuo. 0 = tentar já. */
+  next_attempt_at: number;
+  created_at: string;
+  updated_at: string;
+  last_error?: string | null;
+}
+
 class InventoryDexieDatabase extends Dexie {
   // v6: chave primária composta [tenantid+primarykey] — o tenantid é o muro que
   // separa os mundos de cada cliente (mesma regra da nuvem com PK (tenantid, id)).
@@ -290,6 +314,11 @@ class InventoryDexieDatabase extends Dexie {
    * «DESFAZER» funcionar sem rede e sem ficheiro externo.
    */
   asset_cleanup_backups!: Dexie.Table<DexieAssetCleanupBackup, number>;
+  /**
+   * Fila de subida durável (v9): envelope do envio, escrito na transacção do
+   * próprio ativo (`services/syncOutbox`).
+   */
+  sync_outbox!: Dexie.Table<DexieSyncOutbox, string>;
 
   constructor() {
     super('InventoryLocalStore');
@@ -447,6 +476,13 @@ class InventoryDexieDatabase extends Dexie {
     // idêntico). Tabela nova, sem tocar nas existentes: o «DESFAZER» lê daqui.
     this.version(8).stores({
       asset_cleanup_backups: '++seq, cleanup_id, kind'
+    });
+    // v9 — fila de subida durável. Tabela NOVA (`sync_outbox`): nenhuma tabela
+    // existente muda de chave ou de índices. A fila `_is_synced = 0` continua a
+    // ser a fonte da drenagem nesta fase; a outbox é o envelope com tentativas,
+    // recuo e ordem, semeado a partir dela.
+    this.version(9).stores({
+      sync_outbox: 'key, primarykey, tenantid, status, next_attempt_at'
     });
   }
 }

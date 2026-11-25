@@ -15,6 +15,7 @@ import { purgarAuditoriaAntiga } from './auditoriaRetencao';
 import { assetGpsColumns } from '../utils/assetGps';
 import { assinaturaDeFalha, inicioDoDiaDaFalha } from '../utils/syncFalha';
 import { normalizeFlag } from '../utils/normalize';
+import { semearOutboxDePendentes, marcarEnviadosOutbox, marcarFalhasOutbox, chavesEmRecuo } from './syncOutbox';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -31,6 +32,13 @@ import { normalizeFlag } from '../utils/normalize';
  */
 const markRecordSynced = async (primaryKey: string): Promise<void> => {
   await sqliteService.markAssetsSynced([primaryKey]);
+  // Fila durável (v9): o envio aceite sai do envelope. Best-effort — a outbox
+  // não pode fazer falhar um envio que a nuvem já confirmou.
+  try {
+    await marcarEnviadosOutbox([primaryKey]);
+  } catch (err) {
+    logger.warn(`>>> [Outbox] Envio aceite mas entrada não removida (${primaryKey}):`, err);
+  }
 };
 
 export interface UserSessionData {
@@ -708,6 +716,15 @@ const _syncService = {
     const filialClean = String(rawFilial).trim();
 
     try {
+      // FASE 1 — envelope durável: a outbox nasce semeada do que a fila legada
+      // já tinha pendente (`_is_synced = 0`). Uma vez por sessão e sem poder
+      // bloquear o envio: se a semeadura falhar, a drenagem segue como antes.
+      try {
+        await semearOutboxDePendentes();
+      } catch (seedErr) {
+        logger.warn('>>> [Outbox] Semeadura da fila durável falhou (o envio continua):', seedErr);
+      }
+
       // 1. ANTI-DUPLICATION FILTER: Ler única e exclusivamente a tabela 'local_assets' buscando registros onde '_is_synced = 0' via Dexie API
       const pendingRecords = await db.local_assets.where('_is_synced').equals(0).toArray();
 
@@ -729,13 +746,30 @@ const _syncService = {
         return { success: true, processedCount: 0, failedCount: 0 };
       }
 
+      // RECUO (v9): a outbox diz quando cada ativo pode voltar a ser tentado.
+      // Sem esta leitura o `next_attempt_at` era um campo que ninguém lia e uma
+      // recusa era repetida a cada ciclo de 60 s — a rede e a trilha pagavam
+      // por isso. Registos sem entrada na outbox não são bloqueados: nesta fase
+      // a fonte continua a ser `_is_synced` e o envelope só cobre o que passou
+      // por ela (semeadura + conferência).
+      const recuo = await chavesEmRecuo(tenantidClean);
+      const tentaveis = recuo.size === 0
+        ? records
+        : records.filter((record) => !recuo.has(sanitizeAssetKey(String(record.primarykey || record.id || ''))));
+      if (tentaveis.length === 0) {
+        logger.info(
+          `>>> [Sync] ${records.length} pendente(s) em recuo — nova tentativa quando o prazo passar.`
+        );
+        return { success: true, processedCount: 0, failedCount: 0 };
+      }
+
       // EXCLUSÃO VENCE A SUBIDA: o upsert não lê o estado remoto, por isso um
       // aparelho offline reenviava a cópia ativa de um ativo apagado noutro
       // lado e reactivava-o em todos. A nuvem é consultada UMA vez por ciclo
       // (nunca por registo) e os apagados ficam fora do envio.
       const apagadasNaNuvem = await fetchCloudDeletedKeys(
         [tenantidClean],
-        records.map(record => String(record.primarykey || record.id || ''))
+        tentaveis.map(record => String(record.primarykey || record.id || ''))
       );
 
       const syncedPrimaryKeys: string[] = [];
@@ -745,7 +779,7 @@ const _syncService = {
       let failureSignatures: Set<string> | null = null;
       let exceptionSignatures: Set<string> | null = null;
 
-      for (const record of records) {
+      for (const record of tentaveis) {
         // GUARDA DE CONECTIVIDADE EM TEMPO REAL: Evita enchentes de erros caso o sinal caia no meio do laço
         if (!navigator.onLine) {
           logger.warn(">>> [Sync Guard] Conectividade perdida no meio do laço de processamento. Abortando ciclo.");
@@ -958,6 +992,16 @@ const _syncService = {
           }
           
           if (!navigator.onLine) break; // Força a saída do laço se o erro foi decorrente de queda de rede físico
+        }
+      }
+
+      if (failedPrimaryKeys.length > 0) {
+        // Recuo na outbox: a próxima tentativa deste registo não tem de esperar
+        // o ciclo de 60 s. Best-effort — nunca altera o resultado do ciclo.
+        try {
+          await marcarFalhasOutbox(failedPrimaryKeys, 'envio recusado ou interrompido no ciclo');
+        } catch (outboxErr) {
+          logger.warn('>>> [Outbox] Falha ao registar o recuo dos envios falhados:', outboxErr);
         }
       }
 
