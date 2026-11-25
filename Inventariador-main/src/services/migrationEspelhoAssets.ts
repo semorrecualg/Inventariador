@@ -8,9 +8,11 @@
 // Dois passos, porque o Dexie não expõe uma store no upgrade que a apaga
 // (dexie#275/#276):
 //   v10 — resgate: lê `assets`, compara por `[tenantid+primarykey]` com as
-//         duas tabelas vivas e copia para cada uma SÓ o que falta. Linha
-//         existente não é sobrescrita: o espelho que o app lê é a fonte de
-//         verdade. Nada é apagado.
+//         duas tabelas vivas e acerta os espelhos. A linha viva manda: quando
+//         a chave já existe numa delas, é essa que se copia para a que falta,
+//         não a versão atrasada de `assets` — assim os dois espelhos não
+//         ficam divergentes. Quem só existe em `assets` (sem par em nenhuma
+//         das duas) é copiado para ambas. Nada é apagado.
 //   v11 — extinção: `assets: null` apaga a store.
 // ============================================================================
 import type Dexie from 'dexie';
@@ -35,13 +37,15 @@ export interface TxDeResgate {
 }
 
 /**
- * Copia para `local_assets` e `ativos` as linhas de `assets` que não têm par.
- * Devolve quantas cópias foram escritas (0 quando o espelho estava vazio ou
- * era réplica integral das tabelas vivas).
+ * Acerta `local_assets` e `ativos` com base nas chaves que existem em
+ * `assets`. A linha viva ganha sempre: se a chave está numa das tabelas vivas,
+ * é essa linha que se copia para a outra, mantendo os dois espelhos iguais; a
+ * versão de `assets` só é usada quando a chave não existe em nenhuma das duas.
+ * Devolve quantas cópias foram escritas.
  */
 export const resgatarEspelhoAssets = async (tx: TxDeResgate): Promise<number> => {
   const origens = await tx.table(ESPELHO_LEGADO).toArray();
-  let resgatadas = 0;
+  let alinhadas = 0;
 
   for (const linha of origens) {
     const tenantid = String(linha.tenantid ?? '').trim().toUpperCase();
@@ -50,21 +54,28 @@ export const resgatarEspelhoAssets = async (tx: TxDeResgate): Promise<number> =>
     if (!primarykey) continue;
 
     const chave: [string, string] = [tenantid, primarykey];
-    const copia: Linha = { ...linha, tenantid, id: primarykey };
+    const vivas = await Promise.all(TABELAS_VIVAS.map((tabela) => tx.table(tabela).get(chave)));
+    // Primeira linha viva encontrada (ordem de TABELAS_VIVAS) é a fonte.
+    const fonte: Linha =
+      vivas.find((viva): viva is Linha => viva !== undefined) ?? {
+        ...linha,
+        tenantid,
+        id: primarykey
+      };
 
-    for (const tabela of TABELAS_VIVAS) {
-      if (await tx.table(tabela).get(chave)) continue;
-      await tx.table(tabela).put(copia);
-      resgatadas += 1;
+    for (let i = 0; i < TABELAS_VIVAS.length; i += 1) {
+      if (vivas[i]) continue;
+      await tx.table(TABELAS_VIVAS[i]).put(fonte);
+      alinhadas += 1;
     }
   }
 
-  if (resgatadas > 0) {
+  if (alinhadas > 0) {
     logger.warn(
-      `[MigrationV10] ${resgatadas} linha(s) existentes só no espelho 'assets' copiadas para local_assets/ativos antes da remoção.`
+      `[MigrationV10] ${alinhadas} linha(s) copiadas entre local_assets/ativos a partir do espelho 'assets' antes da remoção.`
     );
   }
-  return resgatadas;
+  return alinhadas;
 };
 
 // Assinatura das tabelas de ativos: chave composta `[tenantid+primarykey]` e

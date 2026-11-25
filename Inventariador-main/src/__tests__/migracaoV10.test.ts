@@ -3,7 +3,9 @@
 // migracaoV10.test.ts — A.3a.4 em dois passos.
 //
 // v10: RESGATE. Compara `assets` com as duas tabelas vivas por
-// `[tenantid+primarykey]` e copia para `local_assets`/`ativos` só o que falta.
+// `[tenantid+primarykey]` e acerta os dois espelhos: se a chave já existe numa
+// delas, é a linha viva que se copia para a outra; a versão de `assets` só
+// entra quando a chave não existe em nenhuma.
 // v11: REMOÇÃO. A store `assets` sai do schema.
 //
 // O teste NÃO reimplementa a migração: declara as versões com
@@ -80,20 +82,32 @@ describe('A.3a.4 — resgate na v10, remoção na v11', () => {
     db.close();
   });
 
-  it('linha já presente nas tabelas vivas não é sobrescrita pelo espelho morto', async () => {
+  it('chave já existente numa tabela viva propaga a linha viva, não a atrasada de `assets`', async () => {
     const v9 = abrirV9();
     await v9.open();
-    await v9.table('ativos').put(linha('PK-1', { etiqueta: 'VIVA' }));
-    await v9.table('assets').put(linha('PK-1', { etiqueta: 'ATRASADA' }));
+    // PK-1 só em `ativos`; PK-2 só em `local_assets`. Nos dois casos `assets`
+    // tem uma versão atrasada que não pode ganhar.
+    await v9.table('ativos').put(linha('PK-1', { etiqueta: 'VIVA-ATIVOS' }));
+    await v9.table('local_assets').put(linha('PK-2', { etiqueta: 'VIVA-LOCAL' }));
+    await v9.table('assets').bulkPut([
+      linha('PK-1', { etiqueta: 'ATRASADA-1' }),
+      linha('PK-2', { etiqueta: 'ATRASADA-2' })
+    ]);
     v9.close();
 
     const db = createDb();
     await db.open();
 
-    // `ativos` mantém o que o app lia; `local_assets` (vazio) recebe o resgate.
-    expect(await db.table('ativos').get(['CICOPAL', 'PK-1'])).toMatchObject({ etiqueta: 'VIVA' });
+    // Os dois espelhos ficam iguais, com o conteúdo vivo dos dois lados.
+    expect(await db.table('ativos').get(['CICOPAL', 'PK-1'])).toMatchObject({ etiqueta: 'VIVA-ATIVOS' });
     expect(await db.table('local_assets').get(['CICOPAL', 'PK-1'])).toMatchObject({
-      etiqueta: 'ATRASADA'
+      etiqueta: 'VIVA-ATIVOS'
+    });
+    expect(await db.table('local_assets').get(['CICOPAL', 'PK-2'])).toMatchObject({
+      etiqueta: 'VIVA-LOCAL'
+    });
+    expect(await db.table('ativos').get(['CICOPAL', 'PK-2'])).toMatchObject({
+      etiqueta: 'VIVA-LOCAL'
     });
     db.close();
   });
