@@ -41,7 +41,7 @@ describe('summarizeSamples', () => {
   });
 
   it('mantém as quatro métricas de F0 no contrato', () => {
-    expect(PERF_METRICS).toEqual(['boot', 'pull.full', 'pull.delta', 'push']);
+    expect(PERF_METRICS).toEqual(['boot', 'pull.full', 'pull.delta', 'push', 'save']);
   });
 
   it('formata o snapshot em JSON legível, com trigger e espelhos', () => {
@@ -54,7 +54,8 @@ describe('summarizeSamples', () => {
         boot: { samples: 1, p50: 900, p95: 900, last: 900 },
         'pull.full': { samples: 1, p50: 1200, p95: 1200, last: 1200 },
         'pull.delta': { samples: 0, p50: null, p95: null, last: null },
-        push: { samples: 0, p50: null, p95: null, last: null }
+        push: { samples: 0, p50: null, p95: null, last: null },
+        save: { samples: 0, p50: null, p95: null, last: null }
       }
     });
     const parsed = JSON.parse(text) as Record<string, unknown>;
@@ -72,7 +73,8 @@ describe('summarizeSamples', () => {
         boot: { samples: 1, p50: 800, p95: 800, last: 800 },
         'pull.full': { samples: 0, p50: null, p95: null, last: null },
         'pull.delta': { samples: 0, p50: null, p95: null, last: null },
-        push: { samples: 0, p50: null, p95: null, last: null }
+        push: { samples: 0, p50: null, p95: null, last: null },
+        save: { samples: 0, p50: null, p95: null, last: null }
       }
     };
     const normalized = normalizePerfBaseline(legacy);

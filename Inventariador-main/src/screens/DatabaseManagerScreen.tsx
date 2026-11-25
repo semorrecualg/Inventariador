@@ -37,7 +37,8 @@ const PERF_LABELS: Record<PerfMetricName, string> = {
   boot: 'Boot',
   'pull.full': 'Pull completo',
   'pull.delta': 'Delta',
-  push: 'Push'
+  push: 'Push',
+  save: 'Save'
 };
 
 /** `p50 / p95 ms · n` ou “sem amostra”. */

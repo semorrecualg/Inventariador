@@ -432,6 +432,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   de regressão (nuvem a responder sem sessão depois do login local) em
   `bootCloudCheck`.
 
+### Adicionado — cronómetro do `saveInventory` (`perfMetrics`)
+
+- **O que era:** o retrato da linha de base gravava `boot`, `pull.full`,
+  `pull.delta` e `push`. As duas linhas de §8 do plano de sincronização —
+  «`saveInventory` com 1 ativo (ms)» e «com 300 ativos (ms)» — não tinham
+  instrumento, por isso não eram medíveis.
+- **Agora:** cada `saveInventory` grava uma amostra `save` com o tamanho do
+  inventário no `count`, inclusive quando o save falha (o registo é no
+  `finally`). A mesma métrica serve os dois tamanhos: lê-se a amostra com
+  `count = 1` e a com `count = 300`, sem uma métrica por tamanho de base. O
+  cartão do Gestor de Base mostra o rótulo «Save».
+- **Testes:** `saveInventoryPerf` (3) fixa a amostra com 300, a separação 1/300
+  pelo `count` e a gravação em caso de falha; `perfMetrics` passa a exigir
+  `save` no contrato das métricas.
+
 ### Corrigido — recuo para o registo que falha sem envelope
 
 - **O que era:** o recuo (`next_attempt_at`) só existia para quem já tinha

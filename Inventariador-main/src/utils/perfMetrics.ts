@@ -1,7 +1,8 @@
 import { logger } from './logger';
 
 /**
- * F0 — Cronômetro do boot, do pull (completo/delta) e do push.
+ * F0 — Cronômetro do boot, do pull (completo/delta), do push e do save
+ * (`saveInventory`, com o tamanho do inventário no `count`).
  *
  * Amostras ficam num anel em `localStorage` (`gbr_perf_samples_v1`, últimas 200)
  * e a linha de base é um retrato datado (`gbr_perf_baseline_v1`), exibido no
@@ -11,9 +12,9 @@ import { logger } from './logger';
  * (storage indisponível é ignorado).
  */
 
-export type PerfMetricName = 'boot' | 'pull.full' | 'pull.delta' | 'push';
+export type PerfMetricName = 'boot' | 'pull.full' | 'pull.delta' | 'push' | 'save';
 
-export const PERF_METRICS: PerfMetricName[] = ['boot', 'pull.full', 'pull.delta', 'push'];
+export const PERF_METRICS: PerfMetricName[] = ['boot', 'pull.full', 'pull.delta', 'push', 'save'];
 
 export interface PerfSample {
   name: PerfMetricName;
