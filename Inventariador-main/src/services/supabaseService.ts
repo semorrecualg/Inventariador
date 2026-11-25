@@ -2138,10 +2138,19 @@ export const getEmailByUsername = async (username: string): Promise<string | nul
   if (!supabase) return null;
 
   try {
+    // O login por username acontece ANTES do signIn: `anon` já não lê a tabela
+    // user_permissions. A RPC devolve só o e-mail, por igualdade exata.
+    const viaRpc = await supabase.rpc('email_by_username', { p_username: username.trim() });
+    if (!viaRpc.error) {
+      return typeof viaRpc.data === 'string' && viaRpc.data ? viaRpc.data : null;
+    }
+
+    // Fallback para bases onde a função ainda não foi criada: a tabela só é
+    // legível com sessão, por isso sem ela o resultado é null (não rebenta).
     const fetchPromise = supabase
       .from('user_permissions')
       .select('email')
-      .ilike('username', username)
+      .ilike('username', username.trim())
       .maybeSingle();
 
     const result = await Promise.race([

@@ -30,6 +30,12 @@ AS $$
   SELECT up.tenantid
   FROM public.user_permissions up
   WHERE up.id = auth.uid()
+     OR (
+       auth.uid() IS NOT NULL
+       AND btrim(coalesce(auth.jwt() ->> 'email', '')) <> ''
+       AND lower(btrim(coalesce(up.email, ''))) = lower(btrim(coalesce(auth.jwt() ->> 'email', '')))
+     )
+  ORDER BY (up.id = auth.uid()) DESC
   LIMIT 1
 $$;
 

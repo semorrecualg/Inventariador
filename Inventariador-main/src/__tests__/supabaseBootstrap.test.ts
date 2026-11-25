@@ -49,15 +49,19 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     expect(doBlocks.length).toBeLessThanOrEqual(1);
   });
 
-  it('mantém uma política p_all por tabela e nenhuma em asset-photos', () => {
-    // 9 tabelas do app + `base_generation` (selo de geração, só leitura)
-    // continuam em p_all; `asset-photos` passou a política por tenant.
-    // 11 DROP: os 10 `p_all` vivos + o DROP que remove o antigo `p_all` de
-    // `asset-photos` numa base já existente. Só 10 voltam a ser criados.
+  it('só as tabelas ainda abertas mantêm p_all (assets e user_permissions não)', () => {
+    // 7 tabelas do app + `base_generation` (selo de geração, só leitura)
+    // continuam em p_all; `asset-photos`, `assets` e `user_permissions` passaram
+    // a políticas por contrato/por utilizador (ver 7-A).
+    // 11 DROP: os 10 `p_all` antigos (incluindo assets e user_permissions) + o
+    // `p_all` de `asset-photos` numa base já existente. Só 8 voltam a ser criados.
     expect(codeLines.filter((l) => l.startsWith('DROP POLICY IF EXISTS p_all ON')).length).toBe(11);
-    expect(codeLines.filter((l) => l.startsWith('CREATE POLICY p_all ON')).length).toBe(10);
+    expect(codeLines.filter((l) => l.startsWith('CREATE POLICY p_all ON')).length).toBe(8);
     expect(sql).not.toContain('CREATE POLICY p_all ON public."asset-photos"');
+    expect(sql).not.toContain('CREATE POLICY p_all ON public.assets');
+    expect(sql).not.toContain('CREATE POLICY p_all ON public.user_permissions');
     expect(codeLines.some((l) => l.startsWith('CREATE POLICY p_tenant_all ON public."asset-photos"'))).toBe(true);
+    expect(codeLines.some((l) => l.startsWith('CREATE POLICY p_tenant_all ON public.assets'))).toBe(true);
   });
 
   it('todas as políticas usam nomes fixos (nunca interpolados)', () => {
@@ -66,7 +70,7 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     );
     expect(
       policyLines.every((l) =>
-        /(?:CREATE POLICY|DROP POLICY IF EXISTS) (?:p_all|p_tenant_all|p_asset_photos_tenant_(?:select|insert|update|delete)) ON/.test(l)
+        /(?:CREATE POLICY|DROP POLICY IF EXISTS) (?:p_all|p_tenant_all|p_self_(?:select|insert|update)|p_admin_all|p_asset_photos_tenant_(?:select|insert|update|delete)) ON/.test(l)
       )
     ).toBe(true);
   });

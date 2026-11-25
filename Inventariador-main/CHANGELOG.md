@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Segurança — RLS de assets e user_permissions
+
+- **O que era:** `public.assets` e `public.user_permissions` continuavam com
+  `p_all` para `anon`: a base de qualquer contrato era legível e apagável sem
+  sessão, e ainda se liam os e-mails, papéis, contratos e filiais de todos os
+  utilizadores.
+- **Agora:** `docs/supabase_rls_assets_permissoes.sql` (e a secção 7/7-A do
+  bootstrap) troca o `p_all` de `assets` por `p_tenant_all`, só para
+  `authenticated` e limitada ao contrato do perfil; `role = 'MASTER'` (dono
+  global) mantém a visão entre contratos. Em `user_permissions`, `anon` perde o
+  privilégio de tabela e o login por username passa pela RPC
+  `email_by_username(text)` — devolve só o e-mail, por igualdade exata. Cada
+  utilizador lê e corrige a própria linha (o app sincroniza o `id` com o Auth);
+  uma guarda `BEFORE INSERT OR UPDATE` impede que se torne ADMIN, mude de
+  contrato ou entre noutro tenant, e um ADMIN só gere os utilizadores do seu
+  contrato.
+- **Testes:** `rlsAssetsPermissoes` fixa a ausência de políticas para `anon`, a
+  RPC, a guarda de colunas e a paridade com o bootstrap.
+
 ### Segurança — bucket de fotos privado e Kardex fechado
 
 - **O que era:** o bucket `asset-photos` era público e o app gravava em

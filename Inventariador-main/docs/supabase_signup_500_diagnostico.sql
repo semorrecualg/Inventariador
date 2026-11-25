@@ -160,13 +160,13 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
 
--- B.4 — Garantir que o RLS da user_permissions permite a escrita
--- (a política p_all do bootstrap permite anon/authenticated; recria se faltar)
+-- B.4 — RLS de user_permissions
+-- O trigger acima é SECURITY DEFINER: grava sem precisar de política. O RLS
+-- fechado (sem p_all, sem privilégio para anon) vive em
+-- docs/supabase_rls_assets_permissoes.sql. NÃO recriar aqui o p_all —
+-- reabriria a leitura da tabela a `anon`.
 ALTER TABLE public.user_permissions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS p_all ON public.user_permissions;
-CREATE POLICY p_all ON public.user_permissions
-  FOR ALL TO anon, authenticated
-  USING (true) WITH CHECK (true);
 
 
 -- ============================================================================
