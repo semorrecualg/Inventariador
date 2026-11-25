@@ -45,6 +45,7 @@ import type { AccessDiagnostic } from '../utils/accessDiagnostics';
 import { sqliteService } from '../services/sqliteService';
 import { exportVerifiedSecurityPackage } from '../services/securityExportService';
 import { logger } from '../utils/logger';
+import { isSovereigntyLocked, SOVEREIGNTY_EVENT, SOVEREIGNTY_INTEGRITY_KEY } from '../utils/sovereignty';
 
 interface MainMenuProps {
   onNavigate: (target: AppScreen, params?: NavigationParams) => void;
@@ -180,6 +181,17 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [isCheckingIntegrity, setIsCheckingIntegrity] = useState(false);
   const [isExportingPackage, setIsExportingPackage] = useState(false);
   const [isSystemLocked, setIsSystemLocked] = useState(() => localStorage.getItem('is_system_locked') === 'true');
+
+  // O selo acompanha o modo de base (o App sela/remove sozinho). O evento só
+  // relê os badges do cartão passivo, sem obrigar a fechar o painel.
+  useEffect(() => {
+    const aoMudarBlindagem = () => {
+      setIsSystemLocked(isSovereigntyLocked(localStorage));
+      setIntegrityKey(localStorage.getItem(SOVEREIGNTY_INTEGRITY_KEY) || '');
+    };
+    window.addEventListener(SOVEREIGNTY_EVENT, aoMudarBlindagem);
+    return () => window.removeEventListener(SOVEREIGNTY_EVENT, aoMudarBlindagem);
+  }, []);
   const [integrityKey, setIntegrityKey] = useState(() => localStorage.getItem('gbr_integrity_key') || '');
 
   const handleCheckIntegrity = async () => {
@@ -315,55 +327,6 @@ const MainMenu: React.FC<MainMenuProps> = ({
       );
     }
   };
-
-  // 3. BLINDAGEM DE HARDWARE E ISOLAMENTO DE ERRO NO DISK FLUSH
-  const handleValidateSovereignty = async () => {
-    // Flag ou controle visual para evitar clique duplo e sobrecarga na ponte nativa
-    if (isCheckingIntegrity) return; 
-    
-    try {
-      logger.info(">>> [Soberania] Iniciando validação definitiva da base de dados pelo Administrador...");
-      
-      const isBatteryOk = await validateBatteryLevel();
-      if (!isBatteryOk) return;
-
-      setIsCheckingIntegrity(true); // Bloqueia concorrência de cliques imediatamente
-
-
-      const randomSeed = Math.random().toString(36).substring(2, 10).toUpperCase();
-      const count = await sqliteService.getAssetCount();
-      const checksum = `GBR-AES256-SHA512::KARDEX_CONF_LOCKED_${count}_${randomSeed}`;
-      
-      localStorage.setItem('is_system_locked', 'true');
-      localStorage.setItem('gbr_integrity_key', checksum);
-      setIsSystemLocked(true);
-      setIntegrityKey(checksum);
-
-      // Tratamento específico isolado para escrita física offline-first
-      try {
-        await sqliteService.forceSync();
-      } catch (syncErr) {
-        logger.error(">>> [SQLite IO Error] Falha crítica de escrita física:", syncErr);
-        showModal("Falha de Gravação", "O driver nativo do banco de dados falhou ao realizar o Disk Flush físico. Verifique permissões.", "error");
-        return;
-      }
-
-      const status = await sqliteService.getFileStatus();
-      setDirStatus(status as { status: string; path: string; fileName?: string });
-      
-      showModal(
-        "Dispositivo Ready-to-Field",
-        "Soberania e integridade da base de dados validadas com sucesso pelo Administrador!\n\nO arquivo 'gbr_kardek.db' foi blindado com o HASH:\n" + checksum,
-        "success"
-      );
-    } catch (err: unknown) {
-      logger.error(err);
-      showModal("Erro na Validação", "Não foi possível validar a soberania: " + (err instanceof Error ? err.message : String(err)), "error");
-    } finally {
-      setIsCheckingIntegrity(false); // Restaura o estado de escuta de forma segura
-    }
-  };
-
 
   return (
     <div className="flex-1 w-full flex flex-col bg-bg-main animate-fadeIn relative overflow-hidden min-h-full">
@@ -920,14 +883,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
                   </div>
                 </div>
 
+                {/* Cartão passivo: sem «VALIDAR SOBERANIA». A blindagem entra e
+                    sai com o modo de base, não com cliques técnicos. O único
+                    controlo aqui é a exportação do backup. */}
                 <div className="flex space-x-2">
-                  <button 
-                    onClick={handleValidateSovereignty}
-                    className="flex-1 py-2.5 bg-slate-900 border border-slate-700 hover:bg-slate-800 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center justify-center space-x-2"
-                  >
-                    <FolderOpen size={12} className="text-blue-400" />
-                    <span>VALIDAR SOBERANIA</span>
-                  </button>
                   <button 
                     onClick={() => {
                       if (Capacitor.isNativePlatform()) {
@@ -986,6 +945,13 @@ const MainMenu: React.FC<MainMenuProps> = ({
                       <p className="text-[8px] font-mono font-bold text-emerald-300 break-all select-all mt-1">{integrityKey}</p>
                     </div>
                   )}
+
+                  {/* Cartão 100% passivo: o selo acompanha o modo de base. */}
+                  <p className="mt-3 text-[8px] font-bold text-emerald-500/60 uppercase tracking-widest text-center">
+                    {isSystemLocked
+                      ? 'Blindagem automática · ativa enquanto a Base Local estiver em uso'
+                      : 'Sem blindagem · a Base Oficial está disponível'}
+                  </p>
                 </div>
               </div>
 

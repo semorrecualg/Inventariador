@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — selo global de base e sincronização
+
+- **O que era:** o modo ativo só era legível em duas telas (cartão «Modo de
+  Base» e barra amarela do Gestor). Fora delas, nada dizia se o aparelho
+  operava em Base Local ou na Base Oficial, nem se havia fila por subir.
+- **Agora:** um selo fixo e discreto no canto inferior esquerdo acompanha todas
+  as telas do shell: a primeira luz diz **Base Local** (vermelha, nada sai do
+  aparelho) ou **Supabase** (verde). A segunda é a da sincronização — verde
+  quando está tudo enviado, âmbar a piscar enquanto sincroniza ou com fila
+  pendente, vermelha sem rede ou com o envio parado, e cinza em Base Local (a
+  nuvem está desligada por desenho, não é falha). Não intercepta toques.
+- **Testes:** `baseModeBeacon` (10) fixa a regra da luz e o selo nos cinco
+  estados.
+
+### Alterado — «Modo de Base» guiado, offline-first e cartões passivos
+
+- **O que era:** com a blindagem física («Pronto para Campo», `PROTEGIDO`), o
+  botão «VALIDAR SOBERANIA» gravava `is_system_locked` e o arranque forçava
+  BASE LOCAL. Ao escolher Base Oficial, o diálogo anunciava «MODO NUVEM»; no
+  reload, todas as telas voltavam a dizer BASE LOCAL — a troca nunca valia.
+- **Base Oficial, sem adivinhação:** build sem chaves do Supabase recusa a
+  troca; **sem internet a troca é recusada de imediato** («Você está sem
+  internet. Conecte-se a uma rede de dados ou Wi-Fi para acessar a Base
+  Oficial») sem alterar a blindagem nem o modo atual. Online e blindado, **um
+  único modal** explica que a blindagem local será pausada; ao confirmar, o app
+  remove `is_system_locked` e a chave de integridade, registra «Blindagem física
+  removida automaticamente na troca para Base Oficial», avisa as telas abertas e
+  ativa a Base Oficial na sequência — sem segundo modal.
+- **Base Local, resiliente:** a troca funciona online e offline, encerra o modo
+  oficial e **sela o aparelho nos bastidores** (`is_system_locked` + chave de
+  integridade, auditoria «Blindagem física aplicada automaticamente na troca
+  para Base Local»), sem cliques extra. Na reconexão, o pendente é tratado em
+  segundo plano (fila da nuvem quando aplicável; gravação física em Base Local),
+  com log e sem interromper o operador.
+- **Fecho determinístico:** o fim do fluxo guiado já não depende de um
+  `setTimeout(350)`. A auditoria do desbloqueio e a da troca são aguardadas
+  (com teto de 2 s para o utilizador nunca ficar preso se o IndexedDB bloquear),
+  o diálogo fecha com commit síncrono no DOM e só então a app reinicia — o
+  evento de auditoria deixa de se perder no reload.
+- **Cartões 100% passivos:** saíram «VALIDAR SOBERANIA» e «Desbloquear
+  blindagem». Os cartões «Status de Blindagem» e «Vínculo de Diretório» só
+  refletem o estado real (PROTEGIDO/MONITORANDO, ONLINE/OFFLINE/SINCRONIZANDO);
+  o selo global continua a mostrar base e sincronização em todas as telas.
+- **Invariantes:** nunca se sela com a Base Oficial ativa e nunca se inicia a
+  troca para a nuvem sem rede ou sem chaves do Supabase.
+- **Placar do Gestor:** em BASE LOCAL ou com blindagem ativa o cartão do
+  protocolo SRE já não dispara uma leitura à nuvem que ficava eternamente em
+  «CONSULTANDO»; mostra `SUPABASE n/d · não consultada (base local)` e regista
+  no terminal que nenhuma chamada foi feita.
+- **Testes:** `sreProtocol` (5) cobre o estado de Base Local no placar;
+  `baseModeTransition` (6) fixa a decisão do seletor, `sovereignty` (4) o
+  selo/remoção e o evento, `baseModeRestart` (4) a ordem auditoria → fecho →
+  reinício, `cartoesStatusPassivos` (2) a ausência de botões, e o E2E `modoBase`
+  cobre offline, o modal único, o selo automático e os cartões passivos.
+
 ### Adicionado — selo de geração da base
 
 - **O que era:** o reset da nuvem só limpava o aparelho onde «Preparar Nova Carga»
