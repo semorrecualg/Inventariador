@@ -317,6 +317,24 @@ ocorrência)`. Mesmo arquivo ⇒ mesmas chaves (reimportar substitui); `ocorrên
 distingue linhas realmente repetidas no mesmo arquivo. A impressão digital ignora
 chaves técnicas (`tenantid`, `filial`, flags `_*`). Ver `utils/assetKey.ts`.
 
+**Contrato da carga (planilha):** as três vias (`injetarDadosEmLotes`,
+`processExcelFile`, `importExcelBulkData`) partilham as mesmas regras em
+`services/DatabaseLoaderService.ts`:
+
+- `assertTenantInEveryRow` bloqueia a carga se QUALQUER linha preenchida vier sem
+  `tenantid` (antes só bloqueava com a coluna vazia em todas) e a mensagem nomeia
+  as linhas do arquivo (1 = cabeçalho). Sem isso a linha entrava com a chave
+  composta `['', primarykey]`, misturando contratos;
+- `resolveFilialRaw` resolve a filial pela mesma ordem (`filial` → `unidade` →
+  `unit` → `unitid` → `unit_id` → unidade do operador). Antes
+  `injetarDadosEmLotes` lia só `filial`, e a identidade derivada — que usa a
+  filial — saía diferente da de `processExcelFile` para a mesma linha;
+- `findOrphanRows` (em `utils/importReconciliation.ts`) deteta os registos que
+  uma reimportação deixou na base: mesma `source_primarykey`, filial e contrato,
+  mas identidade que a carga atual não usa. São reportados em `audit_logs`
+  (`IMPORT_RECONCILIATION`, campos `orphans`/`orphanKeys`) e no terminal do Gestor
+  de Base; nada é apagado automaticamente.
+
 **Guardião de duplicidade por recno** — `utils/recnoGuard.ts` (regra pura: `recnoKeyOf`,
 `sameRecnoData`, `findRecnoCollisions`, `describeRecnoCollision`) +
 `services/recnoGuardService.ts` (índice, auditoria, relatório). Chave de comparação:

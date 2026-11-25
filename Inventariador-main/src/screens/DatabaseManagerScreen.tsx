@@ -28,7 +28,14 @@ export async function processAndInjectSpreadsheetData(file: File, onProgress: (p
   if (!data || data.length === 0) {
     throw new Error("Planilha vazia ou inválida.");
   }
-  await DatabaseLoaderService.injetarDadosEmLotes(data, onProgress);
+  // Mesma filial das outras vias de carga: com a coluna 'filial' vazia, usa a
+  // unidade do operador (contexto já gravado pelo login/seleção) em vez de
+  // 'FILIAL_DEFAULT'. Sem isso, a mesma planilha gerava chaves diferentes
+  // conforme a via que a importava.
+  const unidadeAtual = typeof window !== 'undefined'
+    ? sessionStorage.getItem('filial') || sessionStorage.getItem('selectedUnit') || ''
+    : '';
+  await DatabaseLoaderService.injetarDadosEmLotes(data, onProgress, unidadeAtual || undefined);
   return data;
 }
 

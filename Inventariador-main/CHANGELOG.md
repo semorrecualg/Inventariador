@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — carga da planilha: tenantid por linha, filial única e órfãs
+
+- **`tenantid` em cada linha:** a carga passa a bloquear quando qualquer linha
+  preenchida vem sem `tenantid` e a mensagem nomeia as linhas do arquivo
+  (1 = cabeçalho). Antes só bloqueava com a coluna vazia em todas as linhas, e
+  uma linha isolada entrava com a chave composta `['', primarykey]`.
+- **Filial única:** `injetarDadosEmLotes` passa a resolver a filial pela mesma
+  cadeia das outras vias (`filial` → `unidade` → `unit` → `unitid` → `unit_id` →
+  unidade do operador). A identidade derivada usa a filial, por isso a mesma
+  planilha importada por vias diferentes criava registos novos.
+- **Órfãs da reimportação:** a reconciliação deteta os registos que ficaram na
+  base com a identidade antiga da mesma `source_primarykey` (mesmo contrato e
+  filial), regista-os em `audit_logs` (`orphans`/`orphanKeys`) e no terminal do
+  Gestor de Base. Nenhum registo é apagado automaticamente.
+
 ### Adicionado — runbook de medição do A.3a.0
 
 - `docs/RUNBOOK-A3a0.md`: procedimento para o operador medir a base real no
