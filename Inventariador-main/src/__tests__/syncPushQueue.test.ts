@@ -48,7 +48,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
 });
 
 import { db } from '../services/sqliteService';
-import { entradaOutbox } from '../services/syncOutbox';
+import { entradaOutbox, semearOutboxDePendentes } from '../services/syncOutbox';
 import { ASSETS_CONFLICT_TARGET, processDataSyncQueue } from '../services/syncService';
 import { BaseGenerationBlockedError } from '../utils/baseGeneration';
 import { SyncRequestTimeoutError, UPSERT_TIMEOUT_MS } from '../services/syncQueueGuards';
@@ -74,6 +74,18 @@ const asset = (over: Record<string, unknown> = {}) =>
     ...over
   }) as Record<string, unknown>;
 
+/**
+ * Ciclos simulados: estes testes correm o ciclo duas vezes em milissegundos, na
+ * produção distam 60 s. O recuo criado pela falha é tempo real, por isso recua-se
+ * o prazo dos envelopes antes de simular o ciclo seguinte.
+ */
+const proximoCiclo = async () => {
+  const entradas = await db.sync_outbox.toArray();
+  if (entradas.length > 0) {
+    await db.sync_outbox.bulkPut(entradas.map((entrada) => ({ ...entrada, next_attempt_at: 0 })));
+  }
+};
+
 describe('processDataSyncQueue — envio real da conferência do aparelho', () => {
   beforeEach(async () => {
     upsert.mockReset();
@@ -90,6 +102,36 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     localStorage.removeItem('app_selected_unit');
     sessionStorage.setItem('filial', '010101 CICOPAL GO');
     sessionStorage.setItem('tenantid', 'CICOPAL');
+  });
+
+  it('um registo que falha SEM entrada na outbox ganha entrada e não é retentado no ciclo seguinte', async () => {
+    // A semeadura corre uma vez por sessão: aqui roda com a base vazia para o
+    // registo nascer DEPOIS dela — o caso real de quem entra por importação de
+    // planilha ou por uma escrita que não passa pela `saveCollectedAssetAtomic`.
+    await semearOutboxDePendentes();
+    upsert.mockResolvedValue({
+      error: { message: 'new row violates row-level security policy', code: '42501' }
+    });
+    await db.local_assets.put(asset() as never);
+    expect(await db.sync_outbox.count()).toBe(0);
+
+    await processDataSyncQueue();
+
+    // A falha criou o envelope: sem isto o registo voltava a cada 60 s.
+    const [entrada] = await db.sync_outbox.toArray();
+    expect(entrada).toMatchObject({
+      key: 'CICOPAL|01010100000005000001',
+      primarykey: '01010100000005000001',
+      tenantid: 'CICOPAL',
+      op: 'UPSERT',
+      status: 'FALHA',
+      attempts: 1
+    });
+    expect(entrada.next_attempt_at).toBeGreaterThan(Date.now());
+
+    // Ciclo seguinte, dentro do prazo: em recuo, não há segundo envio.
+    await processDataSyncQueue();
+    expect(upsert).toHaveBeenCalledTimes(1);
   });
 
   it('um registo em recuo NÃO volta a ser tentado (next_attempt_at no futuro)', async () => {
@@ -301,6 +343,7 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
 
     upsert.mockReset();
     upsert.mockResolvedValue({ error: null });
+    await proximoCiclo();
     const result = await processDataSyncQueue();
 
     expect(result.processedCount).toBeGreaterThan(0);
@@ -436,6 +479,7 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     // No ciclo seguinte só o que falhou é reenviado.
     upsert.mockReset();
     upsert.mockResolvedValue({ error: null });
+    await proximoCiclo();
     await processDataSyncQueue();
     expect(upsert).toHaveBeenCalledTimes(1);
     expect((upsert.mock.calls[0][0] as Record<string, unknown>).primarykey).toBe('PK-B');
