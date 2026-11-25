@@ -15,6 +15,7 @@ import { purgarAuditoriaAntiga } from './auditoriaRetencao';
 import { assetGpsColumns } from '../utils/assetGps';
 import { assinaturaDeFalha, inicioDoDiaDaFalha } from '../utils/syncFalha';
 import { normalizeFlag } from '../utils/normalize';
+import { semearOutboxDePendentes, marcarEnviadosOutbox, marcarFalhasOutbox } from './syncOutbox';
 
 /**
  * Marca UM registo como sincronizado nos três stores locais, logo depois de o
@@ -31,6 +32,13 @@ import { normalizeFlag } from '../utils/normalize';
  */
 const markRecordSynced = async (primaryKey: string): Promise<void> => {
   await sqliteService.markAssetsSynced([primaryKey]);
+  // Fila durável (v9): o envio aceite sai do envelope. Best-effort — a outbox
+  // não pode fazer falhar um envio que a nuvem já confirmou.
+  try {
+    await marcarEnviadosOutbox([primaryKey]);
+  } catch (err) {
+    logger.warn(`>>> [Outbox] Envio aceite mas entrada não removida (${primaryKey}):`, err);
+  }
 };
 
 export interface UserSessionData {
@@ -708,6 +716,15 @@ const _syncService = {
     const filialClean = String(rawFilial).trim();
 
     try {
+      // FASE 1 — envelope durável: a outbox nasce semeada do que a fila legada
+      // já tinha pendente (`_is_synced = 0`). Uma vez por sessão e sem poder
+      // bloquear o envio: se a semeadura falhar, a drenagem segue como antes.
+      try {
+        await semearOutboxDePendentes();
+      } catch (seedErr) {
+        logger.warn('>>> [Outbox] Semeadura da fila durável falhou (o envio continua):', seedErr);
+      }
+
       // 1. ANTI-DUPLICATION FILTER: Ler única e exclusivamente a tabela 'local_assets' buscando registros onde '_is_synced = 0' via Dexie API
       const pendingRecords = await db.local_assets.where('_is_synced').equals(0).toArray();
 
@@ -958,6 +975,16 @@ const _syncService = {
           }
           
           if (!navigator.onLine) break; // Força a saída do laço se o erro foi decorrente de queda de rede físico
+        }
+      }
+
+      if (failedPrimaryKeys.length > 0) {
+        // Recuo na outbox: a próxima tentativa deste registo não tem de esperar
+        // o ciclo de 60 s. Best-effort — nunca altera o resultado do ciclo.
+        try {
+          await marcarFalhasOutbox(failedPrimaryKeys, 'envio recusado ou interrompido no ciclo');
+        } catch (outboxErr) {
+          logger.warn('>>> [Outbox] Falha ao registar o recuo dos envios falhados:', outboxErr);
         }
       }
 
