@@ -29,6 +29,7 @@ import { assetUuid } from './uuidV5';
 import { sanitizeAssetKey } from '../utils/assetKey';
 import { normalizeFlag } from '../utils/normalize';
 import { normalizeUnitNames } from '../utils/unitContextUtils';
+import { photoStoragePath } from '../utils/photoStoragePath';
 import {
   BaseGenerationBlockedError,
   avaliarGeracaoBase,
@@ -3168,7 +3169,9 @@ export const isQuotaExceededError = (err: any): boolean => {
 };
 
 /**
- * Faz upload de uma foto do ativo para o Supabase Storage com compressão client-side
+ * Faz upload de uma foto do ativo para o Supabase Storage com compressão client-side.
+ * Devolve o CAMINHO no bucket (não um URL): o bucket é privado e a URL assinada
+ * é gerada na altura de mostrar (`getSignedPhotoUrl`).
  */
 export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenantid: string): Promise<string | null> => {
   if (!supabase) return null;
@@ -3219,15 +3222,7 @@ export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenan
       throw uploadError;
     }
 
-    const { data } = supabase.storage
-      .from('asset-photos')
-      .getPublicUrl(filePath);
-
-    if (!data || !data.publicUrl) {
-      throw new Error('Falha ao gerar URL pública para a foto carregada.');
-    }
-
-    return data.publicUrl;
+    return filePath;
   } catch (err) {
     logger.error('Erro no processo de upload:', err);
     throw err; // Propaga o erro para que o SyncService registre a falha real
@@ -3237,17 +3232,13 @@ export const uploadAssetPhoto = async (assetId: string, file: File | Blob, tenan
 /**
  * Remove uma foto do Supabase Storage
  */
-export const deleteAssetPhoto = async (photoUrl: string): Promise<boolean> => {
-  if (!supabase || !photoUrl) return false;
+export const deleteAssetPhoto = async (photoUrlOrPath: string): Promise<boolean> => {
+  // Aceita o caminho guardado (`photos/tenant/id/123.jpg`) e os URLs antigos
+  // (público ou assinado, com `?token=`); o bucket é privado desde a migração.
+  const filePath = photoStoragePath(photoUrlOrPath);
+  if (!supabase || !filePath) return false;
 
   try {
-    // Extrai o caminho do arquivo da URL pública
-    // Ex: https://.../storage/v1/object/public/asset-photos/photos/tenant/id/123.jpg
-    const urlParts = photoUrl.split('/asset-photos/');
-    if (urlParts.length < 2) return false;
-    
-    const filePath = urlParts[1];
-
     const { error } = await supabase.storage
       .from('asset-photos')
       .remove([filePath]);

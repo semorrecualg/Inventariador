@@ -49,17 +49,33 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     expect(doBlocks.length).toBeLessThanOrEqual(1);
   });
 
-  it('tem exatamente 11 pares DROP + CREATE POLICY (estático, um por tabela)', () => {
-    // 10 tabelas do app + `base_generation` (selo de geração, só leitura).
-    expect(codeLines.filter((l) => l.startsWith('DROP POLICY IF EXISTS')).length).toBe(11);
-    expect(codeLines.filter((l) => l.startsWith('CREATE POLICY')).length).toBe(11);
+  it('mantém uma política p_all por tabela e nenhuma em asset-photos', () => {
+    // 9 tabelas do app + `base_generation` (selo de geração, só leitura)
+    // continuam em p_all; `asset-photos` passou a política por tenant.
+    // 11 DROP: os 10 `p_all` vivos + o DROP que remove o antigo `p_all` de
+    // `asset-photos` numa base já existente. Só 10 voltam a ser criados.
+    expect(codeLines.filter((l) => l.startsWith('DROP POLICY IF EXISTS p_all ON')).length).toBe(11);
+    expect(codeLines.filter((l) => l.startsWith('CREATE POLICY p_all ON')).length).toBe(10);
+    expect(sql).not.toContain('CREATE POLICY p_all ON public."asset-photos"');
+    expect(codeLines.some((l) => l.startsWith('CREATE POLICY p_tenant_all ON public."asset-photos"'))).toBe(true);
   });
 
-  it('todas as políticas usam o nome fixo p_all (nunca interpolado)', () => {
+  it('todas as políticas usam nomes fixos (nunca interpolados)', () => {
     const policyLines = codeLines.filter(
       (l) => l.startsWith('CREATE POLICY') || l.startsWith('DROP POLICY IF EXISTS')
     );
-    expect(policyLines.every((l) => /(?:CREATE POLICY|DROP POLICY IF EXISTS) p_all ON/.test(l))).toBe(true);
+    expect(
+      policyLines.every((l) =>
+        /(?:CREATE POLICY|DROP POLICY IF EXISTS) (?:p_all|p_tenant_all|p_asset_photos_tenant_(?:select|insert|update|delete)) ON/.test(l)
+      )
+    ).toBe(true);
+  });
+
+  it('mantém o bucket asset-photos privado e com as quatro políticas de storage.objects', () => {
+    expect(sql).toContain("VALUES ('asset-photos', 'asset-photos', false)");
+    for (const op of ['select', 'insert', 'update', 'delete']) {
+      expect(sql).toContain(`CREATE POLICY p_asset_photos_tenant_${op} ON storage.objects`);
+    }
   });
 
   it('cobre as 10 tabelas do app com CREATE TABLE IF NOT EXISTS', () => {
@@ -83,7 +99,7 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
 
   it('cita asset-photos com aspas em tabela e políticas', () => {
     expect(sql).toContain('public."asset-photos"');
-    expect(codeLines.some((l) => l.includes('CREATE POLICY p_all ON public."asset-photos"')));
+    expect(codeLines.some((l) => l.includes('CREATE POLICY p_tenant_all ON public."asset-photos"')));
   });
 
   it('garante id e is_admin em user_permissions legada (upsert do app envia id: data.user.id)', () => {

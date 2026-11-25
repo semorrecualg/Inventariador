@@ -13,7 +13,7 @@ import { effectiveAssetAddress, rotuloDePara } from './utils/assetAddress';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
-import { normalizeFlag, pickCanonical } from './utils/normalize';
+import { normalizeFlag } from './utils/normalize';
 import {
   summarizeDistinctKeys,
   summarizeDuplicateAssetKeys,
@@ -2822,7 +2822,10 @@ useEffect(() => {
       setIsSyncing(true);
       try {
         const { backupService } = await import('./services/backupService');
-        const res = await backupService.performMobileSingleBackup(user.id || user.email);
+        const backupTenant = explicitTenantid
+          || (Array.isArray(user.tenantid) ? user.tenantid[0] : user.tenantid)
+          || '';
+        const res = await backupService.performMobileSingleBackup(user.id || user.email, backupTenant);
         if (res.success) {
           setLastSyncTime(new Date().toISOString());
           setSyncError(null);
@@ -3844,33 +3847,35 @@ useEffect(() => {
   useEffect(() => {
     if (!isDataLoaded) return;
 
-    // Check for URL parameters (e.g., ?etq=006731 or ?d=base64)
+    // Check for URL parameters (e.g., ?etq=006731)
     const params = new URLSearchParams(window.location.search);
     const etqParam = params.get('etq');
-    const dataParam = params.get('d');
 
-    if (dataParam && !publicAsset) {
-      try {
-        const decoded = JSON.parse(decodeURIComponent(escape(atob(dataParam))));
-        if (decoded && pickCanonical(decoded as Record<string, unknown>, 'etiqueta')) {
-          setPublicAsset(decoded as Asset);
-        }
-      } catch (e) {
-        logger.error('Erro ao decodificar dados do QR Code:', e);
-      }
-    } else if (etqParam && !publicAsset) {
+    if (params.has('d')) {
+      // QR antigos punham o ativo INTEIRO em base64 no URL (descrição, série,
+      // valores, endereço). O Kardex público foi fechado: o parâmetro é
+      // descartado e o URL limpo, para não ficar no histórico.
+      logger.warn('[Kardex] Parâmetro legado ?d= recusado: o payload do ativo não viaja em URL.');
+      const url = new URL(window.location.href);
+      url.searchParams.delete('d');
+      window.history.replaceState({}, document.title, url.pathname + url.search);
+    } else if (etqParam && !publicAsset && user?.tenantid) {
       // 1. Tenta encontrar no inventário local primeiro (mais rápido)
       const foundLocal = inventoryRef.current.assets.find(a => normalizeKey(a.etiqueta || "") === normalizeKey(etqParam));
       if (foundLocal) {
         setPublicAsset(foundLocal);
       } else {
         // 2. Se não estiver local, tenta buscar no Supabase (para novos usuários/dispositivos)
-        getAssetByTag(etqParam, user?.tenantid).then(foundCloud => {
+        //    Sempre com o tenant do utilizador: a consulta sem tenant lia a
+        //    primeira etiqueta que aparecesse na tabela.
+        getAssetByTag(etqParam, user.tenantid).then(foundCloud => {
           if (foundCloud) {
             setPublicAsset(foundCloud);
           }
         });
       }
+    } else if (etqParam && !publicAsset) {
+      logger.warn('[Kardex] Consulta por etiqueta recusada: é preciso sessão com tenant.');
     }
 
     const currentScreen = history[history.length - 1] || AppScreen.LOGIN;
@@ -7636,6 +7641,7 @@ useEffect(() => {
             setPublicAsset(null);
             const url = new URL(window.location.href);
             url.searchParams.delete('etq');
+            url.searchParams.delete('d');
             window.history.replaceState({}, document.title, url.pathname + url.search);
           }} 
         />

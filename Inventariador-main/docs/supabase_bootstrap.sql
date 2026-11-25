@@ -503,11 +503,12 @@ ALTER TABLE public.unit_configs ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public."asset-photos" ALTER COLUMN id SET DEFAULT gen_random_uuid();
 
 -- ============================================================================
--- 7. RLS — políticas PERMISSIVAS (MVP), estáticas e idempotentes.
+-- 7. RLS — políticas estáticas e idempotentes.
 --    O app usa a anon key; sem políticas, toda gravação da nuvem falharia com
 --    401/42501 (o app tolera, mas nada sincronizaria).
---    HARDENING depois: restringir por tenantid via JWT.
---    Nome de política fixo `p_all` (único por tabela) — nunca interpolado.
+--    `asset-photos` é a exceção: política por tenant (bucket privado) e sem
+--    `p_all` — ver 7-B.
+--    Nome de política fixo (`p_all` / `p_tenant_all`) — nunca interpolado.
 -- ============================================================================
 ALTER TABLE public.assets            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_config  ENABLE ROW LEVEL SECURITY;
@@ -548,7 +549,85 @@ DROP POLICY IF EXISTS p_all ON public.asset_logs;
 CREATE POLICY p_all ON public.asset_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS p_all ON public."asset-photos";
-CREATE POLICY p_all ON public."asset-photos" FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_all ON public."asset-photos";
+CREATE POLICY p_tenant_all ON public."asset-photos" FOR ALL TO authenticated
+  USING (lower(tenantid) = lower(public.get_tenantid()))
+  WITH CHECK (lower(tenantid) = lower(public.get_tenantid()));
+
+-- ============================================================================
+-- 7-B. BUCKET asset-photos PRIVADO (mesmo SQL de docs/supabase_privacidade_storage.sql)
+-- ----------------------------------------------------------------------------
+-- O bucket de fotos era público: qualquer pessoa com o URL lia a evidência
+-- fotográfica de qualquer contrato. Passa a privado; a app guarda o CAMINHO em
+-- `_photoUrl` e pede uma URL assinada (`createSignedUrl`, 1 h) quando mostra.
+-- As quatro políticas de storage.objects só dão acesso à pasta do tenant do
+-- utilizador autenticado (photos/{tenantid}/...).
+-- ============================================================================
+SET LOCAL check_function_bodies = off;
+
+CREATE OR REPLACE FUNCTION public.get_tenantid()
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT up.tenantid
+  FROM public.user_permissions up
+  WHERE up.id = auth.uid()
+  LIMIT 1
+$$;
+
+SET LOCAL check_function_bodies = on;
+
+REVOKE ALL ON FUNCTION public.get_tenantid() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_tenantid() FROM anon;
+GRANT EXECUTE ON FUNCTION public.get_tenantid() TO authenticated;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('asset-photos', 'asset-photos', false)
+ON CONFLICT (id) DO UPDATE SET public = false;
+
+DROP POLICY IF EXISTS p_asset_photos_tenant_select ON storage.objects;
+CREATE POLICY p_asset_photos_tenant_select ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'asset-photos'
+    AND (storage.foldername(name))[1] = 'photos'
+    AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
+  );
+
+DROP POLICY IF EXISTS p_asset_photos_tenant_insert ON storage.objects;
+CREATE POLICY p_asset_photos_tenant_insert ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'asset-photos'
+    AND (storage.foldername(name))[1] = 'photos'
+    AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
+  );
+
+DROP POLICY IF EXISTS p_asset_photos_tenant_update ON storage.objects;
+CREATE POLICY p_asset_photos_tenant_update ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (
+    bucket_id = 'asset-photos'
+    AND (storage.foldername(name))[1] = 'photos'
+    AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
+  )
+  WITH CHECK (
+    bucket_id = 'asset-photos'
+    AND (storage.foldername(name))[1] = 'photos'
+    AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
+  );
+
+DROP POLICY IF EXISTS p_asset_photos_tenant_delete ON storage.objects;
+CREATE POLICY p_asset_photos_tenant_delete ON storage.objects
+  FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'asset-photos'
+    AND (storage.foldername(name))[1] = 'photos'
+    AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
+  );
 
 -- ============================================================================
 -- 8. SELO DE GERAÇÃO DA BASE (uma linha) — ver docs/GERACAO_BASE.md

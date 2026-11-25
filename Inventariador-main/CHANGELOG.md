@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Segurança — bucket de fotos privado e Kardex fechado
+
+- **O que era:** o bucket `asset-photos` era público e o app gravava em
+  `_photoUrl` o URL `/object/public/...`: quem tivesse o link lia a evidência
+  fotográfica de qualquer contrato. A tabela `asset-photos` tinha `p_all` para
+  `anon` e o Kardex aceitava `?d=` — o ativo inteiro (descrição, série, valores,
+  endereço) em base64 no URL — e consultava a nuvem por etiqueta **sem**
+  tenantid quando não havia sessão.
+- **Agora:** `docs/supabase_privacidade_storage.sql` (e a secção 7-B do
+  bootstrap) fecha o bucket, cria quatro políticas em `storage.objects` que só
+  dão acesso à pasta do tenant do utilizador autenticado
+  (`photos/{tenantid}/...`), troca o `p_all` de `asset-photos` por
+  `p_tenant_all` e move os backups automáticos legados para dentro dessa pasta.
+  O app guarda o **caminho** no bucket e assina a URL (`createSignedUrl`, 1 h)
+  na altura de mostrar (ficha e impressão); o upload devolve caminho, o delete
+  aceita caminho ou URL antigo e o backup passa a gravar em
+  `photos/{tenantid}/backups/...`. O `?d=` foi removido (o URL é limpo) e o
+  `?etq=` só consulta a nuvem com o tenant do utilizador.
+- **Testes:** `photoStoragePrivado` fixa a extração do caminho nos três
+  formatos de URL, o TTL, o SQL e a ausência de `getPublicUrl`/`?d=`.
+
 ### Adicionado — selo global de base e sincronização
 
 - **O que era:** o modo ativo só era legível em duas telas (cartão «Modo de
