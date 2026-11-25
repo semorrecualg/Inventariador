@@ -43,49 +43,6 @@ const TOTAL_DE_LINHAS = LINHAS.length;
 const planilhaCsv = () =>
   [CABECALHO, ...LINHAS].map((linha) => linha.join(',')).join('\n');
 
-/**
- * Fecha os avisos que se sobrepõem ao ecrã (o mais comum é «Operando na Base
- * Local», cujo botão se chama **Confirmar**). O spec antigo só conhecia «OK»:
- * o aviso ficava aberto e o toque seguinte nunca chegava ao contrato.
- */
-const fecharAvisos = async (page: Page) => {
-  for (let i = 0; i < 3; i += 1) {
-    const aviso = page.getByRole('button', { name: /^(OK|Confirmar)$/ });
-    if (!(await aviso.first().isVisible().catch(() => false))) return;
-    await aviso.first().click().catch(() => {});
-    await page.waitForTimeout(150);
-  }
-};
-
-/**
- * O login `admin/admin` resolve ADMINISTRADOR GLOBAL — um perfil **sem
- * contrato**. Nesse caso o ecrã abre na escolha do CONTRATO e a lista de
- * filiais só é montada depois de escolher um. O spec antigo assumia o contrato
- * já resolvido e por isso encontrava zero cartões em CI.
- *
- * O cartão do contrato é o único botão que anuncia «N filial(is) na base»;
- * usar o nome do contrato casaria também com os cartões de filial.
- */
-const escolherContrato = async (page: Page) => {
-  const cartao = page.locator('button', { hasText: /filial\(is\) na base/ });
-  if (!(await cartao.first().isVisible().catch(() => false))) return;
-  await cartao.first().click();
-
-  const filiais = page.locator('[data-testid="filial-options"] > button');
-  const acessar = page.getByRole('button', { name: /Acessar o Módulo/i });
-  // Em algumas versões a escolha do contrato já monta as filiais na mesma
-  // tela; noutras é preciso entrar no módulo. Os dois caminhos são aceites.
-  const montou = await expect
-    .poll(async () => (await filiais.count()) > 0, { timeout: 5000, intervals: [250, 500, 1000] })
-    .toBe(true)
-    .then(() => true)
-    .catch(() => false);
-  if (!montou && (await acessar.isEnabled().catch(() => false))) {
-    await acessar.click();
-    await page.waitForURL(/#\/contexto$/, { timeout: 15000 });
-  }
-};
-
 /** Abre um ecrã da app pelo mesmo `pushScreen` que os botões usam. */
 const abrirEcra = async (page: Page, ecra: string) => {
   await page.evaluate((destino) => {
@@ -108,20 +65,15 @@ const carregarPlanilha = async (page: Page) => {
     page.getByText(new RegExp(`${TOTAL_DE_LINHAS} ativos injetados com sucesso`))
   ).toBeVisible({ timeout: 60000 });
 
-  // Aviso de mudança para BASE LOCAL (só aparece quando o modo muda) — o
-  // botão chama-se «Confirmar» nesta versão.
-  await fecharAvisos(page);
+  // Aviso de mudança para BASE LOCAL (só aparece quando o modo muda).
+  const confirmar = page.getByRole('button', { name: 'OK', exact: true });
+  if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
 };
 
 /** Abre o CONTRATO DE TRABALHO e confere filiais, contagens e total. */
 const confirmarUnidadeSemCopias = async (page: Page) => {
   await abrirEcra(page, 'WORK_CONTEXT_SELECTION');
   await page.waitForURL(/#\/contexto$/, { timeout: 15000 });
-
-  // Admin global: contrato ainda por escolher → as filiais não existem ainda.
-  await fecharAvisos(page);
-  await escolherContrato(page);
-  await fecharAvisos(page);
 
   // Um cartão por filial — as linhas sem tenantid não criam uma unidade extra.
   await expect(page.locator('[data-testid="filial-options"] > button')).toHaveCount(2, { timeout: 20000 });
@@ -145,7 +97,6 @@ const entrarNoGestorDeBase = async (page: Page) => {
   // Aparelho novo (base vazia) → Gestor de Base. Se o pós-login parar no
   // contrato, o caminho para o Gestor é o mesmo `pushScreen` da app.
   await page.waitForURL(/\/(contexto|db-manager)/, { timeout: 20000 });
-  await fecharAvisos(page);
   if (!page.url().includes('/db-manager')) await abrirEcra(page, 'DATABASE_MANAGER');
 };
 

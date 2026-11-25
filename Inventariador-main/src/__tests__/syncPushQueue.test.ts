@@ -48,7 +48,6 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
 });
 
 import { db } from '../services/sqliteService';
-import { entradaOutbox } from '../services/syncOutbox';
 import { ASSETS_CONFLICT_TARGET, processDataSyncQueue } from '../services/syncService';
 import { BaseGenerationBlockedError } from '../utils/baseGeneration';
 import { SyncRequestTimeoutError, UPSERT_TIMEOUT_MS } from '../services/syncQueueGuards';
@@ -84,50 +83,11 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     await db.ativos.clear();
     await db.assets.clear();
     await db.audit_logs.clear();
-    await db.sync_outbox.clear();
     localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));
     localStorage.removeItem('filial');
     localStorage.removeItem('app_selected_unit');
     sessionStorage.setItem('filial', '010101 CICOPAL GO');
     sessionStorage.setItem('tenantid', 'CICOPAL');
-  });
-
-  it('um registo em recuo NÃO volta a ser tentado (next_attempt_at no futuro)', async () => {
-    const registo = asset();
-    await db.local_assets.put(registo as never);
-    await db.sync_outbox.put({
-      ...entradaOutbox(registo),
-      status: 'FALHA',
-      attempts: 2,
-      next_attempt_at: Date.now() + 60_000
-    });
-
-    const result = await processDataSyncQueue();
-
-    expect(upsert).not.toHaveBeenCalled();
-    expect(result.processedCount).toBe(0);
-    expect(result.success).toBe(true);
-    // O registo continua pendente: só não é tentado antes do prazo.
-    expect((await db.local_assets.get(['CICOPAL', '01010100000005000001']))?._is_synced).toBe(0);
-    expect(await db.sync_outbox.count()).toBe(1);
-  });
-
-  it('passado o recuo, o mesmo registo volta a ser tentado', async () => {
-    const registo = asset();
-    await db.local_assets.put(registo as never);
-    await db.sync_outbox.put({
-      ...entradaOutbox(registo),
-      status: 'FALHA',
-      attempts: 2,
-      next_attempt_at: Date.now() - 1
-    });
-
-    const result = await processDataSyncQueue();
-
-    expect(upsert).toHaveBeenCalledTimes(1);
-    expect(result.processedCount).toBeGreaterThan(0);
-    // Envio aceite: a entrada do envelope sai.
-    expect(await db.sync_outbox.count()).toBe(0);
   });
 
   it('envia o ativo pendente e leva conferido, auditor e data da leitura', async () => {

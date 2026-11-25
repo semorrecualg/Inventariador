@@ -41,7 +41,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
 });
 
 import { db, sqliteService } from '../services/sqliteService';
-import { processDataSyncQueue as drenarFilaReal } from '../services/syncService';
+import { processDataSyncQueue } from '../services/syncService';
 import { SYNC_FAILURE_STAMP_WINDOW_MS } from '../utils/syncFalha';
 
 const asset = (over: Record<string, unknown> = {}) =>
@@ -70,21 +70,6 @@ const registoLocal = () =>
 
 const RLS = { message: 'new row violates row-level security policy', code: '42501' };
 
-/**
- * Os ciclos destes testes correm em milissegundos; na produção distam 60 s. O
- * recuo da outbox (`next_attempt_at`) é tempo real, por isso cada chamada aqui
- * simula o ciclo seguinte recuando o prazo dos envelopes ao passado. Sem isto
- * o segundo ciclo saltava o registo — e o que se mede neste ficheiro é o
- * carimbo, não o recuo (que tem teste próprio em `syncPushQueue.test.ts`).
- */
-const processDataSyncQueue = async () => {
-  const entradas = await db.sync_outbox.toArray();
-  if (entradas.length > 0) {
-    await db.sync_outbox.bulkPut(entradas.map((entrada) => ({ ...entrada, next_attempt_at: 0 })));
-  }
-  return drenarFilaReal();
-};
-
 describe('processDataSyncQueue — carimbo da recusa no registo local', () => {
   beforeEach(async () => {
     upsert.mockReset();
@@ -92,7 +77,6 @@ describe('processDataSyncQueue — carimbo da recusa no registo local', () => {
     await db.ativos.clear();
     await db.assets.clear();
     await db.audit_logs.clear();
-    await db.sync_outbox.clear();
     localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));
     localStorage.removeItem('filial');
     localStorage.removeItem('app_selected_unit');

@@ -14,7 +14,6 @@ import { readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { marcarAlteracaoLocal } from '../utils/pendencia';
 import { marcarConferido } from '../utils/conferencia';
 import { reportRecnoConflictForAsset } from './recnoGuardService';
-import { entradaOutbox } from './syncOutbox';
 import type { RecnoCandidate } from '../utils/recnoGuard';
 
 // Chaves base para o armazenamento
@@ -301,9 +300,7 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
   let mergedData: DexieAsset | null = null;
 
   // Bloqueia e sequencia as tabelas envolvidas em modo Read-Write
-  // A outbox entra no MESMO escopo: o ativo e a sua entrada de subida são
-  // gravados ou falham juntos. É a razão de a fila viver em Dexie.
-  await db.transaction('rw', [db.local_assets, db.ativos, db.sync_outbox], async () => {
+  await db.transaction('rw', [db.local_assets, db.ativos], async () => {
     // Chave composta [tenantid+primarykey] — o tenantid é o muro entre contratos.
     const tenantKey = String(assetData.tenantid || '').trim().toUpperCase();
     const assetKey: [string, string] = [tenantKey, String(assetData.primarykey || '')];
@@ -322,9 +319,6 @@ export async function saveCollectedAssetAtomic(assetData: Partial<DexieAsset> & 
 
     // Escrita atômica sequencial
     await db.local_assets.put(mergedData as DexieAsset);
-    // Envelope de subida (v9): a conferência já entra na fila durável, com o
-    // `_is_synced` que `marcarAlteracaoLocal` acabou de pôr a 0.
-    await db.sync_outbox.put(entradaOutbox(mergedData as unknown as Record<string, unknown>));
     if (existingActive) {
       await db.ativos.update(assetKey, { ...marcarConferido() });
     }

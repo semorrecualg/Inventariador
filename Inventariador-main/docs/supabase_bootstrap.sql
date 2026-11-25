@@ -168,18 +168,14 @@ CREATE INDEX IF NOT EXISTS assets_tenant_filial_idx ON public.assets (tenantid, 
 -- do aparelho podia empurrar o checkpoint para o futuro); quem carimba é o
 -- servidor. Numa base que já existe, o mesmo bloco vive em
 -- scripts/assets-updated-at-trigger.sql.
-UPDATE public.assets SET updated_at = COALESCE(created_at, clock_timestamp()) WHERE updated_at IS NULL;
+UPDATE public.assets SET updated_at = COALESCE(created_at, now()) WHERE updated_at IS NULL;
 
 CREATE OR REPLACE FUNCTION public.touch_updated_at()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  -- clock_timestamp() e não now(): `now()` é o instante do BEGIN da transacção,
-  -- igual para todas as linhas do lote — duas actualizações do mesmo ativo
-  -- ficavam com o mesmo carimbo e a segunda era invisível ao pull delta
-  -- (`updated_at > checkpoint`). Ver scripts/assets-updated-at-trigger.sql.
-  NEW.updated_at := clock_timestamp();
+  NEW.updated_at := now();
   RETURN NEW;
 END;
 $$;
