@@ -3,6 +3,16 @@ import { db, sqliteService, invalidateTenantCaseMarker } from '../services/sqlit
 import { showRecoveryToast as originalShowRecoveryToast } from '../services/NavigationGuardService';
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
+import {
+  buildWebDirectoryTrail,
+  captureDirectoryTrail,
+  clearDirectoryTrail,
+  getDirectoryTrail,
+  saveDirectoryTrail,
+  type DirectoryTrail
+} from '../services/directoryTrailService';
+import { Capacitor } from '@capacitor/core';
+import { FilePicker } from '@capawesome/capacitor-file-picker';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
 import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets } from '../services/supabaseService';
 import { contarAuditoriaPendente, contarAuditoriaNuvem, type ContagemAuditoriaNuvem } from '../services/auditoriaNuvem';
@@ -60,6 +70,14 @@ interface DatabaseManagerScreenProps {
 export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ onBack, onLocalBaseLoaded }) => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isPurging, setIsPurging] = useState<boolean>(false);
+  /** Caminho do último pacote gravado no telefone (export nativo). */
+  const [ultimoPacoteExportado, setUltimoPacoteExportado] = useState<string>('');
+  /**
+   * TRILHA DE DIRETÓRIO: pasta física escolhida pelo operador (a pasta onde
+   * ele navegou para escolher a planilha). É o endereço de todo o I/O do app
+   * no telemóvel — gravação do pacote, espelhos e backups.
+   */
+  const [trail, setTrail] = useState<DirectoryTrail | null>(() => getDirectoryTrail());
   const [progress, setProgress] = useState<number>(0);
   const [showModal, setShowModal] = useState<boolean>(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -241,7 +259,18 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         return;
       }
       addLog(`[F7] Pacote verificado: ${result.total} registros, schema v${result.manifest.schemaVersion}, SHA-256 ${result.manifest.packageChecksum.slice(0, 16)}…`);
-      showRecoveryToast('✓ PACOTE DE BACKUP VERIFICADO EXPORTADO (.json/.dat).', 'blue');
+      if (result.savedFile?.saved) {
+        const caminho = result.savedFile.path || result.savedFile.uri || 'Documentos/GBR_KARDEK_DATA';
+        setUltimoPacoteExportado(caminho);
+        addLog(`[F7] Pacote gravado no telefone: ${caminho}`);
+        showRecoveryToast(`✓ PACOTE EXPORTADO EM ${caminho}`, 'blue');
+      } else if (result.savedFile) {
+        setUltimoPacoteExportado('');
+        addLog('[F7] Pacote verificado, mas nenhuma pasta do telefone aceitou a gravação.');
+        showRecoveryToast('✗ PACOTE VERIFICADO, MAS NÃO FOI GRAVADO NO TELEMÓVEL.', 'red');
+      } else {
+        showRecoveryToast('✓ PACOTE DE BACKUP VERIFICADO EXPORTADO (.json/.dat).', 'blue');
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addLog(`[F7] Falha ao exportar o pacote: ${msg}`);
@@ -331,7 +360,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     if (isIframe) {
       return sessionFolder ? `iFrame Sandbox / ${sessionFolder}` : "iFrame Sandbox / GBR_Inventario_Virtual";
     }
-    return sessionFolder || "NENHUM DIRETÓRIO VINCULADO";
+    return getDirectoryTrail()?.path || sessionFolder || "NENHUM DIRETÓRIO VINCULADO";
   });
 
   const [isMirroring, setIsMirroring] = useState<boolean>(false);
@@ -849,10 +878,20 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     const stableHistory = JSON.stringify([AppScreen.DATABASE_MANAGER]);
     
     const isIframe = typeof window !== 'undefined' && window.self !== window.top;
-    const pathName = isIframe ? `iFrame Sandbox / ${file.name}` : `GBR_Inventario / ${file.name}`;
+    const trailAtual = getDirectoryTrail();
+    const pathName = isIframe
+      ? `iFrame Sandbox / ${file.name}`
+      : trailAtual
+        ? `${trailAtual.path}/${file.name}`
+        : `GBR_Inventario / ${file.name}`;
     setActivePathName(pathName);
-    sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
-    localStorage.setItem('gbr_physical_link_active', 'true');
+    if (trailAtual) {
+      // A planilha veio da trilha: não sobrepor a pasta escolhida pelo operador.
+      localStorage.setItem('gbr_physical_link_active', 'true');
+    } else {
+      sessionStorage.setItem('gbr_physical_folder_name', 'GBR_Inventario_Virtual');
+      localStorage.setItem('gbr_physical_link_active', 'true');
+    }
 
     try {
       addLog("[SRE_LOADER] Extraindo e fatiando planilha Excel...");
@@ -958,52 +997,115 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     e.target.value = '';
   };
 
-  // ── Pasta vinculada: listar as planilhas .xls/.xlsx/.csv existentes ──
-  const [workspaceSheets, setWorkspaceSheets] = useState<{ name: string; handle: FileSystemFileHandle }[]>([]);
-  const [workspaceFolderName, setWorkspaceFolderName] = useState<string | null>(null);
-
-  const handleLinkFolder = async () => {
-    const w = window as unknown as { showDirectoryPicker?: (opts?: { mode?: string }) => Promise<{ name: string; values: () => AsyncIterable<{ kind: string; name: string; getFile: () => Promise<File> }> }> };
-    if (typeof w.showDirectoryPicker !== 'function') {
-      addLog('[SRE_LOADER] Seletor de pasta indisponível neste navegador. Use SELECIONAR E CARREGAR PLANILHA.');
-      showRecoveryToast('Seletor de pasta indisponível — use SELECIONAR E CARREGAR PLANILHA.', 'red');
-      return;
-    }
+  /**
+   * Seletor NATIVO de planilha. Além do ficheiro, devolve o caminho dele — e é
+   * desse caminho que sai a TRILHA DE DIRETÓRIO (a pasta onde o operador
+   * navegou). Devolve `false` quando o seletor nativo não está disponível,
+   * para o `<input type="file">` do WebView continuar a ser o recurso.
+   */
+  const selecionarPlanilhaNativa = async (): Promise<boolean> => {
+    if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('FilePicker')) return false;
     try {
-      const handle = await w.showDirectoryPicker({ mode: 'read' });
-      const sheets: { name: string; handle: FileSystemFileHandle }[] = [];
-      for await (const entry of handle.values()) {
-        if (entry.kind === 'file' && /\.(xlsx?|csv)$/i.test(entry.name)) {
-          sheets.push({ name: entry.name, handle: entry as unknown as FileSystemFileHandle });
-        }
+      const { files } = await FilePicker.pickFiles({
+        types: [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'text/csv'
+        ],
+        limit: 1,
+        readData: true
+      });
+      const escolhido = files?.[0];
+      if (!escolhido) return true; // operador cancelou
+
+      const novaTrilha = captureDirectoryTrail(escolhido.path ?? '', {
+        origem: 'planilha',
+        sourceFileName: escolhido.name
+      });
+      if (novaTrilha) {
+        setTrail(novaTrilha);
+        setActivePathName(`${novaTrilha.path}/${escolhido.name}`);
+        addLog(`[SRE_TRILHA] Pasta da planilha: ${novaTrilha.path}`);
+      } else {
+        addLog('[SRE_TRILHA] O seletor não devolveu o caminho da pasta; a trilha anterior foi mantida.');
       }
-      setWorkspaceSheets(sheets);
-      setWorkspaceFolderName(handle.name);
-      sessionStorage.setItem('gbr_physical_folder_name', handle.name);
-      localStorage.setItem('gbr_physical_link_active', 'true');
-      addLog(`[SRE_LOADER] Pasta vinculada: ${handle.name} — ${sheets.length} planilha(s) encontrada(s).`);
-    } catch {
-      addLog('[SRE_LOADER] Seletor de pasta cancelado.');
-    }
-  };
 
-  const handleLoadWorkspaceSheet = async (sheet: { name: string; handle: FileSystemFileHandle }) => {
-    try {
-      const file = await sheet.handle.getFile();
-      addLog(`[SRE_LOADER] Carregando planilha da pasta: ${sheet.name}`);
+      const base64 = escolhido.data;
+      if (!base64) {
+        addLog('[SRE_TRILHA] O seletor não devolveu o conteúdo da planilha; usando o seletor do WebView.');
+        return false;
+      }
+      const binario = atob(base64);
+      const bytes = new Uint8Array(binario.length);
+      for (let i = 0; i < binario.length; i += 1) bytes[i] = binario.charCodeAt(i);
+      const file = new File([bytes], escolhido.name, { type: escolhido.mimeType || 'application/octet-stream' });
       await loadSpreadsheetFile(file);
+      return true;
     } catch (err) {
-      addLog(`[SRE ERROR] Falha ao ler planilha da pasta: ${err instanceof Error ? err.message : String(err)}`);
-      showRecoveryToast('❌ ERRO AO LER PLANILHA DA PASTA.', 'red');
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/cancel/i.test(msg)) {
+        addLog('[SRE_TRILHA] Seleção nativa cancelada.');
+        return true;
+      }
+      addLog(`[SRE_TRILHA] Seletor nativo indisponível (${msg}); usando o seletor do WebView.`);
+      return false;
     }
   };
 
-  const handleButtonClick = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleSpreadsheetPick = async () => {
+    if (isUploading || isPurging) return;
+    if (await selecionarPlanilhaNativa()) return;
     if (fileInputRef.current) {
       addLog("[SRE_UI] Acionando seletor de arquivos de forma síncrona...");
       fileInputRef.current.click();
     }
+  };
+
+  /** Escolhe/actualiza a pasta da trilha (seletor nativo ou da Web). */
+  const handleChooseTrailFolder = async () => {
+    if (Capacitor.isNativePlatform()) {
+      if (!Capacitor.isPluginAvailable('FilePicker')) {
+        showRecoveryToast('SELETOR DE PASTA INDISPONÍVEL NESTE APK.', 'red');
+        return;
+      }
+      try {
+        const { path } = await FilePicker.pickDirectory();
+        const novaTrilha = captureDirectoryTrail(path, { origem: 'pasta-escolhida' });
+        if (!novaTrilha) {
+          showRecoveryToast('❌ A PASTA ESCOLHIDA NÃO TEM CAMINHO FÍSICO CONHECIDO.', 'red');
+          return;
+        }
+        setTrail(novaTrilha);
+        setActivePathName(novaTrilha.path);
+        addLog(`[SRE_TRILHA] Trilha de diretório: ${novaTrilha.path}`);
+      } catch (err) {
+        addLog(`[SRE_TRILHA] Seletor de pasta cancelado: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    const w = window as unknown as { showDirectoryPicker?: (opts?: { mode?: string }) => Promise<{ name: string }> };
+    if (typeof w.showDirectoryPicker !== 'function') {
+      showRecoveryToast('SELETOR DE PASTA INDISPONÍVEL NESTE NAVEGADOR.', 'red');
+      return;
+    }
+    try {
+      const handle = await w.showDirectoryPicker({ mode: 'readwrite' });
+      const novaTrilha = buildWebDirectoryTrail(handle.name);
+      saveDirectoryTrail(novaTrilha);
+      setTrail(novaTrilha);
+      setActivePathName(novaTrilha.path);
+      addLog(`[SRE_TRILHA] Trilha de diretório: ${novaTrilha.path}`);
+    } catch {
+      addLog('[SRE_TRILHA] Seletor de pasta cancelado.');
+    }
+  };
+
+  const handleClearTrail = () => {
+    clearDirectoryTrail();
+    setTrail(null);
+    setActivePathName('NENHUM DIRETÓRIO VINCULADO');
+    addLog('[SRE_TRILHA] Trilha de diretório removida.');
   };
 
   const handleCompleteDatabasePurge = async () => {
@@ -1252,12 +1354,67 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           </div>
           <button 
             disabled={isUploading || isPurging}
-            onClick={handleButtonClick}
+            onClick={() => { void handleSpreadsheetPick(); }}
             className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-98 cursor-pointer border border-emerald-500/20"
           >
             <UploadCloud size={14} />
             <span>{isUploading ? `CARREGANDO: ${progress}%` : "SELECIONAR E CARREGAR PLANILHA"}</span>
           </button>
+        </div>
+
+        {/* TRILHA DE DIRETÓRIO — endereço físico único do app no telemóvel.
+            Nasce da pasta onde o operador escolhe a planilha e passa a ser o
+            destino de todo o I/O gerado pelo app (pacote, espelhos, backups). */}
+        <div className="p-5 bg-slate-900/40 border border-indigo-800/60 rounded-2xl flex flex-col space-y-3">
+          <div className="flex items-center space-x-3">
+            <div className="p-3 bg-indigo-950/40 text-indigo-400 rounded-full border border-indigo-900/30">
+              <FolderOpen className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Trilha de Diretório</h3>
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
+                Pasta física da planilha: é onde o app procura e grava os ficheiros no telemóvel
+              </p>
+            </div>
+          </div>
+          <div
+            className={`w-full rounded-lg border px-3 py-2 font-mono text-[10px] break-all ${
+              trail
+                ? 'bg-indigo-950/30 border-indigo-900/40 text-indigo-100'
+                : 'bg-slate-950/50 border-slate-800/60 text-slate-500'
+            }`}
+          >
+            {trail ? trail.path : 'NENHUMA PASTA DEFINIDA — SELECIONE A PLANILHA PARA DEFINIR A TRILHA'}
+            {trail && (
+              <span className="block mt-1 text-[9px] font-bold text-indigo-300/80 uppercase tracking-wider">
+                {trail.origem === 'planilha'
+                  ? `Pasta da planilha ${trail.sourceFileName || ''}`.trim()
+                  : trail.plataforma === 'web'
+                    ? 'Pasta escolhida no navegador'
+                    : 'Pasta escolhida pelo operador'}
+                {trail.capturedAt ? ` · ${new Date(trail.capturedAt).toLocaleString('pt-BR')}` : ''}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            <button
+              type="button"
+              onClick={() => { void handleChooseTrailFolder(); }}
+              className="flex items-center justify-center space-x-2 px-4 py-3 bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-indigo-500/30"
+            >
+              <FolderOpen size={14} />
+              <span>ESCOLHER PASTA DA TRILHA</span>
+            </button>
+            <button
+              type="button"
+              disabled={!trail}
+              onClick={handleClearTrail}
+              className="flex items-center justify-center space-x-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 text-slate-200 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all border border-slate-700/50"
+            >
+              <Trash2 size={14} />
+              <span>LIMPAR TRILHA</span>
+            </button>
+          </div>
         </div>
 
         {/* Guardião suave de duplicidade por recno (Protheus sn1_recno) */}
@@ -1388,55 +1545,6 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
           )}
         </div>
 
-        {/* Planilhas da Pasta Vinculada: lista os .xls/.xlsx/.csv existentes */}
-        <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col space-y-3">
-          <div className="flex items-center space-x-3">
-            <div className="p-3 bg-indigo-950/40 text-indigo-400 rounded-full border border-indigo-900/30">
-              <FolderOpen className="w-6 h-6" />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Planilhas da Pasta</h3>
-              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
-                Vincule a pasta e veja os arquivos .xls/.xlsx/.csv existentes nela
-              </p>
-            </div>
-          </div>
-          <button 
-            onClick={handleLinkFolder}
-            className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-98 border border-indigo-500/20"
-          >
-            <FolderOpen size={14} />
-            <span>VINCULAR PASTA E VER PLANILHAS</span>
-          </button>
-          {workspaceFolderName && (
-            <p className="text-[9px] font-mono text-indigo-300 uppercase tracking-wider">Pasta: {workspaceFolderName}</p>
-          )}
-          {workspaceSheets.length === 0 && workspaceFolderName && (
-            <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide">
-              Nenhuma planilha .xls/.xlsx/.csv encontrada na pasta.
-            </p>
-          )}
-          {workspaceSheets.length > 0 && (
-            <div className="space-y-1.5 max-h-48 overflow-y-auto no-scrollbar">
-              {workspaceSheets.map((sheet) => (
-                <div key={sheet.name} className="flex items-center justify-between bg-slate-800/40 border border-slate-700/50 rounded-xl px-3 py-2.5">
-                  <span className="text-[10px] font-bold text-slate-300 truncate flex items-center space-x-2 min-w-0">
-                    <FileSpreadsheet size={14} className="text-emerald-400 shrink-0" />
-                    <span className="truncate">{sheet.name}</span>
-                  </span>
-                  <button
-                    disabled={isUploading}
-                    onClick={() => handleLoadWorkspaceSheet(sheet)}
-                    className="ml-3 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-[9px] font-black uppercase tracking-widest rounded-lg transition-all shrink-0"
-                  >
-                    {isUploading ? '...' : 'Carregar'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* F7 — pacote de backup exportável e verificado (todas as tabelas). */}
         <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex flex-col items-center text-center space-y-4">
           <div className="p-3 bg-emerald-950/40 text-emerald-400 rounded-full border border-emerald-900/30">
@@ -1456,6 +1564,11 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
             <ShieldCheck size={14} />
             <span>EXPORTAR PACOTE VERIFICADO</span>
           </button>
+          {ultimoPacoteExportado && (
+            <p className="w-full text-[9px] font-mono text-emerald-200 break-all bg-emerald-950/30 border border-emerald-900/40 rounded-lg px-2 py-1.5 text-left">
+              Último pacote: {ultimoPacoteExportado}
+            </p>
+          )}
         </div>
 
         {/* F7 (2/2) — restauro do pacote verificado (relatório antes da escrita). */}

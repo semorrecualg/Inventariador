@@ -16,6 +16,7 @@ import { readVirtualSnapshot } from '../services/localDbService';
 import { Capacitor } from '@capacitor/core';
 import { logger } from '../utils/logger';
 import { getDatabaseMode, isOnlineDatabaseMode } from '../services/supabaseService';
+import { getDirectoryTrail } from '../services/directoryTrailService';
 
 interface ModuleSelectorProps {
   onSelect: (module: AppModule) => void;
@@ -82,42 +83,14 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ onSelect, onLogout, onO
   const isAuditor = userRole === UserRole.AUDITOR;
   const isAdmin = userRole === UserRole.ADMIN || userRole === UserRole.MASTER;
 
-  // v24.50.8 - Interceptador SRE: acesso ao Gestor de Base.
-  // WEB: navega direto para o Gestor (o vínculo de pasta é opcional e feito
-  // dentro do Gestor, em "Vincular Pasta e Ver Planilhas") — sem exigir a
-  // seleção de pasta antes, como o usuário espera ao abrir a gestão de base.
-  // NATIVO (Android): mantém a barreira de vínculo físico existente.
+  // Acesso ao Gestor de Base: sem barreira de pasta. A TRILHA DE DIRETÓRIO
+  // nasce da própria seleção da planilha, dentro do Gestor — no Android o
+  // WebView não tem `showDirectoryPicker`, e a barreira antiga só impedia o
+  // operador de chegar ao sítio onde a pasta é escolhida.
   const handleDatabaseManagerClick = async () => {
-    const isNative = Capacitor.isNativePlatform();
-
-    if (!isNative) {
-      if (onOpenDatabaseManager) {
-        onOpenDatabaseManager();
-      }
-      return;
+    if (Capacitor.isNativePlatform() && !getDirectoryTrail()) {
+      logger.info('>>> [SRE-TRILHA] Gestor aberto sem trilha definida: a pasta será gravada na primeira carga.');
     }
-
-    const hasFolderLinked = !!sessionStorage.getItem('gbr_physical_folder_name');
-    if (!hasFolderLinked) {
-      logger.warn(">>> [SRE-GUARD] Tentativa de acessar Gestor de Base sem pasta vinculada no Android. Forçando Picker...");
-      try {
-        const directoryHandle = await (window as any).showDirectoryPicker({ // eslint-disable-line @typescript-eslint/no-explicit-any
-          mode: 'readwrite'
-        });
-        if (directoryHandle) {
-          sessionStorage.setItem('gbr_physical_folder_name', directoryHandle.name);
-          localStorage.setItem('gbr_physical_link_active', 'true');
-          logger.info(`>>> [SRE-GUARD] Vínculo dinâmico estabelecido em trânsito: ${directoryHandle.name}`);
-        } else {
-          return; // Aborta navegação se o usuário cancelar
-        }
-      } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-        logger.error(">>> [SRE-GUARD] Seletor cancelado ou bloqueado pelo sistema operacional.", err);
-        return; // Bloqueia a navegação para evitar tela com erro
-      }
-    }
-
-    // Se passou na barreira ou se for plataforma nativa, executa a rota canônica
     if (onOpenDatabaseManager) {
       onOpenDatabaseManager();
     }

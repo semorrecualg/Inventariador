@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — trilha de diretório no telemóvel
+
+- **O que era:** a pasta que o operador percorria para escolher a planilha da
+  base era descartada. Cada rotina gravava numa pasta fixa
+  (`GBR_KARDEK_DATA`), o vínculo antigo vivia em `sessionStorage` (morria ao
+  fechar a app) e o cartão «Vincular Pasta e Ver Planilhas» pedia uma segunda
+  navegação que nada acrescentava.
+- **Agora:** a pasta da planilha passa a ser a **Trilha de Diretório** — o
+  endereço físico do app no aparelho, gravado de forma persistente e mostrado
+  no Gestor de Base (com a origem e a data da captura). É por ela que o app
+  grava e procura: pacote de backup verificado, espelhos do inventário e
+  snapshot da carga.
+  Sem permissão na pasta escolhida, a gravação cai para Documentos e para o
+  armazenamento do app, sempre a devolver o caminho real usado.
+- **Cartão removido:** «PLANILHA DA PASTA — VINCULAR PASTA E VER PLANILHAS» saiu;
+  no telemóvel a barreira de pasta antes de abrir o Gestor também saiu (o
+  WebView não tem `showDirectoryPicker` e a trilha nasce dentro do Gestor).
+- **Testes:** `directoryTrailService` (9) cobre a conversão dos caminhos SAF
+  (`tree`/`document`), a persistência da trilha e a ordem de gravação
+  trilha → Documentos → app, incluindo leitura e o caso Web.
+
+### Corrigido — export do pacote de backup no telemóvel
+
+- **O que era:** no APK o «EXPORTAR PACOTE VERIFICADO» só disparava um
+  `<a download>` do WebView. O Android ignora esse download e o operador ficava
+  sem ficheiro nenhum — e sem saber onde procurá-lo.
+- **Agora:** no nativo o pacote é escrito pelo Filesystem em
+  `GBR_KARDEK_DATA/GBR_SECURITY_EXPORT_v<schema>_<data>.dat`, primeiro nos
+  Documentos e, sem permissão, no armazenamento do app. O nome é datado (um
+  export novo não apaga o pacote antigo que o restauro precisa) e o caminho
+  aparece no toast, no terminal e por baixo do botão. A Web continua a
+  descarregar `.json`/`.dat`.
+
 ### Adicionado — selo de geração da base
 
 - **O que era:** o reset da nuvem só limpava o aparelho onde «Preparar Nova Carga»
