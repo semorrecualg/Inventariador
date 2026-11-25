@@ -18,6 +18,7 @@ const filaAuditoria = readFileSync(join(process.cwd(), 'src', 'services', 'audit
 
 const TABELAS = [
   'inventory_config',
+  'unit_configs',
   'audit_logs',
   'locations',
   'campaigns',
@@ -55,7 +56,7 @@ describe('docs/supabase_rls_tabelas_restantes.sql — tabelas de operação', ()
 
   it('nenhuma política destas tabelas alcança anon', () => {
     const politicas = codigo(sqlNovo).filter((l) => l.startsWith('CREATE POLICY'));
-    expect(politicas.length).toBe(10);
+    expect(politicas.length).toBe(11);
     for (const p of politicas) {
       expect(p).toContain('TO authenticated');
       expect(p).not.toMatch(/\bTO anon\b/);
@@ -136,14 +137,16 @@ describe('docs/supabase_rls_tabelas_restantes.sql — tabelas de operação', ()
     }
   });
 
-  it('não toca em unit_configs — é a exposição seguinte, não uma falsa cobertura', () => {
-    expect(sqlNovo).not.toContain('ON public.unit_configs');
-    expect(sqlNovo).toContain('unit_configs');
+  it('fecha unit_configs: era o último p_all para anon', () => {
+    expect(sqlNovo).toContain('CREATE POLICY p_tenant_all ON public.unit_configs');
+    expect(sqlNovo).toContain('REVOKE ALL ON public.unit_configs FROM anon;');
+    expect(sqlNovo).toContain('ALTER TABLE public.unit_configs ENABLE ROW LEVEL SECURITY;');
+    expect(sqlNovo).not.toContain('CREATE POLICY p_all ON public.unit_configs');
   });
 });
 
 describe('docs/supabase_bootstrap.sql — mesmas políticas (paridade)', () => {
-  it('nenhuma das 7 tabelas volta a criar p_all', () => {
+  it('nenhuma das 8 tabelas volta a criar p_all', () => {
     for (const t of TABELAS) {
       expect(sqlBootstrap).not.toContain(`CREATE POLICY p_all ON public.${t}`);
       expect(sqlBootstrap).toContain(`REVOKE ALL ON public.${t} FROM anon;`);
@@ -153,7 +156,7 @@ describe('docs/supabase_bootstrap.sql — mesmas políticas (paridade)', () => {
   it('cria tenant_visible antes de a usar e define as políticas por contrato', () => {
     const posFuncao = sqlBootstrap.indexOf('FUNCTION public.tenant_visible');
     expect(posFuncao).toBeGreaterThan(sqlBootstrap.indexOf('FUNCTION public.is_master'));
-    for (const t of ['inventory_config', 'locations', 'campaigns']) {
+    for (const t of ['inventory_config', 'unit_configs', 'locations', 'campaigns']) {
       expect(sqlBootstrap).toContain(`CREATE POLICY p_tenant_all ON public.${t}`);
       expect(sqlBootstrap.indexOf(`CREATE POLICY p_tenant_all ON public.${t}`)).toBeGreaterThan(posFuncao);
     }

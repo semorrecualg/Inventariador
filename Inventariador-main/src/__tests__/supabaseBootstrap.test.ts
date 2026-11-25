@@ -2,7 +2,7 @@
 // Regressão para docs/supabase_bootstrap.sql:
 //  - impede o retorno do DO/EXECUTE/format() dinâmico (erros 42601 e 26000 que
 //    aconteceram ao rodar o script no SQL Editor do Supabase);
-//  - garante as políticas estáticas (só unit_configs mantém p_all) e a
+//  - garante as políticas estáticas (nenhuma tabela do app mantém p_all) e a
 //    resiliência a schema legado
 //    (ALTER TABLE ... ADD COLUMN IF NOT EXISTS — erro 42703).
 import { describe, it, expect } from 'vitest';
@@ -50,23 +50,23 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     expect(doBlocks.length).toBeLessThanOrEqual(1);
   });
 
-  it('só unit_configs mantém p_all (a exposição seguinte, ainda em aberto)', () => {
-    // `asset-photos`, `assets`, `user_permissions` e as sete tabelas de operação
-    // (inventory_config, audit_logs, locations, campaigns, campaign_snapshots,
-    // asset_logs, base_generation) passaram a políticas por contrato/por
-    // utilizador — ver 7-A/7-C, docs/supabase_rls_assets_permissoes.sql e
+  it('nenhuma tabela do app fica com p_all', () => {
+    // `asset-photos`, `assets`, `user_permissions` e as oito tabelas de operação
+    // (inventory_config, unit_configs, audit_logs, locations, campaigns,
+    // campaign_snapshots, asset_logs, base_generation) passaram a políticas por
+    // contrato/por utilizador — ver 7-A/7-C,
+    // docs/supabase_rls_assets_permissoes.sql e
     // docs/supabase_rls_tabelas_restantes.sql.
     // 11 DROP: os 10 `p_all` antigos + o de `asset-photos` numa base existente.
-    // Só `unit_configs` volta a receber `p_all`.
+    // Nenhum volta a ser criado.
     expect(codeLines.filter((l) => l.startsWith('DROP POLICY IF EXISTS p_all ON')).length).toBe(11);
-    expect(codeLines.filter((l) => l.startsWith('CREATE POLICY p_all ON'))).toEqual([
-      'CREATE POLICY p_all ON public.unit_configs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);'
-    ]);
+    expect(codeLines.filter((l) => l.startsWith('CREATE POLICY p_all ON'))).toEqual([]);
     for (const tabela of [
       'asset-photos',
       'assets',
       'user_permissions',
       'inventory_config',
+      'unit_configs',
       'audit_logs',
       'locations',
       'campaigns',
@@ -80,6 +80,7 @@ describe('docs/supabase_bootstrap.sql — invariantes (regressão 42601/26000/42
     expect(codeLines.some((l) => l.startsWith('CREATE POLICY p_tenant_all ON public."asset-photos"'))).toBe(true);
     expect(codeLines.some((l) => l.startsWith('CREATE POLICY p_tenant_all ON public.assets'))).toBe(true);
     expect(codeLines.some((l) => l.startsWith('CREATE POLICY p_tenant_all ON public.inventory_config'))).toBe(true);
+    expect(codeLines.some((l) => l.startsWith('CREATE POLICY p_tenant_all ON public.unit_configs'))).toBe(true);
     expect(codeLines.some((l) => l.startsWith('CREATE POLICY p_authenticated_select ON public.base_generation'))).toBe(true);
   });
 

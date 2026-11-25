@@ -180,13 +180,15 @@ nunca entra em variável `VITE_*`.
   ativos usa `onConflict('tenantid, id')` — nunca `id` sozinho.
 - **RBAC é do app** (`rbacService.ts`); a nuvem não decide papel.
 - **RLS:** `assets`, `user_permissions`, `asset-photos` e as tabelas de operação
-  (`inventory_config`, `audit_logs`, `locations`, `campaigns`,
-  `campaign_snapshots`, `asset_logs`, `base_generation`) já estão limitadas ao
+  (`inventory_config`, `unit_configs`, `audit_logs`, `locations`, `campaigns`,
+  `campaign_snapshots`, `asset_logs`, `base_generation`) estão limitadas ao
   contrato do perfil (`public.tenant_visible`), com `role = 'MASTER'` a
-  atravessar contratos; `anon` perdeu o privilégio de tabela. **Continua aberta**
-  `unit_configs` (`p_all` para `anon`) — é o risco restante e a próxima
-  migração. Ver `docs/supabase_rls_assets_permissoes.sql` e
+  atravessar contratos; `anon` perdeu o privilégio de tabela em todas. A trilha,
+  os logs por ativo e os laudos são append-only. Ver
+  `docs/supabase_rls_assets_permissoes.sql` e
   `docs/supabase_rls_tabelas_restantes.sql`.
+- **Tabelas fora do app:** `tenants`/`filial`, se existirem na base, não são
+  geridas pelo código e ficam fora destes scripts — revê-las à parte.
 - **Migrações:** apenas os `scripts/*.sql` versionados, sempre idempotentes e com
   backup/export antes. `DROP TABLE` só com backup e aviso no PR.
 - **Backup:** exportar pelo painel (Database → Backups) antes de qualquer DDL e
@@ -298,9 +300,8 @@ Detalhes da chave e do custo de a manter no repositório:
 | # | Pendência | Impacto | Depende de |
 |---|---|---|---|
 | 1 | Secrets `VITE_SUPABASE_*` não cadastrados no GitHub (Actions) | APK nasce INTERNAL | Passo 5 do runbook (§ 7.2) — é ação no painel, em minutos |
-| 2 | `unit_configs` com `p_all` para `anon` | Anon key lê a config/âncora de todas as unidades | Aplicar a receita de `docs/supabase_rls_tabelas_restantes.sql` a `unit_configs` |
-| 3 | E2E Playwright fora do CI | Regressão de fluxo só manual | Decisão de custo/benefício |
-| 4 | Teste de login real no Supabase | AUTH saudável e tabelas OK, mas nenhum signup/sessão de ponta a ponta validado | Conta de teste no projeto |
+| 2 | E2E Playwright fora do CI | Regressão de fluxo só manual | Decisão de custo/benefício |
+| 3 | Teste de login real no Supabase | AUTH saudável e tabelas OK, mas nenhum signup/sessão de ponta a ponta validado | Conta de teste no projeto |
 
 **Elo GitHub — estado (Fase E, 2026-11-02):** a autenticação de push está ativa
 via **Git Credential Manager** (helper `manager`, conta `semorrecualg`; `ls-remote`,

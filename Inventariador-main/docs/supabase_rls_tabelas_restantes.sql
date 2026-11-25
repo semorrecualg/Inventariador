@@ -4,11 +4,11 @@
 -- Fecha o que ficou de fora de docs/supabase_privacidade_storage.sql e
 -- docs/supabase_rls_assets_permissoes.sql:
 --
---   inventory_config, locations, campaigns, campaign_snapshots, asset_logs,
---   audit_logs e base_generation tinham `p_all` para `anon`: a anon key lia e
---   apagava a âncora GPS de todas as filiais, a trilha inteira, as campanhas e
---   os laudos fechados, o histórico por ativo e as localidades de qualquer
---   contrato.
+--   inventory_config, unit_configs, locations, campaigns, campaign_snapshots,
+--   asset_logs, audit_logs e base_generation tinham `p_all` para `anon`: a anon
+--   key lia e apagava a âncora GPS de todas as filiais, a config de cada
+--   unidade, a trilha inteira, as campanhas e os laudos fechados, o histórico
+--   por ativo e as localidades de qualquer contrato.
 --
 -- O que passa a valer (tudo só para `authenticated`, sem privilégio de tabela
 -- para `anon`):
@@ -17,7 +17,8 @@
 --     quando o contrato é o do perfil. `role = 'MASTER'` (dono global) atravessa
 --     contratos; um perfil ainda SEM contrato só alcança linhas sem contrato
 --     (é o caso dos eventos de login de uma conta recém-registada).
---   • inventory_config/locations/campaigns: contrato inteiro (inclui DELETE).
+--   • inventory_config/unit_configs/locations/campaigns: contrato inteiro
+--     (inclui DELETE).
 --   • audit_logs, asset_logs, campaign_snapshots: append-only — só SELECT e
 --     INSERT. Sem política de UPDATE/DELETE, o PostgREST não reescreve nem
 --     apaga a trilha nem o laudo (o comando afecta 0 linhas).
@@ -28,9 +29,10 @@
 --     copia-a para `tenantid` lendo-a por `to_jsonb(NEW)`, que devolve NULL
 --     quando a coluna não existe.
 --
--- FORA DO ÂMBITO: `unit_configs` continua com `p_all` para `anon` — é a
--- exposição seguinte (ver docs/GOVERNANCA.md). A base não está fechada antes
--- de isso ser resolvido.
+-- COBERTURA: depois deste ficheiro não fica nenhuma tabela do app com `p_all`
+-- para `anon` (`assets`, `user_permissions`, `asset-photos` e as oito tabelas
+-- de operação estão fechadas). `tenants`/`filial`, se existirem na base, são
+-- fora do app e devem ser revistas à parte.
 --
 -- COMO USAR: colar o ficheiro INTEIRO no SQL Editor do Supabase e executar.
 -- Cada instrução está completa numa só linha e as funções são criadas aqui
@@ -91,6 +93,7 @@ GRANT EXECUTE ON FUNCTION public.tenant_visible(text) TO authenticated;
 --    políticas falhariam com 42703) e trigger da grafia legada das trilhas.
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS tenantid text;
+ALTER TABLE public.unit_configs ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.locations ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS tenantid text;
 ALTER TABLE public.campaign_snapshots ADD COLUMN IF NOT EXISTS tenantid text;
@@ -114,7 +117,18 @@ CREATE POLICY p_tenant_all ON public.inventory_config FOR ALL TO authenticated U
 REVOKE ALL ON public.inventory_config FROM anon;
 
 -- ----------------------------------------------------------------------------
--- 4. locations — unidades/endereços do contrato
+-- 4. unit_configs — config/âncora GPS por unidade, no contrato
+--    Linha por (tenantid, filial): o app lê, faz upsert por esse par e grava
+--    as flags de política em `flags` (jsonb).
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.unit_configs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_all ON public.unit_configs;
+DROP POLICY IF EXISTS p_tenant_all ON public.unit_configs;
+CREATE POLICY p_tenant_all ON public.unit_configs FOR ALL TO authenticated USING (public.tenant_visible(tenantid)) WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.unit_configs FROM anon;
+
+-- ----------------------------------------------------------------------------
+-- 5. locations — unidades/endereços do contrato
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.locations ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS p_all ON public.locations;
@@ -123,7 +137,7 @@ CREATE POLICY p_tenant_all ON public.locations FOR ALL TO authenticated USING (p
 REVOKE ALL ON public.locations FROM anon;
 
 -- ----------------------------------------------------------------------------
--- 5. campaigns — campanhas do contrato (o ALL inclui o DELETE do app)
+-- 6. campaigns — campanhas do contrato (o ALL inclui o DELETE do app)
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.campaigns ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS p_all ON public.campaigns;
@@ -132,7 +146,7 @@ CREATE POLICY p_tenant_all ON public.campaigns FOR ALL TO authenticated USING (p
 REVOKE ALL ON public.campaigns FROM anon;
 
 -- ----------------------------------------------------------------------------
--- 6. campaign_snapshots — laudo fechado, imutável (só SELECT/INSERT)
+-- 7. campaign_snapshots — laudo fechado, imutável (só SELECT/INSERT)
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.campaign_snapshots ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS p_all ON public.campaign_snapshots;
@@ -143,7 +157,7 @@ CREATE POLICY p_tenant_insert ON public.campaign_snapshots FOR INSERT TO authent
 REVOKE ALL ON public.campaign_snapshots FROM anon;
 
 -- ----------------------------------------------------------------------------
--- 7. asset_logs — histórico por ativo, append-only (só SELECT/INSERT)
+-- 8. asset_logs — histórico por ativo, append-only (só SELECT/INSERT)
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.asset_logs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS p_all ON public.asset_logs;
@@ -154,7 +168,7 @@ CREATE POLICY p_tenant_insert ON public.asset_logs FOR INSERT TO authenticated W
 REVOKE ALL ON public.asset_logs FROM anon;
 
 -- ----------------------------------------------------------------------------
--- 8. audit_logs — trilha do contrato, append-only (só SELECT/INSERT)
+-- 9. audit_logs — trilha do contrato, append-only (só SELECT/INSERT)
 --    A fila do app envia por `client_event_id` com `ignoreDuplicates`
 --    (ON CONFLICT DO NOTHING): reenviar não duplica nem exige UPDATE.
 -- ----------------------------------------------------------------------------
@@ -167,7 +181,7 @@ CREATE POLICY p_tenant_insert ON public.audit_logs FOR INSERT TO authenticated W
 REVOKE ALL ON public.audit_logs FROM anon;
 
 -- ----------------------------------------------------------------------------
--- 9. base_generation — selo de geração, só leitura para authenticated
+-- 10. base_generation — selo de geração, só leitura para authenticated
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.base_generation ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS p_all ON public.base_generation;
@@ -181,13 +195,13 @@ COMMIT;
 -- VERIFICAÇÃO (só leitura — correr depois)
 -- ----------------------------------------------------------------------------
 -- 1) Nenhuma das 8 tabelas deve ter política para `anon`:
---   select tablename, policyname, cmd, roles from pg_policies where schemaname = 'public' and tablename in ('inventory_config', 'audit_logs', 'campaigns', 'campaign_snapshots', 'asset_logs', 'locations', 'base_generation') order by 1, 2;
+--   select tablename, policyname, cmd, roles from pg_policies where schemaname = 'public' and tablename in ('inventory_config', 'unit_configs', 'audit_logs', 'campaigns', 'campaign_snapshots', 'asset_logs', 'locations', 'base_generation') order by 1, 2;
 --
 -- 2) `anon` sem privilégio de tabela (0 linhas):
---   select table_name, privilege_type from information_schema.role_table_grants where table_schema = 'public' and table_name in ('inventory_config', 'audit_logs', 'campaigns', 'campaign_snapshots', 'asset_logs', 'locations', 'base_generation') and grantee in ('anon', 'PUBLIC');
+--   select table_name, privilege_type from information_schema.role_table_grants where table_schema = 'public' and table_name in ('inventory_config', 'unit_configs', 'audit_logs', 'campaigns', 'campaign_snapshots', 'asset_logs', 'locations', 'base_generation') and grantee in ('anon', 'PUBLIC');
 --
 -- 3) Linhas sem contrato — invisíveis para utilizadores com contrato:
---   select 'inventory_config' as tabela, count(*) from public.inventory_config where btrim(coalesce(tenantid, '')) = '' union all select 'locations', count(*) from public.locations where btrim(coalesce(tenantid, '')) = '' union all select 'campaigns', count(*) from public.campaigns where btrim(coalesce(tenantid, '')) = '' union all select 'campaign_snapshots', count(*) from public.campaign_snapshots where btrim(coalesce(tenantid, '')) = '' union all select 'asset_logs', count(*) from public.asset_logs where btrim(coalesce(tenantid, '')) = '' union all select 'audit_logs', count(*) from public.audit_logs where btrim(coalesce(tenantid, '')) = '';
+--   select 'inventory_config' as tabela, count(*) from public.inventory_config where btrim(coalesce(tenantid, '')) = '' union all select 'unit_configs', count(*) from public.unit_configs where btrim(coalesce(tenantid, '')) = '' union all select 'locations', count(*) from public.locations where btrim(coalesce(tenantid, '')) = '' union all select 'campaigns', count(*) from public.campaigns where btrim(coalesce(tenantid, '')) = '' union all select 'campaign_snapshots', count(*) from public.campaign_snapshots where btrim(coalesce(tenantid, '')) = '' union all select 'asset_logs', count(*) from public.asset_logs where btrim(coalesce(tenantid, '')) = '' union all select 'audit_logs', count(*) from public.audit_logs where btrim(coalesce(tenantid, '')) = '';
 --
 -- 4) Trilha e laudos append-only (só SELECT/INSERT):
 --   select tablename, cmd from pg_policies where schemaname = 'public' and tablename in ('audit_logs', 'asset_logs', 'campaign_snapshots') order by 1, 2;
@@ -195,6 +209,6 @@ COMMIT;
 -- 5) Dono global precisa de `role = 'MASTER'` para atravessar contratos:
 --   select email, role, is_admin, tenantid from public.user_permissions where upper(btrim(coalesce(role, ''))) = 'MASTER';
 --
--- 6) `unit_configs` continua ABERTA a `anon` (fora do âmbito deste ficheiro):
---   select policyname, roles from pg_policies where schemaname = 'public' and tablename = 'unit_configs';
+-- 6) Nenhuma tabela do app deve manter `p_all` (0 linhas):
+--   select tablename, policyname, roles from pg_policies where schemaname = 'public' and policyname = 'p_all' order by 1;
 -- ============================================================================

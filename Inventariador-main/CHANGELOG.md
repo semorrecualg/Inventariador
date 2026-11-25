@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Segurança — RLS das tabelas de operação
 
-- **O que era:** `inventory_config`, `audit_logs`, `locations`, `campaigns`,
-  `campaign_snapshots`, `asset_logs` e `base_generation` ainda tinham `p_all`
-  para `anon`: a anon key lia (e apagava) a âncora GPS de todas as filiais, a
-  trilha de auditoria completa, as campanhas e os laudos fechados, o histórico
-  por ativo e as localidades de qualquer contrato.
+- **O que era:** `inventory_config`, `unit_configs`, `audit_logs`, `locations`,
+  `campaigns`, `campaign_snapshots`, `asset_logs` e `base_generation` ainda
+  tinham `p_all` para `anon`: a anon key lia (e apagava) a âncora GPS de todas
+  as filiais, a config/âncora de cada unidade, a trilha de auditoria completa,
+  as campanhas e os laudos fechados, o histórico por ativo e as localidades de
+  qualquer contrato.
 - **Agora:** `docs/supabase_rls_tabelas_restantes.sql` (e a secção 7-C do
   bootstrap) troca o `p_all` por políticas só para `authenticated`, limitadas
   ao contrato do perfil por `tenant_visible()` — `role = 'MASTER'` continua a
@@ -34,9 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tenant_id`; a grafia legada é copiada para `tenantid` por um trigger
   `BEFORE INSERT` que a lê via `to_jsonb(NEW)` (sem 42703 onde a coluna não
   existe).
-- **Fora do âmbito:** `unit_configs` mantém `p_all` — é a exposição seguinte,
-  assinalada em `docs/GOVERNANCA.md`. A base não deve ser dada como fechada
-  antes disso.
+- **Cobertura:** com `unit_configs` incluído, não fica nenhuma tabela do app
+  com `p_all` para `anon`. `tenants`/`filial`, se existirem na base, são fora do
+  app e devem ser revistas à parte.
 - **Testes:** `rlsTabelasRestantes` fixa a ausência de políticas para `anon`, a
   regra de contrato, a trilha append-only, o `ignoreDuplicates` da fila e a
   paridade com o bootstrap.

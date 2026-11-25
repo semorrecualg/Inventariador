@@ -553,12 +553,12 @@ ALTER TABLE public."asset-photos" ALTER COLUMN id SET DEFAULT gen_random_uuid();
 -- 7. RLS — políticas estáticas e idempotentes.
 --    Sem políticas, toda gravação da nuvem falharia com 401/42501 (o app
 --    tolera, mas nada sincronizaria).
---    Só `unit_configs` mantém `p_all` (exposição seguinte, ainda em aberto —
---    ver docs/GOVERNANCA.md). `assets`, `user_permissions`, `asset-photos` e as
---    tabelas de operação (inventory_config, audit_logs, locations, campaigns,
---    campaign_snapshots, asset_logs, base_generation) ficam limitadas ao
---    contrato do utilizador, com MASTER a atravessar, e `anon` perde o
---    privilégio de tabela — ver 7-A, docs/supabase_rls_assets_permissoes.sql e
+--    Nenhuma tabela do app fica com `p_all`: `assets`, `user_permissions`,
+--    `asset-photos` e as tabelas de operação (inventory_config, unit_configs,
+--    audit_logs, locations, campaigns, campaign_snapshots, asset_logs,
+--    base_generation) ficam limitadas ao contrato do utilizador, com MASTER a
+--    atravessar, e `anon` perde o privilégio de tabela — ver 7-A,
+--    docs/supabase_rls_assets_permissoes.sql e
 --    docs/supabase_rls_tabelas_restantes.sql.
 --    Nome de política fixo (`p_all` / `p_tenant_all` / `p_self_*` /
 --    `p_admin_all` / `p_tenant_select|insert` / `p_authenticated_select`) —
@@ -833,12 +833,12 @@ CREATE POLICY p_tenant_all ON public.assets
 REVOKE ALL ON public.assets FROM anon;
 
 -- 7-C. TABELAS DE OPERAÇÃO — contrato, sem anon (docs/supabase_rls_tabelas_restantes.sql)
---    inventory_config/locations/campaigns: contrato inteiro; MASTER atravessa.
+--    inventory_config/unit_configs/locations/campaigns: contrato inteiro;
+--    MASTER atravessa.
 --    campaign_snapshots/asset_logs/audit_logs: append-only (só SELECT/INSERT) —
 --    a trilha e os laudos não são reescrevíveis pelo PostgREST. A grafia legada
 --    `tenant_id` é copiada para `tenantid` pelo trigger do 7-A.
 --    base_generation: só leitura para authenticated; escrita pelo SQL de reset.
---    FORA DO ÂMBITO: `unit_configs` continua com p_all (exposição seguinte).
 DROP POLICY IF EXISTS p_all ON public.inventory_config;
 DROP POLICY IF EXISTS p_tenant_all ON public.inventory_config;
 CREATE POLICY p_tenant_all ON public.inventory_config
@@ -847,9 +847,13 @@ CREATE POLICY p_tenant_all ON public.inventory_config
   WITH CHECK (public.tenant_visible(tenantid));
 REVOKE ALL ON public.inventory_config FROM anon;
 
--- unit_configs: ainda aberta a anon — a próxima exposição a fechar.
 DROP POLICY IF EXISTS p_all ON public.unit_configs;
-CREATE POLICY p_all ON public.unit_configs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS p_tenant_all ON public.unit_configs;
+CREATE POLICY p_tenant_all ON public.unit_configs
+  FOR ALL TO authenticated
+  USING (public.tenant_visible(tenantid))
+  WITH CHECK (public.tenant_visible(tenantid));
+REVOKE ALL ON public.unit_configs FROM anon;
 
 DROP POLICY IF EXISTS p_all ON public.audit_logs;
 DROP POLICY IF EXISTS p_tenant_select ON public.audit_logs;
