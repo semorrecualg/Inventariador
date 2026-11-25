@@ -463,6 +463,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   espelho); o painel e a linha de base do `perfMetrics` deixaram de mostrar a
   terceira coluna. `migrateLegacyTenantids`, as marcações de sincronização, a
   migração de `_conferido` e todas as transações passaram a duas tabelas.
+- O resgate e a declaração das v10/v11 vivem em
+  `services/migrationEspelhoAssets` e o construtor da base chama-os; o teste
+  **chama a mesma função** em vez de reimplementar a migração.
 - Testes: `migracaoV10` (3) prova que a linha que só existia em `assets` é
   resgatada para as duas tabelas, que a linha viva não é sobrescrita e que a
   comparação é pela chave composta (mesmo `primarykey` noutro contrato não

@@ -12,6 +12,7 @@ import { assetGpsPair } from '../utils/assetGps';
 import { unitContextKey, splitUnitContextKey, filterPhantomConfigKeys } from '../utils/unitContextUtils';
 import { uniqueAssetsForDisplay } from '../utils/dedupAssets';
 import { runMigrationV5DryRun as runMigrationV5DryRunOn, runV5Upgrade, type V5DryRunReport, type V5Source } from './migrationV5';
+import { registarResgateEExtincaoDoEspelho } from './migrationEspelhoAssets';
 
 // Strict Type Declarations for the 21 accounting indices and metadata
 export interface DexieAsset {
@@ -483,44 +484,10 @@ class InventoryDexieDatabase extends Dexie {
     this.version(9).stores({
       sync_outbox: 'key, primarykey, tenantid, status, next_attempt_at'
     });
-    // v10 — A.3a.4 (passo 1/2): RESGATE antes de apagar o terceiro espelho.
-    // O Dexie não deixa ler uma store na mesma versão que a apaga (dexie#275,
-    // #276 — o `upgrade` corre com o schema já sem a tabela), por isso a
-    // leitura vive aqui e a remoção fica na v11.
-    //
-    // Regra do resgate: comparar por `[tenantid+primarykey]` e copiar para
-    // `local_assets` e `ativos` SÓ o que faltar. Linha já existente não é
-    // sobrescrita — o espelho que o app lê é a fonte de verdade; `assets` só
-    // cede o que não tem par. Nada é apagado aqui.
-    this.version(10).stores({
-      assets: '[tenantid+primarykey], primarykey, filial, _is_synced, [tenantid+filial]'
-    }).upgrade(async (tx) => {
-      const origens = (await tx.table('assets').toArray()) as DexieAsset[];
-      let resgatadas = 0;
-      for (const linha of origens) {
-        const tenantid = String(linha.tenantid ?? '').trim().toUpperCase();
-        const primarykey = String(linha.primarykey ?? linha.id ?? '').trim();
-        if (!primarykey) continue;
-        const chave: [string, string] = [tenantid, primarykey];
-        const copia = { ...linha, tenantid, id: primarykey } as DexieAsset;
-        for (const tabela of ['local_assets', 'ativos'] as const) {
-          if (await tx.table(tabela).get(chave)) continue;
-          await tx.table(tabela).put(copia);
-          resgatadas += 1;
-        }
-      }
-      if (resgatadas > 0) {
-        logger.warn(
-          `[MigrationV10] ${resgatadas} linha(s) existentes só no espelho 'assets' copiadas para local_assets/ativos antes da remoção.`
-        );
-      }
-    });
-    // v11 — A.3a.4 (passo 2/2): agora sim, o espelho sai. Desde a A.3a.3 ninguém
-    // lhe escrevia e desde a A.3a.1 ninguém o lia; o que tinha de único já foi
-    // resgatado na v10. `null` faz o Dexie apagar a store no upgrade.
-    this.version(11).stores({
-      assets: null
-    });
+    // v10 e v11 — A.3a.4: resgate do que só existe em `assets` e, depois,
+    // remoção da store. O par vive em `migrationEspelhoAssets` para o teste
+    // exercitar a MESMA função que este upgrade corre.
+    registarResgateEExtincaoDoEspelho(this);
   }
 }
 

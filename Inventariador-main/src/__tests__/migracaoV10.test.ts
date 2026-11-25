@@ -6,12 +6,15 @@
 // `[tenantid+primarykey]` e copia para `local_assets`/`ativos` só o que falta.
 // v11: REMOÇÃO. A store `assets` sai do schema.
 //
-// A divisão não é decoração: o Dexie não deixa ler uma store na mesma versão
-// que a apaga (dexie#275/#276), por isso a leitura tem de vir antes.
+// O teste NÃO reimplementa a migração: declara as versões com
+// `registarResgateEExtincaoDoEspelho`, a mesma função que o construtor de
+// `InventoryDexieDatabase` chama. Se o resgate de produção mudar (comparação,
+// chave, normalização), estes casos apanham.
 // ============================================================================
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { registarResgateEExtincaoDoEspelho } from '../services/migrationEspelhoAssets';
 
 const NOME = 'InventoryLocalStore_v10_prova';
 
@@ -34,25 +37,11 @@ const STORES_V9 = {
   audit_logs: 'id, updated_at'
 };
 
-/** Mesma migração da app: v10 resgata, v11 apaga a store. */
+/** Base v9 com a MESMA declaração de v10/v11 da produção. */
 const createDb = () => {
   const d = new Dexie(NOME);
   d.version(9).stores(STORES_V9);
-  d.version(10).stores(STORES_V9).upgrade(async (tx) => {
-    const origens = (await tx.table('assets').toArray()) as Array<Record<string, unknown>>;
-    for (const linha of origens) {
-      const tenantid = String(linha.tenantid ?? '').trim().toUpperCase();
-      const primarykey = String(linha.primarykey ?? linha.id ?? '').trim();
-      if (!primarykey) continue;
-      const chave: [string, string] = [tenantid, primarykey];
-      const copia = { ...linha, tenantid, id: primarykey };
-      for (const tabela of ['local_assets', 'ativos'] as const) {
-        if (await tx.table(tabela).get(chave)) continue;
-        await tx.table(tabela).put(copia);
-      }
-    }
-  });
-  d.version(11).stores({ assets: null });
+  registarResgateEExtincaoDoEspelho(d);
   return d;
 };
 
