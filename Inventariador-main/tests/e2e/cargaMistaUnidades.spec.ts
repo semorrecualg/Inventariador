@@ -65,9 +65,14 @@ const carregarPlanilha = async (page: Page) => {
     page.getByText(new RegExp(`${TOTAL_DE_LINHAS} ativos injetados com sucesso`))
   ).toBeVisible({ timeout: 60000 });
 
-  // Aviso de mudança para BASE LOCAL (só aparece quando o modo muda).
-  const confirmar = page.getByRole('button', { name: 'OK', exact: true });
-  if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
+  // Aviso de mudança para BASE LOCAL (só aparece quando o modo muda). O botão
+  // já foi «OK» e hoje é «Confirmar»; aceita os dois e espera o aviso fechar,
+  // senão a camada modal interceta o toque no contrato.
+  const aviso = page.getByText(/Operando na Base Local/i).first();
+  if (await aviso.isVisible().catch(() => false)) {
+    const confirmar = page.getByRole('button', { name: /^(OK|Confirmar)$/ }).first();
+    if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
+  }
 };
 
 /** Abre o CONTRATO DE TRABALHO e confere filiais, contagens e total. */
@@ -75,8 +80,16 @@ const confirmarUnidadeSemCopias = async (page: Page) => {
   await abrirEcra(page, 'WORK_CONTEXT_SELECTION');
   await page.waitForURL(/#\/contexto$/, { timeout: 15000 });
 
+  // Admin global sem contrato no perfil: a tela abre no seletor de contrato e
+  // só depois da escolha explícita mostra as filiais da base.
+  const filiais = page.locator('[data-testid="filial-options"] > button');
+  if ((await filiais.count()) === 0) {
+    const contrato = page.getByRole('button', { name: /CICOPAL/ }).first();
+    if (await contrato.isVisible().catch(() => false)) await contrato.click();
+  }
+
   // Um cartão por filial — as linhas sem tenantid não criam uma unidade extra.
-  await expect(page.locator('[data-testid="filial-options"] > button')).toHaveCount(2, { timeout: 20000 });
+  await expect(filiais).toHaveCount(2, { timeout: 20000 });
   await expect(page.getByText(FILIAL_GO, { exact: true })).toHaveCount(1);
   await expect(page.getByText(FILIAL_PA, { exact: true })).toHaveCount(1);
 
