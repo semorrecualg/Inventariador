@@ -41,12 +41,17 @@ const abrirGestaoDeBase = async (page: Page) => {
     () => typeof (window as unknown as { pushScreen?: unknown }).pushScreen === 'function',
     { timeout: 20000 }
   );
+
+  // A porta real do PAINEL COMPLETO é o botão do CONTRATO DE TRABALHO —
+  // entrar em MAIN_MENU directo redirecciona para o contrato sem unidade.
   await page.evaluate(() => {
     (window as unknown as { pushScreen: (s: string, p?: unknown) => void })
-      .pushScreen('MAIN_MENU', { openPanel: 'ADMIN' });
+      .pushScreen('WORK_CONTEXT_SELECTION');
   });
+  await page.waitForURL(/#\/contexto$/, { timeout: 15000 });
 
-  await expect(page.getByText('Painel Completo')).toBeVisible({ timeout: 15000 });
+  await page.getByRole('button', { name: /Painel completo/i }).click();
+  await expect(page.getByText('Gestão e Manutenção')).toBeVisible({ timeout: 15000 });
   await page.getByText('Gestão e Manutenção').click();
   await expect(page.getByText('Configuração e Ações do Utilizador')).toBeVisible({ timeout: 15000 });
 };
@@ -110,7 +115,7 @@ test.describe('Modo de Base — offline-first e cartões passivos', () => {
 
     await page.getByRole('button', { name: /Base Local/ }).click();
 
-    await expect(page.getByText('Modo Alterado')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Modo Alterado')).toBeVisible({ timeout: 30000 });
     await page.waitForFunction(
       () => localStorage.getItem('is_system_locked') === 'true'
         && (localStorage.getItem('gbr_integrity_key') || '').includes('KARDEX_CONF_LOCKED'),

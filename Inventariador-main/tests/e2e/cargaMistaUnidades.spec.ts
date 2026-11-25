@@ -65,9 +65,11 @@ const carregarPlanilha = async (page: Page) => {
     page.getByText(new RegExp(`${TOTAL_DE_LINHAS} ativos injetados com sucesso`))
   ).toBeVisible({ timeout: 60000 });
 
-  // Aviso de mudança para BASE LOCAL (só aparece quando o modo muda).
-  const confirmar = page.getByRole('button', { name: 'OK', exact: true });
+  // Aviso de mudança para BASE LOCAL (só aparece quando o modo muda). O modal
+  // usa «CONFIRMAR»; deixá-lo aberto bloqueia o contrato e dava 0 filiais.
+  const confirmar = page.getByRole('button', { name: /^(OK|CONFIRMAR|Confirmar)$/i }).first();
   if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
+  await expect(page.getByText('OPERANDO NA BASE LOCAL')).toHaveCount(0);
 };
 
 /** Abre o CONTRATO DE TRABALHO e confere filiais, contagens e total. */
