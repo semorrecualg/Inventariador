@@ -34,7 +34,11 @@ meças**: atualiza a app primeiro e recomeça.
 3. **Mesma versão do início ao fim.** Se a app atualizar a meio, descarta e
    recomeça.
 4. **Sem «Preparar Nova Carga»**, sem limpar dados da app, sem restaurar
-   pacotes. Só o passo 5 escreve alguma coisa — e num contrato de teste.
+   pacotes. O passo 5 e a medição de `pull.full` (§2, *Passo 1b*) escrevem — e a
+   segunda é o único ponto que volta a descarregar a base inteira.
+5. **Nunca apagar a base do aparelho de campo para medir.** Se a janela de
+   trabalho não permitir uma descarga completa, a medição faz-se noutro aparelho
+   com a mesma base (ver *Passo 1b*).
 5. Registar sempre **data + modelo do aparelho** ao lado do número; §8 fica com
    o valor e o runbook guarda o rasto no Anexo C.
 
@@ -57,16 +61,50 @@ O painel mostra, por métrica, `p50 / p95 ms · n=…` — ou «sem amostra».
 | Métrica (painel) | Mede | Como nasce a amostra |
 |---|---|---|
 | `Boot` | Da navegação (`performance.timeOrigin`) até `isDataLoaded` — documento, scripts e dados | Automática, uma vez por arranque. `count` = ativos carregados |
-| `Pull completo` | Um `fetchFullInventory` **sem** `since` | Sincronização completa (primeira de uma instalação, ou depois de trocar de unidade) |
+| `Pull completo` | Um `fetchFullInventory` **sem** `since` | Menu Dados → **«Sincronizar Tudo»**; ou a primeira sincronização de uma instalação, ou depois de trocar de unidade (*Passo 1b*) |
 | `Delta` | Um pull com `since` (checkpoint) | Qualquer sincronização seguinte |
 | `Push` | Envio de eventos/ativos para a nuvem | Fim de um envio com sucesso |
 | `Save` | `saveInventory` completo, do início ao `finally` | Qualquer gravação do inventário; `count` = ativos no estado |
 
-**Importante:** o `pull.full` só nasce quando não há checkpoint. Depois do
-primeiro, os seguintes são `Delta` — por isso a medição da «Base completa»
-(passo 4) tem de ser feita **antes** de o checkpoint existir, numa instalação
-limpa de dados da app **no aparelho de teste**, ou aproveitando a primeira
-sincronização após instalar a versão.
+### Passo 1b — medir o `pull.full` de 12.636 linhas **sem apagar os dados**
+
+O `pull.full` só nasce quando o pedido vai **sem** `since`. Isso consegue-se de
+duas maneiras, e a primeira **não** destrói nada:
+
+**(a) No próprio aparelho de campo — «Sincronizar Tudo»**
+
+Menu **Dados** → **«Sincronizar Tudo»** (subtítulo «Forçar pull completo da
+Nuvem»). O que acontece, por esta ordem:
+
+1. As alterações pendentes **sobem** primeiro (é o passo de envio normal).
+2. É limpo **apenas o checkpoint do delta** — uma chave de `localStorage`
+   `[tenant|filial]`. Não é inventário, não são ativos, não é auditoria.
+3. Segue `fetchFullInventory` **sem `since`** → amostra `pull.full`, com
+   `count` = linhas recebidas (12.636, se o contrato estiver completo).
+4. As linhas são gravadas **por chave** (*upsert*) nas duas tabelas vivas. As
+   tabelas **não são esvaziadas**.
+
+Ou seja: a base do aparelho fica onde está — ativos, conferências, endereços e
+`audit_logs` continuam lá; o que se perde é só o «atalho» do delta, que volta a
+ser reconstruído no fim do pull.
+
+**Custo, e o que combinar antes:** volta a baixar o contrato inteiro (12.636
+linhas). Fazer com **Wi-Fi**, fora do horário de trabalho, e com o operador
+avisado de que as edições pendentes vão subir primeiro. Confirmar no log
+`>>> [PERF] pull.full: Nms · 12636 registro(s)`.
+
+**(b) Num aparelho de teste com a mesma base**
+
+Se (a) não for aceitável — dados móveis, janela apertada, risco de subir edições
+fora de hora —, a medição faz-se num **aparelho de teste com a mesma base de
+12.636 linhas** (o pacote F7 restaurado nesse aparelho, ou a primeira
+sincronização completa de uma instalação nova). Aí o `pull.full` é o primeiro
+pull, sem truques.
+
+Em qualquer dos casos, a célula de §8 diz **em que aparelho** foi medido. E uma
+regra que não se quebra: **não se apaga a base do aparelho de campo para
+medir** — reinstalar ou «Preparar Nova Carga» no aparelho do operador é
+inaceitável, porque apaga conferências e endereços que não voltam da nuvem.
 
 ### Limpar o anel antes de uma ronda
 
@@ -199,7 +237,7 @@ Mapa linha → fonte:
 | Escritas por save | Código (critério da agenda) | Já preenchido com 5; confirmar, não medir |
 | `saveInventory` com 1 ativo (ms) | Passo 5 | `save` com `count=1` |
 | `saveInventory` com 300 ativos (ms) | Passo 5 | `save` com `count=300` |
-| Base completa 12.636 (ms) | Passo 1/4 | `pull.full` com `count=12.636` |
+| Base completa 12.636 (ms) | Passo 1b | `pull.full` com `count=12.636` — «Sincronizar Tudo» no aparelho de campo, ou aparelho de teste com a mesma base |
 | Arranque até lista pronta — Android (ms) | Passo 4 | `Boot`, APK |
 | Arranque até lista pronta — PWA (ms) | Passo 4 | `Boot`, PWA |
 | Tamanho do IndexedDB (MB) | Passo 3 | `usage` |
@@ -274,6 +312,7 @@ não vê as conferências dos outros aparelhos.
 | `schemaVersion` (F7) | | |
 | `Boot` p50 / p95 / n | | |
 | `Pull completo` p50 / p95 / n | | |
+| `pull.full` `count` (tem de ser 12.636) | | |
 | `pull.delta` p50 / p95 / n | | |
 | `push` p50 / p95 / n | | |
 | `save` (1 ativo) p50 / p95 / n | | |
