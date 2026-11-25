@@ -19,6 +19,16 @@ export function isLocalPhotoUrl(value?: string | null): boolean {
   return !!value && (value.startsWith('blob:') || value.startsWith('data:'));
 }
 
+/**
+ * Os objectos vivem todos em `photos/...` — é o que a política do bucket exige.
+ * A fila de fotos antiga gravava em `{tenantid}/{assetId}/...` sem o prefixo;
+ * quem tem esse caminho guardado continua a conseguir assiná-lo.
+ */
+function withPhotosPrefix(path: string): string | null {
+  if (!path) return null;
+  return path.startsWith('photos/') ? path : `photos/${path}`;
+}
+
 export function photoStoragePath(value?: string | null): string | null {
   if (!value) return null;
 
@@ -27,7 +37,7 @@ export function photoStoragePath(value?: string | null): string | null {
 
   if (!/^https?:\/\//i.test(raw)) {
     const path = raw.replace(/^\/+/, '').split('?')[0];
-    return path || null;
+    return withPhotosPrefix(path);
   }
 
   const marker = `/${BUCKET}/`;
@@ -38,8 +48,8 @@ export function photoStoragePath(value?: string | null): string | null {
   if (!path) return null;
 
   try {
-    return decodeURIComponent(path);
+    return withPhotosPrefix(decodeURIComponent(path));
   } catch {
-    return path;
+    return withPhotosPrefix(path);
   }
 }

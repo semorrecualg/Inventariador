@@ -118,12 +118,30 @@ WHERE o.bucket_id = 'asset-photos'
   AND up.id::text = split_part(o.name, '/', 2);
 
 -- ============================================================================
+-- PASSO 5-B — fotos antigas da fila de sync: {tenantid}/{assetId}/... ->
+--             photos/{tenantid}/{assetId}/...
+--   A fila gravava o primeiro segmento como tenant, sem o prefixo que a
+--   política exige; sem esta mudança de nome, essas fotos ficavam guardadas no
+--   bucket mas inalcançáveis (o app guarda esse caminho em `_photoUrl`).
+-- ============================================================================
+UPDATE storage.objects o
+SET name = 'photos/' || o.name
+WHERE o.bucket_id = 'asset-photos'
+  AND o.name NOT LIKE 'photos/%'
+  AND o.name NOT LIKE 'backups/%'
+  AND EXISTS (
+    SELECT 1
+    FROM public.user_permissions up
+    WHERE lower(up.tenantid) = lower(split_part(o.name, '/', 1))
+  );
+
+-- ============================================================================
 -- VERIFICAÇÃO (descomentar depois do COMMIT, é só leitura):
 --   select id, public from storage.buckets where id = 'asset-photos';       -- public = false
 --   select policyname, cmd, roles from pg_policies
 --     where schemaname = 'storage' and tablename = 'objects';                -- 4 p_asset_photos_*
 --   select count(*) from storage.objects
---     where bucket_id = 'asset-photos' and name like 'backups/%';           -- deve ser 0
+--     where bucket_id = 'asset-photos' and name not like 'photos/%';        -- deve ser 0
 --   select policyname from pg_policies
 --     where schemaname = 'public' and tablename = 'asset-photos';           -- só p_tenant_all
 -- ============================================================================

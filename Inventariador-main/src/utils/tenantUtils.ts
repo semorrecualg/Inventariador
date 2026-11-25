@@ -38,6 +38,15 @@ export function resolveTenantId(value: object | null | undefined): string {
 }
 
 /**
+ * Primeiro `tenantid` de um valor escalar ou de uma lista (perfil multi-filial).
+ * O bucket `asset-photos` só aceita uma pasta de tenant por objecto: um array
+ * cru virava `photos/A,B/backups/...` e a política negava o upload.
+ */
+export function firstTenantid(value?: string | string[] | null): string {
+  return resolveTenantId({ tenantid: value }).trim();
+}
+
+/**
  * Retorna uma cópia do objeto com a propriedade canônica `tenantid` garantida
  * (preenchida a partir do canônico ou das chaves legadas). Não muta o original.
  */

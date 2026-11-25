@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `?etq=` só consulta a nuvem com o tenant do utilizador.
 - **Testes:** `photoStoragePrivado` fixa a extração do caminho nos três
   formatos de URL, o TTL, o SQL e a ausência de `getPublicUrl`/`?d=`.
+- **Revisão pós-commit:** o backup automático normaliza o tenant (o perfil pode
+  trazer uma lista — `photos/A,B/...` violava a política) e a fila de fotos
+  passou a gravar em `photos/{tenantid}/...`; o SQL move também as fotos antigas
+  guardadas fora dessa pasta.
 
 ### Adicionado — selo global de base e sincronização
 

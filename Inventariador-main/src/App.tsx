@@ -87,7 +87,7 @@ import AssetControlModule from './components/AssetControlModule';
 import TenantWorkSelector from './components/TenantWorkSelector';
 import WorkContextSelector from './components/WorkContextSelector';
 import { processarRoteamentoPosLoginSaas, resolveModuleEntryScreen, shouldReturnHubToWorkContext, historicoAposVoltar, SupabaseUserProfile } from './utils/routingUtils';
-import { resolveTenantId, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
+import { resolveTenantId, firstTenantid, readSessionTenantId, readLocalTenantId, clearTenantContext } from './utils/tenantUtils';
 import { buildWorkContexts, persistWorkContext, normalizeWorkTenant, normalizeWorkFilial, persistLastWorkContext, readLastWorkContext, resolveWorkContextPreselection } from './utils/workContextUtils';
 import type { WorkContext } from './utils/workContextUtils';
 import { buildUnitReleaseMap, campaignUnitKeys, collectConfiguredUnitNames, describeUnitReleaseMissing, isActiveCampaign, isUnitInReleaseSet, readActiveCampaignCache, readUnitRelease, type UnitReleaseMap } from './utils/unitRelease';
@@ -2822,9 +2822,10 @@ useEffect(() => {
       setIsSyncing(true);
       try {
         const { backupService } = await import('./services/backupService');
-        const backupTenant = explicitTenantid
-          || (Array.isArray(user.tenantid) ? user.tenantid[0] : user.tenantid)
-          || '';
+        // `explicitTenantid` chega como string OU lista (perfil multi-filial):
+        // sem normalizar, o caminho saía «photos/A,B/backups/...» e a política
+        // do bucket (uma só pasta de tenant) negava o upload. Fica a primeira.
+        const backupTenant = firstTenantid(explicitTenantid || user.tenantid);
         const res = await backupService.performMobileSingleBackup(user.id || user.email, backupTenant);
         if (res.success) {
           setLastSyncTime(new Date().toISOString());

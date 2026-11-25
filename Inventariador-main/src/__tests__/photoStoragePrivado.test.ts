@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { photoStoragePath, isLocalPhotoUrl } from '../utils/photoStoragePath';
+import { firstTenantid } from '../utils/tenantUtils';
 
 const fonte = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf8');
 const sqlPrivacidade = readFileSync(
@@ -20,6 +21,15 @@ describe('photoStoragePath — caminho do objecto a partir de _photoUrl', () => 
       'photos/CICOPAL/123/1700000000000.jpg'
     );
     expect(photoStoragePath('/photos/CICOPAL/123/foto.jpg')).toBe('photos/CICOPAL/123/foto.jpg');
+  });
+
+  it('normaliza o caminho antigo da fila, sem o prefixo photos/', () => {
+    expect(photoStoragePath('CICOPAL/123/antiga.jpg')).toBe('photos/CICOPAL/123/antiga.jpg');
+    expect(
+      photoStoragePath(
+        'https://x.supabase.co/storage/v1/object/public/asset-photos/CICOPAL/123/antiga.jpg'
+      )
+    ).toBe('photos/CICOPAL/123/antiga.jpg');
   });
 
   it('extrai o caminho dos três formatos de URL do Storage', () => {
@@ -64,9 +74,27 @@ describe('bucket privado — o código deixou de emitir URL pública', () => {
     expect(service).toContain('SIGNED_PHOTO_TTL_SECONDS = 60 * 60');
   });
 
-  it('o backup automático fica dentro da pasta do tenant', () => {
+  it('o backup automático fica dentro da pasta de UM tenant', () => {
     const service = fonte('services/backupService.ts');
-    expect(service).toContain('photos/${tenantid}/backups/${userId}/backup_v24.json');
+    expect(service).toContain('photos/${tenantidClean}/backups/${userId}/backup_v24.json');
+    expect(service).toContain('const tenantidClean = firstTenantid(tenantid)');
+  });
+
+  it('a fila de fotos grava em photos/{tenantid}/...', () => {
+    expect(fonte('services/syncService.ts')).toContain('photos/${tenantidClean}/${item.assetId}');
+  });
+
+  it('normaliza o tenant em lista antes de montar o caminho do backup', () => {
+    // Regressão: `explicitTenantid` pode ser `string[]`; sem normalizar o
+    // caminho saía `photos/A,B/backups/...` e a política do bucket negava.
+    expect(firstTenantid(['CICOPAL', 'OUTRA'])).toBe('CICOPAL');
+    expect(firstTenantid(' CICOPAL ')).toBe('CICOPAL');
+    expect(firstTenantid([])).toBe('');
+    expect(firstTenantid(undefined)).toBe('');
+
+    const app = fonte('App.tsx');
+    expect(app).toContain('firstTenantid(explicitTenantid || user.tenantid)');
+    expect(app).not.toContain('Array.isArray(user.tenantid) ? user.tenantid[0]');
   });
 });
 
@@ -101,6 +129,8 @@ describe('docs/supabase_privacidade_storage.sql — invariantes', () => {
   it('move os backups legados para photos/{tenantid}/backups e é idempotente', () => {
     expect(sqlPrivacidade).toContain("SET name = 'photos/' || up.tenantid || '/backups/'");
     expect(sqlPrivacidade).toContain("AND o.name LIKE 'backups/%'");
+    expect(sqlPrivacidade).toContain("SET name = 'photos/' || o.name");
+    expect(sqlPrivacidade).toContain("AND o.name NOT LIKE 'photos/%'");
     expect(sqlPrivacidade).toContain('BEGIN;');
     expect(sqlPrivacidade).toContain('COMMIT;');
   });

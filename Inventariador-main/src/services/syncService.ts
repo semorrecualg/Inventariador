@@ -613,7 +613,9 @@ export const photoSyncManager = {
         try {
           const fileExt = 'jpg';
           const tenantidClean = String(rawTenant).trim();
-          const filePath = `${tenantidClean}/${item.assetId}/${item.id}.${fileExt}`;
+          // A política do bucket privado só aceita `photos/{tenantid}/...`:
+          // o caminho antigo (`{tenantid}/...`, sem o prefixo) é recusado.
+          const filePath = `photos/${tenantidClean}/${item.assetId}/${item.id}.${fileExt}`;
 
           const { error: uploadError } = await supabase.storage
             .from('asset-photos')

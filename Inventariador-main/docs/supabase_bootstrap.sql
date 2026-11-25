@@ -629,6 +629,27 @@ CREATE POLICY p_asset_photos_tenant_delete ON storage.objects
     AND lower((storage.foldername(name))[2]) = lower(public.get_tenantid())
   );
 
+-- Objectos antigos fora de `photos/{tenantid}/...` deixariam de ser alcançáveis
+-- por política: passam a viver dentro da pasta do tenant (nada é apagado).
+UPDATE storage.objects o
+SET name = 'photos/' || up.tenantid || '/backups/'
+           || split_part(o.name, '/', 2) || '/' || split_part(o.name, '/', 3)
+FROM public.user_permissions up
+WHERE o.bucket_id = 'asset-photos'
+  AND o.name LIKE 'backups/%'
+  AND up.id::text = split_part(o.name, '/', 2);
+
+UPDATE storage.objects o
+SET name = 'photos/' || o.name
+WHERE o.bucket_id = 'asset-photos'
+  AND o.name NOT LIKE 'photos/%'
+  AND o.name NOT LIKE 'backups/%'
+  AND EXISTS (
+    SELECT 1
+    FROM public.user_permissions up
+    WHERE lower(up.tenantid) = lower(split_part(o.name, '/', 1))
+  );
+
 -- ============================================================================
 -- 8. SELO DE GERAÇÃO DA BASE (uma linha) — ver docs/GERACAO_BASE.md
 -- ----------------------------------------------------------------------------
