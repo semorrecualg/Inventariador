@@ -87,7 +87,9 @@ describe('migrationV5 — normalização de dados version(5) (Fase C4)', () => {
     const upgraded = createDb(name, true);
     await upgraded.open();
 
-    for (const tbl of ['assets', 'local_assets', 'ativos'] as const) {
+    // A.3a.2: a normalização cobre as duas tabelas vivas; `assets` fica como
+    // está até a A.3a.4 remover o espelho.
+    for (const tbl of ['local_assets', 'ativos'] as const) {
       const rows = await upgraded.table(tbl).toArray();
       expect(rows).toHaveLength(1);
       const r = rows[0] as unknown as Record<string, unknown>;
@@ -184,7 +186,7 @@ describe('migrationV5 — normalização de dados version(5) (Fase C4)', () => {
     await d.open();
 
     const report = await runMigrationV5DryRun(d as unknown as V5Source);
-    expect(report.tables).toHaveLength(3);
+    expect(report.tables).toHaveLength(2);
     for (const t of report.tables) {
       expect(t.count).toBe(1);
       expect(t.changed).toBe(1);
@@ -243,7 +245,8 @@ describe('migrationV5 — normalização de dados version(5) (Fase C4)', () => {
 
     const seed = createDb(name, false);
     await seed.open();
-    await seed.table('assets').bulkAdd([
+    // As localidades derivam das duas tabelas vivas (A.3a.2), não de `assets`.
+    await seed.table('local_assets').bulkAdd([
       DIRTY(),
       DIRTY({ id: 'PK-002', primarykey: 'PK-002', ENDERECO: 'SALA 3', ETIQUETA: 'ET-002' })
     ]);

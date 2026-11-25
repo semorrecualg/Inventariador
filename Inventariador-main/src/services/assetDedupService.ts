@@ -16,7 +16,10 @@ import { redactTenantId } from '../utils/diagnosticRedaction';
  * em `audit_logs`.
  */
 
-export const ASSET_MIRROR_TABLES = ['local_assets', 'ativos', 'assets'] as const;
+// A.3a.2: duas tabelas. `assets` saiu das leituras no A.3a.1 e só recebe
+// escrita até à A.3a.3 — medi-lo como espelho de negócio inflacionava o
+// relatório de cópias com linhas que ninguém lê.
+export const ASSET_MIRROR_TABLES = ['local_assets', 'ativos'] as const;
 export type AssetMirrorTable = (typeof ASSET_MIRROR_TABLES)[number];
 
 export interface DedupTableReport {

@@ -67,7 +67,9 @@ describe('assetDedupService — diagnóstico de cópias (não apaga nada)', () =
     expect(report.after).toBe(3);
     expect(report.groupsWithCopies).toBe(2);
     expect(report.withoutIdentity).toBe(1);
-    expect(report.tables.map((t) => t.table)).toEqual(['local_assets', 'ativos', 'assets']);
+    // A.3a.2: o relatório mede as duas tabelas que ainda são espelho de
+    // negócio; `assets` só recebe escrita até à A.3a.3.
+    expect(report.tables.map((t) => t.table)).toEqual(['local_assets', 'ativos']);
     expect(report.perFilial[0]).toMatchObject({ before: 6, after: 3, removed: 3 });
 
     // O rótulo não chama "identidades" às linhas sem etiqueta: 3 linhas após a
@@ -77,7 +79,7 @@ describe('assetDedupService — diagnóstico de cópias (não apaga nada)', () =
     expect(texto).toContain('linhas sem etiqueta (fora do agrupamento, contadas uma a uma): 1');
     expect(texto).not.toContain('identidade(s)');
 
-    // Nada foi apagado, em nenhum dos três espelhos.
+    // Nada foi apagado, em espelho nenhum.
     expect(await db.local_assets.count()).toBe(6);
     expect(await db.ativos.count()).toBe(6);
     expect(await db.assets.count()).toBe(6);
