@@ -6,6 +6,7 @@ import { encryption } from './securityService';
 import { localDb, backupDatabaseToPhysicalStorage } from './localDbService';
 import { sqliteService, db, DexieAsset, invalidateTenantCaseMarker } from './sqliteService';
 import { generateChecksum } from './utils';
+import { recordPerf, startPerf } from '../utils/perfMetrics';
 import { normalizeAssetContract } from '../utils/schema';
 import { FileSystemStorageService } from './FileSystemStorageService';
 import { logger } from '../utils/logger';
@@ -404,6 +405,10 @@ const schedulePhysicalMirror = (): void => {
 };
 
 export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false, skipSqlAssetsInsert = false): Promise<void> => {
+  // §8 do plano de sincronização: o tempo deste save, com o tamanho do
+  // inventário no `count` — é o que torna medíveis «1 ativo» e «300 ativos».
+  // A amostra é gravada mesmo quando o save falha (é o `finally`).
+  const startedAt = startPerf();
   try {
     const mode = data.databaseMode || DatabaseMode.INTERNAL;
     const keys = getInventoryKeys(mode);
@@ -494,6 +499,8 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
   } catch (error) {
     logger.error('>>> [Persistence] Erro ao salvar inventário no IndexedDB:', error);
     throw error;
+  } finally {
+    recordPerf('save', startedAt, { count: data.assets?.length ?? 0 });
   }
 };
 

@@ -155,7 +155,8 @@ describe('redactDiagnosticText — pacote de diagnóstico seguro para partilha',
         boot: { samples: 3, p50: 1200, p95: 2400, last: 1300 },
         'pull.full': { samples: 1, p50: 9000, p95: 9000, last: 9000 },
         'pull.delta': { samples: 2, p50: 300, p95: 500, last: 320 },
-        push: { samples: 0, p50: null, p95: null, last: null }
+        push: { samples: 0, p50: null, p95: null, last: null },
+        save: { samples: 0, p50: null, p95: null, last: null }
       }
     };
 
