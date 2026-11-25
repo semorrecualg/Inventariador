@@ -88,6 +88,19 @@ Ou seja: a base do aparelho fica onde está — ativos, conferências, endereço
 `audit_logs` continuam lá; o que se perde é só o «atalho» do delta, que volta a
 ser reconstruído no fim do pull.
 
+**Âmbito — é isto que faz a linha valer 12.636.** O pull é **por
+`[tenant|filial]`**: com uma filial seleccionada, o `count` que chega é o dessa
+filial, e a amostra `pull.full` fica com algumas centenas de linhas em vez das
+12.636. «Sincronizar Tudo» corre com a filial indefinida (âmbito `GERAL`), ou
+seja o **contrato inteiro** — é a única forma de a amostra servir para a linha
+«Base completa 12.636 (ms)» de §8. Antes de premir, confirmar que o contrato
+escolhido é o certo e que a filial não está fixada a montante.
+
+O checkpoint do delta também é chaveado por `[tenant|filial]`: limpar o do
+contrato **não** apaga os das filiais, e um pull posterior com filial escolhida
+volta a ser delta. Se o `count` do log não for 12.636, o âmbito estava errado —
+a amostra não entra em §8.
+
 **Custo, e o que combinar antes:** volta a baixar o contrato inteiro (12.636
 linhas). Fazer com **Wi-Fi**, fora do horário de trabalho, e com o operador
 avisado de que as edições pendentes vão subir primeiro. Confirmar no log
@@ -237,7 +250,7 @@ Mapa linha → fonte:
 | Escritas por save | Código (critério da agenda) | Já preenchido com 5; confirmar, não medir |
 | `saveInventory` com 1 ativo (ms) | Passo 5 | `save` com `count=1` |
 | `saveInventory` com 300 ativos (ms) | Passo 5 | `save` com `count=300` |
-| Base completa 12.636 (ms) | Passo 1b | `pull.full` com `count=12.636` — «Sincronizar Tudo» no aparelho de campo, ou aparelho de teste com a mesma base |
+| Base completa 12.636 (ms) | Passo 1b | `pull.full` com `count=12.636` — «Sincronizar Tudo» (contrato inteiro, sem filtro de filial) no aparelho de campo, ou aparelho de teste com a mesma base |
 | Arranque até lista pronta — Android (ms) | Passo 4 | `Boot`, APK |
 | Arranque até lista pronta — PWA (ms) | Passo 4 | `Boot`, PWA |
 | Tamanho do IndexedDB (MB) | Passo 3 | `usage` |
@@ -312,7 +325,7 @@ não vê as conferências dos outros aparelhos.
 | `schemaVersion` (F7) | | |
 | `Boot` p50 / p95 / n | | |
 | `Pull completo` p50 / p95 / n | | |
-| `pull.full` `count` (tem de ser 12.636) | | |
+| `pull.full` `count` (tem de ser 12.636 — se for menor, faltou o âmbito do contrato) | | |
 | `pull.delta` p50 / p95 / n | | |
 | `push` p50 / p95 / n | | |
 | `save` (1 ativo) p50 / p95 / n | | |
