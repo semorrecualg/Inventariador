@@ -538,9 +538,20 @@ export const localDb = {
       ];
       const addressRows = async (): Promise<DexieAddress[]> => {
         const table = db.addresses as unknown as UnitTable;
-        const exatos = await exactRowsOf(table);
-        if (exatos.length > 0 || !unitMatch) return exatos as unknown as DexieAddress[];
-        return (await doContrato(table)) as unknown as DexieAddress[];
+        const exatos = (await exactRowsOf(table)) as unknown as DexieAddress[];
+        if (!unitMatch) return exatos;
+        // UNIÃO das duas grafias da filial (índice exato + varredura tolerante).
+        // Parar no exato escondia as linhas gravadas com outra grafia — o caso
+        // real é a mesma filial em `010101 CICOPAL GO` e `010101_CICOPAL_GO`:
+        // a localidade criada à mão entrava numa grafia e a lista consultada
+        // pela outra mostrava só o grupo antigo. Dedup por código do endereço.
+        const tolerantes = (await doContrato(table)) as unknown as DexieAddress[];
+        const porCodigo = new Map<string, DexieAddress>();
+        for (const row of [...exatos, ...tolerantes]) {
+          const key = String(row.codigo_endereco || '').trim().toUpperCase();
+          if (!porCodigo.has(key)) porCodigo.set(key, row);
+        }
+        return Array.from(porCodigo.values());
       };
       /**
        * Ativos da filial nas DUAS tabelas da união, pela ordem de precedência
@@ -689,6 +700,68 @@ export const localDb = {
         if (aFixo !== bFixo) return aFixo - bFixo;
         return a.displayName.localeCompare(b.displayName);
       });
+    },
+
+    /**
+     * Cria/garante uma localidade no índice `addresses` — a fonte da lista do
+     * ENDEREÇO FÍSICO sempre que a filial tem linhas nesse índice.
+     *
+     * O registo é ADITIVO de propósito: `getLocationsWithStats` só deriva
+     * localidades dos ativos quando `addresses` está vazia. Gravar apenas a
+     * localidade nova numa filial que ainda vivia do fallback trocava a lista
+     * inteira por essa única linha; por isso as localidades que o ecrã já
+     * mostra são fixadas no índice antes de a nova entrar. Nada do que estava
+     * visível desaparece.
+     *
+     * Idempotente por contrato + filial (tolerante a `_`/`-`/caixa) + código.
+     * Devolve `true` quando a localidade pedida passou a existir no índice.
+     */
+    ensureLocalAddress: async (unitId: string, codigoEndereco: string): Promise<boolean> => {
+      const tenant = getCurrentTenantid().trim().toUpperCase();
+      const unit = String(unitId || '').trim();
+      const codigo = String(codigoEndereco || '').trim();
+      if (!tenant || !unit || !codigo) {
+        throw new Error('Contrato, filial e nome do local são obrigatórios para criar a localidade.');
+      }
+
+      const unitKey = normalizeUnitMatchKey(unit);
+      const existentes = (await db.addresses.toArray()).filter(row =>
+        String(row.tenantid || '').trim().toUpperCase() === tenant &&
+        normalizeUnitMatchKey(row.filial) === unitKey
+      );
+      const jaNoIndice = new Set(
+        existentes
+          .map(row => normalizeAddressSearch(row.codigo_endereco))
+          .filter(Boolean)
+      );
+
+      // O que o ecrã mostra hoje (inclui o fallback derivado dos ativos).
+      const visiveis = await localDb.assets.getLocationsWithStats(unit);
+      const desejadas = new Set<string>();
+      for (const local of visiveis) {
+        const nome = String(local.displayName || '').trim();
+        if (!nome) continue;
+        // «SEM LOCAL» sintético não é um endereço: nunca entra no índice.
+        if (normalizeAddressSearch(nome) === SEM_LOCAL_LABEL) continue;
+        desejadas.add(nome);
+      }
+      desejadas.add(codigo);
+
+      const novas = Array.from(desejadas).filter(
+        nome => !jaNoIndice.has(normalizeAddressSearch(nome))
+      );
+      if (novas.length > 0) {
+        await db.addresses.bulkAdd(novas.map(nome => ({
+          tenantid: tenant,
+          filial: unit.toUpperCase(),
+          codigo_endereco: nome,
+          setor: '',
+          bloco: '',
+          _is_synced: 1
+        })) as DexieAddress[]);
+      }
+
+      return novas.some(nome => normalizeAddressSearch(nome) === normalizeAddressSearch(codigo));
     },
 
     /**

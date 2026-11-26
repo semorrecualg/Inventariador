@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — «Nova Localidade» grava no índice e aparece na lista
+
+- **O local criado no ENDEREÇO FÍSICO passa a existir para escolha:**
+  `localDb.assets.ensureLocalAddress` grava a localidade no índice `addresses`
+  (contrato + filial + `codigo_endereco`) em vez de ficar só em
+  `app_manual_locations`/localStorage. O `AddressSelector` recarrega a lista
+  depois de gravar, e uma falha de escrita fica visível no modal (que não fecha
+  como se tivesse criado).
+- **Registo aditivo, sem esconder localidades:** como `getLocationsWithStats`
+  só deriva localidades dos ativos quando `addresses` está vazia, gravar uma
+  linha isolada trocava a lista inteira por ela. As localidades já visíveis são
+  fixadas no índice antes de a nova entrar.
+- **Mesma filial em duas grafias:** a leitura do índice passa a unir o caminho
+  exato com a varredura tolerante (`010101 CICOPAL GO` ×
+  `010101_CICOPAL_GO`), em vez de parar no primeiro grupo; antes a localidade
+  criada numa grafia podia não aparecer na consulta feita pela outra.
+- Provas: `src/__tests__/localAddressCreate.test.ts` e
+  `src/__tests__/addressSelectorCreateLocation.test.tsx`.
+
 ### Corrigido — uma única seleção de endereço na esteira do inventário
 
 - **Fim da duplicação ENDEREÇO FÍSICO → MAPEAMENTO:** o `AddressSelector` passa a

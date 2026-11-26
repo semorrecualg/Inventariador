@@ -180,6 +180,13 @@ aviso de âncora GPS, o banner de modo offline e o botão «Nova Localidade» vi
 no `AddressSelector` (`docs/COMPONENTS_MAP.md` §3) e não são reimplementados
 nesta tela.
 
+O local criado em «Nova Localidade» é gravado no índice `addresses` por
+`localDb.assets.ensureLocalAddress` (contrato + filial + `codigo_endereco`) e a
+lista é recarregada logo depois — o local fica escolhível sem sair do ecrã. O
+registo é **aditivo**: as localidades que o ecrã já mostra são fixadas no
+índice, porque `getLocationsWithStats` só deriva localidades dos ativos quando
+`addresses` está vazia (gravar uma linha isolada esconderia as restantes).
+
 ---
 
 ## 3. Validações e checks

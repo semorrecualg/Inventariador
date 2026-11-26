@@ -1058,15 +1058,20 @@ useEffect(() => {
     } catch { return []; }
   });
 
-  const handleAddNewLocation = useCallback((newLocation: string) => {
+  const handleAddNewLocation = useCallback(async (newLocation: string) => {
     const normalized = String(newLocation || '').trim().toUpperCase();
     if (!normalized) return;
+    // Grava no índice que alimenta o ENDEREÇO FÍSICO (não só em localStorage):
+    // sem esta linha a localidade criada nunca aparecia na lista para escolher.
+    if (selectedUnit) {
+      await localDb.assets.ensureLocalAddress(selectedUnit, normalized);
+    }
     setManualLocations(prev => {
       const next = prev.includes(normalized) ? prev : [...prev, normalized];
       try { localStorage.setItem('app_manual_locations', JSON.stringify(next)); } catch { /* ignore */ }
       return next;
     });
-  }, []);
+  }, [selectedUnit]);
 
   const userRef = useRef<User | null>(user);
   // SINCRONIZA userRef com o usuário logado atual. Sem isso, o guard anti-loop

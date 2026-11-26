@@ -28,7 +28,7 @@ interface AddressSelectorProps {
   user?: User | null;
   databaseMode?: DatabaseMode;
   /** Registo do local criado no ecrã (modal «Nova Localidade»). */
-  onAddNewLocation?: (newLocation: string) => void;
+  onAddNewLocation?: (newLocation: string) => void | Promise<void>;
   /** Abre o configurador da unidade para definir a âncora GPS. */
   onConfigureAnchor?: () => void;
 }
@@ -54,6 +54,8 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
   const [reloadToken, setReloadToken] = useState(0);
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
+  const [isCreatingLocation, setIsCreatingLocation] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -106,14 +108,24 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
     onSelect(address);
   };
 
-  const handleCreateLocation = () => {
+  const handleCreateLocation = async () => {
     const nome = newLocationName.trim();
-    if (!nome) return;
-    onAddNewLocation?.(nome);
-    setNewLocationName('');
-    setIsNewLocationModalOpen(false);
-    // O local novo entra na lista pelo mesmo caminho dos restantes (base local).
-    setReloadToken((token) => token + 1);
+    if (!nome || isCreatingLocation) return;
+    setIsCreatingLocation(true);
+    setCreateError(null);
+    try {
+      await onAddNewLocation?.(nome);
+      setNewLocationName('');
+      setIsNewLocationModalOpen(false);
+      // O local novo já está no índice da base local; recarrega a lista para o
+      // mostrar e poder ser escolhido de imediato.
+      setReloadToken((token) => token + 1);
+    } catch (err) {
+      // Sem gravar não há local para escolher: o modal fica aberto a dizer porquê.
+      setCreateError(err instanceof Error ? err.message : String(err ?? '').trim() || 'Não foi possível gravar a localidade na base local.');
+    } finally {
+      setIsCreatingLocation(false);
+    }
   };
 
   // Espelha a coluna 'filial' como veio da base — sem uppercase.
@@ -301,7 +313,7 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
         <button
           id="address-new-location-fab"
           disabled={isBlockedByAnchor || !onAddNewLocation}
-          onClick={() => setIsNewLocationModalOpen(true)}
+          onClick={() => { setCreateError(null); setIsNewLocationModalOpen(true); }}
           className={`pointer-events-auto h-14 px-8 rounded-full flex items-center justify-center space-x-3 font-bold uppercase text-xs tracking-widest active:scale-95 transition-all shadow-xl shadow-blue-500/20 ${isBlockedByAnchor || !onAddNewLocation ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-[#2563EB] text-white'}`}
         >
           <Plus size={20} strokeWidth={3} />
@@ -347,15 +359,20 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
               </div>
 
               <div className="flex flex-col space-y-3">
+                {createError && (
+                  <p id="address-new-location-error" role="alert" className="text-[9px] font-bold text-red-600 uppercase leading-snug break-words">
+                    {createError}
+                  </p>
+                )}
                 <button
                   onClick={handleCreateLocation}
-                  disabled={!newLocationName.trim()}
+                  disabled={!newLocationName.trim() || isCreatingLocation}
                   className="w-full py-4 bg-accent disabled:bg-ink-muted/20 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
                 >
-                  Confirmar Criação
+                  {isCreatingLocation ? 'A Gravar…' : 'Confirmar Criação'}
                 </button>
                 <button
-                  onClick={() => { setIsNewLocationModalOpen(false); setNewLocationName(''); }}
+                  onClick={() => { setIsNewLocationModalOpen(false); setNewLocationName(''); setCreateError(null); }}
                   className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
                 >
                   Cancelar
