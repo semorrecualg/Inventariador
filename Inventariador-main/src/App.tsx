@@ -183,7 +183,7 @@ let bootPerfRecorded = false;
  * F0: grava o retrato da linha de base sem bloquear o fluxo medido.
  * Chamado no fim do boot e no fim de um pull completo (persistência concluída).
  *
- * A contagem dos três espelhos percorre a base inteira: fica para um momento
+ * A contagem das duas tabelas espelhadas percorre a base inteira: fica para um momento
  * ocioso (`scheduleIdle`) para não pesar no boot nem competir com a gravação.
  */
 const autoRegisterPerfBaseline = (

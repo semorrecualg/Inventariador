@@ -41,11 +41,14 @@ describe('countAssetMirrors (F0)', () => {
     // A migração não tem resíduo para tratar e só deixa o marcador.
     await expect(sqliteService.migrateLegacyTenantids()).resolves.toEqual({ repaired: 0, skipped: 0 });
 
-    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toEqual({
+    const counts = await sqliteService.countAssetMirrors('CICOPAL');
+    expect(counts).toEqual({
       local_assets: 2,
       ativos: 2,
       total: 2
     });
+    // Contrato de duas tabelas: a contagem não devolve um campo `assets`.
+    expect(Object.keys(counts).sort()).toEqual(['ativos', 'local_assets', 'total']);
   });
 
   it('antes da migração conta o legado por varredura, sem o alterar', async () => {

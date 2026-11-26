@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prova da própria guarda: `src/__tests__/verificaAssetsRemovida.test.ts`
   (detecta as regressões e aceita os históricos).
 
+### Alinhado — A.6: contagens, limpeza de cópias e reset no contrato de duas tabelas
+
+- Provas fixam o contrato de `local_assets` + `ativos` nas três rotinas do A.6:
+  `countAssetMirrors` não devolve campo `assets`, o relatório de
+  `assetMirrorCleanupService` percorre só essas duas tabelas e o
+  `localBaseReset` confirma que a store removida na v11 não está no schema.
+- Comentários e mensagens do Gestor de Base deixam de falar em «três espelhos».
+
 ### Documentado — fim do terceiro espelho local e filtro de auditoria da nuvem
 
 - `docs/SPEC.md`, `docs/ARCHITECTURE.md`, `docs/MIGRACAO_HIBRIDA.md`,
