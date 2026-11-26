@@ -139,7 +139,7 @@ import HardDrive from 'lucide-react/dist/esm/icons/hard-drive';
 import Database from 'lucide-react/dist/esm/icons/database';
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
-import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly } from './services/persistenceService';
+import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly, checkInventoryIntegrity } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
 import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, flushAncorasPendentes, fetchCampaigns, isInternalMode, getInitialDatabaseMode, isOnlineDatabaseMode } from './services/supabaseService';
 import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
@@ -5137,9 +5137,35 @@ useEffect(() => {
         };
       }
 
-      return { 
-        success: true, 
-        message: `Integridade verificada com sucesso! Todos os ${loaded.assets.length} ativos correspondem ao checksum SHA-256 gravado no último salvamento.` 
+      const verificacao = await checkInventoryIntegrity(databaseMode, loaded.assets);
+
+      if (verificacao.status === 'confere') {
+        return {
+          success: true,
+          message: `Integridade verificada com sucesso! Todos os ${verificacao.total} ativos correspondem ao checksum SHA-256 gravado no último salvamento.`
+        };
+      }
+
+      if (verificacao.status === 'divergente') {
+        // §A.4: o hash é o do último salvamento completo. Conferências e
+        // importações incrementais mudam o conjunto sem o reescrever, por isso
+        // a mensagem diz isso em vez de gritar corrupção.
+        return {
+          success: false,
+          message: `O checksum SHA-256 gravado no último salvamento não corresponde ao conjunto atual de ${verificacao.total} ativos (gravado ${verificacao.gravado.slice(0, 12)}… · atual ${verificacao.atual.slice(0, 12)}…). Se houve conferências, importações ou sincronizações depois desse salvamento, a diferença é esperada; sem alterações conhecidas, investigue. O pacote de segurança (F7) confirma tabela a tabela.`
+        };
+      }
+
+      if (verificacao.status === 'erro') {
+        return {
+          success: false,
+          message: "Não foi possível calcular o checksum SHA-256 neste dispositivo (crypto.subtle indisponível)."
+        };
+      }
+
+      return {
+        success: false,
+        message: `Ainda não há checksum gravado nesta base (${verificacao.total} ativos). O checksum é calculado em segundo plano logo após um salvamento — repita a verificação depois de guardar o inventário.`
       };
     } catch (error) {
       logger.error('Erro ao verificar integridade:', error);
