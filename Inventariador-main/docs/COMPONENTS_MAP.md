@@ -93,5 +93,6 @@ O `AddressSelector.tsx` impede o carregamento indiscriminado da base inteira ope
 3. Ao selecionar um Endereço Físico (ex: `CORREDOR A`, `GALPÃO CENTRAL`):
    - O identificador de endereço é salvo em cache de sessão sob a chave `current_selected_address`.
 4. O `Inventory.tsx` ao ser renderizzato herda esse estado de sessão de forma síncrona — é a **única** seleção de endereço: a antiga fase «Mapeamento» dentro do inventário foi removida por repetir esta mesma lista e consulta.
+5. «Nova Localidade» grava no índice `addresses` (`localDb.assets.ensureLocalAddress`) de forma aditiva — as localidades já visíveis são fixadas no índice antes da nova — e recarrega a lista, para o local criado poder ser escolhido de imediato.
 5. O `App.tsx` carrega os ativos do endereço via **API Dexie** (`localDb`/`sqliteService`, escopo por `tenantid`+`filial`) — sem SQL raw (contrato SRE).
 6. O loop de renderização do `Virtuoso` recebe unicamente os ativos pertencentes ao quadrante físico selecionado, reduzindo o tráfego em RAM dos ativos globais do contrato (ex.: 12.636 no CICOPAL) para frações geolocalizadas seguras de máxima performance.
