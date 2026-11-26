@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — uma única seleção de endereço na esteira do inventário
+
+- **Fim da duplicação ENDEREÇO FÍSICO → MAPEAMENTO:** o `AddressSelector` passa a
+  ser o seletor único. Ao escolher o local, o `App.tsx` entra em `INVENTORY` já
+  com o endereço, e o `Inventory` deixou de renderizar a fase de seleção interna
+  (lista, busca de local e `getLocationsWithStats` repetidos).
+- O botão **«Nova Localidade»**, o aviso **«GPS Âncora Pendente»** (com
+  «Reconfigurar Âncora (MAPA)») e o banner de modo offline passam para o
+  `AddressSelector`, sem perda de funcionalidade. O modo imersivo continua a ser
+  ativado na escolha do local.
+- O estado `isInventorying` (`app_is_inventorying`) desaparece: já não existia
+  segunda fase para o distinguir.
+- `docs/TELA_INVENTARIO.md` e `docs/COMPONENTS_MAP.md` deixam de descrever duas
+  fases de seleção na mesma esteira.
+
 ### Adicionado — guarda contra o regresso do espelho local `assets`
 
 - `npm run verify:assets-removida` (passo próprio no CI) falha se o código
