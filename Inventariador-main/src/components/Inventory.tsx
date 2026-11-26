@@ -12,7 +12,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User, DatabaseMode, UnitConfig, AppScreen } from '../types';
+import { Asset, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, User } from '../types';
 import Scanner from './Scanner';
 import { extractEtiquetaFromQrData, QR_FIELD_ORDER } from '../utils/qrUtils';
 import { effectiveAssetAddress } from '../utils/assetAddress';
@@ -21,7 +21,6 @@ import { generateUUID } from '../services/supabaseService';
 import { telemetryService } from '../services/telemetryService';
 import { useDeviceMetrics } from '../hooks/useDeviceMetrics';
 import Marquee from './Marquee';
-import { isAdminEmail } from '../utils/authUtils';
 import { localDb } from '../services/localDbService';
 import { queueAssetBackupMirror } from '../services/persistenceService';
 import { sqliteService } from '../services/sqliteService';
@@ -42,7 +41,6 @@ import {
 import { AssetListItem } from './AssetListItem';
 import PreferencesPanel from './PreferencesPanel';
 import { resolvePersistedTag } from '../services/tagService';
-import { BufferIndicator } from './BufferIndicator';
 import { assetRepository } from '../services/assetRepository';
 
 import { reverseGeocode } from '../services/geocodingService';
@@ -64,9 +62,7 @@ import {
   Database,
   Mic,
   ShieldAlert,
-  WifiOff,
   ArrowLeft,
-  Target,
   Settings2
 } from 'lucide-react';
 
@@ -148,12 +144,7 @@ interface InventoryProps {
   onBulkUpdateAssets: (ids: string[], updates?: Partial<Asset>) => void | Promise<void>;
   onSelectAsset: (asset: Asset) => void;
   selectedLocation: string | null;
-  setSelectedLocation: (loc: string | null) => void;
-  isInventorying: boolean;
-  setIsInventorying: (val: boolean) => void;
   selectedUnit: string | null;
-  onAddNewLocation: (newLocation: string) => void;
-  locationsWithStats: Record<string, { total: number; checked: number; displayName: string }>;
   scannerMode: ScannerMode;
   searchMode: InventorySearchMode;
   onUpdateSearchMode: (mode: InventorySearchMode) => void;
@@ -169,14 +160,10 @@ interface InventoryProps {
   onOpenSignature: () => void;
   inventorySearchValue: string | null;
   clearInventorySearchValue: () => void;
-  immersiveMode: boolean;
-  onToggleFullscreen: () => void;
   batterySaver: boolean;
-  databaseMode: DatabaseMode;
   onSyncFromCloud: () => Promise<void>;
   user: User | null;
   currentCampaignId?: string;
-  unitConfig?: UnitConfig | null;
   /** Campos escolhidos em PAINEL COMPLETO → Configurar QR Code. */
   qrCodeFields?: string[];
 }
@@ -189,11 +176,7 @@ const Inventory: React.FC<InventoryProps> = ({
   onBulkUpdateAssets, 
   onSelectAsset, 
   selectedLocation, 
-  setSelectedLocation, 
-  isInventorying, 
-  setIsInventorying, 
   selectedUnit, 
-  onAddNewLocation, 
   scannerMode, 
   searchMode, 
   onUpdateSearchMode, 
@@ -209,19 +192,14 @@ const Inventory: React.FC<InventoryProps> = ({
   onOpenSignature,
   inventorySearchValue, 
   clearInventorySearchValue, 
-  immersiveMode, 
-  onToggleFullscreen, 
   batterySaver,
-  databaseMode,
   user,
   currentCampaignId,
-  unitConfig,
   qrCodeFields = ['ETIQUETA']
 }) => {
   const [displayValue, setDisplayValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'pending' | 'checked'>('pending');
-  const [dbLocations, setDbLocations] = useState<{ displayName: string; total: number; checked: number; locKey: string }[]>([]);
   const [globalSearchResults, setGlobalSearchResults] = useState<Asset[]>([]);
   const [sreNotification, setSreNotification] = useState<{ type: 'success' | 'warning' | 'error' | 'info'; message: string; subText?: string } | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -242,9 +220,8 @@ const Inventory: React.FC<InventoryProps> = ({
     return () => {
       logger.info(">>> [MemoryGuard] Componente Inventory desmontado. Limpando arrays massivos de cache...");
       MemoryGuardService.releaseMassiveArray(globalSearchResults);
-      MemoryGuardService.releaseMassiveArray(dbLocations);
     };
-  }, [globalSearchResults, dbLocations]);
+  }, [globalSearchResults]);
   const [currentSelectedAddress] = useState<string | null>(() => sessionStorage.getItem('current_selected_address'));
 
   const cleanAndCapitalizeAsset = useCallback((rawAsset: Asset): Asset => {
@@ -332,10 +309,10 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     };
     
-    if (isInventorying && allAssets.length > 0) {
+    if (allAssets.length > 0) {
       runRecoveryBoot();
     }
-  }, [isInventorying, allAssets.length, onUpdateAsset, user, selectedUnit]);
+  }, [allAssets.length, onUpdateAsset, user, selectedUnit]);
   
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -440,13 +417,13 @@ const Inventory: React.FC<InventoryProps> = ({
   useEffect(() => {
     const interval = setInterval(() => {
       const inactiveTime = Date.now() - lastActivityTime;
-      if (inactiveTime > 30000 && isInventorying && !isScannerPaused) {
+      if (inactiveTime > 30000 && !isScannerPaused) {
         setIsScannerPaused(true);
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [lastActivityTime, isInventorying, isScannerPaused]);
+  }, [lastActivityTime, isScannerPaused]);
 
   // Reset de atividade
   const resetActivity = useCallback(() => {
@@ -484,12 +461,6 @@ const Inventory: React.FC<InventoryProps> = ({
   // para o auditor ver o bem e, se quiser, copiar os dados para o item novo
   // desta unidade/endereço. ADOTADO EXTERNO deixa de ser criado por padrão.
   const [fichaPreview, setFichaPreview] = useState<Asset | null>(null);
-  const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
-  const [newLocationName, setNewLocationName] = useState('');
-  const [isLocationSearchVisible, setIsLocationSearchVisible] = useState(false);
-  const [locationSearchTerm, setLocationSearchTerm] = useState('');
-  const [debouncedLocTerm, setDebouncedLocTerm] = useState('');
-  const [isLocSearching, setIsLocSearching] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [duplicateAsset, setDuplicateAsset] = useState<Asset | null>(null);
 
@@ -528,31 +499,6 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
   }, [selectedUnit, selectedLocation]);
-
-  // v25.01: Busca de Localidades com Debounce e SQLite
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedLocTerm(locationSearchTerm);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [locationSearchTerm]);
-
-  useEffect(() => {
-    const performSearch = async () => {
-      if (!isDbReady || !selectedUnit) return;
-      setIsLocSearching(true);
-      try {
-        const results = await localDb.assets.getLocationsWithStats(selectedUnit, debouncedLocTerm);
-        setDbLocations(results || []);
-      } catch (err) {
-        logger.error(">>> [DBA] Erro ao buscar localidades:", err);
-      } finally {
-        setIsLocSearching(false);
-      }
-    };
-
-    performSearch();
-  }, [debouncedLocTerm, selectedUnit, allAssets.length, isDbReady]);
 
   const handleRangeChanged = useCallback((range: { startIndex: number }) => {
     if (range.startIndex > 0) {
@@ -1084,18 +1030,6 @@ const Inventory: React.FC<InventoryProps> = ({
     );
   };
 
-  const handleForceLocation = async () => {
-    if (!selectedUnit) return;
-    
-    // v24.50: Agora sempre abre o mapa interativo para que o auditor defina a âncora
-    // Eliminada a tela vermelha de contingência.
-    if (window.pushScreen) {
-      window.pushScreen(AppScreen.UNIT_CONFIGURATOR, { unitName: selectedUnit });
-    } else {
-      logger.error('pushScreen não disponível no Inventory.tsx');
-    }
-  };
-
   // SOBERANIA DE FILIAL: filial recuperada da session/local ou do prop.
   const activeFilialKey = useMemo(() => (
     localStorage.getItem('filial') || sessionStorage.getItem('filial') || selectedUnit || user?.filial || ''
@@ -1489,10 +1423,10 @@ const Inventory: React.FC<InventoryProps> = ({
     // Modo scanner persistido (reentrada no inventário): reabre a leitura.
     // A permissão da câmera é pedida pelo próprio Scanner — a pré-checagem com
     // getUserMedia abria um segundo stream e podia derrubar o start real.
-    if (isInventorying && searchMode === InventorySearchMode.SCANNER) {
+    if (searchMode === InventorySearchMode.SCANNER) {
       setIsScannerOpen(true);
     }
-  }, [isInventorying, searchMode]); // Só dispara quando entra no inventário de um local ou muda para scanner
+  }, [searchMode]); // Só dispara quando entra no inventário de um local ou muda para scanner
 
   useEffect(() => {
     const searchTimeout = setTimeout(() => {
@@ -1953,195 +1887,8 @@ const Inventory: React.FC<InventoryProps> = ({
           </button>
         </div>
       )}
-      {!isInventorying ? (
-        <div className="flex flex-col h-full bg-[#F8FAFC] relative">
-          {/* Header Minimalista */}
-          <div className="px-6 pt-12 pb-6 bg-white border-b border-slate-100">
-            <div className="flex items-center justify-between mb-4">
-              <button 
-                onClick={onBack}
-                className="flex items-center space-x-2 text-[#1E293B] active:opacity-60 transition-all"
-              >
-                <ArrowLeft size={20} />
-                <span className="text-lg font-bold tracking-tight">Mapeamento</span>
-              </button>
-              <button 
-                onClick={() => setIsLocationSearchVisible(!isLocationSearchVisible)}
-                className={`p-2 rounded-xl transition-all active:scale-95 ${isLocationSearchVisible ? 'bg-accent text-white' : 'text-slate-400 hover:bg-slate-50'}`}
-              >
-                <Search size={20} />
-              </button>
-            </div>
-            
-            <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-[0.15em]">Selecione uma localidade para auditoria</p>
 
-            {isLocationSearchVisible && (
-              <div className="mt-4 relative animate-fadeIn">
-                <input 
-                  type="text"
-                  value={locationSearchTerm}
-                  onChange={(e) => setLocationSearchTerm(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-50 border border-slate-100 px-4 py-3 font-bold text-sm rounded-xl text-ink outline-none focus:border-accent transition-all"
-                  placeholder="PESQUISAR LOCAL..."
-                  autoFocus
-                />
-                {locationSearchTerm && (
-                  <button 
-                    onClick={() => setLocationSearchTerm('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted"
-                  >
-                    <X size={16} />
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-6 space-y-4 pb-32 no-scrollbar">
-            {/* Banner Offline Sutil e Buffer Atômico */}
-            {databaseMode === 'INTERNAL' && (
-              <div className="space-y-3">
-                <div className="bg-amber-50 border border-amber-100 p-3 rounded-2xl flex items-center space-x-3 mb-2">
-                  <WifiOff size={14} className="text-amber-600" />
-                  <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">Modo Offline Ativo</p>
-                </div>
-                <BufferIndicator />
-              </div>
-            )}
-
-            {!unitConfig && (
-              <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-start space-x-3 mb-2">
-                <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[10px] font-black text-red-700 uppercase tracking-widest">GPS Âncora Pendente</p>
-                    {isGeocoding && <Loader2 size={12} className="animate-spin text-red-600" />}
-                  </div>
-                  <p className="text-[9px] text-red-600 font-bold uppercase leading-tight mt-1">
-                    Configuração de GPS obrigatória para liberar o inventário.
-                  </p>
-                  
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleForceLocation();
-                      }}
-                      disabled={isGeocoding}
-                      className="bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center space-x-2 shadow-lg shadow-red-500/20 disabled:opacity-50"
-                    >
-                      <Target size={12} />
-                      <span>Reconfigurar Âncora (MAPA)</span>
-                    </button>
-
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {isLocSearching && (
-              <div className="flex items-center justify-center py-4 space-x-2 animate-pulse">
-                <Loader2 size={14} className="animate-spin text-accent" />
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Filtrando Banco de Dados...</span>
-              </div>
-            )}
-
-            {dbLocations.length > 0 ? (
-              dbLocations
-              .map((loc: { displayName: string; total: number; checked: number; locKey: string }) => {
-                const progress = loc.total > 0 ? Math.round((loc.checked / loc.total) * 100) : 0;
-                const isCompleted = progress === 100;
-                const locStr = String(loc.displayName || '');
-                
-                // Extrair código e nome (assumindo formato "CODIGO NOME")
-                const parts = locStr.split(' ');
-                const code = parts[0];
-                const name = parts.slice(1).join(' ') || locStr;
-              
-                const isBypass = isAdminEmail(user?.email);
-                const isDisabled = !unitConfig && !isBypass;
-              
-                return (
-                  <button 
-                    key={loc.locKey} 
-                    disabled={isDisabled}
-                    onClick={() => { 
-                      setSelectedLocation(loc.displayName); 
-                      setIsInventorying(true); 
-                      if (immersiveMode && !document.fullscreenElement) {
-                        onToggleFullscreen();
-                      }
-                    }} 
-                    className={`w-full bg-white rounded-[16px] p-4 active:scale-[0.98] transition-all flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.05)] border-none relative overflow-hidden group ${isDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
-                  >
-                    <div className="flex items-start space-x-4 mb-4">
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-colors ${isCompleted ? 'bg-[#10B981]/15 text-[#10B981]' : 'bg-[#2563EB]/15 text-[#2563EB]'}`}>
-                        <MapPin size={22} strokeWidth={2.5} />
-                      </div>
-                      <div className="text-left flex-1 min-w-0">
-                        <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-widest block mb-1">{code}</span>
-                        <h4 className="text-sm font-bold text-[#1E293B] leading-tight line-clamp-2">
-                          {name}
-                        </h4>
-                      </div>
-                      <ChevronRight size={18} className="text-slate-300 mt-1" />
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-end">
-                        <span className={`text-[10px] font-bold uppercase tracking-tight ${isCompleted ? 'text-[#10B981]' : 'text-[#64748B]'}`}>
-                          {loc.checked} / {loc.total} ITENS
-                        </span>
-                        <span className={`text-[10px] font-black ${isCompleted ? 'text-[#10B981]' : 'text-[#2563EB]'}`}>
-                          {progress}%
-                        </span>
-                      </div>
-                      <div className="h-[6px] w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full transition-all duration-700 ease-out rounded-full ${isCompleted ? 'bg-[#10B981]' : 'bg-[#2563EB]'}`}
-                          style={{ width: `${progress}%` }}
-                        />
-                      </div>
-                    </div>
-                  </button>
-                );
-              })
-            ) : (
-                !isLocSearching && (
-                  <div className="py-20 text-center space-y-4">
-                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto">
-                      <Search size={24} className="text-slate-300" />
-                    </div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest leading-loose">
-                      Nenhuma localidade localizada<br/>
-                      <span className="text-[10px] opacity-60">Tente buscar por outro termo ou descrição</span>
-                    </p>
-                  </div>
-                )
-            )}
-          </div>
-
-          {/* FAB - Criar Nova Localidade */}
-          <div className="fixed bottom-8 left-0 right-0 px-6 flex justify-center pointer-events-none">
-            {(() => {
-              const isBypass = isAdminEmail(user?.email);
-              const isDisabled = !unitConfig && !isBypass;
-              return (
-                <button 
-                  disabled={isDisabled}
-                  onClick={() => setIsNewLocationModalOpen(true)} 
-                  className={`pointer-events-auto h-14 px-8 rounded-full flex items-center justify-center space-x-3 font-bold uppercase text-xs tracking-widest active:scale-95 transition-all shadow-xl shadow-blue-500/20 ${isDisabled ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-[#2563EB] text-white'}`}
-                >
-                  <Plus size={20} strokeWidth={3} />
-                  <span>Nova Localidade</span>
-                </button>
-              );
-            })()}
-          </div>
-        </div>
-      ) : (
-        <React.Fragment>
-    <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
+      <div className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
       {/* Endereço e progresso sobem para cima da barra de comandos: bypass →
           endereço → progresso → busca, que fecha a seção do topo. */}
       <div className="bg-white px-6 pt-3 pb-2 shrink-0 space-y-2.5">
@@ -2436,8 +2183,6 @@ const Inventory: React.FC<InventoryProps> = ({
       </footer>
 
       </div>
-        </React.Fragment>
-      )}
 
       {/* Modal de Inclusão Manual removido daqui pois estava duplicado */}
 
@@ -2514,66 +2259,6 @@ const Inventory: React.FC<InventoryProps> = ({
       {renderFichaPreview()}
 
       {/* Outros Modais do Sistema */}
-      {isNewLocationModalOpen && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
-          <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
-            <div className="bg-accent p-8 text-white text-center">
-              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
-                <MapPin size={40} className="text-white" />
-              </div>
-              <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Nova Localidade</h3>
-              <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Mapeamento de Endereço</p>
-            </div>
-            
-            <div className="p-8 space-y-6">
-              <div className="space-y-2">
-                <label className="text-[9px] font-black text-ink-muted uppercase tracking-widest ml-1">Nome do Local</label>
-                <input 
-                  type="text" 
-                  value={newLocationName} 
-                  onChange={(e) => setNewLocationName(e.target.value.toUpperCase())}
-                  list="locais-cadastrados"
-                  className="w-full bg-bg-main border border-border p-4 rounded-2xl text-sm font-bold text-ink outline-none focus:border-accent transition-all"
-                  placeholder="EX: SALA 101, ALMOXARIFADO..."
-                  autoFocus
-                />
-                {/* Inteligência de sugestão: reaproveitar endereços já existentes
-                    evita variações de escrita ("ADM" × "ADMINISTRACAO"). */}
-                <datalist id="locais-cadastrados">
-                  {dbLocations.map(loc => (
-                    <option key={loc.locKey} value={loc.displayName} />
-                  ))}
-                </datalist>
-                {dbLocations.length > 0 && (
-                  <p className="text-[9px] font-bold text-ink-muted uppercase tracking-wide ml-1">
-                    {dbLocations.length} endereço(s) já cadastrado(s) — toque para reaproveitar.
-                  </p>
-                )}
-              </div>
-
-              <div className="flex flex-col space-y-3">
-                <button 
-                  onClick={() => {
-                    onAddNewLocation(newLocationName);
-                    setNewLocationName('');
-                    setIsNewLocationModalOpen(false);
-                  }}
-                  disabled={!newLocationName.trim()}
-                  className="w-full py-4 bg-accent disabled:bg-ink-muted/20 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
-                >
-                  Confirmar Criação
-                </button>
-                <button 
-                  onClick={() => { setIsNewLocationModalOpen(false); setNewLocationName(''); }} 
-                  className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {qrModalAsset && createPortal(
         <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">

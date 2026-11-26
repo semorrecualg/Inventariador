@@ -6,23 +6,43 @@ import {
   Compass, 
   RefreshCw, 
   AlertTriangle,
-  Lock
+  Lock,
+  Plus,
+  Target,
+  WifiOff
 } from 'lucide-react';
 import BackButton from './BackButton';
+import { BufferIndicator } from './BufferIndicator';
 import { localDb } from '../services/localDbService';
+import { isAdminEmail } from '../utils/authUtils';
+import { DatabaseMode, UnitConfig, User } from '../types';
 
 interface AddressSelectorProps {
   selectedUnit: string;
   onSelect: (address: string) => void;
   onBack: () => void;
   isImportingBatch?: boolean;
+  /** Configuração da unidade: sem âncora GPS o inventário fica bloqueado. */
+  unitConfig?: UnitConfig | null;
+  /** Operador atual — o admin/master tem bypass da âncora GPS. */
+  user?: User | null;
+  databaseMode?: DatabaseMode;
+  /** Registo do local criado no ecrã (modal «Nova Localidade»). */
+  onAddNewLocation?: (newLocation: string) => void;
+  /** Abre o configurador da unidade para definir a âncora GPS. */
+  onConfigureAnchor?: () => void;
 }
 
 export const AddressSelector: React.FC<AddressSelectorProps> = ({
   selectedUnit,
   onSelect,
   onBack,
-  isImportingBatch = false
+  isImportingBatch = false,
+  unitConfig,
+  user = null,
+  databaseMode,
+  onAddNewLocation,
+  onConfigureAnchor
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -32,6 +52,8 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
   // lista vazia dizia «Nenhum Endereço Cadastrado» e escondia o erro de SQLite.
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState(false);
+  const [newLocationName, setNewLocationName] = useState('');
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -84,8 +106,26 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
     onSelect(address);
   };
 
+  const handleCreateLocation = () => {
+    const nome = newLocationName.trim();
+    if (!nome) return;
+    onAddNewLocation?.(nome);
+    setNewLocationName('');
+    setIsNewLocationModalOpen(false);
+    // O local novo entra na lista pelo mesmo caminho dos restantes (base local).
+    setReloadToken((token) => token + 1);
+  };
+
   // Espelha a coluna 'filial' como veio da base — sem uppercase.
   const purifiedUnitName = selectedUnit ? selectedUnit.trim() : 'UNIDADE NÃO ESPECIFICADA';
+
+  // Âncora GPS é obrigatória para abrir o inventário; ADMIN/MASTER mantêm o
+  // bypass que já existia na antiga fase de mapeamento.
+  // Só bloqueia quando o App diz explicitamente que a unidade não tem âncora
+  // (`null`); um chamador sem a prop não fica travado.
+  const isAnchorMissing = unitConfig === null;
+  const isAnchorBypass = isAdminEmail(user?.email);
+  const isBlockedByAnchor = isAnchorMissing && !isAnchorBypass;
 
   return (
     <div id="address-selector-container" className="flex flex-col h-[100dvh] bg-bg-main animate-fadeIn overflow-hidden">
@@ -130,7 +170,48 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
       </div>
 
       {/* Conteúdo com scroll de alta reatividade */}
-      <div id="address-list-content" className="flex-1 overflow-y-auto bg-bg-main relative p-4 space-y-3">
+      <div id="address-list-content" className="flex-1 overflow-y-auto bg-bg-main relative p-4 space-y-3 pb-28">
+        {databaseMode === DatabaseMode.INTERNAL && (
+          <div className="space-y-3">
+            <div className="bg-amber-50 border border-amber-100 p-3 rounded-2xl flex items-center space-x-3">
+              <WifiOff size={14} className="text-amber-600" />
+              <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">Modo Offline Ativo</p>
+            </div>
+            <BufferIndicator />
+          </div>
+        )}
+
+        {isAnchorMissing && (
+          <div id="address-gps-anchor" className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-start space-x-3">
+            <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black text-red-700 uppercase tracking-widest">GPS Âncora Pendente</p>
+              </div>
+              <p className="text-[9px] text-red-600 font-bold uppercase leading-tight mt-1">
+                Configuração de GPS obrigatória para liberar o inventário.
+              </p>
+              {isAnchorBypass ? (
+                <p className="text-[8px] text-red-500 font-bold uppercase leading-tight mt-2">
+                  Acesso de administrador: o inventário abre sem âncora.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <button
+                    id="address-configure-anchor-btn"
+                    onClick={onConfigureAnchor}
+                    disabled={!onConfigureAnchor}
+                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center space-x-2 shadow-lg shadow-red-500/20 disabled:opacity-50"
+                  >
+                    <Target size={12} />
+                    <span>Reconfigurar Âncora (MAPA)</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {isImportingBatch || isLoading ? (
           <div className="flex flex-col items-center justify-center h-full py-16 px-6 text-center">
             <RefreshCw size={36} className="text-accent animate-spin mb-4" />
@@ -176,7 +257,8 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
                   key={item.locKey || index}
                   id={`address-item-${index}`}
                   onClick={() => handleSelect(item.displayName)}
-                  className="w-full text-left bg-white border border-gray-100 hover:border-accent/30 rounded-2xl p-4 flex items-center justify-between transition-all duration-200 active:scale-[0.98] shadow-sm hover:shadow-md cursor-pointer group"
+                  disabled={isBlockedByAnchor}
+                  className={`w-full bg-white rounded-[16px] p-4 border border-gray-100 shadow-sm active:scale-[0.98] transition-all flex items-center justify-between text-left group ${isBlockedByAnchor ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                   <div className="flex items-center space-x-3.5 min-w-0 flex-1">
                     <div className="p-3 bg-slate-50 text-slate-500 rounded-xl group-hover:bg-accent/10 group-hover:text-accent transition-colors">
@@ -213,6 +295,76 @@ export const AddressSelector: React.FC<AddressSelectorProps> = ({
           </div>
         )}
       </div>
+
+      {/* FAB - Criar Nova Localidade */}
+      <div className="fixed bottom-20 left-0 right-0 px-6 flex justify-center pointer-events-none">
+        <button
+          id="address-new-location-fab"
+          disabled={isBlockedByAnchor || !onAddNewLocation}
+          onClick={() => setIsNewLocationModalOpen(true)}
+          className={`pointer-events-auto h-14 px-8 rounded-full flex items-center justify-center space-x-3 font-bold uppercase text-xs tracking-widest active:scale-95 transition-all shadow-xl shadow-blue-500/20 ${isBlockedByAnchor || !onAddNewLocation ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-[#2563EB] text-white'}`}
+        >
+          <Plus size={20} strokeWidth={3} />
+          <span>Nova Localidade</span>
+        </button>
+      </div>
+
+      {isNewLocationModalOpen && (
+        <div id="address-new-location-modal" className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-border shadow-2xl overflow-hidden relative animate-scaleIn">
+            <div className="bg-accent p-8 text-white text-center">
+              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
+                <MapPin size={40} className="text-white" />
+              </div>
+              <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Nova Localidade</h3>
+              <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-2">Mapeamento de Endereço</p>
+            </div>
+
+            <div className="p-8 space-y-6">
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-ink-muted uppercase tracking-widest ml-1">Nome do Local</label>
+                <input
+                  type="text"
+                  value={newLocationName}
+                  onChange={(e) => setNewLocationName(e.target.value.toUpperCase())}
+                  list="locais-cadastrados"
+                  className="w-full bg-bg-main border border-border p-4 rounded-2xl text-sm font-bold text-ink outline-none focus:border-accent transition-all"
+                  placeholder="EX: SALA 101, ALMOXARIFADO..."
+                  autoFocus
+                />
+                {/* Inteligência de sugestão: reaproveitar endereços já existentes
+                    evita variações de escrita ("ADM" × "ADMINISTRACAO"). */}
+                <datalist id="locais-cadastrados">
+                  {addresses.map(loc => (
+                    <option key={loc.locKey} value={loc.displayName} />
+                  ))}
+                </datalist>
+                {addresses.length > 0 && (
+                  <p className="text-[9px] font-bold text-ink-muted uppercase tracking-wide ml-1">
+                    {addresses.length} endereço(s) já cadastrado(s) — toque para reaproveitar.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-col space-y-3">
+                <button
+                  onClick={handleCreateLocation}
+                  disabled={!newLocationName.trim()}
+                  className="w-full py-4 bg-accent disabled:bg-ink-muted/20 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg shadow-accent/20 active:scale-95 transition-all"
+                >
+                  Confirmar Criação
+                </button>
+                <button
+                  onClick={() => { setIsNewLocationModalOpen(false); setNewLocationName(''); }}
+                  className="w-full py-4 bg-bg-main text-ink-muted rounded-xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Margem inferior de estabilização do dispositivo */}
       <div id="address-bottom-safety" className="pb-6 pt-2 px-4 bg-white border-t border-gray-100 flex items-center justify-between shrink-0">

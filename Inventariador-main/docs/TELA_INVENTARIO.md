@@ -12,12 +12,18 @@
 
 ---
 
-## 1. Duas fases da mesma tela
+## 1. Uma fase: execução
 
-| Fase | Quando | Conteúdo |
-|---|---|---|
-| **A · Seleção de localidade** | `isInventorying === false` | lista de endereços com progresso, busca de local, aviso de âncora GPS, banner offline, FAB "Nova Localidade" |
-| **B · Execução** | `isInventorying === true` | cabeçalho de contexto, progresso, filtros, busca por etiqueta, ajustes de campo, lista virtualizada, barra de ação (lote/encerramento) |
+A escolha da localidade acontece **antes** desta tela, no `AddressSelector`
+(`ADDRESS_SELECTION`, «Endereço Físico»), que é o **seletor único** da esteira:
+ao tocar num local ele grava `current_selected_address` + `inventoryLocation` e
+o `App.tsx` entra em `INVENTORY` já com o endereço escolhido. A antiga fase de
+seleção dentro do `Inventory` («Mapeamento») foi removida — repetia a mesma
+lista e a mesma consulta `getLocationsWithStats`.
+
+| Fase | Conteúdo |
+|---|---|
+| **Execução** | cabeçalho de contexto, progresso, filtros, busca por etiqueta, ajustes de campo, lista virtualizada, barra de ação (lote/encerramento) |
 
 O isolamento é triplo: a tela só recebe `assets` da unidade selecionada
 (`filteredAssetsByUnit`), aplica filtro de unidade (`belongsToUnit`, tolerante a
@@ -167,16 +173,12 @@ Regras de cálculo (`determineAssetTag`, na ordem):
   existia antes ("Vincular a esta Unidade" e a adoção automática no clique) foi
   removido, e com isso a tag `ADOTADO EXTERNO` deixou de ser produzida.
 
-### 2.4 Fase A (seleção de localidade)
+### 2.4 Seleção de localidade (fora desta tela)
 
-| Campo | Regra |
-|---|---|
-| Código e nome do local | primeiro token é código; restante é nome |
-| Itens conferidos / total | `getLocationsWithStats()` |
-| Percentual + barra | `checked / total` |
-| Busca de local | debounce 300 ms, filtra por prefixo do código |
-| Âncora GPS ausente | bloco vermelho com ação "Reconfigurar Âncora (MAPA)" |
-| Offline / buffer | `DatabaseMode.INTERNAL` → banner + `BufferIndicator` |
+A lista de locais com progresso, a busca por endereço (debounce de 300 ms), o
+aviso de âncora GPS, o banner de modo offline e o botão «Nova Localidade» vivem
+no `AddressSelector` (`docs/COMPONENTS_MAP.md` §3) e não são reimplementados
+nesta tela.
 
 ---
 
@@ -187,7 +189,7 @@ Regras de cálculo (`determineAssetTag`, na ordem):
 | # | Check | Comportamento |
 |---|---|---|
 | 1 | **Geofence / GPS** (`GPSComplianceGuard`) | valida lat/lng contra `UnitConfig.radius_meters` (Turf); fora do raio não abre a tela (perfis ADMIN/MASTER têm bypass) |
-| 2 | **Âncora GPS da unidade** (`unitConfig` nulo) | fase A bloqueia abertura de localidade e criação de local, exceto bypass `isAdminEmail` |
+| 2 | **Âncora GPS da unidade** (`unitConfig` nulo) | o `AddressSelector` bloqueia a abertura de localidade e a criação de local, exceto bypass `isAdminEmail`; o `GPSComplianceGuard` continua a validar a entrada em `INVENTORY` |
 | 3 | **Fila de sincronização** (`isSyncLocked` em `App.tsx`) | acima de `MAX_SYNC_QUEUE_SIZE` a tela é substituída por "Sistema Bloqueado" (exceto admin) |
 | 4 | **Motor Dexie** | enquanto `sqliteService` não inicializa → tela "RE-INICIALIZANDO SISTEMA GBR" |
 
@@ -253,7 +255,7 @@ apenas para calar o ESLint:
 | Campo de busca | `readOnly` e o teclado numérico nunca era renderizado → **impossível digitar** | input editável no **cabeçalho** (etiqueta e descrição), no lugar da barra grande acima da lista |
 | Teclado numérico | componente morto | removido (não servia para busca por descrição) |
 | Busca por foto (OCR) | botão chamava `ocrInputRef.click()` sem `<input type="file">` na árvore → inerte | **removida**: apontava para `/assets/ocr/*` inexistente e falhava em silêncio; a leitura fica com o leitor de câmera (código de barras/QR) |
-| Progresso da localidade | só na fase A | barra + `conferidos/total/%` no cabeçalho e na barra de ação |
+| Progresso da localidade | só no `AddressSelector` | barra + `conferidos/total/%` no cabeçalho e na barra de ação |
 | Seleção manual | estado inalcançável | botão no cabeçalho + barra "selecionados / Conferir / Cancelar" |
 | Finalizar lote | `onOpenSignature` sem botão | "Finalizar lote" na barra de ação |
 | Conferir resultado da busca | `handleConfirmSearchBatch` sem botão | botão quando há vários registros da mesma etiqueta |

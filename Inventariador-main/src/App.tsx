@@ -1041,10 +1041,6 @@ useEffect(() => {
     return localStorage.getItem('app_inventory_location') || null;
   });
 
-  const [isInventorying, setIsInventorying] = useState<boolean>(() => {
-    return localStorage.getItem('app_is_inventorying') === 'true';
-  });
-
   const [isReadOnlyDetail, setIsReadOnlyDetail] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [permissionsGranted, setPermissionsGranted] = useState(true);
@@ -4255,8 +4251,7 @@ useEffect(() => {
   }, [unsyncedAssetsCount, syncQueueLength, auditoriaPendenteCount]);
 
 
-  const { allLocations, uniqueCentrosDeCusto, locationsWithStats } = useMemo(() => {
-    const stats: Record<string, { total: number; checked: number; displayName: string }> = {};
+  const { allLocations, uniqueCentrosDeCusto } = useMemo(() => {
     const locationsSet = new Set<string>(manualLocations);
     const centrosDeCustoSet = new Set<string>();
     
@@ -4282,30 +4277,13 @@ useEffect(() => {
         continue;
       }
 
-      const conferido = isConferido(a);
       const effectiveLoc = effectiveAssetAddress(a);
       const locDisplay = String(effectiveLoc).trim().toUpperCase();
-      const locKey = normalizeKey(effectiveLoc);
       
       if (locDisplay) locationsSet.add(locDisplay);
-
-      const statusUpper = String(a.status || '').toUpperCase();
-      const isBaixado = statusUpper.includes('BAIXA') || !!a.databaixa;
-      
-      if (isBaixado && !conferido) continue;
-
-      if (!stats[locKey]) stats[locKey] = { total: 0, checked: 0, displayName: locDisplay };
-      
-      if (!isBaixado) stats[locKey].total++;
-      
-      if (conferido) {
-        stats[locKey].checked++;
-        if (isBaixado) stats[locKey].total++;
-      }
     }
 
     return { 
-      locationsWithStats: stats, 
       allLocations: Array.from(locationsSet).sort(),
       uniqueCentrosDeCusto: Array.from(centrosDeCustoSet).sort()
     };
@@ -4374,7 +4352,6 @@ useEffect(() => {
         localStorage.setItem('app_users', safeStringify(users));
         localStorage.setItem('app_selected_unit', selectedUnit || '');
         localStorage.setItem('app_inventory_location', inventoryLocation || '');
-        localStorage.setItem('app_is_inventorying', String(isInventorying));
         localStorage.setItem('app_consultation_filters', safeStringify(consultationFilters));
         localStorage.setItem('app_committed_consultation_filters', safeStringify(committedConsultationFilters));
         localStorage.setItem('app_dark_mode', String(inventory.darkMode || false));
@@ -4384,7 +4361,7 @@ useEffect(() => {
       } catch { logger.warn("Storage cap reached"); }
     }, 3000); // Reduzido de 10s para 3s para maior segurança de dados
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [inventory, history, user, users, selectedUnit, inventoryLocation, isInventorying, isDataLoaded, consultationFilters, committedConsultationFilters, databaseMode, isSyncing, lastSyncTime]);
+  }, [inventory, history, user, users, selectedUnit, inventoryLocation, isDataLoaded, consultationFilters, committedConsultationFilters, databaseMode, isSyncing, lastSyncTime]);
 
   const updateConfig = useCallback((updates: Partial<InventoryState>) => {
     setInventory(prev => ({
@@ -7938,12 +7915,7 @@ useEffect(() => {
                   onBulkUpdateAssets={bulkUpdateAssets}
                   onSelectAsset={handleSelectAsset}
                   selectedLocation={inventoryLocation}
-                  setSelectedLocation={setInventoryLocation}
-                  isInventorying={isInventorying}
-                  setIsInventorying={setIsInventorying}
                   selectedUnit={selectedUnit}
-                  onAddNewLocation={handleAddNewLocation}
-                  locationsWithStats={locationsWithStats}
                   scannerMode={inventory.scannerMode || ScannerMode.BARCODE}
                   searchMode={inventory.inventorySearchMode || InventorySearchMode.MANUAL}
                   onUpdateSearchMode={(mode) => setInventory(prev => ({ ...prev, inventorySearchMode: mode }))}
@@ -7959,14 +7931,10 @@ useEffect(() => {
                   onOpenSignature={() => pushScreen(AppScreen.SIGNATURE)}
                   inventorySearchValue={inventorySearchValue}
                   clearInventorySearchValue={() => setInventorySearchValue(null)}
-                  immersiveMode={inventory.immersiveMode || false}
-                  onToggleFullscreen={toggleFullscreen}
                   batterySaver={inventory.batterySaver || false}
-                  databaseMode={databaseMode}
                   onSyncFromCloud={syncFromCloud}
                   user={user}
                   currentCampaignId={inventory.currentCampaignId}
-                  unitConfig={currentUnitConfig}
                   qrCodeFields={inventory.qrCodeFields || ['ETIQUETA']}
                 />
               )}
@@ -8132,13 +8100,23 @@ useEffect(() => {
               selectedUnit={selectedUnit}
               onSelect={(addr) => {
                 setSelectedAddress(addr);
-                // O motor do inventário lê `selectedLocation` (prop) — sem isto a
-                // tela abria com o endereço anterior/nulo e a lista vinha vazia.
+                // O motor do inventário lê `selectedLocation` (prop). Esta é a
+                // ÚNICA seleção de endereço da esteira: entra em INVENTORY já
+                // com o local escolhido, sem segunda tela de mapeamento.
                 setInventoryLocation(addr);
+                // Modo imersivo: a escolha do local era o que pedia o ecrã cheio.
+                if (inventory.immersiveMode && !document.fullscreenElement) {
+                  toggleFullscreen();
+                }
                 pushScreen(AppScreen.INVENTORY);
               }}
               onBack={popScreen}
               isImportingBatch={isImportingBatchState}
+              unitConfig={currentUnitConfig}
+              user={user}
+              databaseMode={databaseMode}
+              onAddNewLocation={handleAddNewLocation}
+              onConfigureAnchor={() => pushScreen(AppScreen.UNIT_CONFIGURATOR, { unitName: selectedUnit })}
             />
           )}
           {screen === AppScreen.UNIT_CONFIGURATOR && user && (userHasPermission(user, 'configure_units') || isAdminUser(user) ? (
