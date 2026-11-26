@@ -33,6 +33,77 @@ const getInventoryKeys = (mode: DatabaseMode) => {
   };
 };
 
+/**
+ * §A.5 — o Dexie é o cache; o blob cifrado é a via de recuo.
+ * ============================================================================
+ * `saveInventory` gravava o inventário inteiro duas vezes: cifrado no
+ * localforage e nas tabelas do Dexie. A cópia cifrada custa o `encrypt` da base
+ * toda e duplica o espaço — e ninguém a lia enquanto o Dexie tivesse linhas.
+ * Passa a ser escrita só quando é a única cópia: falha do Dexie, espelho legado
+ * pedido por chave, ou um save que não escreve ativos no cache com o cache
+ * ainda vazio.
+ *
+ * As chaves de ambiente são lidas a cada chamada (nunca no import), para um
+ * aparelho poder recuar sem nova release — o que a agenda chama «release de
+ * fallback»:
+ *   - `gbr_read_from_dexie_first=0` volta a ler o blob cifrado primeiro no modo
+ *     oficial (a paridade com a versão antiga exige o espelho ligado);
+ *   - `gbr_legacy_assets_mirror=1` volta a gravar o blob a cada save.
+ */
+export const READ_FROM_DEXIE_FIRST_KEY = 'gbr_read_from_dexie_first';
+export const LEGACY_ASSETS_MIRROR_KEY = 'gbr_legacy_assets_mirror';
+
+const lerChaveBooleana = (chave: string, porOmissao: boolean): boolean => {
+  if (typeof localStorage === 'undefined') return porOmissao;
+  try {
+    const bruto = localStorage.getItem(chave);
+    if (bruto === null) return porOmissao;
+    return bruto !== '0' && bruto.trim().toLowerCase() !== 'false';
+  } catch {
+    return porOmissao;
+  }
+};
+
+export type PersistenceFlags = {
+  /** Ler o cache Dexie antes do blob cifrado (padrão no modo oficial). */
+  readFromDexieFirst: boolean;
+  /** Voltar a gravar o blob cifrado a cada save (coexistência/rollback). */
+  legacyAssetsMirror: boolean;
+};
+
+export const getPersistenceFlags = (): PersistenceFlags => ({
+  readFromDexieFirst: lerChaveBooleana(READ_FROM_DEXIE_FIRST_KEY, true),
+  legacyAssetsMirror: lerChaveBooleana(LEGACY_ASSETS_MIRROR_KEY, false)
+});
+
+/** Linhas vivas do cache Dexie — a fonte de leitura a partir da A.5. */
+const lerAtivosDoCacheDexie = async (): Promise<Asset[]> => {
+  try {
+    return ((await sqliteService.getAllAssets()) as unknown as Asset[]) || [];
+  } catch (err) {
+    logger.warn('>>> [Persistence] Cache Dexie indisponível para leitura:', err);
+    return [];
+  }
+};
+
+/**
+ * Escopa o cache ao contrato da sessão. Sem contrato identificado devolve vazio:
+ * numa base oficial o cache guarda linhas de vários contratos e o arranque não
+ * pode mostrar as de outro.
+ */
+const escoparPorContratoDaSessao = (assets: Asset[]): Asset[] => {
+  const tenant = (readSessionTenantId() || readLocalTenantId() || '').trim().toUpperCase();
+  if (!tenant) return [];
+  return assets.filter(a => String(a.tenantid ?? '').trim().toUpperCase() === tenant);
+};
+
+/** Blob cifrado legado: `null` quando não existe (distinto de «existe e vazio»). */
+const lerAtivosDoBlobCifrado = async (chave: string): Promise<Asset[] | null> => {
+  const guardado = await localforage.getItem<Uint8Array | string>(chave);
+  if (!guardado) return null;
+  return ((await encryption.decrypt(guardado)) as Asset[]) || [];
+};
+
 // Configure localforage
 localforage.config({
   name: 'GBR_Inventory_App',
@@ -45,23 +116,36 @@ localforage.config({
 export const backupInventory = async (mode: DatabaseMode, customName?: string): Promise<boolean> => {
   try {
     const keys = getInventoryKeys(mode);
-    const encryptedAssets = await localforage.getItem<Uint8Array | string>(keys.assets);
     const encryptedConfig = await localforage.getItem<Uint8Array | string>(keys.config);
 
-    if (!encryptedAssets && !encryptedConfig) return false;
-
-    let assets: Asset[] = [];
-    let config: Record<string, unknown> = {};
-
-    try {
-      assets = encryptedAssets ? await encryption.decrypt(encryptedAssets) as Asset[] : [];
-      config = encryptedConfig ? await encryption.decrypt(encryptedConfig) as Record<string, unknown> : {};
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
-        logger.error('Não é possível gerar backup: Dados locais corrompidos ou chave inválida.');
-        return false;
+    // §A.5: o cache Dexie é a fonte. O blob cifrado é o recuo das instalações
+    // antigas (e dos aparelhos onde a escrita no Dexie falhou).
+    let assets: Asset[] = await lerAtivosDoCacheDexie();
+    if (assets.length === 0) {
+      try {
+        assets = (await lerAtivosDoBlobCifrado(keys.assets)) || [];
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
+          logger.error('Não é possível gerar backup: Dados locais corrompidos ou chave inválida.');
+          return false;
+        }
+        throw error;
       }
-      throw error;
+    }
+
+    if (assets.length === 0 && !encryptedConfig) return false;
+
+    let config: Record<string, unknown> = {};
+    if (encryptedConfig) {
+      try {
+        config = await encryption.decrypt(encryptedConfig) as Record<string, unknown>;
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
+          logger.error('Não é possível gerar backup: Dados locais corrompidos ou chave inválida.');
+          return false;
+        }
+        throw error;
+      }
     }
 
     const backupData = {
@@ -118,14 +202,24 @@ export const restoreInventory = async (file: File, mode: DatabaseMode): Promise<
           databaseMode: mode
         };
 
-        // Salva no localforage usando as chaves do modo atual
         const keys = getInventoryKeys(mode);
-        const [encryptedConfig, encryptedAssets] = await Promise.all([
-          encryption.encrypt(data.config || {}),
-          encryption.encrypt(data.assets)
-        ]);
 
+        // §A.5: o cache Dexie é a fonte de leitura — o restauro tem de gravar
+        // lá, ou o arranque seguinte voltava à base antiga (que o cache ainda
+        // tem) e a restauração desaparecia.
+        try {
+          await sqliteService.saveInventoryConfig((data.config || {}) as Record<string, unknown>);
+          if (Array.isArray(data.assets) && data.assets.length > 0) {
+            await sqliteService.bulkInsertAssets(data.assets);
+          }
+        } catch (dexieErr) {
+          logger.warn('>>> [Persistence] Restauro não gravou no cache Dexie; fica o blob cifrado:', dexieErr);
+        }
+
+        // O blob cifrado mantém-se como cópia de recuo do restauro.
+        const encryptedConfig = await encryption.encrypt(data.config || {});
         await localforage.setItem(keys.config, encryptedConfig);
+        const encryptedAssets = await encryption.encrypt(data.assets);
         await localforage.setItem(keys.assets, encryptedAssets);
 
         resolve(newState);
@@ -496,10 +590,19 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
     
     // CRITICAL: Se houver ativos sujos (dirtyAssets) ou se for um salvamento completo (sem dirtyAssets especificados),
     // persistimos os ativos na tabela SQL física de alta performance.
+    // §A.5: esta é a escrita canônica dos ativos — o cache Dexie é a única
+    // cópia de trabalho do inventário. O espelho em lotes que vinha a seguir
+    // regravava `local_assets` com as mesmas linhas (escrita dupla no Dexie).
     const assetsToSave = dirtyAssets || assets;
+    let falhouNoDexie = false;
     if (assetsToSave.length > 0 && !skipSqlAssetsInsert) {
-      logger.info(`>>> [Persistence] Inserindo ${assetsToSave.length} ativos no SQLite físico via buffer...`);
-      await sqliteService.bulkInsertAssets(assetsToSave);
+      logger.info(`>>> [Persistence] Inserindo ${assetsToSave.length} ativos no cache Dexie...`);
+      try {
+        await sqliteService.bulkInsertAssets(assetsToSave);
+      } catch (dexieErr) {
+        falhouNoDexie = true;
+        logger.warn('>>> [Persistence] Falha ao gravar no cache Dexie: acionando o blob cifrado:', dexieErr);
+      }
     }
     
     // Atualiza o status interno do banco físico para ACTIVE se houver ativos no banco
@@ -508,36 +611,41 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
       await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
     }
 
-    logger.info(`>>> [Persistence] Criptografando e gravando cache IndexedDB...`);
-    // Criptografamos os dados para o cache do Navegador (Legado/Fallback)
-    const [encryptedConfig, encryptedAssets] = await Promise.all([
-      encryption.encrypt(config),
-      encryption.encrypt(assets)
-    ]);
+    const flags = getPersistenceFlags();
+    const gravouAtivosNoCache = !skipSqlAssetsInsert && assetsToSave.length > 0 && !falhouNoDexie;
+    // O blob cifrado só entra quando é a única cópia: a escrita no Dexie falhou,
+    // o espelho legado foi pedido por chave, ou este save não escreve ativos no
+    // cache e o cache ainda está vazio (nos pulls o download grava-o antes).
+    let precisaBlobCifrado = falhouNoDexie || flags.legacyAssetsMirror;
+    if (!precisaBlobCifrado && !gravouAtivosNoCache && assets.length > 0) {
+      precisaBlobCifrado = assetCount === 0;
+    }
 
-    await Promise.all([
-      localforage.setItem(keys.config, encryptedConfig),
-      localforage.setItem(keys.assets, encryptedAssets)
-    ]);
+    logger.info('>>> [Persistence] Criptografando e gravando a configuração no cache IndexedDB...');
+    const encryptedConfig = await encryption.encrypt(config);
+    await localforage.setItem(keys.config, encryptedConfig);
+
+    if (precisaBlobCifrado) {
+      try {
+        const encryptedAssets = await encryption.encrypt(assets);
+        await localforage.setItem(keys.assets, encryptedAssets);
+        const motivo = falhouNoDexie
+          ? 'Dexie falhou'
+          : flags.legacyAssetsMirror
+            ? 'espelho legado ligado'
+            : 'cache vazio';
+        logger.warn(`>>> [Persistence] Blob cifrado gravado como recuo (${motivo}).`);
+      } catch (blobErr) {
+        // Sem o Dexie e sem o blob não ficou nada gravado: o erro é real.
+        if (falhouNoDexie) throw blobErr;
+        logger.warn('>>> [Persistence] Falha ao gravar o espelho cifrado:', blobErr);
+      }
+    }
 
     // §A.4: o checksum entra depois da gravação, em ocioso. O save deixa de
     // pagar o SHA-256 sobre a base inteira; quem precisa do veredicto pede-o
     // ao diagnóstico (`checkInventoryIntegrity`).
     scheduleIntegrityFingerprint(keys, assets);
-
-    // Espelhamento Dexie para compatibilidade em lotes para não travar a thread
-    try {
-      if (mode === DatabaseMode.INTERNAL && !skipSqlAssetsInsert) {
-        const BATCH_SIZE = 1000;
-        for (let i = 0; i < assets.length; i += BATCH_SIZE) {
-          const chunk = assets.slice(i, i + BATCH_SIZE);
-          await localDb.assets.bulkPut(chunk);
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
-      }
-    } catch (dexieErr) {
-      logger.warn('>>> [Persistence] Falha no espelhamento Dexie:', dexieErr);
-    }
 
     logger.info('>>> [Persistence] Gravado com sucesso no IndexedDB.');
 
@@ -570,18 +678,40 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
   }
 };
 
+/**
+ * Failsafe de decifra: sem chave válida não há como ler nada — os caches locais
+ * saem e a aplicação recarrega para re-sincronizar (comportamento herdado).
+ */
+const descartarCachesIlegiveis = async (tipo: 'config' | 'ativos'): Promise<null> => {
+  logger.error(`>>> [Criptografia/Failsafe] Chave inválida ou dados corrompidos na decriptografia de ${tipo}. Limpando cache e forçando re-sync...`);
+  try {
+    localStorage.clear();
+    sessionStorage.clear();
+    await localforage.clear();
+  } catch (clearErr) {
+    logger.error('Erro ao limpar localforage/storages:', clearErr);
+  }
+  if (typeof window !== 'undefined') {
+    window.location.reload();
+  }
+  return null;
+};
+
 export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState | null> => {
   try {
     const keys = getInventoryKeys(mode);
-    
-    // PRIORIDADE 0: Carregamento do SQLite Físico (MODO INTERNO)
-    // No modo mobile puro, o arquivo .db local é o ÚNICO ponto da verdade.
-    let sqlAssets: Asset[] = [];
+    const flags = getPersistenceFlags();
+
+    // PRIORIDADE 0: o cache Dexie. No modo interno a base do aparelho é a
+    // verdade; no modo oficial o mesmo cache serve a sessão, escopado ao
+    // contrato — é a inversão de prioridade da A.5: o blob cifrado deixa de ser
+    // o primeiro a ser lido.
+    let cacheAssets: Asset[] = [];
     let sqlConfig: Partial<InventoryState> | null = null;
 
     if (mode === DatabaseMode.INTERNAL) {
       try {
-        logger.info('>>> [Persistence] Tentando carregar dados do SQLite físico...');
+        logger.info('>>> [Persistence] Tentando carregar dados do cache Dexie...');
         
         // Antes de carregar, verificamos o status do arquivo
         const fileStatus = await sqliteService.getFileStatus();
@@ -601,82 +731,84 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
           } as unknown as InventoryState;
         }
 
-        // Buscamos ativos e config em paralelo do SQLite (Pode ser o físico ou o cache do Service)
+        // Buscamos ativos e config em paralelo do cache (pode ser o físico do
+        // aparelho ou o cache do Service)
         const [assets, config] = await Promise.all([
           sqliteService.getAllAssets(),
           sqliteService.getInventoryConfig()
         ]);
         
-        sqlAssets = assets as unknown as Asset[] || [];
+        cacheAssets = assets as unknown as Asset[] || [];
         sqlConfig = config as Partial<InventoryState>;
         
-        if (sqlAssets.length > 0) {
-          logger.info(`>>> [Persistence] SUCESSO: ${sqlAssets.length} ativos carregados do ${sqliteService.getStorageSource() === 'CACHE' ? 'Cache (Fallback)' : 'SQLite físico'}.`);
+        if (cacheAssets.length > 0) {
+          logger.info(`>>> [Persistence] SUCESSO: ${cacheAssets.length} ativos carregados do ${sqliteService.getStorageSource() === 'CACHE' ? 'Cache (Fallback)' : 'SQLite físico'}.`);
         } else {
-          logger.warn('>>> [Persistence] SQLite físico/cache vazio ou sem ativos.');
+          logger.warn('>>> [Persistence] Cache Dexie vazio ou sem ativos.');
         }
       } catch (sqlErr) {
-        logger.error('>>> [Persistence] Erro crítico ao ler SQLite físico:', sqlErr);
+        logger.error('>>> [Persistence] Erro crítico ao ler o cache Dexie:', sqlErr);
+      }
+    } else if (flags.readFromDexieFirst) {
+      // §A.5: no modo oficial a prioridade inverte-se também — o cache serve a
+      // sessão, escopado ao contrato para não mostrar linhas de outro.
+      const cacheDoContrato = escoparPorContratoDaSessao(await lerAtivosDoCacheDexie());
+      if (cacheDoContrato.length > 0) {
+        cacheAssets = cacheDoContrato;
+        logger.info(`>>> [Persistence] ${cacheAssets.length} ativos carregados do cache Dexie (contrato da sessão).`);
       }
     }
 
-    // Carregamento de Fallback (Cache do Navegador)
-    const [encryptedAssets, encryptedConfig] = await Promise.all([
-      localforage.getItem<Uint8Array | string>(keys.assets),
-      localforage.getItem<Uint8Array | string>(keys.config)
-    ]);
+    // Recuo das versões anteriores (e dos aparelhos onde o Dexie falhou): o
+    // blob cifrado. Só é lido quando o cache não tem nada — ler uma base
+    // inteira para a deitar fora era o custo do arranque antigo.
+    const encryptedConfig = await localforage.getItem<Uint8Array | string>(keys.config);
 
-    if (!encryptedConfig && !encryptedAssets && sqlAssets.length === 0) {
-      return null;
+    let ativosLegados: Asset[] | null = null;
+    let legadoLido = false;
+    const lerAtivosLegados = async (): Promise<Asset[] | null> => {
+      if (!legadoLido) {
+        ativosLegados = await lerAtivosDoBlobCifrado(keys.assets);
+        legadoLido = true;
+      }
+      return ativosLegados;
+    };
+
+    if (!encryptedConfig && cacheAssets.length === 0) {
+      try {
+        if ((await lerAtivosLegados()) === null) return null;
+      } catch (err) {
+        logger.warn('>>> [Persistence] Falha ao decriptografar ativos do cache:', err);
+        return await descartarCachesIlegiveis('ativos');
+      }
     }
 
     // Decriptografamos as configurações
     let config: Record<string, unknown> = sqlConfig || {};
     
-    // Se não veio do SQL, tenta o cache criptografado
+    // Se não veio do cache, tenta o blob cifrado
     if (Object.keys(config).length === 0 && encryptedConfig) {
       try {
         config = await encryption.decrypt(encryptedConfig) as Record<string, unknown>;
         logger.info('>>> [Persistence] Configuração carregada do cache IndexedDB.');
       } catch (err) {
         logger.warn('>>> [Persistence] Falha ao decriptografar config do cache:', err);
-        logger.error('>>> [Criptografia/Failsafe] Chave inválida ou dados corrompidos na decriptografia de config. Limpando cache e forçando re-sync...');
-        try {
-          localStorage.clear();
-          sessionStorage.clear();
-          await localforage.clear();
-        } catch (clearErr) {
-          logger.error('Erro ao limpar localforage/storages:', clearErr);
-        }
-        if (typeof window !== 'undefined') {
-          window.location.reload();
-        }
-        return null;
+        return await descartarCachesIlegiveis('config');
       }
     }
 
-    // Decriptografamos ativos apenas se não viermos do SQL ou se o SQL estiver vazio
-    let finalAssets = sqlAssets;
+    // §A.5: o cache Dexie é a fonte; o blob cifrado é só o recuo.
+    let finalAssets = cacheAssets;
     
-    // SOBERANIA: Se não houver ativos no SQL físico e houver cache, carregamos o cache.
-    if (finalAssets.length === 0 && encryptedAssets) {
+    if (finalAssets.length === 0) {
       try {
-        finalAssets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
-        logger.info(`>>> [Persistence] ${finalAssets.length} ativos carregados do cache IndexedDB (Fallback).`);
+        finalAssets = (await lerAtivosLegados()) ?? [];
+        if (finalAssets.length > 0) {
+          logger.info(`>>> [Persistence] ${finalAssets.length} ativos carregados do cache IndexedDB (Fallback).`);
+        }
       } catch (err) {
         logger.warn('>>> [Persistence] Falha ao decriptografar ativos do cache:', err);
-        logger.error('>>> [Criptografia/Failsafe] Chave inválida ou dados corrompidos na decriptografia de ativos. Limpando cache e forçando re-sync...');
-        try {
-          localStorage.clear();
-          sessionStorage.clear();
-          await localforage.clear();
-        } catch (clearErr) {
-          logger.error('Erro ao limpar localforage/storages:', clearErr);
-        }
-        if (typeof window !== 'undefined') {
-          window.location.reload();
-        }
-        return null;
+        return await descartarCachesIlegiveis('ativos');
       }
     }
 
@@ -714,20 +846,23 @@ export const clearMultipleInventories = async (companiesToClear: string[], mode:
     if (companiesToClear.length === 0) return;
     
     const keys = getInventoryKeys(mode);
-    const encryptedAssets = await localforage.getItem<Uint8Array | string>(keys.assets);
-    if (!encryptedAssets) return;
+    const blobGuardado = await localforage.getItem<Uint8Array | string>(keys.assets);
 
-    let assets: Asset[] = [];
-    try {
-      assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
-        logger.warn('Falha ao decriptografar para limpeza múltipla. Limpando tudo...');
-        await sqliteService.deleteLocalAssetsByUnits(companiesToClear);
-        await localforage.removeItem(keys.assets);
-        return;
+    // §A.5: o save já não escreve o blob — a fonte é o cache Dexie. O blob é o
+    // recuo das instalações antigas e, quando existe, é reescrito como antes.
+    let assets: Asset[] = await lerAtivosDoCacheDexie();
+    if (assets.length === 0 && blobGuardado) {
+      try {
+        assets = await encryption.decrypt(blobGuardado) as Asset[] || [];
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
+          logger.warn('Falha ao decriptografar para limpeza múltipla. Limpando tudo...');
+          await sqliteService.deleteLocalAssetsByUnits(companiesToClear);
+          await localforage.removeItem(keys.assets);
+          return;
+        }
+        throw error;
       }
-      throw error;
     }
     const normalizedCompanies = companiesToClear.map(c => c.toUpperCase().trim());
     const pertenceAsUnidades = (a: Asset) =>
@@ -741,8 +876,10 @@ export const clearMultipleInventories = async (companiesToClear: string[], mode:
     await sqliteService.deleteLocalAssetsByUnits(companiesToClear);
     descartarContingenciaDosRemovidos(removedAssets);
     
-    const encryptedRemaining = await encryption.encrypt(remainingAssets);
-    await localforage.setItem(keys.assets, encryptedRemaining);
+    if (blobGuardado) {
+      const encryptedRemaining = await encryption.encrypt(remainingAssets);
+      await localforage.setItem(keys.assets, encryptedRemaining);
+    }
   } catch (error) {
     logger.error('Error clearing multiple inventories from IndexedDB:', error);
     throw error;
@@ -753,20 +890,23 @@ export const clearInventory = async (mode: DatabaseMode, companyToClear?: string
   try {
     const keys = getInventoryKeys(mode);
     if (companyToClear) {
-      const encryptedAssets = await localforage.getItem<Uint8Array | string>(keys.assets);
-      if (!encryptedAssets) return;
+      const blobGuardado = await localforage.getItem<Uint8Array | string>(keys.assets);
 
-      let assets: Asset[] = [];
-      try {
-        assets = await encryption.decrypt(encryptedAssets) as Asset[] || [];
-      } catch (error: unknown) {
-        if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
-          logger.warn('Falha ao decriptografar para limpeza parcial. Limpando tudo...');
-          await sqliteService.deleteLocalAssetsByUnits([companyToClear]);
-          await localforage.removeItem(keys.assets);
-          return;
+      // §A.5: mesma regra da limpeza múltipla — cache Dexie primeiro, blob como
+      // recuo (e reescrito só quando existe).
+      let assets: Asset[] = await lerAtivosDoCacheDexie();
+      if (assets.length === 0 && blobGuardado) {
+        try {
+          assets = await encryption.decrypt(blobGuardado) as Asset[] || [];
+        } catch (error: unknown) {
+          if (error instanceof Error && error.message === 'DECRYPTION_FAILED') {
+            logger.warn('Falha ao decriptografar para limpeza parcial. Limpando tudo...');
+            await sqliteService.deleteLocalAssetsByUnits([companyToClear]);
+            await localforage.removeItem(keys.assets);
+            return;
+          }
+          throw error;
         }
-        throw error;
       }
       const normalizedCompany = companyToClear.toUpperCase().trim();
       const pertenceAUnidade = (a: Asset) => (a.filial || a._unitid || '').toUpperCase().trim() === normalizedCompany;
@@ -778,8 +918,10 @@ export const clearInventory = async (mode: DatabaseMode, companyToClear?: string
       await sqliteService.deleteLocalAssetsByUnits([companyToClear]);
       descartarContingenciaDosRemovidos(removedAssets);
       
-      const encryptedRemaining = await encryption.encrypt(remainingAssets);
-      await localforage.setItem(keys.assets, encryptedRemaining);
+      if (blobGuardado) {
+        const encryptedRemaining = await encryption.encrypt(remainingAssets);
+        await localforage.setItem(keys.assets, encryptedRemaining);
+      }
     } else {
       await Promise.all([
         localforage.removeItem(keys.assets),

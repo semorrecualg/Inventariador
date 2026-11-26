@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — fim da escrita dupla do inventário (Dexie como cache, blob como recuo)
+
+- **O que era:** cada `saveInventory` cifrava o inventário inteiro e gravava-o
+  no localforage **e** nas tabelas do Dexie — e, no modo interno, as mesmas
+  linhas ainda voltavam a `local_assets` pelo espelho em lotes. Três escritas
+  do mesmo conjunto, com o custo do `encrypt` da base toda em cada autosave.
+- **Agora:** o Dexie é o cache e a fonte de leitura. O blob cifrado dos ativos
+  só é escrito quando é a única cópia: falha da escrita no Dexie, chave
+  `gbr_legacy_assets_mirror=1`, ou um save que não escreve ativos no cache e o
+  cache ainda vazio (nos pulls o download grava-os antes). A config (pequena)
+  continua no cache cifrado. O espelho em lotes que regravava `local_assets`
+  saiu.
+- **Leitura invertida:** o arranque lê o cache primeiro — no modo oficial
+  escopado ao contrato da sessão, para não mostrar linhas de outro contrato — e
+  o blob cifrado passa a ser o recuo das instalações antigas.
+- **Recuo sem nova release:** `gbr_read_from_dexie_first=0` devolve a leitura
+  antiga pelo blob e `gbr_legacy_assets_mirror=1` volta a gravar o espelho
+  cifrado a cada save (é a «release de fallback» da agenda).
+- **Restauro:** `restoreInventory` passa a gravar também no cache Dexie; sem
+  isso o arranque seguinte (que lê o cache) voltava à base antiga.
+- **Backup e limpeza:** `backupInventory`, `clearInventory` e
+  `clearMultipleInventories` usam o cache quando o blob já não existe (antes,
+  sem blob, o backup falhava e a limpeza parcial não fazia nada).
+- **Testes:** `dexieCacheUnico` (11).
+
 ### Alterado — checksum de integridade fora do caminho crítico
 
 - **O que era:** `saveInventory` calculava o SHA-256 da base inteira antes de

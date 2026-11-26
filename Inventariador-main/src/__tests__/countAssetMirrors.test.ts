@@ -139,9 +139,11 @@ describe('countAssetMirrors (F0)', () => {
 
     await expect(db.SYSTEM_CONTEXT.get(TENANT_CASE_MARKER)).resolves.toBeUndefined();
 
-    // Base restaurada: a linha em minúsculas volta a ser contada pela varredura.
+    // Base restaurada: o restauro grava a linha no cache (§A.5, tenantid
+    // canónico) e a varredura sem índice volta a contar também o legado em
+    // minúsculas — as duas linhas, sem o marcador a esconder nenhuma.
     await db.local_assets.bulkPut([row('cicopal', 'b')]);
-    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 1 });
+    await expect(sqliteService.countAssetMirrors('CICOPAL')).resolves.toMatchObject({ local_assets: 2 });
   });
 
   it('verifyAndRestorePhysicalBackup (caminho real) invalida o marcador e conta o legado', async () => {
