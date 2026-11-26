@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — guarda contra o regresso do espelho local `assets`
+
+- `npm run verify:assets-removida` (passo próprio no CI) falha se o código
+  voltar a usar `db.assets`, `.table('assets')` ou `mirrors.assets`, se o
+  schema declarar a tabela, se `MirrorCounts` voltar a contar três espelhos ou
+  se os docs voltarem a apresentar `assets` como tabela local («três
+  espelhos», linha de tabela, `db.assets`).
+- Isenções explícitas: `CHANGELOG.md`, os docs de decisão/análise anteriores à
+  A.3a.4, linhas de remoção («saiu na v11»), `public.assets`/`table_name` da
+  auditoria, a tabela de versões do `docs/SCHEMA_BASELINE.md` e o upgrade v5.
+  `localDb.assets` continua válido: é fachada de escrita para `ativos` +
+  `local_assets`, não a store removida.
+- Prova da própria guarda: `src/__tests__/verificaAssetsRemovida.test.ts`
+  (detecta as regressões e aceita os históricos).
+
 ### Documentado — fim do terceiro espelho local e filtro de auditoria da nuvem
 
 - `docs/SPEC.md`, `docs/ARCHITECTURE.md`, `docs/MIGRACAO_HIBRIDA.md`,

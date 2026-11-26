@@ -10,6 +10,9 @@
 > `src/constants/schema.ts`). A conformidade é garantida por contrato automatizado:
 > `src/__tests__/schemaBaseline.test.ts` — qualquer mudança não intencional no schema
 > **quebra o teste** e exige decisão explícita (documentar aqui + nova `version(n)`).
+> O regresso **textual** (acesso directo à store removida, contagem com três entradas
+> e apresentação dela como tabela local) é travado por `npm run verify:assets-removida`
+> no CI, que isenta os docs históricos.
 
 ---
 

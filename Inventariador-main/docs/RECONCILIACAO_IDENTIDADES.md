@@ -205,7 +205,7 @@ lixo de importação antiga.**
 **Não fazer:**
 
 - Não renumerar `primarykey` nem introduzir identificador substituto.
-- Não apagar/limpar `assets`, `ativos` ou `local_assets` para «começar limpo».
+- Não apagar/limpar `ativos` ou `local_assets` para «começar limpo».
 - Não correr `delete`/`update` a partir deste documento: todas as consultas aqui
   são `select`.
 
