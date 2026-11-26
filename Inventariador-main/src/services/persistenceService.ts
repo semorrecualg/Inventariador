@@ -6,7 +6,7 @@ import { encryption } from './securityService';
 import { localDb, backupDatabaseToPhysicalStorage } from './localDbService';
 import { sqliteService, db, DexieAsset, invalidateTenantCaseMarker } from './sqliteService';
 import { generateChecksum } from './utils';
-import { recordPerf, startPerf } from '../utils/perfMetrics';
+import { recordPerf, scheduleIdle, startPerf } from '../utils/perfMetrics';
 import { normalizeAssetContract } from '../utils/schema';
 import { FileSystemStorageService } from './FileSystemStorageService';
 import { logger } from '../utils/logger';
@@ -404,6 +404,71 @@ const schedulePhysicalMirror = (): void => {
   }, PHYSICAL_MIRROR_DELAY_MS);
 };
 
+// --- Checksum de integridade fora do caminho crítico (§A.4) ---
+// O hash acompanha o último salvamento, mas é calculado **depois** de ele estar
+// gravado: um SHA-256 sobre a base inteira dentro do `saveInventory` atrasava o
+// save sem que ninguém esperasse pelo resultado. A chave é separada da config
+// cifrada para não obrigar a recifrá-la só para guardar 64 caracteres.
+const integrityKey = (keys: ReturnType<typeof getInventoryKeys>): string => `${keys.config}_integrity`;
+
+let integrityGeneration = 0;
+let integrityInFlight: Promise<void> | null = null;
+
+const scheduleIntegrityFingerprint = (
+  keys: ReturnType<typeof getInventoryKeys>,
+  assets: Asset[]
+): void => {
+  const generation = ++integrityGeneration;
+  // Cópia rasa: o hash cobre o conjunto entregue a este save, mesmo que a UI
+  // altere/substitua o array antes de a thread ficar ociosa.
+  const snapshot = assets.slice();
+  const storageKey = integrityKey(keys);
+  integrityInFlight = new Promise<void>((resolve) => {
+    scheduleIdle(() => {
+      void generateChecksum(snapshot)
+        .then(async (hash) => {
+          // Um save posterior já mandou: o hash antigo não pode ocupar o lugar
+          // do mais recente.
+          if (generation !== integrityGeneration) return;
+          await localforage.setItem(storageKey, hash);
+        })
+        .catch((err) => {
+          logger.warn('>>> [Integrity] Falha ao gravar o checksum pós-save:', err);
+        })
+        .finally(resolve);
+    });
+  });
+};
+
+/** Espera pelo checksum agendado — usado nos testes e antes de encerrar. */
+export const flushIntegrityFingerprint = async (): Promise<void> => {
+  if (integrityInFlight) await integrityInFlight;
+};
+
+export type InventoryIntegrityVerdict =
+  | { status: 'confere'; hash: string; total: number }
+  | { status: 'divergente'; gravado: string; atual: string; total: number }
+  | { status: 'sem-registo'; total: number }
+  | { status: 'erro'; total: number };
+
+/**
+ * Veredicto de integridade **sob pedido**: compara o hash do último save com o
+ * conjunto atual. Corre no diagnóstico, nunca no arranque.
+ */
+export const checkInventoryIntegrity = async (
+  mode: DatabaseMode,
+  assets: Asset[]
+): Promise<InventoryIntegrityVerdict> => {
+  const total = assets.length;
+  const gravado = await localforage.getItem<string>(integrityKey(getInventoryKeys(mode)));
+  if (typeof gravado !== 'string' || gravado.length === 0) return { status: 'sem-registo', total };
+  const atual = await generateChecksum(assets);
+  if (atual === 'checksum_error') return { status: 'erro', total };
+  return atual === gravado
+    ? { status: 'confere', hash: atual, total }
+    : { status: 'divergente', gravado, atual, total };
+};
+
 export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[], forceCloudSync = false, skipSqlAssetsInsert = false): Promise<void> => {
   // §8 do plano de sincronização: o tempo deste save, com o tamanho do
   // inventário no `count` — é o que torna medíveis «1 ativo» e «300 ativos».
@@ -443,10 +508,6 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
       await sqliteService.setSystemStatus(DatabaseStatus.ACTIVE);
     }
 
-    // 1.2 Cálculo de Checksum
-    const integrityHash = await generateChecksum(assets);
-    config._integrity_hash = integrityHash;
-
     logger.info(`>>> [Persistence] Criptografando e gravando cache IndexedDB...`);
     // Criptografamos os dados para o cache do Navegador (Legado/Fallback)
     const [encryptedConfig, encryptedAssets] = await Promise.all([
@@ -458,6 +519,11 @@ export const saveInventory = async (data: InventoryState, dirtyAssets?: Asset[],
       localforage.setItem(keys.config, encryptedConfig),
       localforage.setItem(keys.assets, encryptedAssets)
     ]);
+
+    // §A.4: o checksum entra depois da gravação, em ocioso. O save deixa de
+    // pagar o SHA-256 sobre a base inteira; quem precisa do veredicto pede-o
+    // ao diagnóstico (`checkInventoryIntegrity`).
+    scheduleIntegrityFingerprint(keys, assets);
 
     // Espelhamento Dexie para compatibilidade em lotes para não travar a thread
     try {
@@ -617,14 +683,9 @@ export const loadInventory = async (mode: DatabaseMode): Promise<InventoryState 
     // Normaliza os ativos de acordo com o contrato global unificado v2.6 (tenantid e filial)
     const normalizedAssets = finalAssets.map(a => normalizeAssetContract(a));
 
-    // 1.2 Validação de Integridade (Checksum) - Apenas para base carregada do cache
-    if (normalizedAssets.length > 0 && (config as Record<string, unknown>)._integrity_hash) {
-      const storedHash = (config as Record<string, unknown>)._integrity_hash as string;
-      const currentHash = await generateChecksum(normalizedAssets);
-      if (storedHash !== currentHash) {
-        logger.warn('>>> [Integrity] Checksum divergente (Normal se houve alterações incrementais fora do saveFull).');
-      }
-    }
+    // §A.4: a integridade deixou de ser recalculada no arranque. Re-hashear a
+    // base inteira a cada carga só produzia um `logger.warn`; o veredicto é
+    // agora pedido ao diagnóstico (`checkInventoryIntegrity`).
 
     // SEGURANÇA: Garante que a lista de empresas está populada se houver ativos mas a lista no cache estiver vazia
     if (normalizedAssets.length > 0) {

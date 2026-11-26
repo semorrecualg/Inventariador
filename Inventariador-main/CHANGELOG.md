@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — checksum de integridade fora do caminho crítico
+
+- **O que era:** `saveInventory` calculava o SHA-256 da base inteira antes de
+  gravar, e `loadInventory` voltava a calculá-lo em cada arranque só para um
+  `logger.warn` quando divergia. Em 12k ativos, o mesmo hash era pago duas vezes
+  no caminho mais quente da app — e o segundo não decidia nada.
+- **Agora:** o hash é calculado **depois** de o save estar gravado, em ocioso
+  (`scheduleIdle`), e guardado em `…_integrity` ao lado do cache, fora da config
+  cifrada (que já não leva `_integrity_hash`). Um save posterior invalida o hash
+  atrasado. A carga deixou de re-hashear a base.
+- **Diagnóstico:** `checkInventoryIntegrity` compara sob pedido o hash do último
+  save com o conjunto atual e devolve `confere` / `divergente` / `sem-registo` /
+  `erro`; o botão «Integridade» passa a mostrar esse veredicto — com a nota de
+  que conferências incrementais posteriores tornam a divergência esperada — em
+  vez de confirmar sempre. Os checksums por tabela do pacote de segurança (F7)
+  não mudam.
+- **Testes:** `integrityOffCriticalPath` (8).
+
 ### Corrigido — «Nova Localidade» grava no índice e aparece na lista
 
 - **O local criado no ENDEREÇO FÍSICO passa a existir para escolha:**
