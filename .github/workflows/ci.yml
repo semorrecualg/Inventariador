@@ -54,6 +54,12 @@ jobs:
       - name: Docs (links e referências)
         run: npm run check:docs
 
+      # A store Dexie `assets` saiu na version(11) (A.3a.4). Falha se o código
+      # ou os docs voltarem a tratá-la como tabela local (`db.assets`, contagem
+      # de três espelhos); docs históricos e linhas de remoção são isentos.
+      - name: Assets locais (sem terceiro espelho)
+        run: npm run verify:assets-removida
+
       # Governança §9.1: a versão do package.json tem de ter entrada no CHANGELOG.
       # `--ci` é o modo desenhado para este job: verifica estrutura e versão ↔
       # CHANGELOG, ignora ambiente/Supabase (o passo "Validar credenciais" trata

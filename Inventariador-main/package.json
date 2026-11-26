@@ -17,6 +17,7 @@
     "prova:carga": "vitest run src/__tests__/provaCargaPlanilha.test.ts",
     "verify:governanca": "node scripts/verify-governance.cjs",
     "check:docs": "node scripts/check-docs.cjs",
+    "verify:assets-removida": "node scripts/verify-assets-removida.cjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug",
