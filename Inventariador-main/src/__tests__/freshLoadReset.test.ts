@@ -60,6 +60,8 @@ describe('resetLocalBaseForFreshLoad', () => {
     expect(await db.addresses.count()).toBe(0);
     expect(await db.audit_logs.count()).toBe(0);
     expect(clearVirtualSnapshotMock).toHaveBeenCalledTimes(1);
+    // Contrato de duas tabelas: a store `assets` saiu na v11 e não volta ao schema.
+    expect(db.tables.map((t) => t.name)).not.toContain('assets');
   });
 
   it('remove a fila da âncora por subir e não toca no resto do storage', async () => {

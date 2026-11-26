@@ -1470,7 +1470,7 @@ export class SqliteService {
    * ============================================================================
    * A «Limpeza Total» de uma unidade (MainMenu) filtrava o
    * cache do localforage e o estado React, mas deixava as linhas da unidade nos
-   * três espelhos Dexie (`local_assets`/`ativos`/`assets`) — com o `_syncFailAt`
+   * duas tabelas espelhadas Dexie (`local_assets`/`ativos`) — com o `_syncFailAt`
    * agarrado a elas. O selo contava falhas de ativos que já não existiam no
    * inventário e a fila de fundo voltava a tentar enviá-los a cada ciclo.
    *
@@ -1479,7 +1479,7 @@ export class SqliteService {
    * Nada mais é tocado; os ativos das outras unidades ficam com o carimbo e a
    * pendência intactos («morre com o registo, nunca antes»).
    *
-   * Devolve quantas linhas saíram (a maior das três contagens, a mesma regra de
+   * Devolve quantas linhas saíram (a maior das duas contagens, a mesma regra de
    * `getAssetCount`).
    */
   public async deleteLocalAssetsByUnits(units: string[]): Promise<number> {
@@ -1679,7 +1679,7 @@ export class SqliteService {
 
   /**
    * Patch pontual de um ativo (ex.: coordenadas GPS que chegaram depois do
-   * commit visual) nas três tabelas espelhadas — uma transação, sem reescrever
+   * commit visual) nas duas tabelas espelhadas — uma transação, sem reescrever
    * o registro inteiro da base.
    */
   public async patchAsset(
@@ -1699,7 +1699,7 @@ export class SqliteService {
   /**
    * MIGRAÇÃO ÚNICA DAS GRAFIAS DE `_conferido` — idempotente
    * ============================================================================
-   * Percorre os três espelhos uma vez por base (marcador em `SYSTEM_CONTEXT`) e
+   * Percorre as duas tabelas espelhadas uma vez por base (marcador em `SYSTEM_CONTEXT`) e
    * deixa a prova de conferência na grafia canônica: `_conferido = 1` + data da
    * leitura quando o registo já tem uma data legível (ver
    * `utils/conferencia.normalizarMarcaConferencia`). Não inventa datas nem

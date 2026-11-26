@@ -64,7 +64,7 @@ export interface ExactCopyReport {
   before: number;
   after: number;
   removed: number;
-  /** Cópias removidas somando os três espelhos. */
+  /** Cópias removidas somando as duas tabelas espelhadas. */
   removedTotal: number;
   /** Chaves distintas (uma por `primarykey`) antes e depois — têm de ser iguais. */
   distinctBefore: number;
@@ -96,7 +96,7 @@ interface PlanoTabela {
   withoutKey: number;
 }
 
-/** União das chaves de todos os espelhos — os três espelhos são o mesmo inventário. */
+/** União das chaves de todos os espelhos — `local_assets` e `ativos` são o mesmo inventário. */
 const uniaoDeChaves = (planos: PlanoTabela[], campo: 'groupKeys' | 'skippedKeys'): number => {
   const chaves = new Set<string>();
   planos.forEach((plano) => plano[campo].forEach((chave) => chaves.add(chave)));
@@ -429,7 +429,7 @@ export async function latestExactCopyBackup(): Promise<ExactCopyBackupInfo | nul
 }
 
 /**
- * Reverte uma limpeza: devolve as linhas removidas aos três espelhos, com as
+ * Reverte uma limpeza: devolve as linhas removidas às duas tabelas espelhadas, com as
  * chaves exatas que tinham (inclusive `tenantid` vazio e grafia da chave).
  * `bulkPut` é idempotente — repetir não duplica. O backup NÃO é apagado.
  */

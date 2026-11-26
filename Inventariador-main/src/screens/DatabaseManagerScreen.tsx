@@ -822,14 +822,14 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     }
   };
 
-  /** Reversão com um clique: devolve as linhas do backup aos três espelhos. */
+  /** Reversão com um clique: devolve as linhas do backup às duas tabelas espelhadas. */
   const handleCleanupRestore = async () => {
     if (!lastCleanup || cleanupRestoring) return;
     setCleanupRestoring(true);
     addLog(`[SRE_DEDUP] Desfazendo a limpeza ${lastCleanup.id}...`);
     try {
       const { restored } = await restoreExactCopyCleanup(lastCleanup.id);
-      const linhas = [`[DEDUP] Desfazer ${lastCleanup.id}: ${restored} linha(s) devolvida(s) aos três espelhos.`];
+      const linhas = [`[DEDUP] Desfazer ${lastCleanup.id}: ${restored} linha(s) devolvida(s) às duas tabelas espelhadas.`];
       linhas.forEach(addLog);
       setCleanupLines(linhas);
       await loadStats();

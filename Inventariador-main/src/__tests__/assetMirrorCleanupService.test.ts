@@ -66,6 +66,8 @@ describe('assetMirrorCleanupService — cópias EXATAS (mesma primarykey + conte
     expect(report.after).toBe(1);
     expect(report.distinctBefore).toBe(1);
     expect(report.distinctAfter).toBe(1);
+    // O relatório percorre só as duas tabelas espelhadas.
+    expect(report.tables.map((t) => t.table)).toEqual(['local_assets', 'ativos']);
 
     expect(await db.local_assets.count()).toBe(1);
     expect(await db.ativos.count()).toBe(1);
