@@ -23,8 +23,14 @@ vi.hoisted(() => {
 
 const upsert = vi.fn();
 // Guarda «exclusão vence a subida»: mockada para não ir à rede (nada apagado).
-const { fetchCloudDeletedKeys } = vi.hoisted(() => ({ fetchCloudDeletedKeys: vi.fn() }));
+const { fetchCloudDeletedKeys, fetchCloudConflictRows } = vi.hoisted(() => ({
+  fetchCloudDeletedKeys: vi.fn(),
+  fetchCloudConflictRows: vi.fn()
+}));
 fetchCloudDeletedKeys.mockResolvedValue(new Set<string>());
+// Conflito por campo: a nuvem não devolve linha nenhuma — o envio é o de
+// sempre. Sem este stub a leitura real iria à rede em cada ciclo.
+fetchCloudConflictRows.mockResolvedValue(new Map<string, Record<string, unknown>>());
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: vi.fn(() => true) }
@@ -38,6 +44,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
       from: () => ({ upsert: (...args: unknown[]) => upsert(...args) })
     },
     fetchCloudDeletedKeys,
+    fetchCloudConflictRows,
     registerCampaignSyncQueueDelegate: vi.fn()
   };
 });

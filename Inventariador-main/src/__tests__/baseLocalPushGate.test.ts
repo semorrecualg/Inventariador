@@ -28,6 +28,8 @@ vi.mock('../services/supabaseService', () => ({
   // Mesma regra do serviço real: INTERNAL e INTERNAL_PLUS são base local.
   isOnlineDatabaseMode: (m?: string | null) => !String(m ?? modo.value).startsWith('INTERNAL'),
   fetchCloudDeletedKeys: vi.fn(async () => new Set<string>()),
+  fetchCloudConflictRows: vi.fn(async () => new Map<string, Record<string, unknown>>()),
+  chaveDaNuvem: (t: unknown, p: unknown) => `${String(t || '').trim().toUpperCase()}|${String(p || '').trim()}`,
   isQuotaExceededError: () => false
 }));
 
@@ -52,6 +54,7 @@ import {
   photoSyncManager,
   processCampaignSyncQueue
 } from '../services/syncService';
+import { SYSTEM_LOCK_KEY } from '../utils/systemLock';
 
 describe('canPushToCloud — a BASE LOCAL é hermética', () => {
   beforeEach(() => {
@@ -82,6 +85,39 @@ describe('canPushToCloud — a BASE LOCAL é hermética', () => {
 
   it('na BASE OFICIAL o portão continua aberto', () => {
     modo.value = 'SUPABASE';
+    expect(canPushToCloud()).toBe(true);
+  });
+});
+
+// H1 · Fase 3 — a blindagem física tem de fechar a subida mesmo com o modo de
+// nuvem já em memória. Antes só valia no arranque (forçava INTERNAL): um app
+// aberto e blindado pelo Administrador continuava a enviar no ciclo de 60 s.
+describe('canPushToCloud — a blindagem física fecha a subida', () => {
+  beforeEach(() => {
+    fromMock.mockClear();
+    localStorage.removeItem(SYSTEM_LOCK_KEY);
+    modo.value = 'SUPABASE';
+  });
+
+  it('com o sistema blindado o portão fecha e os ciclos não tocam na nuvem', async () => {
+    localStorage.setItem(SYSTEM_LOCK_KEY, 'true');
+
+    expect(canPushToCloud()).toBe(false);
+    await expect(syncService.processDataSyncQueue())
+      .resolves.toEqual({ success: true, processedCount: 0 });
+    await expect(photoSyncManager.processPhotoSyncQueue())
+      .resolves.toEqual({ success: true, uploadCount: 0, failedCount: 0 });
+    await expect(processCampaignSyncQueue())
+      .resolves.toEqual({ success: true, processedCount: 0 });
+
+    expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  it('ao libertar a blindagem o portão reabre sem reiniciar o app', () => {
+    localStorage.setItem(SYSTEM_LOCK_KEY, 'true');
+    expect(canPushToCloud()).toBe(false);
+
+    localStorage.removeItem(SYSTEM_LOCK_KEY);
     expect(canPushToCloud()).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
-import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys, exigirGeracaoBaseCorrente } from './supabaseService';
+import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys, fetchCloudConflictRows, chaveDaNuvem, exigirGeracaoBaseCorrente } from './supabaseService';
 import { BaseGenerationBlockedError } from '../utils/baseGeneration';
 import { canPushToCloud } from './pushGate';
 import { enviarFilaAuditoria } from './auditoriaNuvem';
@@ -15,6 +15,8 @@ import { purgarAuditoriaAntiga } from './auditoriaRetencao';
 import { assetGpsColumns } from '../utils/assetGps';
 import { assinaturaDeFalha, inicioDoDiaDaFalha } from '../utils/syncFalha';
 import { normalizeFlag } from '../utils/normalize';
+import { resolverConflitoDeSubida } from '../utils/conflitoSubida';
+import { isSystemLocked } from '../utils/systemLock';
 import {
   semearOutboxDePendentes,
   marcarEnviadosOutbox,
@@ -36,8 +38,12 @@ import {
  * Marca um registo como sincronizado — a escrita é a mesma do envio em massa
  * (`sqliteService.markAssetsSynced`), que também apaga o carimbo de recusa.
  */
-const markRecordSynced = async (primaryKey: string): Promise<void> => {
-  await sqliteService.markAssetsSynced([primaryKey]);
+const markRecordSynced = async (
+  primaryKey: string,
+  /** Campos que o sucesso traz da nuvem (conferência/ponto mais recentes). */
+  extra?: Record<string, unknown>
+): Promise<void> => {
+  await sqliteService.markAssetsSynced([primaryKey], extra);
   // Fila durável (v9): o envio aceite sai do envelope. Best-effort — a outbox
   // não pode fazer falhar um envio que a nuvem já confirmou.
   try {
@@ -151,6 +157,12 @@ export const ASSETS_CONFLICT_TARGET = 'tenantid, primarykey';
 
 const SYNC_RECORD_FAIL_AUDIT = 'SYNC_RECORD_FAIL';
 const SYNC_RECORD_EXCEPTION_AUDIT = 'SYNC_RECORD_EXCEPTION';
+/**
+ * Conflito por campo resolvido na subida. É a mesma acção que a descida já
+ * regista (`SYNC_CONFLICT`, no merge do pull), para o painel e a trilha lerem
+ * uma só ideia: «dois auditores no mesmo ativo, decidido por tempo».
+ */
+const SYNC_CONFLICT_AUDIT = 'SYNC_CONFLICT';
 /** Janela em que a mesma falha (primarykey + erro) não volta a ser registada. */
 const SYNC_FAILURE_AUDIT_WINDOW_MS = 10 * 60 * 1000;
 /**
@@ -686,6 +698,12 @@ const _syncService = {
 
   processDataSyncQueue: async (): Promise<SyncResult> => {
     if (!canPushToCloud()) {
+      // A blindagem tem ciclo próprio de saída: quando o Administrador liga o
+      // «Pronto para Campo» com o app aberto, o portão fecha no ciclo seguinte
+      // (antes só fechava num arranque novo, que forçava o modo a INTERNAL).
+      if (isSystemLocked()) {
+        logger.info('>>> [Sync] Envio suspenso: sistema blindado (Pronto para Campo).');
+      }
       return { success: true, processedCount: 0 };
     }
     const user = getUserFromLocalStorage();
@@ -778,6 +796,22 @@ const _syncService = {
         tentaveis.map(record => String(record.primarykey || record.id || ''))
       );
 
+      // CONFLITO POR CAMPO NA SUBIDA (H1 · Fase 2): o upsert sobrescreve as
+      // colunas que leva. Sem saber o que a nuvem já tem, um aparelho com a
+      // fila parada apagava a conferência (ou o ponto de GPS) que outro
+      // auditor gravou depois — a leitura mais antiga ficava na nuvem. A
+      // mesma leitura em lote que serve a exclusão serve aqui; falha para o
+      // lado seguro (mapa vazio = envio como antes).
+      let estadoNaNuvem = new Map<string, Record<string, unknown>>();
+      try {
+        estadoNaNuvem = await fetchCloudConflictRows(
+          [tenantidClean],
+          tentaveis.map(record => String(record.primarykey || record.id || ''))
+        );
+      } catch (conflitoErr) {
+        logger.warn('>>> [Sync] Estado remoto do conflito por campo indisponível (o envio segue):', conflitoErr);
+      }
+
       const syncedPrimaryKeys: string[] = [];
       const failedPrimaryKeys: string[] = [];
       // Os registos que falharam, e não só as chaves: a outbox precisa do
@@ -787,6 +821,7 @@ const _syncService = {
       // erro do ciclo (não em todos os ciclos) e actualizadas a cada registo.
       let failureSignatures: Set<string> | null = null;
       let exceptionSignatures: Set<string> | null = null;
+      let conflictSignatures: Set<string> | null = null;
 
       for (const record of tentaveis) {
         // GUARDA DE CONECTIVIDADE EM TEMPO REAL: Evita enchentes de erros caso o sinal caia no meio do laço
@@ -823,6 +858,17 @@ const _syncService = {
           );
           continue;
         }
+
+        // Decisão por grupo (conferência/GPS) antes de montar o payload: a
+        // nuvem só vence com uma leitura mais recente e os campos dela saem do
+        // envio, ficando a coluna da nuvem como está.
+        const remoto = estadoNaNuvem.size > 0
+          ? estadoNaNuvem.get(chaveDaNuvem(tenantidClean, pKey))
+          : undefined;
+        const conflito = resolverConflitoDeSubida(
+          record as unknown as Record<string, unknown>,
+          remoto
+        );
 
         const contaValue = String(record.contacontabil || (record as unknown as Record<string, unknown>).conta_contabil || '').trim();
         if (contaValue === '131105001') {
@@ -893,6 +939,23 @@ const _syncService = {
             is_deleted: normalizeFlag(record._is_deleted)
           };
 
+          // CONFLITO POR CAMPO: o grupo que a nuvem ganhou sai do payload. O
+          // `ON CONFLICT DO UPDATE` só toca nas colunas enviadas, por isso a
+          // conferência (ou o ponto) da nuvem fica intacta.
+          if (!conflito.conferencia.enviar) {
+            // O `status` viaja com a conferência: mandar um «PENDENTE» local
+            // ao lado do `conferido = true` da nuvem era a divergência do
+            // bloco B.1 do diagnóstico.
+            delete payload.conferido;
+            delete payload.auditor;
+            delete payload.data_leitura;
+            delete payload.status;
+          }
+          if (!conflito.gps.enviar) {
+            delete payload.gps_lat;
+            delete payload.gps_lng;
+          }
+
           // O envio repete sem a coluna que a nuvem ainda não tem (PGRST204), em
           // vez de rejeitar o ativo inteiro por causa de `conferido`/`auditor`/
           // `data_leitura` (scripts/assets-conferencia.sql). O alvo de conflito
@@ -921,8 +984,35 @@ const _syncService = {
           if (!supabaseErr) {
             syncedPrimaryKeys.push(String(pKey));
             // Progresso gravado no instante do sucesso: sobrevive a qualquer
-            // interrupção dos registos seguintes.
-            await markRecordSynced(String(pKey));
+            // interrupção dos registos seguintes. O que a nuvem ganhou por
+            // tempo vem no mesmo passo (`extra`), para o registo local não
+            // ficar a mostrar uma conferência que a nuvem já substituiu.
+            const adotar = { ...conflito.conferencia.adotar, ...conflito.gps.adotar };
+            await markRecordSynced(
+              String(pKey),
+              Object.keys(adotar).length > 0 ? adotar : undefined
+            );
+            if (conflito.conflitos.length > 0) {
+              // Rótulos legíveis: o operador lê a trilha, não o token do tipo.
+              const grupos = conflito.conflitos
+                .map((grupo) => (grupo === 'conferencia' ? 'conferência' : 'ponto de GPS'))
+                .join(' + ');
+              const detalhe = conflito.conferencia.enviar && conflito.gps.enviar
+                ? `Conflito de sincronização (${grupos}): a leitura deste aparelho é a mais recente e subiu.`
+                : `Conflito de sincronização (${grupos}): a leitura da nuvem é a mais recente e ficou; o registo local adotou-a e o resto do ativo subiu deste aparelho.`;
+              try {
+                conflictSignatures ??= await loadRecentSyncAuditSignatures(SYNC_CONFLICT_AUDIT);
+                await auditSyncRecordFailure(
+                  user.id,
+                  SYNC_CONFLICT_AUDIT,
+                  String(pKey),
+                  detalhe,
+                  conflictSignatures
+                );
+              } catch (auditErr) {
+                logger.warn('>>> [Sync Audit] Falha ao registrar o conflito por campo:', auditErr);
+              }
+            }
           } else {
             failedPrimaryKeys.push(String(pKey));
             failedRecords.push(record as unknown as RegistoParaOutbox);

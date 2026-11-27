@@ -1254,7 +1254,12 @@ const warnIdentityConflicts = async (rows: Record<string, unknown>[]): Promise<v
 };
 
 /** Chave canónica (tenantid|primarykey) usada pelas guardas de exclusão. */
-const chaveDaNuvem = (tenantid: unknown, primarykey: unknown): string =>
+/**
+ * Chave de uma linha da nuvem no vocabulário do muro multi-tenant
+ * (`CONTRATO|primarykey`). É a mesma forma usada pela guarda de exclusão e
+ * pelo conflito por campo — o envio procura as duas leituras pela mesma chave.
+ */
+export const chaveDaNuvem = (tenantid: unknown, primarykey: unknown): string =>
   `${String(tenantid || '').trim().toUpperCase()}|${String(primarykey || '').trim()}`;
 
 /**
@@ -1298,6 +1303,49 @@ export const fetchCloudDeletedKeys = async (
   } catch (err) {
     logger.warn('>>> [Supabase] Não foi possível verificar exclusões na nuvem; a subida segue sem essa guarda:', err);
     return vazia;
+  }
+};
+
+/**
+ * ESTADO REMOTO PARA O CONFLITO POR CAMPO — uma leitura por ciclo
+ * ============================================================================
+ * A subida inteira é um `ON CONFLICT DO UPDATE`: cada coluna do payload
+ * sobrescreve a da nuvem. Enquanto o envio não souber o que a nuvem já tem,
+ * um aparelho com a fila parada apaga a conferência (ou o ponto de GPS) que
+ * outro auditor gravou depois — a leitura mais ANTIGA fica na nuvem.
+ *
+ * Aqui vai-se buscar, numa consulta só por ciclo (nunca por registo), o que é
+ * preciso para decidir por tempo: quem conferiu, quando, e o ponto. A decisão
+ * em si é pura e vive em `utils/conflitoSubida`; esta função só lê.
+ *
+ * Falha para o lado seguro: sem resposta (schema antigo, rede, RLS) devolve
+ * mapa vazio e o envio segue como antes — nenhum ativo fica preso por causa
+ * desta leitura.
+ */
+export const fetchCloudConflictRows = async (
+  tenantids: Array<string | null | undefined>,
+  primarykeys: Array<string | null | undefined>
+): Promise<Map<string, Record<string, unknown>>> => {
+  const vazio = new Map<string, Record<string, unknown>>();
+  if (!supabase) return vazio;
+  const tenants = Array.from(new Set(tenantids.map(t => String(t || '').trim().toUpperCase()).filter(Boolean)));
+  const keys = Array.from(new Set(primarykeys.map(k => String(k || '').trim()).filter(Boolean)));
+  if (tenants.length === 0 || keys.length === 0) return vazio;
+  try {
+    const { data, error } = await supabase
+      .from('assets')
+      .select('tenantid, primarykey, conferido, auditor, data_leitura, status, gps_lat, gps_lng')
+      .in('tenantid', tenants)
+      .in('primarykey', keys);
+    if (error || !Array.isArray(data)) return vazio;
+    const linhas = new Map<string, Record<string, unknown>>();
+    for (const row of data as Record<string, unknown>[]) {
+      linhas.set(chaveDaNuvem(row.tenantid, row.primarykey), row);
+    }
+    return linhas;
+  } catch (err) {
+    logger.warn('>>> [Supabase] Estado remoto indisponível para o conflito por campo; o envio segue sem ele:', err);
+    return vazio;
   }
 };
 

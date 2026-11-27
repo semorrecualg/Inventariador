@@ -10,6 +10,14 @@
  */
 import { Capacitor } from '@capacitor/core';
 import { getDatabaseMode, isOnlineDatabaseMode } from './supabaseService';
+import { isSystemLocked } from '../utils/systemLock';
 
+/**
+ * A blindagem física (`is_system_locked`) entra aqui, no portão por onde passam
+ * TODOS os envios (fila de ativos, fotos, campanhas, trilha de auditoria e
+ * `syncAssetsToCloud`). Antes ela só valia enquanto o arranque forçava o modo a
+ * INTERNAL: um app já aberto e blindado pelo Administrador continuava a enviar
+ * no ciclo de 60 s, porque o modo em memória ainda era de nuvem.
+ */
 export const canPushToCloud = (): boolean =>
-  Capacitor.isNativePlatform() && isOnlineDatabaseMode(getDatabaseMode());
+  !isSystemLocked() && Capacitor.isNativePlatform() && isOnlineDatabaseMode(getDatabaseMode());
