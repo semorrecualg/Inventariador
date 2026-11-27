@@ -4,10 +4,11 @@ import { showRecoveryToast as originalShowRecoveryToast } from '../services/Navi
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
-import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets } from '../services/supabaseService';
+import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets, estadoDaSessaoNuvem, estabelecerSessaoNuvem, SessaoNuvemAusenteError, marcarSessaoDeEnvioEmMassa, encerrarSessaoDeEnvioEmMassa } from '../services/supabaseService';
 import { contarAuditoriaPendente, contarAuditoriaNuvem, type ContagemAuditoriaNuvem } from '../services/auditoriaNuvem';
 import { isAdminUser } from '../utils/authUtils';
 import { CloudPushPolicyError } from '../utils/cloudPushGuard';
+import { motivoDoBloqueioDoEnvioEmMassa } from '../utils/entradaNuvemEnvio';
 import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { previewExactCopyCleanup, cleanExactAssetCopies, restoreExactCopyCleanup, latestExactCopyBackup, formatExactCopyReport, type ExactCopyReport, type ExactCopyBackupInfo } from '../services/assetMirrorCleanupService';
 import { downloadRecnoReportCsv, formatRecnoReport, reportRecnoCollisions, type RecnoReport } from '../services/recnoGuardService';
@@ -349,6 +350,11 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   // são escopadas a ele (nunca à contagem global, que poderia expor dados de
   // outro contrato, ex.: CICOPAL para um MASTER de CLIENTETESTE).
   const [activeTenantid, setActiveTenantid] = useState<string>('');
+  // Modal de entrada na nuvem para o envio em massa da base local: o operador
+  // dá a credencial do Supabase só neste momento (acção explícita), sem trocar
+  // de modo e sem contacto com a nuvem fora deste instante.
+  const [cloudLogin, setCloudLogin] = useState<{ email: string; password: string; error: string | null } | null>(null);
+  const [isOpeningCloudSession, setIsOpeningCloudSession] = useState<boolean>(false);
 
   useEffect(() => {
     try {
@@ -383,7 +389,17 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     }
   }, [activeTenantid, addLog]);
 
-  const enviarBaseParaNuvem = async () => {
+  /** Abre o pedido de credencial da nuvem, com o e-mail do operador já preenchido. */
+  const abrirEntradaNaNuvem = (error: string | null = null) => {
+    let email = '';
+    try {
+      const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
+      if (userStr) email = String(JSON.parse(userStr)?.email || '').trim();
+    } catch { /* ignore */ }
+    setCloudLogin({ email, password: '', error });
+  };
+
+  const executarEspelhamentoEmMassa = async () => {
     try {
       setIsMirroring(true);
       setMirrorProgress(1);
@@ -440,6 +456,12 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         // apresenta as linhas do mesmo erro, para não haver duas regras.
         setCloudPushBlock(err.lines);
         err.lines.forEach((line) => addLog(`[SRE_CLOUD] ${line}`));
+      } else if (err instanceof SessaoNuvemAusenteError) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
+        // A sessão da nuvem não existe: pede a credencial agora, sem trocar de
+        // modo. O operador entra e o envio segue de onde parou.
+        abrirEntradaNaNuvem(errMsg);
       } else {
         const errMsg = err instanceof Error ? err.message : String(err);
         addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
@@ -448,6 +470,72 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     } finally {
       setIsMirroring(false);
       setMirrorProgress(0);
+    }
+  };
+
+  // Portão de entrada do envio em massa: decide, sem tocar na nuvem, se é
+  // preciso pedir a credencial da nuvem ao operador (BASE LOCAL hermética).
+  const enviarBaseParaNuvem = async () => {
+    if (isMirroring) return;
+
+    const estadoSessao = isInternalMode ? 'indeterminado' : await estadoDaSessaoNuvem();
+    const motivo = motivoDoBloqueioDoEnvioEmMassa({
+      isInternalMode,
+      online: typeof navigator !== 'undefined' ? navigator.onLine : true,
+      estadoSessao
+    });
+
+    if (motivo === 'sem-credenciais') {
+      addLog('[SRE_CLOUD] BASE LOCAL: a nuvem não foi consultada (nada foi lido nem alterado).');
+      addLog('[SRE_CLOUD] Supabase não configurado neste ambiente — envio em massa indisponível.');
+      return;
+    }
+    if (motivo === 'offline') {
+      addLog('[SRE_CLOUD] Aparelho sem conexão — envio em massa adiado.');
+      return;
+    }
+    if (motivo === 'sem-sessao') {
+      addLog('[SRE_CLOUD] Sem sessão da nuvem — a pedir a credencial ao operador.');
+      abrirEntradaNaNuvem();
+      return;
+    }
+
+    await executarEspelhamentoEmMassa();
+  };
+
+  const confirmarEntradaNaNuvem = async () => {
+    if (!cloudLogin) return;
+    const email = cloudLogin.email.trim();
+    const password = cloudLogin.password;
+    if (!email || !password) {
+      setCloudLogin({ ...cloudLogin, error: 'E-mail e senha da nuvem são obrigatórios.' });
+      return;
+    }
+    setIsOpeningCloudSession(true);
+    const sessaoJaAberta = (await estadoDaSessaoNuvem()) === 'autenticada';
+    // A sessão é aberta no cliente partilhado: sem esta marca o App recebia
+    // SIGNED_IN e podia reprocessar login/modo/pull. No fim, a sessão aberta
+    // aqui é encerrada para a BASE LOCAL voltar a estar hermética.
+    marcarSessaoDeEnvioEmMassa(true);
+    try {
+      const ok = await estabelecerSessaoNuvem(email, password);
+      if (!ok) {
+        setCloudLogin({ ...cloudLogin, error: 'Credencial da nuvem recusada — verifique e-mail e senha.' });
+        return;
+      }
+      setCloudLogin(null);
+      addLog('[SRE_CLOUD] Sessão da nuvem aberta — a enviar a base.');
+      await executarEspelhamentoEmMassa();
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      setCloudLogin({ ...cloudLogin, error: errMsg });
+    } finally {
+      if (sessaoJaAberta) {
+        marcarSessaoDeEnvioEmMassa(false);
+      } else {
+        await encerrarSessaoDeEnvioEmMassa();
+      }
+      setIsOpeningCloudSession(false);
     }
   };
 
@@ -1682,6 +1770,68 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
                 className="flex-1 py-3 bg-red-650 hover:bg-red-700 text-white rounded-xl font-bold text-[9px] uppercase tracking-wider transition-all border border-red-500 active:scale-95 cursor-pointer"
               >
                 Confirmar Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Entrada na nuvem para o envio em massa (BASE LOCAL hermética) */}
+      {cloudLogin && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-sky-800/60 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-5">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-sky-950 text-sky-400 rounded-xl border border-sky-900/50">
+                <UploadCloud className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xs font-black uppercase text-slate-100 tracking-wider">Entrar na Nuvem para Enviar</h3>
+                <p className="text-[8px] text-slate-500 uppercase font-bold tracking-widest">
+                  O modo não muda — a nuvem só é contactada agora.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <input
+                type="email"
+                autoComplete="username"
+                placeholder="E-mail da nuvem"
+                value={cloudLogin.email}
+                onChange={(e) => setCloudLogin({ ...cloudLogin, email: e.target.value, error: null })}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500"
+              />
+              <input
+                type="password"
+                autoComplete="current-password"
+                placeholder="Senha da nuvem"
+                value={cloudLogin.password}
+                onChange={(e) => setCloudLogin({ ...cloudLogin, password: e.target.value, error: null })}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500"
+              />
+              {cloudLogin.error && (
+                <p className="text-[9px] text-rose-300 font-bold uppercase">{cloudLogin.error}</p>
+              )}
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCloudLogin(null);
+                  addLog('[SRE_CLOUD] Envio em massa cancelado pelo operador.');
+                }}
+                className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold text-[9px] uppercase tracking-wider transition-all border border-slate-700 active:scale-95 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => { void confirmarEntradaNaNuvem(); }}
+                disabled={isOpeningCloudSession}
+                className="flex-1 py-3 bg-sky-650 hover:bg-sky-700 text-white rounded-xl font-bold text-[9px] uppercase tracking-wider transition-all border border-sky-500 active:scale-95 cursor-pointer disabled:opacity-50"
+              >
+                {isOpeningCloudSession ? 'ENTRANDO...' : 'Entrar e enviar'}
               </button>
             </div>
           </div>
