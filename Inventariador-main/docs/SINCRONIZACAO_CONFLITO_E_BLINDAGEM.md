@@ -142,4 +142,8 @@ essa linha desce normalmente.
 ## 5. O que ainda falta de H1
 
 - **Fase 5 — matriz S1–S9 com dois agentes reais:** exige dois aparelhos e a
-  nuvem de produção; não se substitui por teste de unidade.
+  nuvem de produção; não se substitui por teste de unidade. O procedimento está
+  em [`docs/RUNBOOK-FASE5-S1-S9.md`](RUNBOOK-FASE5-S1-S9.md), com o estado de
+  partida, os nove cenários e a folha de recolha. O harness automático de dois
+  dispositivos previsto no diagnóstico ainda não existe, por isso nada desta
+  matriz está coberto por teste automático hoje.
