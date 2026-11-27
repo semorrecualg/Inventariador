@@ -15,7 +15,7 @@ describe('motivoDoBloqueioDoEnvioEmMassa', () => {
     expect(motivoDoBloqueioDoEnvioEmMassa({ isInternalMode: false, online: false, estadoSessao: 'autenticada' })).toBe('offline');
   });
 
-  it('sem sessão pede credencial (não bloqueia por outro motivo)', () => {
+  it('sem sessão pede credencial', () => {
     expect(motivoDoBloqueioDoEnvioEmMassa({ isInternalMode: false, online: true, estadoSessao: 'ausente' })).toBe('sem-sessao');
   });
 
@@ -25,19 +25,5 @@ describe('motivoDoBloqueioDoEnvioEmMassa', () => {
 
   it('sessão indeterminada deixa enviar (o portão não bloqueia por não conseguir perguntar)', () => {
     expect(motivoDoBloqueioDoEnvioEmMassa({ isInternalMode: false, online: true, estadoSessao: 'indeterminado' })).toBeNull();
-  });
-
-  it('aceita temCredenciaisDoBuild (invertido)', () => {
-    expect(motivoDoBloqueioDoEnvioEmMassa({ temCredenciaisDoBuild: false, online: true, estadoSessao: 'autenticada' })).toBe('sem-credenciais');
-    expect(motivoDoBloqueioDoEnvioEmMassa({ temCredenciaisDoBuild: true, online: true, estadoSessao: 'autenticada' })).toBeNull();
-  });
-
-  it('aceita modoBase textual', () => {
-    expect(motivoDoBloqueioDoEnvioEmMassa({ modoBase: 'INTERNAL', online: true, estadoSessao: 'autenticada' })).toBe('sem-credenciais');
-  });
-
-  it('aceita chamada posicional (isInternal, online, estado)', () => {
-    expect(motivoDoBloqueioDoEnvioEmMassa(false, true, 'ausente')).toBe('sem-sessao');
-    expect(motivoDoBloqueioDoEnvioEmMassa(true, true, 'autenticada')).toBe('sem-credenciais');
   });
 });

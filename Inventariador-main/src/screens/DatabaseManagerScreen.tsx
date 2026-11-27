@@ -350,7 +350,6 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   // são escopadas a ele (nunca à contagem global, que poderia expor dados de
   // outro contrato, ex.: CICOPAL para um MASTER de CLIENTETESTE).
   const [activeTenantid, setActiveTenantid] = useState<string>('');
-  const [userEmail, setUserEmail] = useState<string>('');
   // Modal de entrada na nuvem para o envio em massa da base local: o operador
   // dá a credencial do Supabase só neste momento (acção explícita), sem trocar
   // de modo e sem contacto com a nuvem fora deste instante.
@@ -364,7 +363,6 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         const parsed = JSON.parse(userStr);
         setIsAdmin(isAdminUser(parsed));
         setActiveTenantid(String(parsed?.tenantid || '').trim().toUpperCase());
-        setUserEmail(String(parsed?.email || '').trim());
       }
     } catch { /* ignore */ }
   }, []);
@@ -390,6 +388,16 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       addLog(`[SRE_BASES] Falha ao ler a base da Nuvem (nada foi alterado): ${errMsg}`);
     }
   }, [activeTenantid, addLog]);
+
+  /** Abre o pedido de credencial da nuvem, com o e-mail do operador já preenchido. */
+  const abrirEntradaNaNuvem = (error: string | null = null) => {
+    let email = '';
+    try {
+      const userStr = sessionStorage.getItem('app_current_user') || localStorage.getItem('user');
+      if (userStr) email = String(JSON.parse(userStr)?.email || '').trim();
+    } catch { /* ignore */ }
+    setCloudLogin({ email, password: '', error });
+  };
 
   const executarEspelhamentoEmMassa = async () => {
     try {
@@ -453,7 +461,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
         // A sessão da nuvem não existe: pede a credencial agora, sem trocar de
         // modo. O operador entra e o envio segue de onde parou.
-        setCloudLogin({ email: userEmail, password: '', error: errMsg });
+        abrirEntradaNaNuvem(errMsg);
       } else {
         const errMsg = err instanceof Error ? err.message : String(err);
         addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
@@ -468,18 +476,9 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   // Portão de entrada do envio em massa: decide, sem tocar na nuvem, se é
   // preciso pedir a credencial da nuvem ao operador (BASE LOCAL hermética).
   const enviarBaseParaNuvem = async () => {
-    if (isUploading || isPurging || isMirroring) return;
-    if (!isAdmin || assetCount === 0) return;
+    if (isMirroring) return;
 
-    let estadoSessao: 'autenticada' | 'ausente' | 'indeterminado' = 'indeterminado';
-    if (!isInternalMode) {
-      try {
-        estadoSessao = await estadoDaSessaoNuvem();
-      } catch {
-        estadoSessao = 'indeterminado';
-      }
-    }
-
+    const estadoSessao = isInternalMode ? 'indeterminado' : await estadoDaSessaoNuvem();
     const motivo = motivoDoBloqueioDoEnvioEmMassa({
       isInternalMode,
       online: typeof navigator !== 'undefined' ? navigator.onLine : true,
@@ -497,7 +496,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
     }
     if (motivo === 'sem-sessao') {
       addLog('[SRE_CLOUD] Sem sessão da nuvem — a pedir a credencial ao operador.');
-      setCloudLogin({ email: userEmail, password: '', error: null });
+      abrirEntradaNaNuvem();
       return;
     }
 
@@ -1778,14 +1777,10 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
               <div className="space-y-1">
                 <h3 className="text-xs font-black uppercase text-slate-100 tracking-wider">Entrar na Nuvem para Enviar</h3>
                 <p className="text-[8px] text-slate-500 uppercase font-bold tracking-widest">
-                  Envio em massa — credencial do Supabase (só neste momento)
+                  O modo não muda — a nuvem só é contactada agora.
                 </p>
               </div>
             </div>
-
-            <p className="text-[10px] text-slate-300 leading-relaxed font-bold uppercase">
-              A BASE LOCAL permanece hermética: a nuvem só é contactada agora, com a sua credencial, para subir a base. O modo não muda.
-            </p>
 
             <div className="space-y-3">
               <input

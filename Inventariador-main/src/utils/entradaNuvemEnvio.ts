@@ -22,77 +22,22 @@ export type MotivoBloqueioEnvioEmMassa =
   | 'sem-sessao'
   | null;
 
-export interface EntradaNuvemEnvioInput {
+export interface EntradaNuvemEnvio {
   /** Modo de base é INTERNAL (build sem credenciais Supabase). */
   isInternalMode?: boolean;
-  /** Existe sessão da nuvem (token presente). */
-  temCredenciaisDoBuild?: boolean;
-  /** Modo de base textual (ex.: 'INTERNAL', 'INTERNAL_PLUS', 'SUPABASE'). */
-  modoBase?: string | null;
-  /** Há ligação à rede. */
+  /** Há ligação à rede (omissão: sim). */
   online?: boolean;
-  isOnline?: boolean;
-  navigatorOnLine?: boolean;
-  /** Estado da sessão da nuvem. */
+  /** Estado da sessão da nuvem (omissão: indeterminado — não bloqueia). */
   estadoSessao?: EstadoSessaoNuvem;
-  estado?: EstadoSessaoNuvem;
-  sessionState?: EstadoSessaoNuvem;
-  sessao?: EstadoSessaoNuvem;
 }
 
-const normalizarInternal = (input: EntradaNuvemEnvioInput): boolean => {
-  if (typeof input.isInternalMode === 'boolean') return input.isInternalMode;
-  if (typeof input.temCredenciaisDoBuild === 'boolean') return !input.temCredenciaisDoBuild;
-  if (typeof input.modoBase === 'string') return String(input.modoBase).startsWith('INTERNAL');
-  return false;
-};
-
-const normalizarOnline = (input: EntradaNuvemEnvioInput): boolean => {
-  if (typeof input.online === 'boolean') return input.online;
-  if (typeof input.isOnline === 'boolean') return input.isOnline;
-  if (typeof input.navigatorOnLine === 'boolean') return input.navigatorOnLine;
-  return true;
-};
-
-const normalizarEstado = (input: EntradaNuvemEnvioInput): EstadoSessaoNuvem => {
-  const v = input.estadoSessao ?? input.estado ?? input.sessionState ?? input.sessao;
-  if (v === 'autenticada' || v === 'ausente' || v === 'indeterminado') return v;
-  return 'indeterminado';
-};
-
-export const motivoDoBloqueioDoEnvioEmMassa = (
-  ...args: [EntradaNuvemEnvioInput] | [boolean, boolean, EstadoSessaoNuvem] | [boolean, boolean, string]
-): MotivoBloqueioEnvioEmMassa => {
-  let input: EntradaNuvemEnvioInput;
-  const n = args.length as number;
-  if (n === 1 && args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])) {
-    input = args[0] as EntradaNuvemEnvioInput;
-  } else if (n >= 3) {
-    input = {
-      isInternalMode: Boolean(args[0]),
-      online: Boolean(args[1]),
-      estadoSessao: args[2] as EstadoSessaoNuvem
-    };
-  } else if (n === 2) {
-    // (isInternalMode, online) — sessão indeterminada por omissão (não bloqueia).
-    input = { isInternalMode: Boolean(args[0]), online: Boolean(args[1]) };
-  } else if (n === 1 && typeof args[0] === 'boolean') {
-    input = { isInternalMode: Boolean(args[0]) };
-  } else {
-    input = {};
-  }
-
-  if (normalizarInternal(input)) return 'sem-credenciais';
-  if (!normalizarOnline(input)) return 'offline';
-  if (normalizarEstado(input) === 'ausente') return 'sem-sessao';
+export const motivoDoBloqueioDoEnvioEmMassa = ({
+  isInternalMode = false,
+  online = true,
+  estadoSessao = 'indeterminado'
+}: EntradaNuvemEnvio = {}): MotivoBloqueioEnvioEmMassa => {
+  if (isInternalMode) return 'sem-credenciais';
+  if (!online) return 'offline';
+  if (estadoSessao === 'ausente') return 'sem-sessao';
   return null;
-};
-
-export const MENSAGENS_BLOQUEIO_ENVIO_EM_MASSA: Record<
-  Exclude<MotivoBloqueioEnvioEmMassa, null>,
-  string
-> = {
-  'sem-credenciais': 'Supabase não configurado neste ambiente (BASE LOCAL).',
-  'offline': 'Aparelho sem conexão com a rede.',
-  'sem-sessao': 'Sem sessão da nuvem neste aparelho — entre com e-mail e senha para enviar.'
 };
