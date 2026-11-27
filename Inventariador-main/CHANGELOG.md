@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentado — escritas por save e recuo no aparelho (A.5)
+
+- **Contagem fixada em teste:** o critério «escritas por save: de 5 para 3» da
+  Etapa A passa a ter prova executável. `dexieCacheUnico` conta por passo as
+  escritas de um save completo — config no Dexie, ativos no Dexie, config
+  cifrada — e exige **3**; com o espelho legado ligado exige **4**; com 2.500
+  ativos exige as mesmas 3 (o espelho em lotes, que escrevia de 1000 em 1000,
+  já não corre).
+- **Runbook do operador:** `docs/RUNBOOK-RECUO-PERSISTENCIA.md` documenta
+  `gbr_read_from_dexie_first` e `gbr_legacy_assets_mirror` — o que cada uma
+  devolve, as quatro combinações, como as escrever e confirmar no aparelho, e a
+  armadilha de ler pelo blob com o espelho desligado.
+
 ### Alterado — fim da escrita dupla do inventário (Dexie como cache, blob como recuo)
 
 - **O que era:** cada `saveInventory` cifrava o inventário inteiro e gravava-o
