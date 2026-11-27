@@ -15,8 +15,9 @@
 -- SÓ LEITURA: este ficheiro não tem INSERT/UPDATE/DELETE/DDL. Não «prepare»
 -- nada à mão; o estado observado tem de ser o real.
 --
--- O QUE DEVOLVER: o resultado de cada bloco (ou «0 linhas») e o `current_user`
--- do bloco 0.
+-- O QUE DEVOLVER: o resultado de cada bloco (ou «0 linhas»), o `current_user`
+-- do bloco 0 e, sobretudo, os blocos 3d/3e — são eles que dizem se o 42501 vem
+-- do GRANT em falta ou de um objeto escondido.
 -- ============================================================================
 
 -- 0) Com que papel esta sessão corre (o SQL Editor usa `postgres`; o app usa
@@ -82,6 +83,58 @@ select n.nspname as schema,
   cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) as x
  where c.relname = 'dics'
  order by 3, 4, 5;
+
+-- 3d) Privilégios EFECTIVOS de `anon` e `authenticated` na tabela. O 3a lê o
+--     catálogo com o filtro de visibilidade do SQL Editor; `has_table_privilege`
+--     responde pelo caminho do servidor, já com a herança de papéis resolvida,
+--     e é a mesma verificação que o Postgres faz ao recusar o pedido. `false`
+--     em INSERT/UPDATE para o papel do app = GRANT em falta; `true` nos dois =
+--     o 42501 vem de um objeto que corre por baixo (blocos 4 a 8).
+select p.papel,
+       has_table_privilege(p.papel, c.oid, 'SELECT')     as pode_select,
+       has_table_privilege(p.papel, c.oid, 'INSERT')     as pode_insert,
+       has_table_privilege(p.papel, c.oid, 'UPDATE')     as pode_update,
+       has_table_privilege(p.papel, c.oid, 'DELETE')     as pode_delete,
+       has_table_privilege(p.papel, c.oid, 'TRUNCATE')   as pode_truncate,
+       has_table_privilege(p.papel, c.oid, 'REFERENCES') as pode_references,
+       has_table_privilege(p.papel, c.oid, 'TRIGGER')    as pode_trigger
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join (values ('anon'), ('authenticated')) as p(papel)
+ where c.relname = 'dics'
+   and n.nspname not in ('pg_catalog', 'information_schema')
+ order by 1;
+
+-- 3e) Com que papel corre o pedido do app. O PostgREST liga-se como
+--     `authenticator` e faz SET ROLE para `anon` (pedido sem JWT) ou
+--     `authenticated` (pedido com sessão); é por isso que o `current_user` do
+--     bloco 0 (`postgres`) não descreve quem falha. Aqui vêem-se os papéis
+--     envolvidos, o que o `authenticator` pode assumir e as ligações do
+--     PostgREST abertas neste momento — `usename` é o papel de login real
+--     (`authenticator`), não o papel assumido: esse lê-se no 3d.
+select r.rolname as papel,
+       r.rolcanlogin as pode_entrar,
+       r.rolsuper as superuser,
+       r.rolbypassrls as ignora_rls,
+       coalesce((select string_agg(m.rolname, ', ' order by m.rolname)
+                   from pg_auth_members am
+                   join pg_roles m on m.oid = am.roleid
+                  where am.member = r.oid), '(nenhum)') as pode_assumir
+  from pg_roles r
+ where r.rolname in ('anon', 'authenticated', 'service_role', 'authenticator')
+ order by 1;
+
+select pid,
+       usename as papel_de_login,
+       application_name,
+       state,
+       backend_start,
+       left(query, 160) as consulta
+  from pg_stat_activity
+ where datname = current_database()
+   and (application_name ilike '%postgrest%'
+        or usename in ('authenticator', 'supabase_admin'))
+ order by backend_start;
 
 -- 4) Políticas de RLS (se houver). Uma política que chama função é candidata.
 select schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check
@@ -157,5 +210,7 @@ select d.classid::regclass as tipo_de_objeto,
 -- ============================================================================
 -- FIM. Nenhuma instrução escreve. Se o bloco 1 vier vazio e o 9 mostrar uma
 -- variante (ex.: `dics_ativos`), o erro está num objeto criado por fora e o
--- nome citado na mensagem é o dessa variante.
+-- nome citado na mensagem é o dessa variante. Se o 3d vier com `pode_insert`
+-- ou `pode_update` a `false` para o papel do app, não há objeto escondido: é o
+-- GRANT em falta (ou o RLS do bloco 4 a barrar o papel).
 -- ============================================================================
