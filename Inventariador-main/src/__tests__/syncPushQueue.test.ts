@@ -23,8 +23,13 @@ vi.hoisted(() => {
 
 const upsert = vi.fn();
 // Guarda «exclusão vence a subida»: por omissão a nuvem não tem nada apagado.
-// `vi.hoisted` porque o factory de `vi.mock` é içado acima destes `const`.
-const { fetchCloudDeletedKeys } = vi.hoisted(() => ({ fetchCloudDeletedKeys: vi.fn() }));
+// Conflito por campo: por omissão a nuvem não devolve linha nenhuma para as
+// chaves do ciclo (o envio é o de sempre). `vi.hoisted` porque o factory de
+// `vi.mock` é içado acima destes `const`.
+const { fetchCloudDeletedKeys, fetchCloudConflictRows } = vi.hoisted(() => ({
+  fetchCloudDeletedKeys: vi.fn(),
+  fetchCloudConflictRows: vi.fn()
+}));
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: vi.fn(() => true) }
@@ -42,6 +47,7 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
       from: () => ({ upsert: (...args: unknown[]) => upsert(...args) })
     },
     fetchCloudDeletedKeys,
+    fetchCloudConflictRows,
     registerCampaignSyncQueueDelegate: vi.fn(),
     exigirGeracaoBaseCorrente: exigirGeracao
   };
@@ -92,6 +98,8 @@ describe('processDataSyncQueue — envio real da conferência do aparelho', () =
     upsert.mockResolvedValue({ error: null });
     fetchCloudDeletedKeys.mockReset();
     fetchCloudDeletedKeys.mockResolvedValue(new Set<string>());
+    fetchCloudConflictRows.mockReset();
+    fetchCloudConflictRows.mockResolvedValue(new Map<string, Record<string, unknown>>());
     await db.local_assets.clear();
     await db.ativos.clear();
     await db.audit_logs.clear();
@@ -582,6 +590,133 @@ describe('processDataSyncQueue — formatos da conferência local', () => {
 
     expect(upsert).toHaveBeenCalledTimes(1);
     expect((upsert.mock.calls[0][0] as Record<string, unknown>).conferido).toBe(false);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// H1 · Fase 2 — CONFLITO POR CAMPO NA SUBIDA
+//
+// O upsert sobrescreve todas as colunas que leva. Sem ler o estado remoto, um
+// aparelho com a fila parada (recuo, app fechado, offline) apagava a conferência
+// ou o ponto de GPS que outro auditor gravou depois. A decisão é por tempo e
+// vive em `utils/conflitoSubida`; aqui prova-se o encaixe no ciclo real: os
+// campos do grupo que a nuvem ganhou SAEM do payload e o registo local adota-os.
+// ----------------------------------------------------------------------------
+describe('processDataSyncQueue — conflito por campo com outro auditor', () => {
+  const PK = '01010100000005000001';
+
+  const linhaNaNuvem = (over: Record<string, unknown> = {}) => ({
+    tenantid: 'CICOPAL',
+    primarykey: PK,
+    conferido: true,
+    auditor: 'outro.auditor@gbr.com.br',
+    data_leitura: '2026-11-20T10:00:00.000Z',
+    status: 'CONFERIDO',
+    gps_lat: -15.7942,
+    gps_lng: -47.8825,
+    ...over
+  });
+
+  beforeEach(async () => {
+    upsert.mockReset();
+    upsert.mockResolvedValue({ error: null });
+    fetchCloudDeletedKeys.mockReset();
+    fetchCloudDeletedKeys.mockResolvedValue(new Set<string>());
+    fetchCloudConflictRows.mockReset();
+    fetchCloudConflictRows.mockResolvedValue(new Map<string, Record<string, unknown>>());
+    exigirGeracao.mockReset();
+    exigirGeracao.mockResolvedValue(undefined);
+    await db.local_assets.clear();
+    await db.ativos.clear();
+    await db.audit_logs.clear();
+    await db.sync_outbox.clear();
+    localStorage.setItem('gbr_user_session', JSON.stringify({ id: 'u-1', email: 'semorr@gmail.com', tenantid: 'CICOPAL' }));
+    localStorage.removeItem('filial');
+    localStorage.removeItem('app_selected_unit');
+    sessionStorage.setItem('filial', '010101 CICOPAL GO');
+    sessionStorage.setItem('tenantid', 'CICOPAL');
+  });
+
+  it('não atropela a conferência mais recente da nuvem e adota-a localmente', async () => {
+    await db.local_assets.put(asset() as never);
+    fetchCloudConflictRows.mockResolvedValue(new Map([[`CICOPAL|${PK}`, linhaNaNuvem()]]));
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBe(1);
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>;
+    // O grupo da conferência sai do payload: o `ON CONFLICT DO UPDATE` não
+    // toca nessas colunas e a leitura da nuvem fica.
+    expect(payload).not.toHaveProperty('conferido');
+    expect(payload).not.toHaveProperty('auditor');
+    expect(payload).not.toHaveProperty('data_leitura');
+    expect(payload).not.toHaveProperty('status');
+    // O resto do ativo continua a subir deste aparelho.
+    expect(payload).toMatchObject({ etiqueta: '000420', primarykey: PK });
+
+    const local = await db.local_assets.where('primarykey').equals(PK).first();
+    expect(Number(local?._is_synced)).toBe(1);
+    expect(local?._auditor).toBe('outro.auditor@gbr.com.br');
+    expect(local?._dataLeitura).toBe('2026-11-20T10:00:00.000Z');
+
+    const logs = await db.audit_logs.filter((log) => log.acao === 'SYNC_CONFLICT').toArray();
+    expect(logs).toHaveLength(1);
+    expect(String(logs[0].details)).toContain('conferência');
+  });
+
+  it('a leitura deste aparelho mais recente continua a subir', async () => {
+    await db.local_assets.put(asset({ _dataLeitura: '2026-11-21T08:00:00.000Z' }) as never);
+    fetchCloudConflictRows.mockResolvedValue(new Map([[`CICOPAL|${PK}`, linhaNaNuvem()]]));
+
+    await processDataSyncQueue();
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.conferido).toBe(true);
+    expect(payload.auditor).toBe('semorr@gmail.com');
+    expect(payload.data_leitura).toBe('2026-11-21T08:00:00.000Z');
+
+    const local = await db.local_assets.where('primarykey').equals(PK).first();
+    expect(local?._auditor).toBe('semorr@gmail.com');
+  });
+
+  it('o ponto da nuvem mais recente não é apagado, e o local adota-o', async () => {
+    await db.local_assets.put(asset({ latitude: -16.0, longitude: -48.0 }) as never);
+    fetchCloudConflictRows.mockResolvedValue(new Map([[`CICOPAL|${PK}`, linhaNaNuvem()]]));
+
+    await processDataSyncQueue();
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(payload, 'gps_lat')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(payload, 'gps_lng')).toBe(false);
+
+    const local = await db.local_assets.where('primarykey').equals(PK).first();
+    expect(Number(local?.latitude)).toBeCloseTo(-15.7942);
+    expect(Number(local?.longitude)).toBeCloseTo(-47.8825);
+  });
+
+  it('sem estado remoto o envio é o de sempre (não se inventa conflito)', async () => {
+    await db.local_assets.put(asset() as never);
+    fetchCloudConflictRows.mockResolvedValue(new Map<string, Record<string, unknown>>());
+
+    await processDataSyncQueue();
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      conferido: true,
+      auditor: 'semorr@gmail.com',
+      data_leitura: '2026-11-12T13:00:00.000Z'
+    });
+    expect(await db.audit_logs.filter((log) => log.acao === 'SYNC_CONFLICT').count()).toBe(0);
+  });
+
+  it('a leitura do estado remoto a falhar não bloqueia o envio', async () => {
+    await db.local_assets.put(asset() as never);
+    fetchCloudConflictRows.mockRejectedValue(new Error('sem rede'));
+
+    const result = await processDataSyncQueue();
+
+    expect(result.processedCount).toBe(1);
+    expect((upsert.mock.calls[0][0] as Record<string, unknown>).conferido).toBe(true);
   });
 });
 

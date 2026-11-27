@@ -21,6 +21,7 @@ import {
 } from './utils/dedupAssets';
 import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
 import { mesclarConflitoPorCampo } from './utils/mergePorCampo';
+import { isSystemLocked } from './utils/systemLock';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
 import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
 import { marcarSincronizadoLocal } from './utils/syncFalha';
@@ -1548,7 +1549,7 @@ useEffect(() => {
               
               const fileStatus = await sqliteService.getFileStatus();
               const isFilePresent = fileStatus.status === 'linked' || fileStatus.status === 'granted';
-              const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
+              const isDbLocked = isSystemLocked();
 
               if (isDbLocked && databaseMode !== DatabaseMode.INTERNAL) {
                 logger.info(">>> [BOOT BLINDADO] Forçando modalidade de dados para INTERNAL devido à blindagem de campo.");
@@ -2779,7 +2780,7 @@ useEffect(() => {
     isSyncingRef.current = true;
 
     const mode = explicitMode || databaseMode;
-    const isDbLocked = localStorage.getItem('is_system_locked') === 'true';
+    const isDbLocked = isSystemLocked();
 
     if (isDbLocked) {
       logger.info('>>> [Sync] Sincronização abortada: O sistema está no modo de Blindagem Física (is_system_locked: true). Nenhuma sincronização na rede ocorrerá.');
@@ -3281,6 +3282,9 @@ useEffect(() => {
 
     // A config do contrato vive em config_<TENANT>; global_config fica como reserva.
     const subscription = subscribeToInventoryChanges((newConfig) => {
+      // BLINDAGEM: com o «Pronto para Campo» ligado (mesmo depois de o app já
+      // estar aberto), nenhum aviso de carga alheia entra na base de campo.
+      if (isSystemLocked()) return;
       if (newConfig && newConfig.lastUpdated) {
         const cloudTime = new Date(newConfig.lastUpdated).getTime();
         // Referência sempre atual (o efeito já não depende de inventory.lastUpdated,
@@ -3297,6 +3301,14 @@ useEffect(() => {
     }, realtimeTenantId);
 
     const assetSubscription = subscribeToAssetChanges(realtimeTenantId, (payload) => {
+      // BLINDAGEM NOS DOIS SENTIDOS (H1 · Fase 3): a subida já estava fechada,
+      // mas o realtime continuava a aplicar a linha da nuvem ao estado e ao
+      // disco a cada evento. A decisão é tomada por evento, porque a chave
+      // pode ser ligada com a subscription já aberta.
+      if (isSystemLocked()) {
+        logger.info('>>> [Sync] Evento em tempo real ignorado: sistema blindado (Pronto para Campo).');
+        return;
+      }
       const { eventType, new: newAssetData, old: oldAssetData } = payload;
       const newAsset = newAssetData as unknown as Asset;
       const oldAsset = oldAssetData as unknown as Asset;
@@ -3354,7 +3366,7 @@ useEffect(() => {
     // Só processamos atualizações pendentes se o usuário estiver logado
     if (!user || !isCloudUpdatePending || isSyncing || databaseMode === DatabaseMode.INTERNAL) return;
 
-    if (localStorage.getItem('is_system_locked') === 'true') {
+    if (isSystemLocked()) {
       logger.info('>>> [Sync] Sincronização pendente abortada: Sistema blindado.');
       return;
     }
@@ -6599,7 +6611,7 @@ useEffect(() => {
   // --- Handlers de Transição e Workflow ---
 
   const handleClearDatabase = async () => {
-    if (localStorage.getItem('is_system_locked') === 'true') {
+    if (isSystemLocked()) {
       setModalConfig({
         isOpen: true,
         title: "Sistema Blindado",

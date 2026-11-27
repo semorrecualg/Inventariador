@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — conflito por campo na subida (H1 · Fase 2)
+
+- **O que era:** a descida já decidia a conferência e o ponto de GPS por tempo
+  (`utils/mergePorCampo`), mas o envio não: o ciclo de fundo montava o payload
+  inteiro e o `ON CONFLICT DO UPDATE` gravava todas as colunas. Um aparelho com
+  a fila parada (recuo, app fechado, offline) apagava na nuvem a conferência —
+  autor e data — ou o ponto que outro auditor gravou depois: a leitura mais
+  **antiga** é que ficava.
+- **Agora:** antes do envio, o ciclo lê numa única consulta o estado remoto das
+  chaves que vão subir (`fetchCloudConflictRows`) e decide grupo a grupo
+  (`utils/conflitoSubida`): a conferência (`conferido`, `auditor`,
+  `data_leitura`, `status`) e o ponto (`gps_lat`/`gps_lng`) só sobem quando a
+  leitura deste aparelho não é mais antiga do que a da nuvem. Quando a nuvem
+  vence, os campos saem do payload (a coluna remota fica intacta) e o registo
+  local adota os valores da nuvem na mesma escrita de `_is_synced = 1`.
+  O conflito fica na trilha (`SYNC_CONFLICT`), com a mesma janela das outras
+  recusas. Falha da leitura remota = envio como antes.
+
+### Corrigido — a blindagem física trava os dois sentidos (H1 · Fase 3)
+
+- **O que era:** `is_system_locked` (o «Pronto para Campo» do Gestor de Base)
+  só fechava a subida — e por via do modo forçado a INTERNAL no arranque. Com o
+  app já aberto, o ciclo de 60 s continuava a enviar, e o realtime aplicava a
+  linha da nuvem ao estado e ao disco a cada evento. A base de campo mexia-se
+  por baixo de quem estava a contar.
+- **Agora:** a chave tem uma regra só (`utils/systemLock`) e é consultada onde a
+  rede toca nos dados: `pushGate` (fila de ativos, fotos, campanhas, trilha e
+  `syncAssetsToCloud`), `syncFromCloud` (descida) e os dois canais de realtime
+  (evento a evento, porque a blindagem pode ser ligada com a subscription já
+  aberta). A grafia da chave não muda: só `'true'` fecha.
+
 ### Documentado — escritas por save e recuo no aparelho (A.5)
 
 - **Contagem fixada em teste:** o critério «escritas por save: de 5 para 3» da
