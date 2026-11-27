@@ -92,6 +92,13 @@ avança com o `updated_at` da nuvem (nunca com a hora deste aparelho, que pode
 estar adiantada e abrir um buraco na janela). Se a leitura falhar, devolve
 `null` e o checkpoint **não** avança: a próxima reconexão repete a janela.
 
+A escrita segue o caminho do delta do pull: a reconciliação calcula as linhas
+que ficaram diferentes (`linhasQueMudaram`) e grava **só essas** — `saveInventory`
+com `skipSqlAssetsInsert` e um `persistAssetsBatch` do subconjunto. Um
+`saveInventory(newState)` sem lista regrava a base inteira
+(`bulkInsertAssets` de todos os ativos) a cada reconexão, que é exactamente o
+que o pull já tinha deixado de fazer.
+
 A blindagem física vale também aqui: com `is_system_locked = 'true'` nem o
 evento nem a reconciliação aplicam linhas alheias.
 
