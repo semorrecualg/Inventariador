@@ -68,4 +68,21 @@ describe('efeito realtime de App.tsx', () => {
     expect(effectCode).toContain('subscribeToAssetChanges(realtimeTenantId');
     expect(effectCode).not.toContain('user?.tenantid');
   });
+
+  it('resolve o evento por campo em vez de descartar o ativo pendente (Fase 4)', () => {
+    expect(effectCode).toContain('mesclarEventoDeAtivo(');
+    expect(effectCode).toContain('ativoTemPendencia(');
+    expect(effectCode).not.toContain('...updatedAssets[index], ...newAsset');
+  });
+
+  it('relê por checkpoint quando o canal reconecta (Fase 4)', () => {
+    expect(effectCode).toContain("estado !== 'SUBSCRIBED'");
+    expect(effectCode).toContain('reconciliarPorCheckpoint');
+    expect(effectCode).toContain('fetchAssetsChangedSince(realtimeTenantId, desde)');
+    expect(effectCode).toContain('avancarCheckpoint(checkpointRealtime');
+  });
+
+  it('mapeia a linha crua do canal antes de a aplicar ao estado (Fase 4)', () => {
+    expect(effectCode).toContain('mapCloudAssetRow((newAssetData || {})');
+  });
 });

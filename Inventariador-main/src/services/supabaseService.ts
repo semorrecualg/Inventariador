@@ -1349,6 +1349,66 @@ export const fetchCloudConflictRows = async (
   }
 };
 
+/**
+ * RECONCILIAÇÃO DO TEMPO REAL — o que mudou desde o checkpoint
+ * ============================================================================
+ * Um evento emitido enquanto o canal estava em baixo (rede perdida, app
+ * suspenso, reconexão do WebSocket) não volta a ser entregue: sem esta
+ * releitura, a alteração só chegava no pull seguinte — que pode ser horas
+ * depois. Ao reconectar, `App.tsx` pede aqui as linhas com
+ * `updated_at > checkpoint` e aplica-as com o mesmo merge do delta.
+ *
+ * Lê a linha inteira (`select('*')`) porque o merge precisa do registo, não só
+ * da conferência: a linha da nuvem substitui a cópia local que não está
+ * pendente. Paginado a 1.000 (limite do PostgREST), como o pull.
+ *
+ * Devolve `null` quando não conseguiu ler — o chamador NÃO avança o checkpoint,
+ * para a próxima reconexão voltar a tentar a mesma janela. Uma lista vazia é
+ * uma resposta válida: nada mudou.
+ */
+export const fetchAssetsChangedSince = async (
+  tenantid: string | string[] | undefined,
+  since: string
+): Promise<Asset[] | null> => {
+  if (!supabase) return null;
+  const desde = String(since || '').trim();
+  if (!desde) return null;
+  const tenants = Array.from(
+    new Set(
+      (Array.isArray(tenantid) ? tenantid : [tenantid])
+        .map(t => String(t || '').trim())
+        .filter(Boolean)
+    )
+  );
+  if (tenants.length === 0) return null;
+
+  const PAGE_SIZE = 1000;
+  const encontrados: Asset[] = [];
+  let from = 0;
+
+  try {
+    for (;;) {
+      const { data, error } = await supabase
+        .from('assets')
+        .select('*')
+        .in('tenantid', tenants)
+        .gt('updated_at', desde)
+        .order('updated_at', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) throw error;
+      const pagina = Array.isArray(data) ? (data as Record<string, unknown>[]) : [];
+      encontrados.push(...pagina.map(row => mapCloudAssetRow(row)));
+      if (pagina.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+    return encontrados;
+  } catch (err) {
+    logger.warn('>>> [Supabase] Reconciliação do tempo real indisponível; o próximo pull cobre a janela:', err);
+    return null;
+  }
+};
+
 export const syncAssetsToCloud = async (
   assets: Asset[],
   tenantid?: string | string[],
@@ -3048,8 +3108,12 @@ export const subscribeToInventoryChanges = (
 
 /**
  * Assina mudanças em tempo real na tabela de ativos
+ *
+ * `onStatus` recebe o estado do canal (`SUBSCRIBED`, `CHANNEL_ERROR`,
+ * `TIMED_OUT`…). Quem assina usa-o para reconciliar o que passou enquanto o
+ * canal esteve em baixo: os eventos perdidos não voltam a ser emitidos.
  */
-export const subscribeToAssetChanges = (tenantid: string | string[], onUpdate: (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => void) => {
+export const subscribeToAssetChanges = (tenantid: string | string[], onUpdate: (payload: { new: Record<string, unknown>; old: Record<string, unknown>; eventType: string }) => void, onStatus?: (status: string) => void) => {
   if (!supabase) return null;
 
   const channel = supabase
@@ -3081,7 +3145,9 @@ export const subscribeToAssetChanges = (tenantid: string | string[], onUpdate: (
         }
       }
     )
-    .subscribe();
+    .subscribe((status: unknown) => {
+      onStatus?.(String(status));
+    });
 
   return channel;
 };
