@@ -7,24 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Corrigido — «permission denied for table assets» (42501) sem correção no repositório
+### Corrigido — o 42501 do envio era o pedido a chegar como `anon`, não falta de GRANT
 
-- **O que era:** o cartão do ativo mostrava «FALHA DE ENVIO — Erro Supabase:
-  [42501] permission denied for table assets» e a conferência nunca subia. O
-  42501 é recusa de **privilégio** de tabela — o RLS decide depois do `GRANT` —
-  por isso apagar a base do aparelho não mudava nada: a base local estava boa e
-  faltava o direito de escrever na nuvem. O `docs/supabase_bootstrap.sql` criava
-  as políticas `p_all` mas **nunca** concedia privilégios; num projeto onde
-  fossem revogados (ou a tabela recriada por outro dono) o app lia e não
-  conseguia subir nada, e não havia script para o corrigir.
-- **Agora:** `scripts/assets-permissoes.sql` (idempotente) diagnostica dono, RLS,
-  privilégios de tabela e de coluna e políticas; repõe `USAGE` no schema e
-  `SELECT/INSERT/UPDATE/DELETE` para `anon` e `authenticated` nas 10 tabelas do
-  app (`ALL` para `service_role`), as mesmas políticas permissivas e o cache do
-  PostgREST; e prova o resultado com `has_table_privilege`. O bootstrap passa a
-  incluir o mesmo bloco de `GRANT` (e `ALTER DEFAULT PRIVILEGES`), para um
-  projeto novo não nascer sem escrita. Nada é apagado no aparelho nem na nuvem.
-  Teste: `permissoesAssets` (10 contratos sobre o script e o bootstrap).
+- **Revertido o #236:** o script de privilégios que esse PR acrescentou (removido
+  neste revert) devolvia `SELECT/INSERT/UPDATE/DELETE` sobre `assets` a `anon`
+  (e repunha a política `p_all`),
+  anulando o endurecimento do #204 — a tabela voltava a ser legível e
+  escrevível sem sessão. Saem o script, o bloco de GRANTs do
+  `docs/supabase_bootstrap.sql` e o teste `permissoesAssets`.
+- **A causa real:** o app aceita sessões sem token do Supabase (login pelo
+  Dexie, «Barreira Local» e biometria regressam ANTES do `signInWithPassword` e
+  marcam a sessão como `APP`) e o portão do envio (`canPushToCloud`) só olha
+  para o aparelho, o modo de base e a blindagem — nunca para a sessão. Nesse
+  estado o supabase-js envia apenas a `apikey` e o PostgREST resolve cada
+  pedido com o papel `anon`; com `assets` fechada a `anon`, o pull e o upsert
+  recebem `42501 permission denied for table assets`. O mesmo código serve a
+  política de RLS a recusar a linha, por isso a mensagem escondia a diferença.
+  Ver `docs/SESSAO-ANON-42501.md`.
+- **Agora:** `src/utils/sessaoNuvem.ts` separa as duas leituras e
+  `services/supabaseService` expõe `estadoDaSessaoNuvem()` (leitura local, com
+  tecto de 2 s). A fila pergunta o papel uma vez por ciclo, no primeiro `42501`,
+  e o carimbo passa a dizer «pedido chegou como anon (sem sessão) — entre de
+  novo», «sessão válida — falta o GRANT em assets» ou «política de RLS recusou a
+  linha», em vez de «permission denied» para as três situações.
+- **Testes:** `sessaoNuvem` (7) fixa a classificação da sessão pelo access
+  token, as três leituras do 42501 e o limite de 90 caracteres do motivo do
+  cartão.
 
 ### Adicionado — anexar o APK de um run à release (fim da dependência dos 7 dias)
 
