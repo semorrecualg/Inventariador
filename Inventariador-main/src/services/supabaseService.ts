@@ -23,6 +23,7 @@ import { buildUnitFlags, mergeUnitFlags } from '../utils/unitConfigFlags';
 import { isAdminEmail } from '../utils/authUtils';
 import { clearPersistedSession } from '../utils/sessionPersistence';
 import { pullDedupKey } from '../utils/syncDedup';
+import { comTecto } from '../utils/comTecto';
 import { matchUnitKeys, normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
@@ -991,19 +992,6 @@ const BASE_GENERATION_TTL_MS = 60_000;
 // awaited antes do primeiro upsert). Esgotar o tempo é falha aberta.
 const BASE_GENERATION_READ_TIMEOUT_MS = 4_000;
 
-const comTecto = async <T>(promise: PromiseLike<T>, ms: number): Promise<T> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('tempo esgotado a ler o selo')), ms);
-      })
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-};
 let baseGenerationCache: { at: number; value: BaseGeneration | null } | null = null;
 let lastBaseGenerationReadWarn = '';
 let lastBaseGenerationNoticeKey: string | null = null;
@@ -1029,7 +1017,8 @@ export const lerGeracaoNuvem = async (): Promise<BaseGeneration | null> => {
         .select('generation, seq')
         .eq('id', 1)
         .maybeSingle() as unknown as PromiseLike<{ data: unknown; error: { message?: string } | null }>,
-      BASE_GENERATION_READ_TIMEOUT_MS
+      BASE_GENERATION_READ_TIMEOUT_MS,
+      'leitura do selo de geração'
     );
     if (error) throw new Error(error.message || 'erro de esquema');
     value = normalizarGeracao(data);
@@ -2671,6 +2660,19 @@ export interface FetchInventoryOptions {
  */
 const pendingPulls = new Map<string, Promise<{ assets: Asset[]; config: Partial<InventoryState> } | null>>();
 
+/**
+ * Tecto de um pull completo/delta de [contrato|filial].
+ *
+ * A paginação fala com a nuvem sem limite de tempo. Um pedido pendurado prendia
+ * quem o espera (o ecrã «SINCRONIZANDO BASE» ficava a rodar sem fim) e, pior,
+ * ficava no mapa de dedup: todos os pulls seguintes para o mesmo
+ * [contrato|filial] herdavam a mesma promessa morta. Com o tecto a promessa
+ * rejeita e sai do mapa — o chamador avisa o operador e pode tentar de novo.
+ * Um pull de 12.636 linhas a 1.000/página são 13 idas à rede; 2 minutos é
+ * folgado para uma filial e curto que baste para não parecer travado.
+ */
+const PULL_TOTAL_TIMEOUT_MS = 120_000;
+
 export const fetchFullInventory = async (
   tenantid?: string | string[], 
   unitid?: string,
@@ -2717,7 +2719,11 @@ export const fetchFullInventory = async (
     return inFlight;
   }
 
-  const promise = fetchFullInventoryImpl(resolvedTenantid, unitid, onProgress, onComplete, options);
+  const promise = comTecto(
+    fetchFullInventoryImpl(resolvedTenantid, unitid, onProgress, onComplete, options),
+    PULL_TOTAL_TIMEOUT_MS,
+    'pull do contrato'
+  );
   pendingPulls.set(pullKey, promise);
   void promise
     .finally(() => {

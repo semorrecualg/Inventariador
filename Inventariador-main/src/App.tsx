@@ -28,6 +28,7 @@ import { isConferido, marcarConferido, statusAoDesmarcar } from './utils/confere
 import { normalizarLeiturasDeConferencia } from './utils/normalizacaoLeitura';
 import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { preservarGpsMaisRecente } from './utils/assetGps';
+import { comTecto, TempoEsgotadoError } from './utils/comTecto';
 import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -2782,35 +2783,46 @@ useEffect(() => {
     if (isSyncing || isSyncingRef.current) return;
     isSyncingRef.current = true;
 
+    // SELO DE REENTRÂNCIA: TODA a saída tem de o devolver. Antes, os `return`
+    // antecipados (sistema blindado, modo interno, offline, login, sem sessão,
+    // escopo sem filial) deixavam o selo em `true` para o resto da sessão: a
+    // partir daí NENHUMA sincronização voltava a correr — e o ecrã podia ficar
+    // em «SINCRONIZANDO BASE» sem nada estar a decorrer. `abortarSync` é a
+    // única porta de saída antecipada.
+    const abortarSync = (motivo: string) => {
+      logger.info(motivo);
+      isSyncingRef.current = false;
+    };
+
     const mode = explicitMode || databaseMode;
     const isDbLocked = isSystemLocked();
 
     if (isDbLocked) {
-      logger.info('>>> [Sync] Sincronização abortada: O sistema está no modo de Blindagem Física (is_system_locked: true). Nenhuma sincronização na rede ocorrerá.');
+      abortarSync('>>> [Sync] Sincronização abortada: O sistema está no modo de Blindagem Física (is_system_locked: true). Nenhuma sincronização na rede ocorrerá.');
       return;
     }
     
     // BLINDAGEM TOTAL: Se o modo for INTERNAL ou isInternalMode for true, não permite nenhuma chamada de rede
     if (mode === DatabaseMode.INTERNAL || isInternalMode) {
-      logger.info('>>> [Sync] Sincronização abortada: Modo INTERNO (Mobile Puro) ativo.');
+      abortarSync('>>> [Sync] Sincronização abortada: Modo INTERNO (Mobile Puro) ativo.');
       return;
     }
 
     // GUARD: Check if online
     if (!navigator.onLine) {
-      logger.info('Sincronização ignorada: Dispositivo offline.');
+      abortarSync('Sincronização ignorada: Dispositivo offline.');
       return;
     }
 
     // GUARD: Check if on login screen (unless explicitTenantid is provided)
     if (screen === AppScreen.LOGIN && !explicitTenantid) {
-      logger.info('Sincronização ignorada: Usuário na tela de login.');
+      abortarSync('Sincronização ignorada: Usuário na tela de login.');
       return;
     }
 
     // GUARD: Check if user is logged in (unless explicitTenantid is provided, which happens during login/auth check)
     if (!user && !explicitTenantid) {
-      logger.info('Sincronização ignorada: Usuário não autenticado.');
+      abortarSync('Sincronização ignorada: Usuário não autenticado.');
       return;
     }
     
@@ -2842,6 +2854,9 @@ useEffect(() => {
       } finally {
         setIsSyncing(false);
       }
+      // Esta saída também é antecipada: sem devolver o selo, o perfil
+      // MOBILE_SINGLE ficava sem nenhuma sincronização no resto da sessão.
+      isSyncingRef.current = false;
       return;
     }
     
@@ -2862,7 +2877,7 @@ useEffect(() => {
       lastCtx: readLastWorkContext()
     });
     if (escopoPull.type === 'blocked') {
-      logger.warn('>>> [Sync] Contrato sem filial resolvida: o contrato inteiro NÃO é baixado. A filial é escolhida no CONTRATO DE TRABALHO.');
+      abortarSync('>>> [Sync] Contrato sem filial resolvida: o contrato inteiro NÃO é baixado. A filial é escolhida no CONTRATO DE TRABALHO.');
       return;
     }
     const unitDoPull = escopoPull.type === 'unit' ? escopoPull.unit : explicitUnitId;
@@ -2874,13 +2889,17 @@ useEffect(() => {
       // Tentamos enviar as alterações locais, mas não bloqueamos o pull se falhar
       // Isso resolve casos de RLS ou conflitos que impedem o push mas permitem o pull
       try {
-        await pushLocalChanges(true); 
-        await processSyncQueue();
+        // O envio e a fila de fotos falam com a nuvem e com o nativo: sem tecto,
+        // um pedido pendurado prendia o ecrã «SINCRONIZANDO BASE» antes de o
+        // pull sequer começar. Esgotado o tempo, o pull segue — é ele que
+        // interessa ao operador.
+        await comTecto(pushLocalChanges(true), 60_000, 'envio das alterações locais');
+        await comTecto(processSyncQueue(), 60_000, 'fila de sincronização');
       } catch (pushErr) {
         logger.warn('[Sync] Falha ao enviar alterações locais antes do pull. Continuando pull para restaurar integridade...', pushErr);
       }
       
-      const pendingItems = await getPendingSyncItems();
+      const pendingItems = await comTecto(getPendingSyncItems(), 15_000, 'fila de fotos').catch(() => []);
       setPendingPhotosCount(pendingItems.length);
 
       // 2. SINCRONISMO DE ENTRADA (SERVIDOR -> AUDITOR)
@@ -3197,6 +3216,20 @@ useEffect(() => {
         }
       }
     } catch (error) {
+      // TECTO ESGOTADO: a nuvem não respondeu no tempo previsto. Não é uma
+      // falha de dados e NÃO se troca de modo por isto: a base que está no
+      // aparelho mantém-se intacta e o operador pode tentar de novo.
+      if (error instanceof TempoEsgotadoError) {
+        logger.error(`>>> [Sync] ${error.message}. Base local preservada; nada foi apagado.`);
+        setSyncError('A nuvem não respondeu a tempo. A base local mantém-se — toque em SINCRONIZAR para tentar novamente.');
+        setModalConfig({
+          isOpen: true,
+          title: 'Sincronização sem resposta',
+          message: 'A nuvem não respondeu dentro do tempo previsto. Nada foi apagado: a base que já está no aparelho continua disponível. Verifique a ligação e toque em SINCRONIZAR para tentar novamente.',
+          type: 'warning'
+        });
+        return;
+      }
       const err = error as Record<string, unknown>;
       logger.error('>>> [Sync] Erro ao sincronizar da nuvem:', error);
       const errMsg = String(err?.message || error || '').toLowerCase();
@@ -3246,6 +3279,29 @@ useEffect(() => {
       setIsSyncing(false);
     }
   }, [databaseMode, screen, isSyncing, pushLocalChanges, user]);
+
+  // VIGIA DO ECRÃ DE SINCRONIZAÇÃO — a última linha de defesa.
+  // Os passos que falam com a nuvem têm tecto de tempo (`comTecto`), mas o
+  // overlay não pode depender de cada um deles: se algo ficar pendurado, o
+  // operador fica com o ecrã tapado e sem saber porquê. Ao fim de 3 minutos o
+  // ecrã liberta-se, diz o que aconteceu e a base local fica como está.
+  useEffect(() => {
+    if (!isSyncing) return;
+    const VIGIA_MS = 3 * 60_000;
+    const vigia = setTimeout(() => {
+      logger.warn('>>> [Sync] Vigia: 3 minutos com o ecrã de sincronização aberto. Liberando o ecrã; a base local mantém-se.');
+      isSyncingRef.current = false;
+      setIsSyncing(false);
+      setSyncError('A sincronização excedeu 3 minutos e foi interrompida. A base local mantém-se.');
+      setModalConfig({
+        isOpen: true,
+        title: 'Sincronização interrompida',
+        message: 'A sincronização demorou mais de 3 minutos e foi interrompida para devolver o controlo. Nada foi apagado: a base que já está no aparelho continua disponível. Verifique a ligação e tente SINCRONIZAR novamente.',
+        type: 'warning'
+      });
+    }, VIGIA_MS);
+    return () => clearTimeout(vigia);
+  }, [isSyncing]);
 
   // Contrato ativo dos canais de tempo real: só muda quando muda o contrato,
   // para o canal não ser desligado e religado a cada sincronização.
