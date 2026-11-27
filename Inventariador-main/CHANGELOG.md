@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — envio em massa da base local pede a credencial da nuvem sem trocar de modo
+
+- **O que era:** ao premir «ENVIAR BASE PARA A NUVEM» no Gestor de Base de
+  Dados em BASE LOCAL, o envio falhava com `SessaoNuvemAusenteError` e a
+  instrução «saia e entre com e-mail e senha» era impossível de cumprir sem
+  trocar de modo — beco sem saída.
+- **Agora:** o botão pede o e-mail e a senha do Supabase num modal do próprio
+  Gestor só quando é premido (acção explícita do operador), abre a sessão com
+  `estabelecerSessaoNuvem` e só então envia. A BASE LOCAL permanece hermética:
+  a nuvem só é contactada nesse instante, o modo não muda e nada é lido em
+  segundo plano. Um portão puro (`motivoDoBloqueioDoEnvioEmMassa`) decide
+  sem-credenciais / offline / sem-sessão, com precedência nessa ordem.
+- **Testes:** `entradaNuvemEnvio` (9) fixa a decisão do portão.
+
 ### Corrigido — pendentes «à espera de sessão» e reentrada a partir da barra
 
 - **Falta de sessão não é recusa:** o ciclo da fila deixa de gravar
