@@ -106,6 +106,14 @@ linha; um `UPDATE` cujo merge não alterou nada e um `DELETE` não gravam
 nenhuma — no `DELETE` o registo sai do estado e o espelho não ganha escrita
 (`persistAssetsBatch` é upsert), como já acontecia com o save completo.
 
+O pull do arranque também deixou de regravar a base: `fetchFullInventory` já
+escreve as linhas com `markSynced: true` e o estado é montado com essas mesmas
+linhas, que não trazem `_is_synced` (`mapCloudAssetRow` não o produz). Regravá-
+las com `saveInventory(newState)` sem lista devolvia o selo a 0 — a base
+recém-descarregada ficava "pendente de nuvem". Os dois caminhos do arranque
+(pull do boot loader e verificação secundária) passam `skipSqlAssetsInsert` e
+gravam só configuração; `bootPullSeloSynced` fixa o caso.
+
 O aviso de foto sincronizada (`gbr_photo_synced`) segue o mesmo recorte: troca
 `_photoUrl` no estado e grava **só** esse ativo (`linhasQueMudaram` com o id do
 aviso + `persistAssetsBatch`), em vez da base inteira por cada foto. Foto

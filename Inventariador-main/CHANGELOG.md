@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o pull do arranque deixa de rebaixar o selo de sincronização (H1 · Fase 4)
+
+- **O que era:** `fetchFullInventory` grava a base com `markSynced: true`
+  (`_is_synced = 1`) e o arranque montava o estado com essas mesmas linhas —
+  que vêm de `mapCloudAssetRow` e **não** trazem `_is_synced` — e chamava
+  `saveInventory(newState)` sem lista. O `mapAssetToDexie` só mantém o selo
+  quando a linha o traz, por isso essa segunda escrita devolvia a base inteira
+  a `_is_synced = 0` logo depois do download — escrita duplicada e selo
+  rebaixado (a base recém-descarregada ficava "pendente de nuvem").
+- **Agora:** os dois caminhos do arranque (pull do boot loader e a verificação
+  secundária) gravam só configuração (`skipSqlAssetsInsert`); quem grava as
+  linhas é o download, com o selo intacto. O contrato fica fixado em teste
+  (`bootPullSeloSynced`): a reprodução mostra o rebaixamento a 0 e a correção
+  mantém o 1.
+
 ### Alterado — a foto sincronizada grava só a linha do ativo (H1 · Fase 4)
 
 - **O que era:** ao receber `gbr_photo_synced` (a foto subiu e passou a ter URL da
