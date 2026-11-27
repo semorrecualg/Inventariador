@@ -1,0 +1,64 @@
+name: Anexar APK a uma release
+
+# O GUIA_APK §6 promete que uma release guarda o APK «para sempre», mas o build
+# sob demanda só publica um artefacto de 7 dias. Este workflow pega num
+# artefacto JÁ gerado e anexa-o à release do tag — não reconstrói nada, por isso
+# o ficheiro anexado é o mesmo do run (mesmo SHA-256, mesmo certificado), e o
+# run pode ser de qualquer dia enquanto o artefacto existir.
+#
+# Uso: Actions → "Anexar APK a uma release" → Run workflow, com o tag da release
+# (ex.: v3.1.0) e o id do run do "Build Android APK" (o número na URL do run).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag da release (ex.: v3.1.0)'
+        required: true
+      run_id:
+        description: 'Run do "Build Android APK" que gerou o artefacto'
+        required: true
+
+permissions:
+  contents: write # anexar ficheiros à release
+  actions: read   # descarregar o artefacto do run indicado
+
+jobs:
+  anexar:
+    name: Anexar APK à release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descarregar o artefacto do run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          case "$RUN_ID" in
+            ''|*[!0-9]*) echo "::error::run_id tem de ser o número do run (ex.: 45932625207)."; exit 1 ;;
+          esac
+          mkdir -p apk
+          gh run download "$RUN_ID" --repo "$REPO" --name gbr-kardek-apk --dir apk
+          ls -l apk
+          if [ -z "$(find apk -name '*.apk' -print -quit)" ]; then
+            echo "::error::O artefacto do run $RUN_ID não tem nenhum .apk."
+            exit 1
+          fi
+
+      - name: Anexar à release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          ficheiros=(apk/**/*.apk apk/**/*.apk.sha256)
+          if [ ${#ficheiros[@]} -eq 0 ]; then
+            echo "::error::Não há ficheiros para anexar."
+            exit 1
+          fi
+          gh release upload "$TAG" "${ficheiros[@]}" --repo "$REPO" --clobber
+          echo "--- anexos da release $TAG ---"
+          gh release view "$TAG" --repo "$REPO" --json assets \
+            --jq '.assets[] | "\(.name) — \(.size) bytes"'

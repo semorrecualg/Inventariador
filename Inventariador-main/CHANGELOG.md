@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — anexar o APK de um run à release (fim da dependência dos 7 dias)
+
+- `.github/workflows/release-asset.yml` (dispatch): baixa o artefacto
+  `gbr-kardek-apk` de um run indicado e anexa o `.apk` e o `.sha256` à release
+  do tag, com `--clobber`. Não reconstrói nada — o ficheiro é o mesmo do run
+  (mesmo SHA-256 e mesmo certificado).
+- Era a peça que faltava: o `GUIA_APK` §6 prometia que a release guardava o APK,
+  mas o build sob demanda só publicava um artefacto de 7 dias.
+
 ### Adicionado — runbook da matriz S1–S9 (H1 · Fase 5)
 
 - `docs/RUNBOOK-FASE5-S1-S9.md`: procedimento para fechar o H1.5 com dois

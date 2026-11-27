@@ -106,6 +106,9 @@ não se repete.
   instalar de novo.
 - O artefacto do GitHub expira em **7 dias**. Para uma versão que precise ficar
   guardada, peça uma **release** (tag `v…`): aí o APK fica anexado para sempre.
+  Quem cuida do projeto anexa-o pelo workflow **«Anexar APK a uma release»**
+  (indica o tag e o número do run que gerou o APK) — o ficheiro é o mesmo do
+  run, com o mesmo SHA-256.
 - Sempre que quiser conferir se o APK é o certo, o resumo do run mostra o
   **SHA-256 do APK** e o **certificado** usado na assinatura.
 
