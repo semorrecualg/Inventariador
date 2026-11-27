@@ -3006,8 +3006,15 @@ useEffect(() => {
               lastUpdated: syncTimestamp
             };
             saveInventory(newState, undefined, false, true).catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
-            // As linhas dos espelhos já estão gravadas pelo download; só a
-            // decisão local precisa de uma escrita (e é um punhado de linhas).
+            // O pull só lê: as linhas do delta têm de ser gravadas aqui, com o
+            // selo do download. Sem isto o checkpoint avançava e elas não
+            // voltavam nunca (o delta seguinte já as considerava vistas).
+            if (cloudAssets.length > 0) {
+              sqliteService.persistAssetsBatch(cloudAssets as unknown as Record<string, unknown>[])
+                .catch(e => logger.error('Erro ao gravar o delta do pull:', e));
+            }
+            // A decisão local precisa de uma escrita própria (é um punhado de
+            // linhas), por cima das que acabaram de ser gravadas.
             if (decisaoLocal.length > 0) {
               sqliteService.persistAssetsBatch(decisaoLocal as unknown as Record<string, unknown>[])
                 .catch(e => logger.error('Erro ao regravar a decisão local do delta:', e));
@@ -3139,6 +3146,12 @@ useEffect(() => {
               }
             })
             .catch(e => logger.error('Erro ao salvar inventário sincronizado:', e));
+          // O pull só lê: a base que desceu grava-se aqui, uma vez, com o selo
+          // que `mapCloudAssetRow` não produz (`_is_synced: 1`).
+          if (cloudAssets.length > 0) {
+            sqliteService.persistAssetsBatch(cloudAssets as unknown as Record<string, unknown>[])
+              .catch(e => logger.error('Erro ao gravar a base do pull:', e));
+          }
           // Uma escrita só, e só das linhas com decisão local.
           if (decisaoLocal.length > 0) {
             sqliteService.persistAssetsBatch(decisaoLocal as unknown as Record<string, unknown>[])
@@ -3762,18 +3775,21 @@ useEffect(() => {
             // ETAPA 5a: marca o filtro EFETIVO (perfil ou última escolha) para o
             // dedup casar exatamente com o que foi baixado.
             markPullCompleted(user?.tenantid, bootFilial);
+            // O PULL SÓ LÊ: `fetchFullInventory` não escreve no Dexie. Quem
+            // grava a base no aparelho é este passo, com o selo do download —
+            // a premissa antiga («o download já gravou») deixava as linhas só
+            // em memória, e o blob só entra quando o cache está vazio.
+            const baixados = (cloudData.assets as Asset[]).map(a => ({ ...a, _is_synced: 1 }));
+            await sqliteService.persistAssetsBatch(baixados as unknown as Record<string, unknown>[]);
             const newState: InventoryState = {
               ...inventoryRef.current,
               ...cloudData.config,
-              assets: cloudData.assets,
+              assets: baixados,
               status: DatabaseStatus.LOADED,
               lastUpdated: new Date().toISOString()
             };
             setInventory(newState);
-            // SÓ CONFIGURAÇÃO: `fetchFullInventory` já gravou estas linhas com
-            // `markSynced: true`. Regravá-las aqui (sem lista) devolvia o selo
-            // `_is_synced` a 0, porque `mapCloudAssetRow` não o produz e o
-            // `mapAssetToDexie` só o mantém quando a linha o traz.
+            // SÓ CONFIGURAÇÃO: as linhas foram gravadas acima, com o selo.
             await saveInventory(newState, undefined, false, true);
             savedInventory = newState;
             setLastSyncTime(new Date().toISOString());
@@ -3841,16 +3857,18 @@ useEffect(() => {
 
                 if (isLocalEmptySec && cloudData.assets && cloudData.assets.length > 0 && !justClearedSec) {
                   logger.info('Base local vazia detectada em verificação secundária. Sincronizando com a nuvem...');
+                  const baixados = (cloudData.assets as Asset[]).map(a => ({ ...a, _is_synced: 1 }));
                   const newState: InventoryState = {
                     ...inventoryRef.current,
                     ...cloudData.config,
-                    assets: cloudData.assets,
+                    assets: baixados,
                     status: DatabaseStatus.LOADED,
                     lastUpdated: new Date().toISOString()
                   };
+                  // Mesmo caso do arranque principal: o pull só lê, por isso as
+                  // linhas são gravadas antes do save, com o selo do download.
+                  await sqliteService.persistAssetsBatch(baixados as unknown as Record<string, unknown>[]);
                   setInventory(newState);
-                  // Mesmo caso do arranque principal: o download já gravou a
-                  // base com o selo; aqui só falta a configuração.
                   await saveInventory(newState, undefined, false, true);
                   setLastSyncTime(new Date().toISOString());
                   setRecoverySource('CLOUD');
