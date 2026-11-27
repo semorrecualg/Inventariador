@@ -162,3 +162,37 @@ export const idsComPendencia = (
   for (const id of tocados) ids.add(String(id));
   return Array.from(ids);
 };
+
+/**
+ * GRAVAR SÓ O QUE MUDOU NA RECONCILIAÇÃO
+ * ============================================================================
+ * A reconciliação relê o delta da nuvem e remonta o estado. Gravar esse estado
+ * com `saveInventory(newState)` sem lista de ativos grava a BASE INTEIRA
+ * (`bulkInsertAssets` de todos os ativos) a cada reconexão — 12.636 linhas por
+ * três espelhos para corrigir, muitas vezes, uma dúzia. É o mesmo problema que
+ * o pull já resolveu com `persistAssetsBatch`.
+ *
+ * Aqui ficam só as linhas que a nuvem tocou e cujo registo final ficou
+ * diferente do que já estava no estado. Uma linha que a nuvem trouxe mas cujo
+ * merge não mudou nada (a conferência local é mais recente, por exemplo) não
+ * volta ao disco: os espelhos já têm essa cópia.
+ */
+export const linhasQueMudaram = (
+  anteriores: readonly Asset[],
+  resultado: readonly Asset[],
+  visitadas: Iterable<string | number>
+): Asset[] => {
+  const antes = new Map(anteriores.map(ativo => [String(ativo.id), ativo]));
+  const depois = new Map(resultado.map(ativo => [String(ativo.id), ativo]));
+  const alteradas: Asset[] = [];
+
+  for (const id of new Set(Array.from(visitadas, valor => String(valor)))) {
+    const atual = depois.get(id);
+    // Sem registo final não há o que gravar (o id não existe no estado).
+    if (!atual) continue;
+    const anterior = antes.get(id);
+    if (!anterior || !mesmoConteudo(atual, anterior)) alteradas.push(atual);
+  }
+
+  return alteradas;
+};

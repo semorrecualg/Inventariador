@@ -4,6 +4,7 @@ import {
   ativoTemPendencia,
   avancarCheckpoint,
   idsComPendencia,
+  linhasQueMudaram,
   mesclarEventoDeAtivo
 } from '../utils/realtimeAtivos';
 
@@ -149,6 +150,54 @@ describe('avancarCheckpoint — só o carimbo da nuvem conta', () => {
     expect(avancarCheckpoint('2026-11-20T10:00:00.000Z', undefined)).toBe('2026-11-20T10:00:00.000Z');
     expect(avancarCheckpoint('2026-11-20T10:00:00.000Z', '')).toBe('2026-11-20T10:00:00.000Z');
     expect(avancarCheckpoint('2026-11-20T10:00:00.000Z', 'ontem')).toBe('2026-11-20T10:00:00.000Z');
+  });
+});
+
+describe('linhasQueMudaram — a reconciliação grava só o delta', () => {
+  it('devolve a linha que não existia no estado (linha nova da nuvem)', () => {
+    const nova = localPendente({ id: 'PK-NOVA', etiqueta: '009999' });
+
+    const alteradas = linhasQueMudaram([localPendente()], [localPendente(), nova], ['PK-NOVA']);
+
+    expect(alteradas).toEqual([nova]);
+  });
+
+  it('não devolve uma linha que o merge deixou igual (mesmo com outra ordem de chaves)', () => {
+    const anterior = localPendente();
+    const reordenada = Object.fromEntries(
+      Object.entries(anterior as unknown as Record<string, unknown>).reverse()
+    ) as unknown as Asset;
+
+    const alteradas = linhasQueMudaram([anterior], [reordenada], ['PK-1']);
+
+    expect(alteradas).toEqual([]);
+  });
+
+  it('devolve a versão final (do resultado) da linha que mudou', () => {
+    const anterior = localPendente({ _auditor: 'ANA' });
+    const final = localPendente({ _auditor: 'BRUNO', _dataLeitura: '2026-11-20T10:00:00.000Z' });
+
+    const alteradas = linhasQueMudaram([anterior], [final], ['PK-1']);
+
+    expect(alteradas).toHaveLength(1);
+    expect(alteradas[0]).toBe(final);
+  });
+
+  it('ignora ids visitados que não têm registo no resultado', () => {
+    const alteradas = linhasQueMudaram([localPendente()], [localPendente()], ['PK-APAGADO']);
+    expect(alteradas).toEqual([]);
+  });
+
+  it('não grava linhas fora do delta, mesmo que tenham mudado', () => {
+    const foraDoDelta = localPendente({ id: 'PK-2', _auditor: 'CARLOS' });
+
+    const alteradas = linhasQueMudaram(
+      [localPendente(), localPendente({ id: 'PK-2' })],
+      [localPendente(), foraDoDelta],
+      ['PK-1']
+    );
+
+    expect(alteradas).toEqual([]);
   });
 });
 

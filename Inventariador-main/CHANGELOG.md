@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — a reconciliação do tempo real grava só o delta (H1 · Fase 4)
+
+- **O que era:** cada reconexão do canal remontava o estado e chamava
+  `saveInventory(newState)` sem lista de ativos. Esse caminho grava a **base
+  inteira** (`bulkInsertAssets` de todos os ativos, nos dois espelhos) para
+  corrigir as poucas linhas que a nuvem trouxe — o mesmo custo que o pull já
+  tinha deixado de pagar.
+- **Agora:** a reconciliação calcula as linhas que ficaram diferentes do que
+  já estava no estado (`linhasQueMudaram`, comparação de conteúdo sem depender
+  da ordem das chaves) e grava só essas: `saveInventory` com
+  `skipSqlAssetsInsert` e um `persistAssetsBatch` do subconjunto. Se nada mudou,
+  não há escrita nenhuma.
+
 ### Corrigido — o tempo real reconcilia o que perdeu (H1 · Fase 4)
 
 - **O que era:** o canal era o caminho com janela de perda. Um evento de ativo

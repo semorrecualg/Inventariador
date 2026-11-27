@@ -21,7 +21,7 @@ import {
 } from './utils/dedupAssets';
 import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
 import { mesclarConflitoPorCampo } from './utils/mergePorCampo';
-import { ativoTemPendencia, avancarCheckpoint, idsComPendencia, mesclarEventoDeAtivo } from './utils/realtimeAtivos';
+import { ativoTemPendencia, avancarCheckpoint, idsComPendencia, linhasQueMudaram, mesclarEventoDeAtivo } from './utils/realtimeAtivos';
 import { isSystemLocked } from './utils/systemLock';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
 import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
@@ -3338,7 +3338,21 @@ useEffect(() => {
           dirtyIds: idsComPendencia(prev.assets, dirtyAssetsRef.current)
         });
         const newState = { ...prev, assets: resultado.assets };
-        saveInventory(newState).catch(e => logger.error('Erro ao salvar a reconciliação do tempo real:', e));
+        // ESCRITA SÓ DO DELTA: `saveInventory(newState)` sem lista regrava a
+        // base inteira a cada reconexão. Aqui seguem só as linhas que a nuvem
+        // tocou e cujo registo final mudou — o mesmo caminho do pull
+        // (`skipSqlAssetsInsert` + `persistAssetsBatch`), sem reenvio de nuvem.
+        const alteradas = linhasQueMudaram(
+          prev.assets,
+          resultado.assets,
+          linhas.map(linha => String(linha.id))
+        );
+        if (alteradas.length > 0) {
+          saveInventory(newState, undefined, false, true)
+            .catch(e => logger.error('Erro ao salvar a reconciliação do tempo real:', e));
+          sqliteService.persistAssetsBatch(alteradas as unknown as Record<string, unknown>[])
+            .catch(e => logger.error('Erro ao regravar as linhas da reconciliação do tempo real:', e));
+        }
         return newState;
       });
     };

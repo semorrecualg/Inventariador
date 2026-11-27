@@ -85,4 +85,18 @@ describe('efeito realtime de App.tsx', () => {
   it('mapeia a linha crua do canal antes de a aplicar ao estado (Fase 4)', () => {
     expect(effectCode).toContain('mapCloudAssetRow((newAssetData || {})');
   });
+
+  it('a reconciliação grava só as linhas que mudaram, não a base inteira', () => {
+    const inicio = effectCode.indexOf('const reconciliarPorCheckpoint');
+    const fim = effectCode.indexOf('const assetSubscription');
+    const reconciliar =
+      inicio !== -1 && fim > inicio ? effectCode.slice(inicio, fim) : '';
+
+    expect(reconciliar).not.toBe('');
+    expect(reconciliar).toContain('linhasQueMudaram(');
+    expect(reconciliar).toContain('saveInventory(newState, undefined, false, true)');
+    expect(reconciliar).toContain('persistAssetsBatch(alteradas');
+    // `saveInventory(newState)` sem lista regrava todos os ativos.
+    expect(reconciliar).not.toContain('saveInventory(newState)');
+  });
 });
