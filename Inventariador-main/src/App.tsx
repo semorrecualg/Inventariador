@@ -29,7 +29,7 @@ import { normalizarLeiturasDeConferencia } from './utils/normalizacaoLeitura';
 import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { preservarGpsMaisRecente } from './utils/assetGps';
 import { comTecto, TempoEsgotadoError } from './utils/comTecto';
-import { descreverErroNuvem } from './utils/erroNuvem';
+import { descreverErroNuvem, pareceFalhaDeCanal } from './utils/erroNuvem';
 import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -3281,18 +3281,9 @@ useEffect(() => {
         });
         return;
       }
-      const err = error as Record<string, unknown>;
-      logger.error('>>> [Sync] Erro ao sincronizar da nuvem:', error);
-      const errMsg = String(err?.message || error || '').toLowerCase();
-      const isSuspendedNetwork = errMsg.includes('suspended') || 
-                                errMsg.includes('io') || 
-                                errMsg.includes('network') || 
-                                errMsg.includes('failed to fetch') || 
-                                errMsg.includes('fetch') || 
-                                errMsg.includes('timeout') ||
-                                errMsg.includes('abort') ||
-                                errMsg.includes('load failed') ||
-                                err?.status === 0;
+      const motivo = descreverErroNuvem(error);
+      logger.error(`>>> [Sync] Erro ao sincronizar da nuvem: ${motivo}`, error);
+      const isSuspendedNetwork = pareceFalhaDeCanal(error);
 
       if (isSuspendedNetwork && databaseMode !== DatabaseMode.INTERNAL) {
         logger.warn('>>> [Sync - Contingência] Conexão com Supabase restrita ou suspensa (ERR_NETWORK_IO_SUSPENDED). Ativando SOBERANIA NATIVA (SQLite) offline de forma automática e segura.');
@@ -3322,15 +3313,10 @@ useEffect(() => {
           message: 'Foi identificada uma suspensão no canal de tráfego de rede da WebView. O aplicativo fez a transição dinâmica para o modo de Soberania Nativa (offline com base física SQLite) para proteger todas as suas operações locais.',
           type: 'warning'
         });
-      }
-
-      // A recusa da nuvem (42501, tabela ausente, política de RLS) não é falha
-      // de rede: mostrar o código e o motivo reais, nunca um diagnóstico
-      // inventado de tráfego da WebView.
-      const motivo = descreverErroNuvem(error);
-      if (isSuspendedNetwork && databaseMode !== DatabaseMode.INTERNAL) {
         setSyncError(`Erro de tráfego em rede WebView. Chaveado para contingência local. ${motivo}`);
       } else {
+        // A recusa da nuvem (42501, tabela ausente, política de RLS) não é
+        // falha de rede: mostrar o código e o motivo reais.
         setSyncError(`Falha ao baixar a base da nuvem: ${motivo}. A base do aparelho mantém-se.`);
         setModalConfig({
           isOpen: true,
@@ -3966,9 +3952,11 @@ useEffect(() => {
           }
         }
       } catch (e) {
+        // Este `try` cobre o pull E as gravações locais do arranque: o aviso
+        // não pode culpar a nuvem pelo que falhou no aparelho.
         const motivo = descreverErroNuvem(e);
         logger.error(`Data load failed: ${motivo}`, e);
-        setSyncError(`Falha ao carregar a base da nuvem no arranque: ${motivo}`);
+        setSyncError(`Falha ao carregar a base: ${motivo}`);
       } finally {
         // ETAPA 5b (fix do timing): libera os syncs que aguardavam o boot
         // terminar o loadInventory antes de decidir delta vs full.
@@ -4007,7 +3995,10 @@ useEffect(() => {
               const cloudData = await Promise.race([
                 fetchFullInventory(user?.tenantid, verifyUnit),
                 new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 8000))
-              ]).catch(() => null);
+              ]).catch((erro) => {
+                logger.warn(`>>> [Boot Loader] Verificação em segundo plano da nuvem falhou: ${descreverErroNuvem(erro)}`);
+                return null;
+              });
 
               if (cloudData && cloudData.config && cloudData.config.lastUpdated) {
                 const cloudTime = new Date(cloudData.config.lastUpdated).getTime();

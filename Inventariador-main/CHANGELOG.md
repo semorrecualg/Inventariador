@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Autosave, envio e arranque:** «Erro na sincronização»,
   «Erro ao enviar alterações locais» e «Data load failed» passam a incluir o
   erro real (`utils/erroNuvem`), sem substituir a causa por um texto genérico.
+  O aviso do arranque diz «Falha ao carregar a base» — o mesmo `try` cobre as
+  gravações locais, que não são falha da nuvem.
+- **42501 não é falha de rede:** a classificação do `App` testava
+  `message.includes('io')`, que casa com «perm**iss io**n denied»: uma recusa do
+  pull mudava a app para offline e escondia o motivo. `pareceFalhaDeCanal`
+  (`utils/erroNuvem`) só reconhece sinais do canal (suspensão, `failed to
+  fetch`, `network`, `timeout`, abort, `status 0`).
 - **Download manual e painel de bases:** o modal «Erro no Download» e o placar
   do Gestor mostram o motivo devolvido pela nuvem em vez de pedir para
   «verificar a conexão».

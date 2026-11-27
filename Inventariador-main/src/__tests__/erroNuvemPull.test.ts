@@ -12,6 +12,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type * as SupabaseService from '../services/supabaseService';
+import { pareceFalhaDeCanal } from '../utils/erroNuvem';
 
 vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
@@ -71,6 +72,25 @@ describe('o pull da nuvem diz o código real da recusa', () => {
   });
 });
 
+describe('a recusa da nuvem não é confundida com falha de rede', () => {
+  it('42501 é recusa de dados, não de canal', () => {
+    expect(
+      pareceFalhaDeCanal({
+        code: '42501',
+        message: 'permission denied for table assets',
+        details: 'role anon'
+      })
+    ).toBe(false);
+    expect(pareceFalhaDeCanal(new Error('permission denied for table dics'))).toBe(false);
+  });
+
+  it('os sinais do canal continuam a valer', () => {
+    expect(pareceFalhaDeCanal(new TypeError('Failed to fetch'))).toBe(true);
+    expect(pareceFalhaDeCanal(new Error('NetworkError when attempting to fetch resource'))).toBe(true);
+    expect(pareceFalhaDeCanal({ status: 0 })).toBe(true);
+  });
+});
+
 describe('os avisos de pull e sincronização usam o formatador', () => {
   const ler = (relativo: string) =>
     readFileSync(join(process.cwd(), 'src', relativo), 'utf8');
@@ -79,9 +99,17 @@ describe('os avisos de pull e sincronização usam o formatador', () => {
     const app = ler('App.tsx');
     expect(app).toContain('Falha ao baixar a base da nuvem: ${motivo}');
     expect(app).toContain('A nuvem recusou a base');
+    expect(app).toContain('const isSuspendedNetwork = pareceFalhaDeCanal(error);');
+    expect(app).not.toContain("includes('io')");
     expect(app).not.toContain(
       "setSyncError('Erro de tráfego em rede WebView. Chaveado para contingência local.');"
     );
+  });
+
+  it('o arranque não chama «falha da nuvem» ao que falhou no aparelho', () => {
+    const app = ler('App.tsx');
+    expect(app).toContain('setSyncError(`Falha ao carregar a base: ${motivo}`)');
+    expect(app).not.toContain('Falha ao carregar a base da nuvem no arranque');
   });
 
   it('o autosave e o envio de alterações mostram o motivo real', () => {

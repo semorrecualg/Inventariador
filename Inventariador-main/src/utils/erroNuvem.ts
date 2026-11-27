@@ -74,3 +74,35 @@ export const descreverErroNuvem = (err: unknown): string => {
 
   return `${nome}${partes.join(' · ')}`;
 };
+
+/**
+ * O erro é de CANAL (rede/webview) e não uma recusa da nuvem?
+ *
+ * A classificação antiga no `App` testava `message.includes('io')` — e
+ * «permiss**io**n denied for table assets» casa com isso: um 42501 era tratado
+ * como falha de tráfego, a app passava para o modo offline e a recusa real
+ * desaparecia. Só os sinais do canal contam.
+ */
+const SINAIS_DE_CANAL = [
+  'suspended',
+  'network',
+  'failed to fetch',
+  'fetch failed',
+  'load failed',
+  'timeout',
+  'tempo esgotado',
+  'abort',
+  'err_network',
+  'net::',
+  'sem conexão',
+];
+
+export const pareceFalhaDeCanal = (err: unknown): boolean => {
+  const descricao = descreverErroNuvem(err).toLowerCase();
+  if (SINAIS_DE_CANAL.some((sinal) => descricao.includes(sinal))) return true;
+  if (err && typeof err === 'object') {
+    const e = err as { status?: unknown; statusCode?: unknown };
+    return e.status === 0 || e.statusCode === 0;
+  }
+  return false;
+};
