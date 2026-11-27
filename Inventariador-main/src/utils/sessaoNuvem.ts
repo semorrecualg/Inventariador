@@ -107,3 +107,20 @@ export const mensagemDeRecusa42501 = (
  */
 export const explicaPapelAnon = (motivo: string): boolean =>
   /pedido chegou como anon|RLS sem sessão/i.test(String(motivo ?? ''));
+
+/** Texto curto do cartão e do aviso quando o envio aguarda uma sessão. */
+export const MENSAGEM_ESPERA_SESSAO =
+  'À espera de sessão — entre com e-mail e senha para enviar.';
+
+/**
+ * O MOTIVO É FALTA DE SESSÃO, NÃO UMA RECUSA DE DADOS
+ * ============================================================================
+ * Sem token do Supabase o pedido chega como `anon` e o PostgREST responde
+ * 42501 — não é a política a recusar a linha nem o registo a estar errado: é o
+ * aparelho que ainda não tem sessão. Esses registos continuam pendentes (nada
+ * se perdeu) e o cartão deve dizê-lo assim, em vez de pintar uma «Falha de
+ * envio» que sugere dados recusados. O motivo guardado por ciclos anteriores é
+ * reconhecido aqui para o selo antigo também passar a ler-se como espera.
+ */
+export const pareceFaltaDeSessao = (motivo: string | null | undefined): boolean =>
+  /sem sessão|chegou como anon|rls sem sessão/i.test(String(motivo ?? ''));

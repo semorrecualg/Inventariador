@@ -2,10 +2,11 @@
 // O selo do cartão dizia só «Pendente Nuvem»: uma conferência por enviar e uma
 // base nunca espelhada apareciam iguais, e sem idade uma pendência de minutos
 // parecia igual a uma esquecida desde a semana passada.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import React from 'react';
 import { render } from '@testing-library/react';
 import { AssetListItem } from '../components/AssetListItem';
+import { useSyncStore } from '../stores/syncStore';
 import type { Asset } from '../types';
 
 const ativo = (over: Partial<Asset> = {}): Asset => ({
@@ -96,4 +97,40 @@ describe('AssetListItem — selo de pendência', () => {
     expect(texto).toContain('Sincronizado');
     expect(texto).not.toContain('Falha de envio');
   });
+
+  // Falta de sessão ≠ recusa de dados: o pendente espera a entrada, não «falhou».
+  it('o carimbo de falta de sessão aparece como «à espera de sessão»', () => {
+    const ha2h = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    const texto = cartao({
+      _syncFailAt: ha2h,
+      _syncFailReason: 'Erro Supabase: [42501] pedido chegou como anon (sem sessão) — entre de novo'
+    });
+
+    expect(texto).toContain('À espera de sessão');
+    expect(texto).toContain('há 2 h');
+    expect(texto).not.toContain('Falha de envio');
+  });
+
+  it('sem sessão no aparelho, o pendente mostra a espera em vez do motivo genérico', () => {
+    useSyncStore.setState({ sessaoNuvemAusente: true });
+    const ha2h = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    const texto = cartao({ _dataLeitura: ha2h });
+
+    expect(texto).toContain('À espera de sessão');
+    expect(texto).not.toContain('conferência por enviar');
+    expect(texto).not.toContain('Pendente Nuvem');
+  });
+
+  it('a espera de sessão não esconde uma recusa de dados', () => {
+    useSyncStore.setState({ sessaoNuvemAusente: true });
+    const ha1h = new Date(Date.now() - 3600 * 1000).toISOString();
+    const texto = cartao({ _syncFailAt: ha1h, _syncFailReason: 'RLS negou o upsert' });
+
+    expect(texto).toContain('Falha de envio');
+    expect(texto).not.toContain('À espera de sessão');
+  });
+});
+
+afterEach(() => {
+  useSyncStore.setState({ sessaoNuvemAusente: false });
 });

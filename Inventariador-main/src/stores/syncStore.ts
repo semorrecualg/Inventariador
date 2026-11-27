@@ -15,6 +15,11 @@ export interface SyncStoreState {
   lastLocalSave: string | null;
   /** Last sync error message */
   syncError: string | null;
+  /**
+   * O aparelho está sem sessão da nuvem: o envio aguarda entrada e os cartões
+   * pendentes mostram «à espera de sessão» em vez de uma recusa.
+   */
+  sessaoNuvemAusente: boolean;
   /** Whether there is a pending cloud update */
   isCloudUpdatePending: boolean;
   /** Whether a reconnection attempt is in progress */
@@ -36,6 +41,7 @@ export interface SyncStoreState {
   setLastSyncTime: (time: string | null) => void;
   setLastLocalSave: (time: string | null) => void;
   setSyncError: (error: string | null) => void;
+  setSessaoNuvemAusente: (ausente: boolean) => void;
   setIsCloudUpdatePending: (pending: boolean) => void;
   setIsReconnecting: (reconnecting: boolean) => void;
   setShowReconnectOverlay: (show: boolean) => void;
@@ -47,7 +53,7 @@ export interface SyncStoreState {
   reset: () => void;
 }
 
-const initialState: Omit<SyncStoreState, 'setSyncQueueLength' | 'setUnsyncedAssetsCount' | 'setIsSyncLocked' | 'setIsSyncing' | 'setLastSyncTime' | 'setLastLocalSave' | 'setSyncError' | 'setIsCloudUpdatePending' | 'setIsReconnecting' | 'setShowReconnectOverlay' | 'setRefreshVersion' | 'setPendingPhotosCount' | 'setLastQueryLog' | 'bumpRefreshVersion' | 'reset'> = {
+const initialState: Omit<SyncStoreState, 'setSyncQueueLength' | 'setUnsyncedAssetsCount' | 'setIsSyncLocked' | 'setIsSyncing' | 'setLastSyncTime' | 'setLastLocalSave' | 'setSyncError' | 'setSessaoNuvemAusente' | 'setIsCloudUpdatePending' | 'setIsReconnecting' | 'setShowReconnectOverlay' | 'setRefreshVersion' | 'setPendingPhotosCount' | 'setLastQueryLog' | 'bumpRefreshVersion' | 'reset'> = {
   syncQueueLength: 0,
   unsyncedAssetsCount: 0,
   isSyncLocked: false,
@@ -55,6 +61,7 @@ const initialState: Omit<SyncStoreState, 'setSyncQueueLength' | 'setUnsyncedAsse
   lastSyncTime: null,
   lastLocalSave: null,
   syncError: null,
+  sessaoNuvemAusente: false,
   isCloudUpdatePending: false,
   isReconnecting: false,
   showReconnectOverlay: false,
@@ -73,6 +80,7 @@ export const useSyncStore = create<SyncStoreState>((set) => ({
   setLastSyncTime: (lastSyncTime) => set({ lastSyncTime }),
   setLastLocalSave: (lastLocalSave) => set({ lastLocalSave }),
   setSyncError: (syncError) => set({ syncError }),
+  setSessaoNuvemAusente: (sessaoNuvemAusente) => set({ sessaoNuvemAusente }),
   setIsCloudUpdatePending: (isCloudUpdatePending) => set({ isCloudUpdatePending }),
   setIsReconnecting: (isReconnecting) => set({ isReconnecting }),
   setShowReconnectOverlay: (showReconnectOverlay) => set({ showReconnectOverlay }),

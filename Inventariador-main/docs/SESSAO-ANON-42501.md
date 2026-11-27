@@ -110,11 +110,18 @@ A partir desta versão o próprio cartão diz qual dos casos é:
   `SessaoNuvemAusenteError`, e o aviso «Sem sessão da nuvem neste aparelho —
   saia e entre com e-mail e senha para enviar.» sobe para a barra de
   sincronização.
+- **Os pendentes ficam «à espera de sessão»:** um 42501 de pedido `anon` (ou o
+  portão a disparar a meio do ciclo) não escreve `_syncFailAt` — o registo
+  continua pendente e o cartão mostra «À espera de sessão · entre com e-mail e
+  senha», inclusive para carimbos de ciclos anteriores. Uma recusa de dados com
+  sessão válida continua a ser carimbada como falha.
+- **Reentrada a partir do aviso:** o aviso de sessão da barra de sincronização é
+  um botão que fecha a sessão local e abre o formulário de entrada (o login
+  volta a pedir o token). Os outros bloqueios mantêm o selo «Erro».
 - **Fica por decidir:** a biometria não tem a senha em memória, por isso continua
-  a entrar sem token — o envio recusa e pede a entrada com senha. Uma «fila à
-  espera de sessão» (pendentes apresentados como bloqueados, sem carimbo de
-  recusa) e um novo login em um toque a partir do próprio aviso são o passo
-  seguinte; a credencial local continua a ser a porta do modo offline.
+  a entrar sem token — o envio recusa e pede a entrada com senha, agora com a
+  ação no próprio aviso. A credencial local continua a ser a porta do modo
+  offline.
 
 Continua a não haver caminho que reabra a tabela a `anon`; o RLS do #204
 mantém-se em todos os casos.

@@ -13,6 +13,9 @@ import {
   explicaPapelAnon,
   mensagemDeRecusa42501,
   MOTIVO_CURTO_MAX,
+  MENSAGEM_ESPERA_SESSAO,
+  MENSAGEM_SESSAO_AUSENTE,
+  pareceFaltaDeSessao,
 } from '../utils/sessaoNuvem';
 
 describe('classificarSessao — a prova é o access token', () => {
@@ -42,6 +45,23 @@ describe('deveAbrirSessaoNuvemNoLogin — só em Base Oficial e com rede', () =>
     expect(deveAbrirSessaoNuvemNoLogin({ ...base, modoBase: 'INTERNAL_PLUS' })).toBe(false);
     expect(deveAbrirSessaoNuvemNoLogin({ ...base, online: false })).toBe(false);
     expect(deveAbrirSessaoNuvemNoLogin({ ...base, temCredenciaisDoBuild: false })).toBe(false);
+  });
+});
+
+describe('pareceFaltaDeSessao — o pendente espera a entrada, não é recusa', () => {
+  it('reconhece o aviso de sessão ausente e os 42501 de anon/RLS sem sessão', () => {
+    expect(pareceFaltaDeSessao(MENSAGEM_SESSAO_AUSENTE)).toBe(true);
+    expect(pareceFaltaDeSessao(mensagemDeRecusa42501('ausente', 'permission denied for table assets'))).toBe(true);
+    expect(pareceFaltaDeSessao(mensagemDeRecusa42501('ausente', 'new row violates row-level security policy'))).toBe(true);
+    expect(MENSAGEM_ESPERA_SESSAO).toContain('À espera de sessão');
+  });
+
+  it('não confunde uma recusa de dados com falta de sessão', () => {
+    expect(pareceFaltaDeSessao(mensagemDeRecusa42501('autenticada', 'permission denied for table assets'))).toBe(false);
+    expect(pareceFaltaDeSessao(mensagemDeRecusa42501('autenticada', 'new row violates row-level security policy'))).toBe(false);
+    expect(pareceFaltaDeSessao('RLS negou o upsert')).toBe(false);
+    expect(pareceFaltaDeSessao('Exceção ao sincronizar registro: rede caiu')).toBe(false);
+    expect(pareceFaltaDeSessao(null)).toBe(false);
   });
 });
 

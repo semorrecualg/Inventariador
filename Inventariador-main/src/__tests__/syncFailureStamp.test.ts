@@ -35,6 +35,14 @@ vi.mock('@capacitor/core', () => ({
 
 vi.mock('../services/supabaseService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/supabaseService')>();
+  // A leitura do papel no 42501 usa o cliente real do módulo (o stub abaixo só
+  // substitui o `from`). Com sessão, um 42501 é recusa de dados — o que este
+  // ficheiro mede — e não falta de sessão (essa tem teste próprio).
+  const auth = actual.supabase.auth as unknown as { getSession: () => Promise<unknown> };
+  vi.spyOn(auth, 'getSession').mockResolvedValue({
+    data: { session: { access_token: 'jwt-válido', user: { email: 'semorr@gmail.com' } } },
+    error: null
+  } as never);
   return {
     ...actual,
     supabase: {

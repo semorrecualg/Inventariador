@@ -1,7 +1,7 @@
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
 import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys, fetchCloudConflictRows, chaveDaNuvem, exigirGeracaoBaseCorrente, estadoDaSessaoNuvem, garantirSessaoNuvemParaEnvio, SessaoNuvemAusenteError } from './supabaseService';
-import { mensagemDeRecusa42501, type EstadoSessaoNuvem } from '../utils/sessaoNuvem';
+import { MENSAGEM_SESSAO_AUSENTE, mensagemDeRecusa42501, type EstadoSessaoNuvem } from '../utils/sessaoNuvem';
 import { BaseGenerationBlockedError } from '../utils/baseGeneration';
 import { canPushToCloud } from './pushGate';
 import { enviarFilaAuditoria } from './auditoriaNuvem';
@@ -839,6 +839,8 @@ const _syncService = {
       // Uma leitura da sessão por ciclo: todos os registos do ciclo recebem o
       // mesmo 42501, e perguntar ao cliente por cada um não muda a resposta.
       let estadoSessaoCiclo: EstadoSessaoNuvem | null = null;
+      // Sessão perdida a meio do ciclo: o que sobrou fica «à espera de sessão».
+      let sessaoAusenteNoCiclo = false;
 
       for (const record of tentaveis) {
         // GUARDA DE CONECTIVIDADE EM TEMPO REAL: Evita enchentes de erros caso o sinal caia no meio do laço
@@ -1031,8 +1033,6 @@ const _syncService = {
               }
             }
           } else {
-            failedPrimaryKeys.push(String(pKey));
-            failedRecords.push(record as unknown as RegistoParaOutbox);
             const errObj = supabaseErr as { status?: string | number; code?: string | number; message?: string };
             const statusStr = errObj.status || errObj.code || 'SYNC_FAIL';
             const codigo = String(errObj.code ?? statusStr);
@@ -1046,6 +1046,22 @@ const _syncService = {
             if (codigo === '42501') {
               estadoSessaoCiclo ??= await estadoDaSessaoNuvem();
             }
+
+            // SESSÃO AUSENTE ≠ RECUSA DO REGISTO. Um 42501 com o pedido a
+            // chegar como `anon` não diz que os dados estão mal: diz que este
+            // aparelho ainda não tem sessão. Carimbar `_syncFailAt` pintava o
+            // cartão de «Falha de envio»; o registo fica pendente, «à espera de
+            // sessão», e o ciclo para (os restantes teriam o mesmo 42501).
+            if (codigo === '42501' && estadoSessaoCiclo === 'ausente') {
+              logger.warn(
+                `>>> [Sync] ${pKey}: 42501 sem sessão da nuvem — fica à espera de sessão, sem carimbo de recusa.`
+              );
+              sessaoAusenteNoCiclo = true;
+              break;
+            }
+
+            failedPrimaryKeys.push(String(pKey));
+            failedRecords.push(record as unknown as RegistoParaOutbox);
 
             // 42P10: a nuvem não tem índice único em (tenantid, primarykey) e o
             // ON CONFLICT não encontra alvo. Repetir o ciclo não resolve — o
@@ -1069,6 +1085,17 @@ const _syncService = {
             }
           }
         } catch (err: unknown) {
+          // O portão de sessão lança aqui quando o token desaparece a meio do
+          // ciclo (logout noutro separador, refresh recusado). Não é recusa do
+          // registo: nada é carimbado e o ciclo espera nova entrada.
+          if (err instanceof SessaoNuvemAusenteError) {
+            logger.warn(
+              `>>> [Sync Isolator] Sessão da nuvem ausente ao enviar ${pKey}: o ciclo espera nova entrada, sem carimbo de recusa.`
+            );
+            sessaoAusenteNoCiclo = true;
+            break;
+          }
+
           failedPrimaryKeys.push(String(pKey));
           failedRecords.push(record as unknown as RegistoParaOutbox);
           const errMsg = err instanceof Error ? err.message : String(err);
@@ -1124,6 +1151,19 @@ const _syncService = {
           
           if (!navigator.onLine) break; // Força a saída do laço se o erro foi decorrente de queda de rede físico
         }
+      }
+
+      // Sem sessão o ciclo termina aqui: os registos continuam pendentes (nada
+      // foi carimbado como recusa) e a barra pede a reentrada.
+      if (sessaoAusenteNoCiclo) {
+        logger.warn(
+          '>>> [Sync] Ciclo interrompido sem sessão da nuvem — os pendentes ficam à espera de sessão.'
+        );
+        return {
+          success: false,
+          processedCount: syncedPrimaryKeys.length,
+          error: MENSAGEM_SESSAO_AUSENTE
+        };
       }
 
       if (failedRecords.length > 0) {

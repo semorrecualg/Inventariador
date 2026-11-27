@@ -5,6 +5,8 @@ import { Device } from '@capacitor/device';
 import { AppScreen, User, ScanFeedbackMode, ScannerMode, DatabaseMode, NavigationParams } from '../types';
 import { isAdminUser, isAuditorUser } from '../services/rbacService';
 import { canAccessDatabaseManager } from '../utils/authUtils';
+import { pareceFaltaDeSessao } from '../utils/sessaoNuvem';
+import SyncSessionNotice from './SyncSessionNotice';
 import Modal from './Modal';
 import BackButton from './BackButton';
 import { APP_VERSION_LABEL } from '../utils/appVersion';
@@ -82,6 +84,8 @@ interface MainMenuProps {
   isSyncing?: boolean;
   lastSyncTime?: string | null;
   syncError?: string | null;
+  /** Reentrada na nuvem a partir do aviso da barra (sem sessão). */
+  onReautenticar?: () => void;
   hasSupabase?: boolean;
   protheusIntegrationEnabled: boolean;
   onUpdateProtheusIntegration: (val: boolean) => void;
@@ -140,6 +144,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onSyncAllCloud,
   isSyncing = false,
   syncError,
+  onReautenticar,
   hasSupabase = false,
   protheusIntegrationEnabled,
   onUpdateProtheusIntegration,
@@ -400,7 +405,11 @@ const MainMenu: React.FC<MainMenuProps> = ({
           </div>
         </div>
         <div className="flex items-center space-x-3">
-          {hasSupabase && databaseMode !== DatabaseMode.INTERNAL && (
+          {/* Sem sessão da nuvem o aviso da barra traz a ação de reentrada;
+              os outros bloqueios continuam no selo «Erro» de sempre. */}
+          {syncError && pareceFaltaDeSessao(syncError) ? (
+            <SyncSessionNotice syncError={syncError} onReautenticar={onReautenticar} />
+          ) : hasSupabase && databaseMode !== DatabaseMode.INTERNAL && (
             <div className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full border ${
               isSyncing 
                 ? 'bg-blue-50 border-blue-100 text-blue-500' 
