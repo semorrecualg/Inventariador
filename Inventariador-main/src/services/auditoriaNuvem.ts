@@ -18,6 +18,7 @@ import { supabase } from './supabaseService';
 import { canPushToCloud } from './pushGate';
 import { db, type DexieAuditLog } from './sqliteService';
 import { getCurrentTenantid } from '../utils/tenantAtual';
+import { descreverErroNuvem } from '../utils/erroNuvem';
 import { logger } from '../utils/logger';
 
 /** Eventos por lote — o mesmo porte das cargas (`DatabaseLoaderService`). */
@@ -142,7 +143,10 @@ export const contarAuditoriaNuvem = async (
         .select('id', { count: 'exact', head: true })
         .eq('tenantid', tenant),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('AUDIT_COUNT_TIMEOUT')), TEMPO_LIMITE_ENVIO_MS)
+        setTimeout(
+          () => reject(new Error(`tempo esgotado ao contar a trilha (${Math.round(TEMPO_LIMITE_ENVIO_MS / 1000)} s)`)),
+          TEMPO_LIMITE_ENVIO_MS
+        )
       ),
     ]);
 
@@ -152,7 +156,7 @@ export const contarAuditoriaNuvem = async (
         estado: 'erro',
         tenantid: tenant,
         total: null,
-        message: erro.message || 'Falha ao contar a trilha na nuvem.'
+        message: descreverErroNuvem(erro)
       };
     }
     const total = (resposta as { count?: number | null }).count ?? 0;
@@ -162,7 +166,7 @@ export const contarAuditoriaNuvem = async (
       estado: 'erro',
       tenantid: tenant,
       total: null,
-      message: err instanceof Error ? err.message : String(err)
+      message: descreverErroNuvem(err)
     };
   }
 };

@@ -114,6 +114,16 @@ describe('contador remoto da trilha — Base Oficial', () => {
     });
   });
 
+  it('erro sem campos não fica sem motivo legível', async () => {
+    eqMock.mockResolvedValue({ count: null, error: {} });
+
+    const resultado = await contarAuditoriaNuvem('CICOPAL');
+
+    expect(resultado).toMatchObject({ estado: 'erro', total: null });
+    expect(resultado.message).toMatch(/resposta sem código nem mensagem/);
+    expect(resultado.message).not.toMatch(/Erro de esquema/);
+  });
+
   it('offline não consulta a nuvem', async () => {
     Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
     try {

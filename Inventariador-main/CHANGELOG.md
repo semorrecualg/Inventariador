@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — os erros da nuvem mostram o código e o motivo reais
+
+- **Fim do «Erro de esquema.»:** `countCloudAssets`, o download da base
+  (`downloadBaseToLocal`) e o contador da trilha (`contarAuditoriaNuvem`)
+  deixam de substituir um motivo ausente por esse texto. O novo
+  `utils/erroNuvem` formata o erro com `code`, `message`, `details`, `hint` e
+  `status`/`statusCode` quando existem; uma resposta sem campos passa a dizer
+  «resposta sem código nem mensagem do servidor» — o app não inventa a causa.
+- **Tempo esgotado diz o que é:** o tecto de 8 s da contagem da trilha devolve
+  «tempo esgotado ao contar a trilha (8 s)» em vez do código interno
+  `AUDIT_COUNT_TIMEOUT`.
+- **Diagnóstico do `dics`:** `scripts/diagnostico-dics-somente-leitura.sql`
+  reúne as consultas (só leitura) que dizem que tabela é, que privilégios tem e
+  que trigger, função, view ou política a referencia — o 42501 cita uma tabela
+  que o app não escreve.
+- **Testes:** `erroNuvem` (9) fixa o formato de cada classe de erro;
+  `erroNuvemVisivel` (4) cobre a contagem e o download contra um 42501, uma
+  resposta vazia e uma falha de rede; `auditoriaNuvemContador` ganha o caso de
+  erro sem campos.
+
 ### Corrigido — pendentes «à espera de sessão» e reentrada a partir da barra
 
 - **Falta de sessão não é recusa:** o ciclo da fila deixa de gravar

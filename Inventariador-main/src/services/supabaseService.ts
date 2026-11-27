@@ -10,6 +10,7 @@ import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
 import { textoDoDetails } from '../utils/auditDetails';
+import { descreverErroNuvem } from '../utils/erroNuvem';
 import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
@@ -2008,7 +2009,7 @@ export const countCloudAssets = async (tenantid?: string | null): Promise<number
   if (tenant) query = query.eq('tenantid', tenant);
   const { count, error } = await query;
   if (error) {
-    throw new SupabaseNetworkException(`Falha ao contar a base da Nuvem: ${error.message || 'Erro de esquema.'}`);
+    throw new SupabaseNetworkException(`Falha ao contar a base da Nuvem: ${descreverErroNuvem(error)}`);
   }
   return count || 0;
 };
@@ -2076,7 +2077,7 @@ export const downloadBaseToLocal = async (
       break;
     }
     if (dropMissingColumn(countErr.message || '')) continue;
-    throw new SupabaseNetworkException(`Falha ao consultar a base do tenant: ${countErr.message || 'Erro de esquema.'}`);
+    throw new SupabaseNetworkException(`Falha ao consultar a base do tenant: ${descreverErroNuvem(countErr)}`);
   }
   if (total === 0) {
     logger.warn(`>>> [Supabase] Base do tenant ${tenant} vazia na Nuvem.`);
@@ -2094,7 +2095,7 @@ export const downloadBaseToLocal = async (
       const { data, error } = await q;
       if (error) {
         if (dropMissingColumn(error.message || '')) continue;
-        throw new SupabaseNetworkException(`Falha ao baixar lote ${start}-${start + PAGE - 1}: ${error.message || 'Erro de esquema.'}`);
+        throw new SupabaseNetworkException(`Falha ao baixar lote ${start}-${start + PAGE - 1}: ${descreverErroNuvem(error)}`);
       }
       // A linha crua do Postgres não tem `_conferido`/`_auditor`/`_dataLeitura`:
       // a conversão comum (a mesma do pull) traz quem conferiu e quando.
