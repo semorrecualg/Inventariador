@@ -129,8 +129,23 @@ describe('AssetListItem — selo de pendência', () => {
     expect(texto).toContain('Falha de envio');
     expect(texto).not.toContain('À espera de sessão');
   });
+
+  // BASE LOCAL não envia nada: a recusa de outra sessão não é falha de agora.
+  it('em BASE LOCAL o carimbo da nuvem aparece como «por subir», não como falha', () => {
+    useSyncStore.setState({ baseLocal: true });
+    const ha5h = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
+    const texto = cartao({
+      _syncFailAt: ha5h,
+      _syncFailReason: 'Erro Supabase: [42501] permission denied for table assets'
+    });
+
+    expect(texto).toContain('Por subir');
+    expect(texto).toContain('BASE LOCAL — a nuvem não é consultada');
+    expect(texto).not.toContain('Falha de envio');
+    expect(texto).not.toContain('permission denied');
+  });
 });
 
 afterEach(() => {
-  useSyncStore.setState({ sessaoNuvemAusente: false });
+  useSyncStore.setState({ sessaoNuvemAusente: false, baseLocal: false });
 });

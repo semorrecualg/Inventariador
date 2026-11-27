@@ -568,6 +568,13 @@ const App: React.FC = () => {
   const [auditoriaPendenteCount, setAuditoriaPendenteCount] = useState(0);
   const [isSyncLocked, setIsSyncLocked] = useState(false);
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => getInitialDatabaseMode());
+  // A BASE LOCAL é hermética: nada é enviado, por isso uma recusa antiga da
+  // nuvem não pode continuar a pintar os cartões como falha activa. O selo lê
+  // esta flag (`stores/syncStore`) e mostra «por subir» enquanto o modo for local.
+  const setBaseLocal = useSyncStore((estado) => estado.setBaseLocal);
+  useEffect(() => {
+    setBaseLocal(!isOnlineDatabaseMode(databaseMode));
+  }, [databaseMode, setBaseLocal]);
 
   const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);

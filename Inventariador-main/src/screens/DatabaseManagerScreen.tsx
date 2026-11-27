@@ -4,7 +4,7 @@ import { showRecoveryToast as originalShowRecoveryToast } from '../services/Navi
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
-import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets } from '../services/supabaseService';
+import { syncAssetsToCloud, isInternalMode, getDatabaseMode, isOnlineDatabaseMode, logAuditEvent, countCloudAssets } from '../services/supabaseService';
 import { contarAuditoriaPendente, contarAuditoriaNuvem, type ContagemAuditoriaNuvem } from '../services/auditoriaNuvem';
 import { isAdminUser } from '../utils/authUtils';
 import { CloudPushPolicyError } from '../utils/cloudPushGuard';
@@ -365,6 +365,16 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
   const loadCloudCount = useCallback(async () => {
     if (isInternalMode) {
       setCloudBase({ state: 'internal', count: null, message: 'Supabase não configurado neste ambiente.' });
+      return;
+    }
+    // BASE LOCAL é hermética (decisão F1): mesma regra do contador da trilha.
+    // Antes, o placar pedia a contagem ao Supabase sempre que o build tinha
+    // credenciais e, num aparelho em BASE LOCAL, pintava «ERRO NA LEITURA» com
+    // o corpo vazio do servidor — ao lado do contador da trilha a dizer «nuvem
+    // não consultada (BASE LOCAL)».
+    if (!isOnlineDatabaseMode(getDatabaseMode())) {
+      setCloudBase({ state: 'local', count: null, message: 'BASE LOCAL — a nuvem não é consultada.' });
+      addLog('[SRE_BASES] BASE LOCAL: a nuvem não foi consultada (nada foi lido nem alterado).');
       return;
     }
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
