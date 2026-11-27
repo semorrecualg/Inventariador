@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — a foto sincronizada grava só a linha do ativo (H1 · Fase 4)
+
+- **O que era:** ao receber `gbr_photo_synced` (a foto subiu e passou a ter URL da
+  nuvem), o app substituía o blob URL pela URL real no estado e chamava
+  `saveInventory(newState)` sem lista de ativos — **a base inteira** nos dois
+  espelhos por cada foto sincronizada. Uma ronda de 300 fotos pagava 300
+  escritas da base completa.
+- **Agora:** só o ativo cuja `_photoUrl` mudou volta ao disco
+  (`linhasQueMudaram` com o id do evento): `saveInventory` com
+  `skipSqlAssetsInsert` e um `persistAssetsBatch` dessa linha, sem reenvio à
+  nuvem. Foto repetida ou ativo que já não está no estado não gravam nada.
+
 ### Alterado — o evento singular do tempo real grava só a linha que mudou (H1 · Fase 4)
 
 - **O que era:** cada evento do canal (`INSERT`/`UPDATE`/`DELETE` de um ativo)

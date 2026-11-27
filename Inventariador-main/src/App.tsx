@@ -3263,12 +3263,23 @@ useEffect(() => {
       const { assetId, photoUrl } = customEvent.detail;
       // Update local state with the real cloud URL
       setInventory(prev => {
-        const newState = {
-          ...prev,
-          assets: prev.assets.map(a => String(a.id) === String(assetId) ? { ...a, _photoUrl: photoUrl } : a)
-        };
+        const assets = prev.assets.map(a =>
+          String(a.id) === String(assetId) ? { ...a, _photoUrl: photoUrl } : a
+        );
+        // ESCRITA SÓ DA LINHA DA FOTO: `saveInventory(newState)` sem lista
+        // regrava a base inteira por cada foto sincronizada. Só o ativo cuja
+        // `_photoUrl` mudou volta ao disco — o mesmo caminho do pull, da
+        // reconciliação e do evento do canal (`skipSqlAssetsInsert` +
+        // `persistAssetsBatch`), sem reenvio à nuvem. Foto repetida ou ativo
+        // inexistente não gravam nada.
+        const alteradas = linhasQueMudaram(prev.assets, assets, [assetId]);
+        if (alteradas.length === 0) return prev;
+        const newState = { ...prev, assets };
         // Persist localmente para substituir o blob URL pela URL da nuvem no storage
-        saveInventory(newState).catch(err => logger.error('[Sync] Erro ao persistir expurgo de foto:', err));
+        saveInventory(newState, undefined, false, true)
+          .catch(err => logger.error('[Sync] Erro ao persistir expurgo de foto:', err));
+        sqliteService.persistAssetsBatch(alteradas as unknown as Record<string, unknown>[])
+          .catch(err => logger.error('[Sync] Erro ao regravar a linha da foto sincronizada:', err));
         return newState;
       });
       updatePendingCount();

@@ -100,6 +100,19 @@ describe('efeito realtime de App.tsx', () => {
     expect(reconciliar).not.toContain('saveInventory(newState)');
   });
 
+  it('a foto sincronizada grava só a linha do ativo, não a base inteira', () => {
+    const inicio = effectCode.indexOf('const handlePhotoSynced');
+    const fim = effectCode.indexOf('window.addEventListener');
+    const foto = inicio !== -1 && fim > inicio ? effectCode.slice(inicio, fim) : '';
+
+    expect(foto).not.toBe('');
+    expect(foto).toContain('linhasQueMudaram(prev.assets, assets');
+    expect(foto).toContain('saveInventory(newState, undefined, false, true)');
+    expect(foto).toContain('persistAssetsBatch(alteradas');
+    // `saveInventory(newState)` sem lista regrava todos os ativos por foto.
+    expect(foto).not.toContain('saveInventory(newState)');
+  });
+
   it('o evento singular grava só a linha que mudou, não a base inteira', () => {
     const inicio = effectCode.indexOf('const assetSubscription');
     const evento = inicio !== -1 ? effectCode.slice(inicio) : '';
