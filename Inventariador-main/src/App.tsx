@@ -3834,7 +3834,11 @@ useEffect(() => {
               lastUpdated: new Date().toISOString()
             };
             setInventory(newState);
-            await saveInventory(newState);
+            // SÓ CONFIGURAÇÃO: `fetchFullInventory` já gravou estas linhas com
+            // `markSynced: true`. Regravá-las aqui (sem lista) devolvia o selo
+            // `_is_synced` a 0, porque `mapCloudAssetRow` não o produz e o
+            // `mapAssetToDexie` só o mantém quando a linha o traz.
+            await saveInventory(newState, undefined, false, true);
             savedInventory = newState;
             setLastSyncTime(new Date().toISOString());
             setRecoverySource('CLOUD');
@@ -3909,7 +3913,9 @@ useEffect(() => {
                     lastUpdated: new Date().toISOString()
                   };
                   setInventory(newState);
-                  await saveInventory(newState);
+                  // Mesmo caso do arranque principal: o download já gravou a
+                  // base com o selo; aqui só falta a configuração.
+                  await saveInventory(newState, undefined, false, true);
                   setLastSyncTime(new Date().toISOString());
                   setRecoverySource('CLOUD');
                   setShowRecoveryToast(true);
