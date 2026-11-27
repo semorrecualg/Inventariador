@@ -24,7 +24,7 @@ import { isAdminEmail } from '../utils/authUtils';
 import { clearPersistedSession } from '../utils/sessionPersistence';
 import { pullDedupKey } from '../utils/syncDedup';
 import { comTecto, TempoEsgotadoError } from '../utils/comTecto';
-import { classificarSessao, type EstadoSessaoNuvem } from '../utils/sessaoNuvem';
+import { classificarSessao, MENSAGEM_SESSAO_AUSENTE, type EstadoSessaoNuvem } from '../utils/sessaoNuvem';
 import { matchUnitKeys, normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
@@ -69,6 +69,18 @@ export class SupabaseAuthException extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SupabaseAuthException';
+  }
+}
+
+/**
+ * O envio foi recusado porque este aparelho não tem sessão do Supabase. Sem
+ * token, o pedido chegaria como `anon` e o RLS responderia `42501 permission
+ * denied for table assets` — um erro que parecia falta de GRANT.
+ */
+export class SessaoNuvemAusenteError extends Error {
+  constructor(message: string = MENSAGEM_SESSAO_AUSENTE) {
+    super(message);
+    this.name = 'SessaoNuvemAusenteError';
   }
 }
 
@@ -515,6 +527,110 @@ export const estadoDaSessaoNuvem = async (): Promise<EstadoSessaoNuvem> => {
   } catch {
     return 'indeterminado';
   }
+};
+
+/**
+ * ABRIR A SESSÃO DA NUVEM NO LOGIN LOCAL (Base Oficial, com rede)
+ * ============================================================================
+ * O login por credencial local (Dexie, «Barreira Local») autenticava sem token:
+ * todos os pedidos seguintes chegavam ao PostgREST como `anon`. Em Base Oficial
+ * com rede, a mesma credencial tem de abrir também a sessão do Supabase.
+ *
+ * Devolve `true` quando há sessão para o e-mail pedido no fim (já existente ou
+ * acabada de criar). Falha para `false` sem lançar: o login local continua a
+ * entrar (offline-first) e é o envio que recusa, com a ação certa
+ * (`garantirSessaoNuvemParaEnvio`).
+ */
+const LOGIN_SESSION_TIMEOUT_MS = 15_000;
+
+export const estabelecerSessaoNuvem = async (
+  email: string,
+  password?: string
+): Promise<boolean> => {
+  if (isInternalMode || !supabase) return false;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+  const alvo = String(email || '').trim().toLowerCase();
+  if (!alvo) return false;
+
+  const cliente = supabase as unknown as {
+    auth?: {
+      getSession?: () => Promise<{ data?: { session?: { access_token?: string | null; user?: { email?: string | null } | null } | null } }>;
+      signInWithPassword?: (credenciais: { email: string; password: string }) => Promise<{
+        data?: { session?: { access_token?: string | null } | null };
+        error?: { message?: string } | null;
+      }>;
+    };
+  };
+
+  const authClient = cliente?.auth;
+  const getSession = authClient?.getSession;
+  const signInWithPassword = authClient?.signInWithPassword;
+  if (!authClient || typeof getSession !== 'function') return false;
+
+  try {
+    // Já há sessão deste utilizador? Não vale a pena pedir outra ao GoTrue (e
+    // um login repetido invalida refresh tokens de outro separador).
+    const atual = await comTecto(
+      getSession.call(authClient),
+      3_000,
+      'sessão actual'
+    );
+    const sessaoAtual = atual?.data?.session;
+    if (
+      sessaoAtual?.access_token &&
+      String(sessaoAtual.user?.email || '').trim().toLowerCase() === alvo
+    ) {
+      return true;
+    }
+
+    if (!password || typeof signInWithPassword !== 'function') return false;
+    const entrada = await comTecto(
+      signInWithPassword.call(authClient, { email: alvo, password }),
+      LOGIN_SESSION_TIMEOUT_MS,
+      'entrada na nuvem'
+    );
+    if (entrada?.error) {
+      logger.warn(
+        `>>> [Supabase] Login local sem sessão da nuvem para ${alvo}: ${entrada.error.message || 'credencial recusada'}`
+      );
+      return false;
+    }
+    return Boolean(entrada?.data?.session?.access_token);
+  } catch (err) {
+    logger.warn('>>> [Supabase] Não foi possível abrir a sessão da nuvem no login local:', err);
+    return false;
+  }
+};
+
+/** Aviso único por episódio de sessão ausente (o ciclo tenta a cada 60 s). */
+let lastSessaoAusenteNotice: string | null = null;
+
+/**
+ * PORTÃO DE SESSÃO DO ENVIO
+ * ============================================================================
+ * Recusa o envio quando o pedido iria chegar como `anon`, com o texto que diz o
+ * que fazer. `indeterminado` (cliente stub, leitura sem resposta) deixa passar:
+ * o portão não pode bloquear o envio por não conseguir perguntar.
+ *
+ * Sem isto, cada ativo do ciclo recebia um 42501 e o operador lia «permission
+ * denied» como falta de permissão na nuvem (foi assim que o #236 abriu `assets`
+ * a `anon`).
+ */
+const announceSessaoAusenteOnce = (): void => {
+  if (lastSessaoAusenteNotice === MENSAGEM_SESSAO_AUSENTE) return;
+  lastSessaoAusenteNotice = MENSAGEM_SESSAO_AUSENTE;
+  logger.warn(`>>> [Supabase] ${MENSAGEM_SESSAO_AUSENTE}`);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gbr_cloud_push_blocked', {
+      detail: { message: MENSAGEM_SESSAO_AUSENTE }
+    }));
+  }
+};
+
+export const garantirSessaoNuvemParaEnvio = async (): Promise<void> => {
+  if (await estadoDaSessaoNuvem() !== 'ausente') return;
+  announceSessaoAusenteOnce();
+  throw new SessaoNuvemAusenteError();
 };
 
 /**
@@ -1469,6 +1585,11 @@ export const syncAssetsToCloud = async (
     return [];
   }
 
+  // SESSÃO DA NUVEM: sem token o pedido chega como `anon` e o RLS responde
+  // 42501 (ver utils/sessaoNuvem). Recusar aqui, com a ação certa, em vez de
+  // deixar o upsert falhar ativo a ativo com um erro que parecia GRANT.
+  await garantirSessaoNuvemParaEnvio();
+
   // SELO DE GERAÇÃO: sem isto, um aparelho com a base antiga repovoava a nuvem
   // reiniciada no primeiro sync. Falha aberta quando a nuvem não tem selo.
   await exigirGeracaoBaseCorrente();
@@ -1837,6 +1958,7 @@ export const syncAssetsToCloud = async (
 
   // Envio aceito: o episódio de bloqueio fecha e o próximo volta a avisar.
   lastCloudPushBlockedNoticeKey = null;
+  lastSessaoAusenteNotice = null;
   return successfullySyncedIds;
 };
 

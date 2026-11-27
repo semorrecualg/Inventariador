@@ -31,6 +31,30 @@ export type EstadoSessaoNuvem = 'autenticada' | 'ausente' | 'indeterminado';
 export const MOTIVO_CURTO_MAX = 90;
 
 /**
+ * A ação que resolve o 42501 de sessão ausente. É a mesma no aviso da barra de
+ * sincronização e no `SessaoNuvemAusenteError`: sair e entrar com a credencial
+ * da nuvem — nunca abrir a tabela a `anon`.
+ */
+export const MENSAGEM_SESSAO_AUSENTE =
+  'Sem sessão da nuvem neste aparelho — saia e entre com e-mail e senha para enviar.';
+
+/**
+ * O login por credencial local tem de abrir também a sessão do Supabase?
+ *
+ * Só em Base Oficial (build com credenciais e modo não `INTERNAL`) e com rede:
+ * em Base Local a nuvem está desligada por desenho e sem rede não há a quem
+ * pedir o token. Fora destes casos o login fica exatamente como era.
+ */
+export const deveAbrirSessaoNuvemNoLogin = (opcoes: {
+  temCredenciaisDoBuild: boolean;
+  modoBase?: string | null;
+  online: boolean;
+}): boolean =>
+  opcoes.temCredenciaisDoBuild &&
+  opcoes.online &&
+  !String(opcoes.modoBase ?? '').startsWith('INTERNAL');
+
+/**
  * Classificação pura da sessão: o que interessa ao diagnóstico é existir um
  * access token. Um objecto de sessão sem token não autentica nada.
  */

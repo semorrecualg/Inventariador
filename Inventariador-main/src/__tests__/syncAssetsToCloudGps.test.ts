@@ -8,6 +8,7 @@
 // payload — e não a `null` — quando o ativo não tem ponto local.
 // ============================================================================
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import { autenticarClienteDeTeste } from './helpers/sessaoNuvemCliente';
 import type * as SupabaseService from '../services/supabaseService';
 import type { Asset } from '../types';
 
@@ -71,6 +72,8 @@ describe('syncAssetsToCloud — a coordenada só sobe quando há leitura local',
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'SUPABASE');
+    // O envio exige sessão da nuvem: estes testes correm com utilizador autenticado.
+    autenticarClienteDeTeste(supabaseStub);
   });
 
   afterEach(() => {

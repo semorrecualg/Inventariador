@@ -51,6 +51,9 @@ vi.mock('../services/supabaseService', () => ({
   getEmailByUsername: getEmailByUsernameMock,
   resetPassword: resetPasswordMock,
   isInternalMode: false,
+  // Sem sessão da nuvem neste cenário: a sessão fica gerida pelo app, como o
+  // teste de «credencial local» espera (a abertura da sessão tem teste próprio).
+  estabelecerSessaoNuvem: vi.fn(async () => false),
 }));
 
 type LoginPropsShape = Record<string, unknown>;

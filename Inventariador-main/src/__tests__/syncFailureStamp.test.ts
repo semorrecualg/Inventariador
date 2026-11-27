@@ -42,7 +42,10 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
     },
     fetchCloudDeletedKeys,
     fetchCloudConflictRows,
-    registerCampaignSyncQueueDelegate: vi.fn()
+    registerCampaignSyncQueueDelegate: vi.fn(),
+    // Sessão da nuvem: tem teste próprio (sessaoNuvemEnvio). Aqui o alvo é o
+    // carimbo da recusa, que corre como utilizador autenticado.
+    garantirSessaoNuvemParaEnvio: vi.fn(async () => {})
   };
 });
 

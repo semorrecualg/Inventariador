@@ -11,6 +11,7 @@
 // a única exceção (`allowUndelete`).
 // ============================================================================
 import 'fake-indexeddb/auto';
+import { autenticarClienteDeTeste } from './helpers/sessaoNuvemCliente';
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type * as SupabaseService from '../services/supabaseService';
 import type { Asset } from '../types';
@@ -78,6 +79,8 @@ describe('exclusão vence a subida — o upsert consulta a nuvem antes de escrev
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'SUPABASE');
+    // O envio exige sessão da nuvem: estes testes correm com utilizador autenticado.
+    autenticarClienteDeTeste(supabaseStub);
     await db.local_assets.clear();
     await db.ativos.clear();
     await db.audit_logs.clear();

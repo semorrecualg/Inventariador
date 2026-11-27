@@ -98,19 +98,23 @@ A partir desta versão o próprio cartão diz qual dos casos é:
   cliente se há sessão (leitura local, tecto de 2 s, falha para
   `indeterminado`). A fila chama-a **uma vez por ciclo**, no primeiro 42501.
 
-## 6. O que falta decidir (não implementado)
+## 6. O que está implementado (e o que fica por decidir)
 
-O envio continua a **tentar** com a sessão que houver; agora explica-se. Para
-fechar o caso na origem há três caminhos, por ordem de custo:
+- **O login local abre a sessão da nuvem.** Em Base Oficial com rede,
+  `estabelecerSessaoNuvem` reaproveita a sessão já aberta do mesmo utilizador ou
+  entra no GoTrue com a credencial que o login local validou (Dexie e «Barreira
+  Local»). A regra de quando o fazer vive em `deveAbrirSessaoNuvemNoLogin`:
+  Base Local, sem rede ou sem credenciais no build não tentam nada.
+- **O envio recusa sem sessão.** `garantirSessaoNuvemParaEnvio` fecha o portão
+  do envio em massa (`syncAssetsToCloud`) e da fila (`processDataSyncQueue`) com
+  `SessaoNuvemAusenteError`, e o aviso «Sem sessão da nuvem neste aparelho —
+  saia e entre com e-mail e senha para enviar.» sobe para a barra de
+  sincronização.
+- **Fica por decidir:** a biometria não tem a senha em memória, por isso continua
+  a entrar sem token — o envio recusa e pede a entrada com senha. Uma «fila à
+  espera de sessão» (pendentes apresentados como bloqueados, sem carimbo de
+  recusa) e um novo login em um toque a partir do próprio aviso são o passo
+  seguinte; a credencial local continua a ser a porta do modo offline.
 
-1. **Portão de sessão no envio:** recusar o ciclo quando
-   `estadoDaSessaoNuvem() !== 'autenticada'` e pedir novo login. Exige um aviso
-   na UI e revisão dos testes que hoje enviam com o cliente stub.
-2. **Base Oficial com login obrigatório na nuvem:** em modo `SUPABASE` e com
-   rede, o login por credencial local deixa de valer — faz-se
-   `signInWithPassword` e usa-se o perfil da nuvem; a credencial local fica só
-   para o modo `INTERNAL`/offline.
-3. **Sessão local com fila parada:** manter o trabalho offline e mostrar a fila
-   como «à espera de sessão da nuvem», sem carimbar recusa por ativo.
-
-Nenhum destes caminhos reabre a tabela a `anon`; todos mantêm o RLS do #204.
+Continua a não haver caminho que reabra a tabela a `anon`; o RLS do #204
+mantém-se em todos os casos.

@@ -1,6 +1,6 @@
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
-import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys, fetchCloudConflictRows, chaveDaNuvem, exigirGeracaoBaseCorrente, estadoDaSessaoNuvem } from './supabaseService';
+import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys, fetchCloudConflictRows, chaveDaNuvem, exigirGeracaoBaseCorrente, estadoDaSessaoNuvem, garantirSessaoNuvemParaEnvio, SessaoNuvemAusenteError } from './supabaseService';
 import { mensagemDeRecusa42501, type EstadoSessaoNuvem } from '../utils/sessaoNuvem';
 import { BaseGenerationBlockedError } from '../utils/baseGeneration';
 import { canPushToCloud } from './pushGate';
@@ -732,6 +732,19 @@ const _syncService = {
       await exigirGeracaoBaseCorrente();
     } catch (err) {
       if (err instanceof BaseGenerationBlockedError) {
+        return { success: false, processedCount: 0, error: err.message };
+      }
+      throw err;
+    }
+
+    // SESSÃO DA NUVEM: a fila só envia com token do Supabase. Sem sessão o
+    // pedido chegaria como `anon` e cada ativo do ciclo recebia 42501 — o
+    // operador lê «permission denied» e conclui que falta permissão na nuvem.
+    // Aqui o ciclo para de uma vez e diz o que fazer (entrar de novo).
+    try {
+      await garantirSessaoNuvemParaEnvio();
+    } catch (err) {
+      if (err instanceof SessaoNuvemAusenteError) {
         return { success: false, processedCount: 0, error: err.message };
       }
       throw err;

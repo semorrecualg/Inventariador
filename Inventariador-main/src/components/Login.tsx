@@ -3,7 +3,8 @@ import React, { useState } from 'react';
 import { UserCircle, AlertCircle, Loader2, Eye, EyeOff, ShieldCheck, Fingerprint, ShieldAlert, Sparkles } from 'lucide-react';
 import { isAdminEmail, markAppManagedSession, ADMIN_EMAIL } from '../utils/authUtils';
 import { useLocalAuth } from '../hooks/useLocalAuth';
-import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode, resetPassword } from '../services/supabaseService';
+import { supabase, ensureUserProfile, logAuditEvent, getEmailByUsername, isInternalMode, resetPassword, estabelecerSessaoNuvem } from '../services/supabaseService';
+import { deveAbrirSessaoNuvemNoLogin } from '../utils/sessaoNuvem';
 import { authenticateBiometric, checkNativeBiometry, hasBiometricRegistered, isBiometricSupported, isNativeAppShell } from '../services/biometricService';
 import { canOfferBiometricUnlock, forgetLastLoginUser, normalizeUnlockUser, readLastLoginUser, rememberLastLoginUser } from '../utils/biometricUnlock';
 import BiometricUnlock from './BiometricUnlock';
@@ -385,6 +386,26 @@ const Login: React.FC<LoginProps> = ({
 
   // Boas práticas React: derive during render, no redundant bool for simple checks
   // (rerender-simple-expression-in-memo)
+  /**
+   * BASE OFICIAL COM REDE — o login por credencial local tem de trazer o token
+   * do Supabase. Sem ele, todos os pedidos à nuvem chegam como `anon`: o pull
+   * não desce a base e o envio da conferência recebe 42501 em `assets` (ver
+   * utils/sessaoNuvem e docs/SESSAO-ANON-42501.md).
+   *
+   * Devolve `false` em Base Local, sem rede, ou quando a nuvem recusa a
+   * credencial: o login local continua a entrar (offline-first) e é o envio que
+   * para e pede nova entrada, em vez de mandar como `anon`.
+   */
+  const abrirSessaoNuvemNoLogin = async (email: string, senha: string): Promise<boolean> => {
+    const deveAbrir = deveAbrirSessaoNuvemNoLogin({
+      temCredenciaisDoBuild: !isInternalMode,
+      modoBase: databaseMode,
+      online: typeof navigator === 'undefined' ? true : navigator.onLine
+    });
+    if (!deveAbrir) return false;
+    return estabelecerSessaoNuvem(email, senha);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -453,10 +474,12 @@ const Login: React.FC<LoginProps> = ({
         sessionStorage.setItem('app_current_user', safeStringify(dexieUser));
 
         // FLUXO ÚNICO: autenticado, entra direto — contrato, filial e módulo
-        // são escolhidos na tela de contrato de trabalho (/contexto). O login
-        // local (Dexie/Barreira Local) não tem token do Supabase: a sessão é
-        // marcada como gerida pelo app para a checagem da nuvem não destruí-la.
-        markAppManagedSession();
+        // são escolhidos na tela de contrato de trabalho (/contexto).
+        // BASE OFICIAL COM REDE: a mesma credencial abre também a sessão do
+        // Supabase. Só quando não há token é que a sessão fica marcada como
+        // gerida pelo app (e então o envio recusa e pede nova entrada).
+        const sessaoNuvem = await abrirSessaoNuvemNoLogin(dexieUser.email, password);
+        if (!sessaoNuvem) markAppManagedSession();
         finishPasswordLogin(dexieUser);
         setIsLoading(false);
         clearTimeout(loginTimeout);
@@ -572,7 +595,9 @@ const Login: React.FC<LoginProps> = ({
 
           // FLUXO ÚNICO: autenticado na Barreira Local, entra direto; contrato,
           // filial e módulo são escolhidos na tela de contrato de trabalho.
-          markAppManagedSession();
+          // BASE OFICIAL COM REDE: a mesma credencial abre a sessão da nuvem.
+          const sessaoNuvem = await abrirSessaoNuvemNoLogin(loggedUser.email, password);
+          if (!sessaoNuvem) markAppManagedSession();
           finishPasswordLogin(loggedUser);
           clearTimeout(loginTimeout);
           return; // ENCERRA O FLUXO SEM COCORRER CÓDIGOS DO SUPABASE

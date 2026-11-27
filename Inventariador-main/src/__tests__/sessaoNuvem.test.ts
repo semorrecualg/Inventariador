@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   classificarSessao,
+  deveAbrirSessaoNuvemNoLogin,
   explicaPapelAnon,
   mensagemDeRecusa42501,
   MOTIVO_CURTO_MAX,
@@ -24,6 +25,23 @@ describe('classificarSessao — a prova é o access token', () => {
     expect(classificarSessao(undefined)).toBe('ausente');
     expect(classificarSessao({ access_token: '' })).toBe('ausente');
     expect(classificarSessao({ access_token: null })).toBe('ausente');
+  });
+});
+
+describe('deveAbrirSessaoNuvemNoLogin — só em Base Oficial e com rede', () => {
+  const base = { temCredenciaisDoBuild: true, modoBase: 'SUPABASE', online: true };
+
+  it('abre em Base Oficial com credenciais e rede', () => {
+    expect(deveAbrirSessaoNuvemNoLogin(base)).toBe(true);
+    expect(deveAbrirSessaoNuvemNoLogin({ ...base, modoBase: 'SUPABASE_PLUS' })).toBe(true);
+    expect(deveAbrirSessaoNuvemNoLogin({ ...base, modoBase: undefined })).toBe(true);
+  });
+
+  it('não abre em Base Local, sem rede ou sem credenciais no build', () => {
+    expect(deveAbrirSessaoNuvemNoLogin({ ...base, modoBase: 'INTERNAL' })).toBe(false);
+    expect(deveAbrirSessaoNuvemNoLogin({ ...base, modoBase: 'INTERNAL_PLUS' })).toBe(false);
+    expect(deveAbrirSessaoNuvemNoLogin({ ...base, online: false })).toBe(false);
+    expect(deveAbrirSessaoNuvemNoLogin({ ...base, temCredenciaisDoBuild: false })).toBe(false);
   });
 });
 

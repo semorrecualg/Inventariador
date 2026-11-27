@@ -30,7 +30,10 @@ vi.mock('../services/supabaseService', () => ({
   fetchCloudDeletedKeys: vi.fn(async () => new Set<string>()),
   fetchCloudConflictRows: vi.fn(async () => new Map<string, Record<string, unknown>>()),
   chaveDaNuvem: (t: unknown, p: unknown) => `${String(t || '').trim().toUpperCase()}|${String(p || '').trim()}`,
-  isQuotaExceededError: () => false
+  isQuotaExceededError: () => false,
+  // Portão de sessão da nuvem: aqui o alvo é o modo de base, não a sessão.
+  garantirSessaoNuvemParaEnvio: vi.fn(async () => {}),
+  SessaoNuvemAusenteError: class SessaoNuvemAusenteError extends Error {}
 }));
 
 vi.mock('../services/sqliteService', () => ({

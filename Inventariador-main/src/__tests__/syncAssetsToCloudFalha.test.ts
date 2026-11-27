@@ -10,6 +10,7 @@
 // sobreviver a um envio aceite por este caminho.
 // ============================================================================
 import 'fake-indexeddb/auto';
+import { autenticarClienteDeTeste } from './helpers/sessaoNuvemCliente';
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type * as SupabaseService from '../services/supabaseService';
 import type { Asset } from '../types';
@@ -91,6 +92,8 @@ describe('syncAssetsToCloud — carimbo da recusa no registo local', () => {
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'SUPABASE');
+    // O envio exige sessão da nuvem: estes testes correm com utilizador autenticado.
+    autenticarClienteDeTeste(supabaseStub);
     await db.local_assets.clear();
     await db.ativos.clear();
   });
@@ -168,6 +171,8 @@ describe('syncAssetsToCloud — carimbo da recusa no registo local', () => {
     expect((await registoLocal())?._syncFailAt).toBeTruthy();
 
     vi.restoreAllMocks();
+    // O `restoreAllMocks` também devolve a sessão ao cliente sem token.
+    autenticarClienteDeTeste(supabaseStub);
     stubTables({ error: null });
     await syncAssetsToCloudAndMark([asset()], 'CICOPAL');
 
