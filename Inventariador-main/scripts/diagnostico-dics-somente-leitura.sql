@@ -44,11 +44,44 @@ select table_schema, table_name, ordinal_position, column_name,
  where table_name = 'dics'
  order by table_schema, ordinal_position;
 
--- 3) Privilégios por papel — a resposta directa ao 42501
+-- 3) Privilégios por papel — a resposta directa ao 42501.
+--    ATENÇÃO: `role_table_grants` só mostra os privilégios em que o grantor ou o
+--    grantee é um papel ACTIVO para a sessão (PostgreSQL §35.37). O SQL Editor
+--    corre como `postgres`; um GRANT dado por `supabase_admin` fica invisível
+--    ali. Por isso o bloco lê também o ACL cru e o expande com `aclexplode`,
+--    que não tem esse filtro de visibilidade.
+
+-- 3a) Visão filtrada (responde quando o grantee é um papel visível)
 select table_schema, table_name, grantee, privilege_type, is_grantable
   from information_schema.role_table_grants
  where table_name = 'dics'
  order by table_schema, grantee, privilege_type;
+
+-- 3b) ACL cru, tal como está gravado no catálogo. `NULL` significa «sem ACL
+--     próprio» = só o dono tem privilégios (o default do Postgres).
+select n.nspname as schema,
+       c.relname as tabela,
+       pg_get_userbyid(c.relowner) as dono,
+       c.relacl::text as acl_cru
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+ where c.relname = 'dics';
+
+-- 3c) ACL expandido por grantor/grantee. Mostra o grantor (que o 3a não mostra
+--     e que costuma ser a peça em falta) e usa o ACL por omissão quando
+--     `relacl` é NULL, para não devolver 0 linhas por engano.
+select n.nspname as schema,
+       c.relname as tabela,
+       pg_get_userbyid(x.grantor) as grantor,
+       case when x.grantee = 0 then 'PUBLIC'
+            else pg_get_userbyid(x.grantee) end as grantee,
+       x.privilege_type,
+       x.is_grantable
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) as x
+ where c.relname = 'dics'
+ order by 3, 4, 5;
 
 -- 4) Políticas de RLS (se houver). Uma política que chama função é candidata.
 select schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check

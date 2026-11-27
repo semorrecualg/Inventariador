@@ -31,6 +31,22 @@ function stubResposta(resposta: Resposta) {
   return vi.spyOn(supabaseStub, 'from').mockImplementation(() => builder);
 }
 
+/**
+ * Chama a leitura UMA vez e devolve a mensagem do erro lançado.
+ *
+ * Chamar a função duas vezes (uma por asserção) fazia dois pedidos à nuvem e
+ * podia esconder uma diferença entre a primeira e a segunda resposta; com a
+ * mensagem guardada, o que se afirma é exactamente o que a chamada devolveu.
+ */
+async function mensagemDoErro(chamada: () => Promise<unknown>): Promise<string> {
+  try {
+    await chamada();
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  throw new Error('a chamada deveria ter falhado, mas resolveu');
+}
+
 describe('erros da nuvem visíveis nas leituras', () => {
   beforeAll(async () => {
     const mod = await import('../services/supabaseService');
@@ -58,25 +74,29 @@ describe('erros da nuvem visíveis nas leituras', () => {
       }
     });
 
-    await expect(countCloudAssets('CICOPAL')).rejects.toThrow(
+    const mensagem = await mensagemDoErro(() => countCloudAssets('CICOPAL'));
+
+    expect(mensagem).toMatch(
       /\[42501\] permission denied for table assets · detalhe: role anon · dica: entrar com e-mail e senha/
     );
-    await expect(countCloudAssets('CICOPAL')).rejects.not.toThrow(/Erro de esquema/);
+    expect(mensagem).not.toMatch(/Erro de esquema/);
   });
 
   it('contagem da base: resposta sem campos não vira «Erro de esquema.»', async () => {
     stubResposta({ count: null, error: {} });
 
-    await expect(countCloudAssets('CICOPAL')).rejects.toThrow(
-      /resposta sem código nem mensagem do servidor/
-    );
-    await expect(countCloudAssets('CICOPAL')).rejects.not.toThrow(/Erro de esquema/);
+    const mensagem = await mensagemDoErro(() => countCloudAssets('CICOPAL'));
+
+    expect(mensagem).toMatch(/resposta sem código nem mensagem do servidor/);
+    expect(mensagem).not.toMatch(/Erro de esquema/);
   });
 
   it('contagem da base: falha de rede conserva a mensagem original', async () => {
     stubResposta({ count: null, error: new TypeError('Failed to fetch') });
 
-    await expect(countCloudAssets('CICOPAL')).rejects.toThrow(/TypeError: Failed to fetch/);
+    const mensagem = await mensagemDoErro(() => countCloudAssets('CICOPAL'));
+
+    expect(mensagem).toMatch(/TypeError: Failed to fetch/);
   });
 
   it('download da base: tabela ausente chega com o código do PostgREST', async () => {
@@ -88,9 +108,9 @@ describe('erros da nuvem visíveis nas leituras', () => {
       }
     });
 
-    await expect(downloadBaseToLocal('CICOPAL')).rejects.toThrow(
-      /\[PGRST205\] Could not find the table 'public\.assets'/
-    );
-    await expect(downloadBaseToLocal('CICOPAL')).rejects.not.toThrow(/Erro de esquema/);
+    const mensagem = await mensagemDoErro(() => downloadBaseToLocal('CICOPAL'));
+
+    expect(mensagem).toMatch(/\[PGRST205\] Could not find the table 'public\.assets'/);
+    expect(mensagem).not.toMatch(/Erro de esquema/);
   });
 });

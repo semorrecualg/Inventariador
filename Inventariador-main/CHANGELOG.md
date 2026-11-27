@@ -43,10 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tempo esgotado diz o que é:** o tecto de 8 s da contagem da trilha devolve
   «tempo esgotado ao contar a trilha (8 s)» em vez do código interno
   `AUDIT_COUNT_TIMEOUT`.
+- **Envio da trilha diz o código:** `enviarFilaAuditoria` carimba a fila e o
+  log com `descreverErroNuvem`; um `[42501] permission denied` deixa de chegar
+  como texto genérico («Falha ao enviar a trilha.»).
 - **Diagnóstico do `dics`:** `scripts/diagnostico-dics-somente-leitura.sql`
   reúne as consultas (só leitura) que dizem que tabela é, que privilégios tem e
   que trigger, função, view ou política a referencia — o 42501 cita uma tabela
-  que o app não escreve.
+  que o app não escreve. O bloco dos privilégios mostra o ACL cru
+  (`pg_class.relacl`) e o expande com `aclexplode`, porque
+  `information_schema.role_table_grants` esconde os GRANTs cujo grantor não é
+  um papel activo da sessão (o SQL Editor corre como `postgres`).
 - **Testes:** `erroNuvem` (9) fixa o formato de cada classe de erro;
   `erroNuvemVisivel` (4) cobre a contagem e o download contra um 42501, uma
   resposta vazia e uma falha de rede; `auditoriaNuvemContador` ganha o caso de

@@ -31,7 +31,7 @@ const texto = (valor: unknown): string =>
  * Formatos:
  *   `[42501] permission denied for table dics · detalhe: … · dica: …`
  *   `[PGRST205] Could not find the table …`
- *   `HTTP 401 · (sem mensagem do servidor)`   ← erro com estado, sem mensagem
+ *   `(sem mensagem do servidor) · HTTP 401`   ← erro com estado, sem mensagem
  *   `resposta sem código nem mensagem do servidor`
  *   `TypeError: Failed to fetch`
  */
