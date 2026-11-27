@@ -291,3 +291,83 @@ describe('§A.5 — backup e limpeza sem o blob', () => {
     expect(memStore.has(CHAVE_ATIVOS)).toBe(false);
   });
 });
+
+// ============================================================================
+// §A.5 — critério «escritas por save: de 5 para 3» da Etapa A da agenda.
+//
+// Antes da A.5 um save completo escrevia o payload em CINCO passos:
+//   1. config no Dexie (`saveInventoryConfig`);
+//   2. `bulkInsertAssets` (ativos + local_assets, uma transação);
+//   3. o espelho em lotes regravava `local_assets` (`localDb.assets.bulkPut`,
+//      um lote de 1000 em 1000 — 12 escritas numa base de 12.636);
+//   4. blob cifrado da config no localforage;
+//   5. blob cifrado dos ativos no localforage.
+// A A.5 deixou TRÊS: 1, 2 e 4. O blob dos ativos (5) passou a ser recuo.
+//
+// Fora da conta, nas duas versões: `setSystemStatus` (livro de estado do banco)
+// e o checksum pós-save da A.4 (em ocioso) — nenhum deles carrega o inventário.
+// ============================================================================
+const CHAVE_CONFIG_INTERNA = 'inventory_config_v24_internal_secure';
+
+/** Conta as escritas do payload deste save, uma por passo. */
+const escritasDoInventario = () => {
+  const setItem = vi.mocked(localforage.setItem);
+  const escritas = {
+    configDexie: dbStubs.saveInventoryConfig.mock.calls.length,
+    ativosDexie: dbStubs.bulkInsertAssets.mock.calls.length,
+    espelhoEmLotes: bulkPutEspelho.mock.calls.length,
+    blobConfig: setItem.mock.calls.filter(([chave]) => chave === CHAVE_CONFIG_INTERNA).length,
+    blobAtivos: setItem.mock.calls.filter(([chave]) => chave === CHAVE_ATIVOS).length
+  };
+  return { ...escritas, total: Object.values(escritas).reduce((soma, n) => soma + n, 0) };
+};
+
+describe('§A.5 — escritas por save: de 5 para 3 (critério da Etapa A)', () => {
+  beforeEach(() => {
+    memStore.clear();
+    cacheDexie.length = 0;
+    localStorage.clear();
+    sessionStorage.clear();
+    vi.clearAllMocks();
+    vi.stubGlobal('requestIdleCallback', undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('um save completo escreve o inventário três vezes', async () => {
+    await salvar(3);
+
+    expect(escritasDoInventario()).toEqual({
+      configDexie: 1,
+      ativosDexie: 1,
+      espelhoEmLotes: 0,
+      blobConfig: 1,
+      blobAtivos: 0,
+      total: 3
+    });
+  });
+
+  it('a contagem não cresce com a base: o espelho em lotes já não corre', async () => {
+    // 2.500 ativos seriam três lotes (`bulkPut`) no espelho antigo.
+    await salvar(2500);
+
+    const escritas = escritasDoInventario();
+    expect(escritas.espelhoEmLotes).toBe(0);
+    expect(escritas.ativosDexie).toBe(1);
+    expect(escritas.blobAtivos).toBe(0);
+    expect(escritas.total).toBe(3);
+  });
+
+  it('o recuo pela chave legada acrescenta só o blob dos ativos (quatro escritas)', async () => {
+    localStorage.setItem(LEGACY_ASSETS_MIRROR_KEY, '1');
+
+    await salvar(2);
+
+    const escritas = escritasDoInventario();
+    expect(escritas.blobAtivos).toBe(1);
+    expect(escritas.espelhoEmLotes).toBe(0);
+    expect(escritas.total).toBe(4);
+  });
+});
