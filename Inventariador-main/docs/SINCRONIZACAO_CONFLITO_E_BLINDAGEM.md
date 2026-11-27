@@ -99,6 +99,13 @@ com `skipSqlAssetsInsert` e um `persistAssetsBatch` do subconjunto. Um
 (`bulkInsertAssets` de todos os ativos) a cada reconexão, que é exactamente o
 que o pull já tinha deixado de fazer.
 
+O evento singular segue a mesma regra: `linhasQueMudaram` com o id do evento
+devolve a linha final que difere do estado anterior, e só essa é gravada
+(`skipSqlAssetsInsert` + `persistAssetsBatch`). Um `INSERT`/`UPDATE` grava uma
+linha; um `UPDATE` cujo merge não alterou nada e um `DELETE` não gravam
+nenhuma — no `DELETE` o registo sai do estado e o espelho não ganha escrita
+(`persistAssetsBatch` é upsert), como já acontecia com o save completo.
+
 A blindagem física vale também aqui: com `is_system_locked = 'true'` nem o
 evento nem a reconciliação aplicam linhas alheias.
 

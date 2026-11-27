@@ -99,4 +99,16 @@ describe('efeito realtime de App.tsx', () => {
     // `saveInventory(newState)` sem lista regrava todos os ativos.
     expect(reconciliar).not.toContain('saveInventory(newState)');
   });
+
+  it('o evento singular grava só a linha que mudou, não a base inteira', () => {
+    const inicio = effectCode.indexOf('const assetSubscription');
+    const evento = inicio !== -1 ? effectCode.slice(inicio) : '';
+
+    expect(evento).not.toBe('');
+    expect(evento).toContain('linhasQueMudaram(prev.assets, updatedAssets');
+    expect(evento).toContain('saveInventory(newState, undefined, false, true)');
+    expect(evento).toContain('persistAssetsBatch(alteradas');
+    // `saveInventory(newState)` sem lista regrava todos os ativos a cada evento.
+    expect(evento).not.toContain('saveInventory(newState)');
+  });
 });
