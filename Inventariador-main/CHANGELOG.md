@@ -52,7 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   que o app não escreve. O bloco dos privilégios mostra o ACL cru
   (`pg_class.relacl`) e o expande com `aclexplode`, porque
   `information_schema.role_table_grants` esconde os GRANTs cujo grantor não é
-  um papel activo da sessão (o SQL Editor corre como `postgres`).
+  um papel activo da sessão (o SQL Editor corre como `postgres`). Mostra ainda
+  os privilégios **efectivos** de `anon` e `authenticated`
+  (`has_table_privilege`, com a herança de papéis resolvida) e o papel de login
+  com que o pedido do app chega (`authenticator` → `anon`/`authenticated`): se o
+  INSERT/UPDATE vier `false`, o 42501 é o GRANT em falta, não um trigger.
 - **Testes:** `erroNuvem` (9) fixa o formato de cada classe de erro;
   `erroNuvemVisivel` (4) cobre a contagem e o download contra um 42501, uma
   resposta vazia e uma falha de rede; `auditoriaNuvemContador` ganha o caso de
