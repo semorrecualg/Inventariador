@@ -88,7 +88,7 @@ describe('contrato — o ecrã de sincronização nunca fica preso', () => {
 
   it('o tempo esgotado avisa o operador antes da contingência de rede', () => {
     const tecto = app.indexOf('error instanceof TempoEsgotadoError');
-    const contingencia = app.indexOf('const isSuspendedNetwork = errMsg.includes(');
+    const contingencia = app.indexOf('const isSuspendedNetwork = pareceFalhaDeCanal(error);');
     expect(tecto).toBeGreaterThan(-1);
     expect(contingencia).toBeGreaterThan(tecto);
     expect(app).toContain("title: 'Sincronização sem resposta'");

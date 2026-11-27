@@ -157,6 +157,22 @@ describe('fila da trilha — Base Oficial', () => {
     expect(linha?._syncError).toContain('client_event_id');
     expect(await contarAuditoriaPendente()).toBe(1);
   });
+
+  it('o carimbo da fila guarda o código real do PostgREST, não só a mensagem', async () => {
+    upsertMock.mockResolvedValue({
+      error: { code: '42501', message: 'permission denied for table audit_logs', hint: 'grant INSERT' }
+    });
+    await semear('LOG_CODIGO');
+
+    const resultado = await enviarFilaAuditoria();
+
+    expect(resultado.error).toContain(
+      '[42501] permission denied for table audit_logs · dica: grant INSERT'
+    );
+    const linha = await db.audit_logs.get('LOG_CODIGO');
+    expect(linha?._syncError).toContain('[42501]');
+    expect(await contarAuditoriaPendente()).toBe(1);
+  });
 });
 
 describe('mapeamento local → nuvem', () => {

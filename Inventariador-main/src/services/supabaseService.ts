@@ -10,6 +10,7 @@ import { sqliteService, db } from './sqliteService';
 import { compressImage } from '../utils/imageUtils';
 import { logger } from '../utils/logger';
 import { textoDoDetails } from '../utils/auditDetails';
+import { descreverErroNuvem } from '../utils/erroNuvem';
 import { recordPerf, recordPerfSample, startPerf } from '../utils/perfMetrics';
 import { resolveTenantId, readLocalTenantId, readSessionTenantId } from '../utils/tenantUtils';
 import { hasRealAnchor } from '../utils/gpsAnchors';
@@ -1171,7 +1172,7 @@ export const lerGeracaoNuvem = async (): Promise<BaseGeneration | null> => {
       BASE_GENERATION_READ_TIMEOUT_MS,
       'leitura do selo de geração'
     );
-    if (error) throw new Error(error.message || 'erro de esquema');
+    if (error) throw new Error(descreverErroNuvem(error));
     value = normalizarGeracao(data);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -2008,7 +2009,7 @@ export const countCloudAssets = async (tenantid?: string | null): Promise<number
   if (tenant) query = query.eq('tenantid', tenant);
   const { count, error } = await query;
   if (error) {
-    throw new SupabaseNetworkException(`Falha ao contar a base da Nuvem: ${error.message || 'Erro de esquema.'}`);
+    throw new SupabaseNetworkException(`Falha ao contar a base da Nuvem: ${descreverErroNuvem(error)}`);
   }
   return count || 0;
 };
@@ -2076,7 +2077,7 @@ export const downloadBaseToLocal = async (
       break;
     }
     if (dropMissingColumn(countErr.message || '')) continue;
-    throw new SupabaseNetworkException(`Falha ao consultar a base do tenant: ${countErr.message || 'Erro de esquema.'}`);
+    throw new SupabaseNetworkException(`Falha ao consultar a base do tenant: ${descreverErroNuvem(countErr)}`);
   }
   if (total === 0) {
     logger.warn(`>>> [Supabase] Base do tenant ${tenant} vazia na Nuvem.`);
@@ -2094,7 +2095,7 @@ export const downloadBaseToLocal = async (
       const { data, error } = await q;
       if (error) {
         if (dropMissingColumn(error.message || '')) continue;
-        throw new SupabaseNetworkException(`Falha ao baixar lote ${start}-${start + PAGE - 1}: ${error.message || 'Erro de esquema.'}`);
+        throw new SupabaseNetworkException(`Falha ao baixar lote ${start}-${start + PAGE - 1}: ${descreverErroNuvem(error)}`);
       }
       // A linha crua do Postgres não tem `_conferido`/`_auditor`/`_dataLeitura`:
       // a conversão comum (a mesma do pull) traz quem conferiu e quando.
@@ -3128,7 +3129,12 @@ const fetchFullInventoryImpl = async (
       
       if (assetsError) {
         logger.error(`[Supabase] Erro em fetchFullInventory (Paginação ${from}): ${assetsError.code} - ${assetsError.message}`, assetsError);
-        throw assetsError;
+        // O erro do PostgREST NÃO é uma instância de `Error`: lançá-lo cru fazia
+        // o chamador cair no ramo genérico («erro de tráfego»). Sobe já legível,
+        // com código, detalhe e dica.
+        throw new SupabaseNetworkException(
+          `Falha ao baixar a base da Nuvem (lote ${from}–${from + PAGE_SIZE - 1}): ${descreverErroNuvem(assetsError)}`
+        );
       }
 
       if (pageData && pageData.length > 0) {
@@ -3250,8 +3256,11 @@ const fetchFullInventoryImpl = async (
       config: mappedConfig
     };
   } catch (err) {
-    logger.error('Erro inesperado ao buscar inventário completo:', err);
-    return null;
+    // A recusa da nuvem não pode virar `null`: `null` significa «não há base» e
+    // o chamador anunciava «nenhum dado encontrado» quando o PostgREST tinha
+    // respondido 42501/tabela ausente/RLS. O motivo sobe para quem chamou.
+    logger.error(`Erro ao buscar o inventário na nuvem: ${descreverErroNuvem(err)}`, err);
+    throw err;
   }
 };
 

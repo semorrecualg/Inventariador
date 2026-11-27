@@ -29,6 +29,7 @@ import { normalizarLeiturasDeConferencia } from './utils/normalizacaoLeitura';
 import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { preservarGpsMaisRecente } from './utils/assetGps';
 import { comTecto, TempoEsgotadoError } from './utils/comTecto';
+import { descreverErroNuvem, pareceFalhaDeCanal } from './utils/erroNuvem';
 import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -568,6 +569,13 @@ const App: React.FC = () => {
   const [auditoriaPendenteCount, setAuditoriaPendenteCount] = useState(0);
   const [isSyncLocked, setIsSyncLocked] = useState(false);
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => getInitialDatabaseMode());
+  // A BASE LOCAL é hermética: nada é enviado, por isso uma recusa antiga da
+  // nuvem não pode continuar a pintar os cartões como falha activa. O selo lê
+  // esta flag (`stores/syncStore`) e mostra «por subir» enquanto o modo for local.
+  const setBaseLocal = useSyncStore((estado) => estado.setBaseLocal);
+  useEffect(() => {
+    setBaseLocal(!isOnlineDatabaseMode(databaseMode));
+  }, [databaseMode, setBaseLocal]);
 
   const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -2793,7 +2801,9 @@ useEffect(() => {
         // Bloqueio por cópias é política, não falha: o operador tem de ver o
         // número e a instrução de DIAGNÓSTICO DE CÓPIAS, não um "erro" genérico.
         setSyncError(
-          err instanceof CloudPushPolicyError ? err.message : 'Erro ao enviar alterações locais'
+          err instanceof CloudPushPolicyError
+            ? err.message
+            : `Erro ao enviar alterações locais: ${descreverErroNuvem(err)}`
         );
         logger.error('Push error:', err);
         throw err;
@@ -3278,18 +3288,9 @@ useEffect(() => {
         });
         return;
       }
-      const err = error as Record<string, unknown>;
-      logger.error('>>> [Sync] Erro ao sincronizar da nuvem:', error);
-      const errMsg = String(err?.message || error || '').toLowerCase();
-      const isSuspendedNetwork = errMsg.includes('suspended') || 
-                                errMsg.includes('io') || 
-                                errMsg.includes('network') || 
-                                errMsg.includes('failed to fetch') || 
-                                errMsg.includes('fetch') || 
-                                errMsg.includes('timeout') ||
-                                errMsg.includes('abort') ||
-                                errMsg.includes('load failed') ||
-                                err?.status === 0;
+      const motivo = descreverErroNuvem(error);
+      logger.error(`>>> [Sync] Erro ao sincronizar da nuvem: ${motivo}`, error);
+      const isSuspendedNetwork = pareceFalhaDeCanal(error);
 
       if (isSuspendedNetwork && databaseMode !== DatabaseMode.INTERNAL) {
         logger.warn('>>> [Sync - Contingência] Conexão com Supabase restrita ou suspensa (ERR_NETWORK_IO_SUSPENDED). Ativando SOBERANIA NATIVA (SQLite) offline de forma automática e segura.');
@@ -3319,9 +3320,18 @@ useEffect(() => {
           message: 'Foi identificada uma suspensão no canal de tráfego de rede da WebView. O aplicativo fez a transição dinâmica para o modo de Soberania Nativa (offline com base física SQLite) para proteger todas as suas operações locais.',
           type: 'warning'
         });
+        setSyncError(`Erro de tráfego em rede WebView. Chaveado para contingência local. ${motivo}`);
+      } else {
+        // A recusa da nuvem (42501, tabela ausente, política de RLS) não é
+        // falha de rede: mostrar o código e o motivo reais.
+        setSyncError(`Falha ao baixar a base da nuvem: ${motivo}. A base do aparelho mantém-se.`);
+        setModalConfig({
+          isOpen: true,
+          title: 'A nuvem recusou a base',
+          message: `A nuvem não entregou a base do inventário. Nada foi apagado: a base que já está no aparelho mantém-se.\n\nMotivo: ${motivo}`,
+          type: 'error'
+        });
       }
-
-      setSyncError('Erro de tráfego em rede WebView. Chaveado para contingência local.');
     } finally {
       isSyncingRef.current = false;
       setIsSyncing(false);
@@ -3948,8 +3958,12 @@ useEffect(() => {
             }
           }
         }
-      } catch (e) { 
-        logger.error("Data load failed", e); 
+      } catch (e) {
+        // Este `try` cobre o pull E as gravações locais do arranque: o aviso
+        // não pode culpar a nuvem pelo que falhou no aparelho.
+        const motivo = descreverErroNuvem(e);
+        logger.error(`Data load failed: ${motivo}`, e);
+        setSyncError(`Falha ao carregar a base: ${motivo}`);
       } finally {
         // ETAPA 5b (fix do timing): libera os syncs que aguardavam o boot
         // terminar o loadInventory antes de decidir delta vs full.
@@ -3988,7 +4002,10 @@ useEffect(() => {
               const cloudData = await Promise.race([
                 fetchFullInventory(user?.tenantid, verifyUnit),
                 new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 8000))
-              ]).catch(() => null);
+              ]).catch((erro) => {
+                logger.warn(`>>> [Boot Loader] Verificação em segundo plano da nuvem falhou: ${descreverErroNuvem(erro)}`);
+                return null;
+              });
 
               if (cloudData && cloudData.config && cloudData.config.lastUpdated) {
                 const cloudTime = new Date(cloudData.config.lastUpdated).getTime();
@@ -4553,7 +4570,7 @@ useEffect(() => {
               setLastSyncTime(inventory.lastUpdated || new Date().toISOString());
               setSyncError(null);
             } catch (err) {
-              setSyncError('Erro na sincronização');
+              setSyncError(`Erro na sincronização: ${descreverErroNuvem(err)}`);
               logger.error('Sync error:', err);
             }
           } else {
@@ -6814,11 +6831,12 @@ useEffect(() => {
         });
       }
     } catch (error) {
-      logger.error('Erro ao baixar dados da nuvem:', error);
+      const motivo = descreverErroNuvem(error);
+      logger.error(`Erro ao baixar dados da nuvem: ${motivo}`, error);
       setModalConfig({
         isOpen: true,
         title: 'Erro no Download',
-        message: 'Ocorreu um erro ao tentar baixar os dados da nuvem. Verifique sua conexão.',
+        message: `O download da nuvem falhou: ${motivo}`,
         type: 'error'
       });
     }

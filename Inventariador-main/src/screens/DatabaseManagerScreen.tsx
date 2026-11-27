@@ -4,9 +4,10 @@ import { showRecoveryToast as originalShowRecoveryToast } from '../services/Navi
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
-import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets } from '../services/supabaseService';
+import { syncAssetsToCloud, isInternalMode, getDatabaseMode, isOnlineDatabaseMode, logAuditEvent, countCloudAssets } from '../services/supabaseService';
 import { contarAuditoriaPendente, contarAuditoriaNuvem, type ContagemAuditoriaNuvem } from '../services/auditoriaNuvem';
 import { isAdminUser } from '../utils/authUtils';
+import { descreverErroNuvem } from '../utils/erroNuvem';
 import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { previewExactCopyCleanup, cleanExactAssetCopies, restoreExactCopyCleanup, latestExactCopyBackup, formatExactCopyReport, type ExactCopyReport, type ExactCopyBackupInfo } from '../services/assetMirrorCleanupService';
@@ -367,6 +368,16 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setCloudBase({ state: 'internal', count: null, message: 'Supabase não configurado neste ambiente.' });
       return;
     }
+    // BASE LOCAL é hermética (decisão F1): mesma regra do contador da trilha.
+    // Antes, o placar pedia a contagem ao Supabase sempre que o build tinha
+    // credenciais e, num aparelho em BASE LOCAL, pintava «ERRO NA LEITURA» com
+    // o corpo vazio do servidor — ao lado do contador da trilha a dizer «nuvem
+    // não consultada (BASE LOCAL)».
+    if (!isOnlineDatabaseMode(getDatabaseMode())) {
+      setCloudBase({ state: 'local', count: null, message: 'BASE LOCAL — a nuvem não é consultada.' });
+      addLog('[SRE_BASES] BASE LOCAL: a nuvem não foi consultada (nada foi lido nem alterado).');
+      return;
+    }
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setCloudBase({ state: 'offline', count: null, message: 'Aparelho sem conexão.' });
       return;
@@ -377,7 +388,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setCloudBase({ state: 'online', count });
       addLog(`[SRE_BASES] Nuvem (Supabase) do contrato ${activeTenantid || 'GLOBAL'}: ${count} registo(s) na tabela assets (leitura online).`);
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
+      const errMsg = descreverErroNuvem(err);
       setCloudBase({ state: 'error', count: null, message: errMsg });
       addLog(`[SRE_BASES] Falha ao ler a base da Nuvem (nada foi alterado): ${errMsg}`);
     }
@@ -441,7 +452,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         setCloudPushBlock(err.lines);
         err.lines.forEach((line) => addLog(`[SRE_CLOUD] ${line}`));
       } else {
-        const errMsg = err instanceof Error ? err.message : String(err);
+        const errMsg = descreverErroNuvem(err);
         addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
         console.error("[SRE_CLOUD] Erro no espelhamento em massa:", err);
       }

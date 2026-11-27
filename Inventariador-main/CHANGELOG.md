@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — em BASE LOCAL o Gestor não consulta a nuvem e o cartão não acusa falha
+
+- **Placar do SRE:** `DatabaseManagerScreen` pedia `countCloudAssets` sempre que
+  o build tinha credenciais, mesmo com o aparelho em BASE LOCAL. O painel
+  mostrava «SUPABASE — · ERRO NA LEITURA» com o corpo vazio do servidor
+  (`{"message":""}`) enquanto o contador da trilha, ao lado, dizia «nuvem não
+  consultada (BASE LOCAL)». O placar passa a decidir pelo modo
+  (`isOnlineDatabaseMode(getDatabaseMode())`) e mostra «BASE LOCAL»: a base
+  local é hermética, nada é lido nem alterado.
+- **Cartão do ativo:** o carimbo de uma recusa da nuvem (`_syncFailAt`) continua
+  guardado, mas em BASE LOCAL deixa de aparecer como «Falha de envio» activa
+  (ficava vermelho para sempre, com a idade a crescer, sem nada a ser enviado).
+  Mostra «Por subir · BASE LOCAL — a nuvem não é consultada» até o modo voltar à
+  Base Oficial, quando o motivo real reaparece.
+- **Testes:** `basesBaseLocal` fixa as duas leituras do placar e a ordem do
+  portão; o selo do cartão ganha o caso de BASE LOCAL.
+
+### Corrigido — o pull e a sincronização mostram o código e o motivo reais
+
+- **Pull deixa de culpar a rede:** a paginação do pull lançava o erro do
+  PostgREST cru (que não é um `Error`), e o `App` caía sempre em «Erro de
+  tráfego em rede WebView» — mesmo quando a nuvem recusava a descarga com
+  `42501`, tabela ausente ou política de RLS. O erro sobe agora como
+  `SupabaseNetworkException` com `[código] mensagem · detalhe · dica` e o aviso
+  de sincronização mostra «Falha ao baixar a base da nuvem: …», com o motivo no
+  ecrã.
+- **Autosave, envio e arranque:** «Erro na sincronização»,
+  «Erro ao enviar alterações locais» e «Data load failed» passam a incluir o
+  erro real (`utils/erroNuvem`), sem substituir a causa por um texto genérico.
+  O aviso do arranque diz «Falha ao carregar a base» — o mesmo `try` cobre as
+  gravações locais, que não são falha da nuvem.
+- **42501 não é falha de rede:** a classificação do `App` testava
+  `message.includes('io')`, que casa com «perm**iss io**n denied»: uma recusa do
+  pull mudava a app para offline e escondia o motivo. `pareceFalhaDeCanal`
+  (`utils/erroNuvem`) só reconhece sinais do canal (suspensão, `failed to
+  fetch`, `network`, `timeout`, abort, `status 0`).
+- **Download manual e painel de bases:** o modal «Erro no Download» e o placar
+  do Gestor mostram o motivo devolvido pela nuvem em vez de pedir para
+  «verificar a conexão».
+- **Testes:** `erroNuvemPull` cobre o 42501 na paginação, a resposta sem campos
+  e a falha de rede, e fixa os avisos de pull, autosave, envio e download.
+
+### Corrigido — os erros da nuvem mostram o código e o motivo reais
+
+- **Fim do «Erro de esquema.»:** `countCloudAssets`, o download da base
+  (`downloadBaseToLocal`) e o contador da trilha (`contarAuditoriaNuvem`)
+  deixam de substituir um motivo ausente por esse texto. O novo
+  `utils/erroNuvem` formata o erro com `code`, `message`, `details`, `hint` e
+  `status`/`statusCode` quando existem; uma resposta sem campos passa a dizer
+  «resposta sem código nem mensagem do servidor» — o app não inventa a causa.
+- **Tempo esgotado diz o que é:** o tecto de 8 s da contagem da trilha devolve
+  «tempo esgotado ao contar a trilha (8 s)» em vez do código interno
+  `AUDIT_COUNT_TIMEOUT`.
+- **Envio da trilha diz o código:** `enviarFilaAuditoria` carimba a fila e o
+  log com `descreverErroNuvem`; um `[42501] permission denied` deixa de chegar
+  como texto genérico («Falha ao enviar a trilha.»).
+- **Diagnóstico do `dics`:** `scripts/diagnostico-dics-somente-leitura.sql`
+  reúne as consultas (só leitura) que dizem que tabela é, que privilégios tem e
+  que trigger, função, view ou política a referencia — o 42501 cita uma tabela
+  que o app não escreve. O bloco dos privilégios mostra o ACL cru
+  (`pg_class.relacl`) e o expande com `aclexplode`, porque
+  `information_schema.role_table_grants` esconde os GRANTs cujo grantor não é
+  um papel activo da sessão (o SQL Editor corre como `postgres`). Mostra ainda
+  os privilégios **efectivos** de `anon` e `authenticated`
+  (`has_table_privilege`, com a herança de papéis resolvida) e o papel de login
+  com que o pedido do app chega (`authenticator` → `anon`/`authenticated`): se o
+  INSERT/UPDATE vier `false`, o 42501 é o GRANT em falta, não um trigger.
+- **Testes:** `erroNuvem` (9) fixa o formato de cada classe de erro;
+  `erroNuvemVisivel` (4) cobre a contagem e o download contra um 42501, uma
+  resposta vazia e uma falha de rede; `auditoriaNuvemContador` ganha o caso de
+  erro sem campos.
+
 ### Corrigido — pendentes «à espera de sessão» e reentrada a partir da barra
 
 - **Falta de sessão não é recusa:** o ciclo da fila deixa de gravar

@@ -11,7 +11,7 @@ export { APP_VERSION };
 /** Primeira linha fixa do SRE. */
 export const SRE_PROTOCOL_LINE = `INVENTARIADOR v${APP_VERSION} · SRE · GESTOR DE BASE DE DADOS`;
 
-export type CloudBaseState = 'loading' | 'online' | 'offline' | 'internal' | 'error';
+export type CloudBaseState = 'loading' | 'online' | 'offline' | 'internal' | 'local' | 'error';
 
 export interface CloudBaseCount {
   state: CloudBaseState;
@@ -25,6 +25,8 @@ export const CLOUD_STATE_LABEL: Record<CloudBaseState, string> = {
   online: 'online · lido agora',
   offline: 'offline · sem conexão',
   internal: 'não configurado',
+  // BASE LOCAL é hermética: a nuvem não foi consultada — isto não é um erro.
+  local: 'não consultada · BASE LOCAL',
   error: 'erro na leitura',
 };
 
@@ -40,6 +42,8 @@ export const formatBasesLine = (local: number, cloud: CloudBaseCount): string =>
       return `${base} · OFFLINE`;
     case 'internal':
       return `${base} · NÃO CONFIGURADO`;
+    case 'local':
+      return `${base} · BASE LOCAL`;
     default:
       return `${base} · ERRO`;
   }
