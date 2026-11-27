@@ -231,6 +231,29 @@ describe('linhasQueMudaram — o evento singular grava só a linha que tocou', (
   });
 });
 
+describe('linhasQueMudaram — a foto sincronizada grava só a linha do ativo', () => {
+  it('devolve só o ativo cuja `_photoUrl` mudou', () => {
+    const antes = [localPendente({ id: 'PK-1' }), localPendente({ id: 'PK-2' })];
+    const comFoto = localPendente({ id: 'PK-1', _photoUrl: 'https://nuvem/foto.jpg' });
+
+    const alteradas = linhasQueMudaram(antes, [comFoto, antes[1]], ['PK-1']);
+
+    expect(alteradas).toHaveLength(1);
+    expect(alteradas[0]).toBe(comFoto);
+  });
+
+  it('não grava quando a foto é a mesma (evento repetido)', () => {
+    const antes = [localPendente({ id: 'PK-1', _photoUrl: 'https://nuvem/foto.jpg' })];
+    const igual = { ...antes[0] } as unknown as Asset;
+
+    expect(linhasQueMudaram(antes, [igual], ['PK-1'])).toEqual([]);
+  });
+
+  it('não grava quando o ativo não está no estado', () => {
+    expect(linhasQueMudaram([localPendente()], [localPendente()], ['PK-AUSENTE'])).toEqual([]);
+  });
+});
+
 describe('idsComPendencia — flag persistida e toques da sessão, sem repetidos', () => {
   it('junta as duas provas e remove duplicados', () => {
     const ativos = [

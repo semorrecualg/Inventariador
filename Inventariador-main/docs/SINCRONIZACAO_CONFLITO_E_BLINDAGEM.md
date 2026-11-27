@@ -106,6 +106,11 @@ linha; um `UPDATE` cujo merge não alterou nada e um `DELETE` não gravam
 nenhuma — no `DELETE` o registo sai do estado e o espelho não ganha escrita
 (`persistAssetsBatch` é upsert), como já acontecia com o save completo.
 
+O aviso de foto sincronizada (`gbr_photo_synced`) segue o mesmo recorte: troca
+`_photoUrl` no estado e grava **só** esse ativo (`linhasQueMudaram` com o id do
+aviso + `persistAssetsBatch`), em vez da base inteira por cada foto. Foto
+repetida ou ativo fora do estado não gravam nada.
+
 A blindagem física vale também aqui: com `is_system_locked = 'true'` nem o
 evento nem a reconciliação aplicam linhas alheias.
 
