@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o pull e a sincronização mostram o código e o motivo reais
+
+- **Pull deixa de culpar a rede:** a paginação do pull lançava o erro do
+  PostgREST cru (que não é um `Error`), e o `App` caía sempre em «Erro de
+  tráfego em rede WebView» — mesmo quando a nuvem recusava a descarga com
+  `42501`, tabela ausente ou política de RLS. O erro sobe agora como
+  `SupabaseNetworkException` com `[código] mensagem · detalhe · dica` e o aviso
+  de sincronização mostra «Falha ao baixar a base da nuvem: …», com o motivo no
+  ecrã.
+- **Autosave, envio e arranque:** «Erro na sincronização»,
+  «Erro ao enviar alterações locais» e «Data load failed» passam a incluir o
+  erro real (`utils/erroNuvem`), sem substituir a causa por um texto genérico.
+- **Download manual e painel de bases:** o modal «Erro no Download» e o placar
+  do Gestor mostram o motivo devolvido pela nuvem em vez de pedir para
+  «verificar a conexão».
+- **Testes:** `erroNuvemPull` cobre o 42501 na paginação, a resposta sem campos
+  e a falha de rede, e fixa os avisos de pull, autosave, envio e download.
+
 ### Corrigido — os erros da nuvem mostram o código e o motivo reais
 
 - **Fim do «Erro de esquema.»:** `countCloudAssets`, o download da base

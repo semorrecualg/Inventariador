@@ -7,6 +7,7 @@ import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clea
 import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets } from '../services/supabaseService';
 import { contarAuditoriaPendente, contarAuditoriaNuvem, type ContagemAuditoriaNuvem } from '../services/auditoriaNuvem';
 import { isAdminUser } from '../utils/authUtils';
+import { descreverErroNuvem } from '../utils/erroNuvem';
 import { CloudPushPolicyError } from '../utils/cloudPushGuard';
 import { previewAssetDuplicateCleanup, formatDedupReport } from '../services/assetDedupService';
 import { previewExactCopyCleanup, cleanExactAssetCopies, restoreExactCopyCleanup, latestExactCopyBackup, formatExactCopyReport, type ExactCopyReport, type ExactCopyBackupInfo } from '../services/assetMirrorCleanupService';
@@ -377,7 +378,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       setCloudBase({ state: 'online', count });
       addLog(`[SRE_BASES] Nuvem (Supabase) do contrato ${activeTenantid || 'GLOBAL'}: ${count} registo(s) na tabela assets (leitura online).`);
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
+      const errMsg = descreverErroNuvem(err);
       setCloudBase({ state: 'error', count: null, message: errMsg });
       addLog(`[SRE_BASES] Falha ao ler a base da Nuvem (nada foi alterado): ${errMsg}`);
     }
@@ -441,7 +442,7 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
         setCloudPushBlock(err.lines);
         err.lines.forEach((line) => addLog(`[SRE_CLOUD] ${line}`));
       } else {
-        const errMsg = err instanceof Error ? err.message : String(err);
+        const errMsg = descreverErroNuvem(err);
         addLog(`[SRE_CLOUD] Erro no espelhamento em massa: ${errMsg}`);
         console.error("[SRE_CLOUD] Erro no espelhamento em massa:", err);
       }

@@ -29,6 +29,7 @@ import { normalizarLeiturasDeConferencia } from './utils/normalizacaoLeitura';
 import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { preservarGpsMaisRecente } from './utils/assetGps';
 import { comTecto, TempoEsgotadoError } from './utils/comTecto';
+import { descreverErroNuvem } from './utils/erroNuvem';
 import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
@@ -2793,7 +2794,9 @@ useEffect(() => {
         // Bloqueio por cópias é política, não falha: o operador tem de ver o
         // número e a instrução de DIAGNÓSTICO DE CÓPIAS, não um "erro" genérico.
         setSyncError(
-          err instanceof CloudPushPolicyError ? err.message : 'Erro ao enviar alterações locais'
+          err instanceof CloudPushPolicyError
+            ? err.message
+            : `Erro ao enviar alterações locais: ${descreverErroNuvem(err)}`
         );
         logger.error('Push error:', err);
         throw err;
@@ -3321,7 +3324,21 @@ useEffect(() => {
         });
       }
 
-      setSyncError('Erro de tráfego em rede WebView. Chaveado para contingência local.');
+      // A recusa da nuvem (42501, tabela ausente, política de RLS) não é falha
+      // de rede: mostrar o código e o motivo reais, nunca um diagnóstico
+      // inventado de tráfego da WebView.
+      const motivo = descreverErroNuvem(error);
+      if (isSuspendedNetwork && databaseMode !== DatabaseMode.INTERNAL) {
+        setSyncError(`Erro de tráfego em rede WebView. Chaveado para contingência local. ${motivo}`);
+      } else {
+        setSyncError(`Falha ao baixar a base da nuvem: ${motivo}. A base do aparelho mantém-se.`);
+        setModalConfig({
+          isOpen: true,
+          title: 'A nuvem recusou a base',
+          message: `A nuvem não entregou a base do inventário. Nada foi apagado: a base que já está no aparelho mantém-se.\n\nMotivo: ${motivo}`,
+          type: 'error'
+        });
+      }
     } finally {
       isSyncingRef.current = false;
       setIsSyncing(false);
@@ -3948,8 +3965,10 @@ useEffect(() => {
             }
           }
         }
-      } catch (e) { 
-        logger.error("Data load failed", e); 
+      } catch (e) {
+        const motivo = descreverErroNuvem(e);
+        logger.error(`Data load failed: ${motivo}`, e);
+        setSyncError(`Falha ao carregar a base da nuvem no arranque: ${motivo}`);
       } finally {
         // ETAPA 5b (fix do timing): libera os syncs que aguardavam o boot
         // terminar o loadInventory antes de decidir delta vs full.
@@ -4553,7 +4572,7 @@ useEffect(() => {
               setLastSyncTime(inventory.lastUpdated || new Date().toISOString());
               setSyncError(null);
             } catch (err) {
-              setSyncError('Erro na sincronização');
+              setSyncError(`Erro na sincronização: ${descreverErroNuvem(err)}`);
               logger.error('Sync error:', err);
             }
           } else {
@@ -6814,11 +6833,12 @@ useEffect(() => {
         });
       }
     } catch (error) {
-      logger.error('Erro ao baixar dados da nuvem:', error);
+      const motivo = descreverErroNuvem(error);
+      logger.error(`Erro ao baixar dados da nuvem: ${motivo}`, error);
       setModalConfig({
         isOpen: true,
         title: 'Erro no Download',
-        message: 'Ocorreu um erro ao tentar baixar os dados da nuvem. Verifique sua conexão.',
+        message: `O download da nuvem falhou: ${motivo}`,
         type: 'error'
       });
     }
