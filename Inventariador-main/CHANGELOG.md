@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a descrição e a série digitadas na inclusão manual ficam no registo
+
+- **Etiqueta já registada:** o item incluído à mão porque não existe no
+  cadastro caía num registo da mesma etiqueta que já estava na base sem
+  descrição nem série. O envio recusava-o como «etiqueta duplicada», o
+  formulário fechava e o texto do auditor desaparecia — o cartão continuava
+  «SEM DESCRIÇÃO · S/N». A inclusão passa a **completar** esse registo em
+  branco (`utils/rascunhoInclusaoManual`): só na mesma unidade e no mesmo
+  endereço, e só quando a descrição **e** a série estão vazias. Um registo já
+  descrito nunca é tocado, para as plaquetas repetidas com itens distintos
+  continuarem a criar registos separados.
+- **Gravação sem resposta:** `saveManualEntry` chamava a gravação sem a
+  esperar, fechava o formulário e abria a ficha do item mesmo quando nada tinha
+  sido gravado (tenant/filial inválidos, falha da gravação local). Passa a
+  esperar, a manter os dados no formulário e a dizer o motivo da recusa; só
+  depois do sucesso é que fecha e limpa o formulário.
+- **Testes:** `rascunhoInclusaoManual` fixa o registo em branco completado, a
+  não-interferência com registos descritos e a barreira de unidade/endereço.
+
 ### Adicionado — anexar o APK de um run à release (fim da dependência dos 7 dias)
 
 - `.github/workflows/release-asset.yml` (dispatch): baixa o artefacto

@@ -30,6 +30,7 @@ import { isConferido, marcarConferido } from '../utils/conferencia';
 import { canonicalKey } from '../utils/normalize';
 import { formatDateBR, formatCurrency, formatEtiqueta } from '../utils/formatUtils';
 import { findSerialDuplicates } from '../utils/assetDuplicates';
+import { rascunhoDaInclusaoManual } from '../utils/rascunhoInclusaoManual';
 import { findBatchGroup, findBatchGroupBySearch, splitByAddress, batchLabel, addressKey } from '../utils/etiquetaGroup';
 import {
   buildCopyForNewItem,
@@ -453,6 +454,7 @@ const Inventory: React.FC<InventoryProps> = ({
     return () => window.removeEventListener('gbr_photo_synced', handlePhotoUpdate);
   }, []);
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
+  const [isSavingManualEntry, setIsSavingManualEntry] = useState(false);
   const [isListening, setIsListening] = useState<string | null>(null);
 
   const [manualAsset, setManualAsset] = useState<Partial<Asset>>({});
@@ -1394,11 +1396,35 @@ const Inventory: React.FC<InventoryProps> = ({
     recognition.start();
   };
 
-  const saveManualEntry = () => {
-    if (manualSerialConflicts.length > 0) return;
+  const saveManualEntry = async () => {
+    if (manualSerialConflicts.length > 0 || isSavingManualEntry) return;
+
+    // O formulário é a verdade: os valores digitados são lidos aqui e escritos
+    // por cima de tudo o resto, para nenhum espalhamento posterior os apagar.
+    const etiqueta = String(manualAsset.etiqueta || '').trim().toUpperCase();
+    const descricao = String(manualAsset.descricaodoativo || '').trim();
+    const serial = String(manualAsset.serial || '').trim();
+    const quantidade = Number(manualAsset.qt) > 0 ? Number(manualAsset.qt) : 1;
+
+    // Registo da mesma etiqueta que ficou sem descrição nem série: o texto
+    // digitado completa-o em vez de ser barrado como «etiqueta duplicada».
+    const rascunho = descricao || serial
+      ? rascunhoDaInclusaoManual(allAssets, {
+          etiqueta,
+          unidade: selectedUnit,
+          endereco: selectedLocation,
+          exceptoId: manualAsset.id,
+        })
+      : undefined;
+
     const rawAsset: Asset = {
+        ...(rascunho || {}),
         ...manualAsset,
-        id: generateUUID(),
+        etiqueta,
+        descricaodoativo: descricao,
+        serial,
+        qt: quantidade,
+        id: rascunho?.id || generateUUID(),
         TAG_INVENTARIO: TagInventario.NOVO_ITEM,
         ...marcarConferido(),
         _isNew: true,
@@ -1407,14 +1433,35 @@ const Inventory: React.FC<InventoryProps> = ({
         currentCampaignId: currentCampaignId,
         _localMaster: selectedLocation || ""
     } as Asset;
-    
+
     const newAsset = cleanAndCapitalizeAsset(rawAsset);
-    
-    handleUpdateAssetWithBackup(newAsset);
-    setIsManualEntryOpen(false);
-    setCommittedSearch('');
-    setDisplayValue('');
-    onSelectAsset(newAsset);
+
+    // A gravação tem de ser esperada: antes, uma falha (tenant/filial inválidos,
+    // gravação local recusada) fechava o formulário e deitava fora o que o
+    // auditor tinha escrito, sem uma palavra.
+    setIsSavingManualEntry(true);
+    try {
+      await handleUpdateAssetWithBackup(newAsset);
+      setIsManualEntryOpen(false);
+      setManualAsset({});
+      setCommittedSearch('');
+      setDisplayValue('');
+      if (rascunho) {
+        setSreNotification({
+          type: 'info',
+          message: 'Registo completado',
+          subText: `A descrição e a série digitadas ficaram no registo ${formatEtiqueta(etiqueta)}, que estava em branco.`
+        });
+      }
+      onSelectAsset(newAsset);
+    } catch (err) {
+      logger.error('>>> [Inventory] Falha ao gravar a inclusão manual:', err);
+      alert(
+        `O item ${etiqueta || '(sem etiqueta)'} não foi gravado: ${err instanceof Error ? err.message : String(err)}. Os dados continuam no formulário — corrija e tente de novo.`
+      );
+    } finally {
+      setIsSavingManualEntry(false);
+    }
   };
 
  
@@ -2616,10 +2663,14 @@ const Inventory: React.FC<InventoryProps> = ({
             <div className="p-8 bg-white border-t border-accent/10 shrink-0 sticky bottom-0">
                <button 
                  onClick={saveManualEntry}
-                 disabled={manualSerialConflicts.length > 0}
+                 disabled={manualSerialConflicts.length > 0 || isSavingManualEntry}
                  className="w-full bg-accent text-white py-5 rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all shadow-accent/20 disabled:opacity-40 disabled:cursor-not-allowed"
                >
-                 {manualSerialConflicts.length > 0 ? 'Serial duplicado — corrija para salvar' : 'Salvar e Conferir'}
+                 {manualSerialConflicts.length > 0
+                   ? 'Serial duplicado — corrija para salvar'
+                   : isSavingManualEntry
+                     ? 'A gravar...'
+                     : 'Salvar e Conferir'}
                </button>
             </div>
           </div>
