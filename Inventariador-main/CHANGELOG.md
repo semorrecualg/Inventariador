@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — a normalização de `_dataLeitura` do arranque é uma vez e grava só o delta (H1 · Fase 4)
+
+- **O que era:** o arranque media a data de leitura de cada ativo conferido e,
+  se fosse anterior a «hoje» (15/03/2026), reescrevia-a para
+  `2026-03-15T12:00:00Z` — e depois gravava **a base inteira** (`saveInventory`
+  sem lista) para corrigir um punhado de linhas. Pior: a data escrita voltava a
+  ser «anterior a 2026-03-16» no arranque seguinte, por isso a base era
+  reescrita em **todos** os arranques enquanto existisse uma linha assim.
+- **Agora:** a regra vive em `utils/normalizacaoLeitura`
+  (`normalizarLeiturasDeConferencia`) e é idempotente — só normaliza o que
+  ainda está antes do alvo; uma leitura já no alvo (ou depois) não se toca. O
+  arranque grava só as linhas devolvidas em `alteradas`
+  (`saveInventory(saved, undefined, false, true)` + `persistAssetsBatch`), e a
+  segunda passagem já não tem nada a fazer. A recuperação do JSON legado usa a
+  mesma regra.
+
 ### Corrigido — o pull do arranque deixa de rebaixar o selo de sincronização (H1 · Fase 4)
 
 - **O que era:** `fetchFullInventory` grava a base com `markSynced: true`

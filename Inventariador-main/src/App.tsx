@@ -24,7 +24,8 @@ import { mesclarConflitoPorCampo } from './utils/mergePorCampo';
 import { ativoTemPendencia, avancarCheckpoint, idsComPendencia, linhasQueMudaram, mesclarEventoDeAtivo } from './utils/realtimeAtivos';
 import { isSystemLocked } from './utils/systemLock';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
-import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
+import { isConferido, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
+import { normalizarLeiturasDeConferencia } from './utils/normalizacaoLeitura';
 import { marcarSincronizadoLocal } from './utils/syncFalha';
 import { preservarGpsMaisRecente } from './utils/assetGps';
 import { mergeDeltaPull } from './utils/mergeDeltaPull';
@@ -3623,52 +3624,20 @@ useEffect(() => {
         }
 
         if (saved && saved.assets && saved.assets.length > 0) {
-          // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
-          const todayStr = '2026-03-16';
-          const yesterdayStr = '2026-03-15T12:00:00Z';
-          let hasChanges = false;
-
-          const updatedAssets = saved.assets.map(a => {
-            const conferido = isConferido(a);
-            if (conferido) {
-              let needsUpdate = false;
-              if (!a._dataLeitura) {
-                needsUpdate = true;
-              } else {
-                try {
-                  const d = new Date(a._dataLeitura);
-                  if (isNaN(d.getTime())) {
-                    needsUpdate = true;
-                  } else {
-                    const readingDate = d.toLocaleDateString('en-CA');
-                    if (readingDate < todayStr) {
-                      needsUpdate = true;
-                    }
-                  }
-                } catch {
-                  needsUpdate = true;
-                }
-              }
-
-              if (needsUpdate) {
-                hasChanges = true;
-                return { ...a, ...marcarConferido(yesterdayStr) };
-              }
-              
-              // Conferido pela regra mas com a marca local fora da grafia
-              // canônica (veio só da coluna de auditoria, ou em texto legado):
-              // normaliza para `true`, mantendo a data de leitura que já tinha.
-              if (!marcaLocalConferida(a)) {
-                hasChanges = true;
-                return { ...a, ...marcarConferido(a._dataLeitura) };
-              }
-            }
-            return a;
-          });
-
-          if (hasChanges) {
-            saved.assets = updatedAssets;
-            await saveInventory(saved);
+          // NORMALIZAÇÃO UMA VEZ: datas de leitura anteriores ao alvo passam a
+          // «ontem» (15/03/2026). A regra é idempotente — o que já está no
+          // alvo não volta a mudar, por isso o arranque seguinte não reescreve
+          // nada (antes, a data gravada era sempre «anterior a hoje»).
+          const { assets: normalizados, alteradas } = normalizarLeiturasDeConferencia(saved.assets);
+          if (alteradas.length > 0) {
+            saved.assets = normalizados;
+            // ESCRITA SÓ DAS LINHAS NORMALIZADAS: `saveInventory(saved)` sem
+            // lista regravava a base inteira nos dois espelhos para corrigir
+            // um punhado de linhas.
+            await saveInventory(saved, undefined, false, true);
+            await sqliteService.persistAssetsBatch(
+              alteradas as unknown as Record<string, unknown>[]
+            );
           }
 
           setInventory(prev => ({
@@ -3696,42 +3665,9 @@ useEffect(() => {
             setRecoverySource('LEGACY');
             const parsed = JSON.parse(legacy);
             if (parsed && parsed.assets && parsed.assets.length > 0) {
-              // Atualiza datas de inventários anteriores a hoje para "ontem" (15/03/2026)
-              const todayStr = '2026-03-16';
-              const yesterdayStr = '2026-03-15T12:00:00Z';
-              
-              parsed.assets = parsed.assets.map((a: Asset) => {
-                const conferido = isConferido(a);
-                if (conferido) {
-                  let needsUpdate = false;
-                  if (!a._dataLeitura) {
-                    needsUpdate = true;
-                  } else {
-                    try {
-                      const d = new Date(a._dataLeitura);
-                      if (isNaN(d.getTime())) {
-                        needsUpdate = true;
-                      } else {
-                        const readingDate = d.toLocaleDateString('en-CA');
-                        if (readingDate < todayStr) {
-                          needsUpdate = true;
-                        }
-                      }
-                    } catch {
-                      needsUpdate = true;
-                    }
-                  }
-                  if (needsUpdate) {
-                    return { ...a, ...marcarConferido(yesterdayStr) };
-                  }
-                  // Mesma normalização do arranque: só reescreve quando a
-                  // marca local ainda não está na grafia canônica.
-                  if (!marcaLocalConferida(a)) {
-                    return { ...a, ...marcarConferido(a._dataLeitura) };
-                  }
-                }
-                return a;
-              });
+              // Mesma normalização do arranque (agora idempotente): o JSON
+              // legado é a base inteira e é gravado como veio.
+              parsed.assets = normalizarLeiturasDeConferencia(parsed.assets).assets;
 
               setInventory(prev => ({ ...prev, ...parsed }));
               await saveInventory(parsed);
