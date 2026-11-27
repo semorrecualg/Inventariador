@@ -5240,7 +5240,11 @@ useEffect(() => {
     try {
       // 1. Salva o estado atual no modo atual antes de trocar para garantir persistência
       logger.info(`>>> [ModeSwitch] Salvando estado atual (${databaseMode}) antes da troca...`);
-      await saveInventory(inventory);
+      // SÓ CONFIGURAÇÃO: o que muda aqui é `databaseMode` (e as chaves de cache
+      // que dele derivam); os ativos são os mesmos e vivem nas mesmas tabelas do
+      // Dexie, independentes do modo. Regravá-los seria a base inteira por uma
+      // flag.
+      await saveInventory(inventory, undefined, false, true);
 
       // 2. Troca o modo no localStorage e no estado de controle
       setDatabaseMode(mode);
@@ -5473,7 +5477,9 @@ useEffect(() => {
       setInventory(prev => {
         logger.info("Finalizando onboarding - Atualizando estado do inventário");
         const newState = { ...prev, hasCompletedOnboarding: true };
-        saveInventory(newState).catch(e => logger.error('Erro ao salvar no IndexedDB:', e));
+        // SÓ CONFIGURAÇÃO: o onboarding muda uma flag do estado, não os ativos.
+        saveInventory(newState, undefined, false, true)
+          .catch(e => logger.error('Erro ao salvar no IndexedDB:', e));
         return newState;
       });
       

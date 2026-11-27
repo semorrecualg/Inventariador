@@ -127,6 +127,11 @@ O aviso de foto sincronizada (`gbr_photo_synced`) segue o mesmo recorte: troca
 aviso + `persistAssetsBatch`), em vez da base inteira por cada foto. Foto
 repetida ou ativo fora do estado não gravam nada.
 
+A troca de modo de base e o fim do onboarding também deixaram de gravar
+ativos: só a configuração muda (`skipSqlAssetsInsert`). Com isso, os únicos
+saves que ainda gravam a base inteira são os que substituem a base — a
+recuperação do JSON legado — e o autosave, que passa a lista de sujos.
+
 A blindagem física vale também aqui: com `is_system_locked = 'true'` nem o
 evento nem a reconciliação aplicam linhas alheias.
 

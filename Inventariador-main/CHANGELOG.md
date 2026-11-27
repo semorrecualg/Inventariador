@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — a troca de modo e o fim do onboarding gravam só configuração (H1 · Fase 4)
+
+- **O que era:** dois caminhos chamavam `saveInventory(state)` sem lista sem que
+  nenhum ativo tivesse mudado — a troca de modo de base (o que muda é
+  `databaseMode`) e o fim do onboarding (`hasCompletedOnboarding`). Cada um
+  regravava a base inteira nos dois espelhos.
+- **Agora:** ambos passam `skipSqlAssetsInsert` e gravam só a configuração. As
+  tabelas do Dexie não dependem do modo, por isso a troca de modo continua a
+  persistir o que precisa antes de mudar de chave de cache. Com isto, os únicos
+  saves sem `skipSqlAssetsInsert` que não passam lista são o do JSON legado
+  (gravação em massa justificada) e o do autosave (que passa os sujos).
+
 ### Corrigido — a normalização de `_dataLeitura` do arranque é uma vez e grava só o delta (H1 · Fase 4)
 
 - **O que era:** o arranque media a data de leitura de cada ativo conferido e,
