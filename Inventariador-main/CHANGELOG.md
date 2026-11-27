@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — «permission denied for table assets» (42501) sem correção no repositório
+
+- **O que era:** o cartão do ativo mostrava «FALHA DE ENVIO — Erro Supabase:
+  [42501] permission denied for table assets» e a conferência nunca subia. O
+  42501 é recusa de **privilégio** de tabela — o RLS decide depois do `GRANT` —
+  por isso apagar a base do aparelho não mudava nada: a base local estava boa e
+  faltava o direito de escrever na nuvem. O `docs/supabase_bootstrap.sql` criava
+  as políticas `p_all` mas **nunca** concedia privilégios; num projeto onde
+  fossem revogados (ou a tabela recriada por outro dono) o app lia e não
+  conseguia subir nada, e não havia script para o corrigir.
+- **Agora:** `scripts/assets-permissoes.sql` (idempotente) diagnostica dono, RLS,
+  privilégios de tabela e de coluna e políticas; repõe `USAGE` no schema e
+  `SELECT/INSERT/UPDATE/DELETE` para `anon` e `authenticated` nas 10 tabelas do
+  app (`ALL` para `service_role`), as mesmas políticas permissivas e o cache do
+  PostgREST; e prova o resultado com `has_table_privilege`. O bootstrap passa a
+  incluir o mesmo bloco de `GRANT` (e `ALTER DEFAULT PRIVILEGES`), para um
+  projeto novo não nascer sem escrita. Nada é apagado no aparelho nem na nuvem.
+  Teste: `permissoesAssets` (10 contratos sobre o script e o bootstrap).
+
 ### Adicionado — anexar o APK de um run à release (fim da dependência dos 7 dias)
 
 - `.github/workflows/release-asset.yml` (dispatch): baixa o artefacto

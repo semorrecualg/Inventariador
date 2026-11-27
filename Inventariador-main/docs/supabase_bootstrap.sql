@@ -555,6 +555,52 @@ DROP POLICY IF EXISTS p_all ON public."asset-photos";
 CREATE POLICY p_all ON public."asset-photos" FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 -- ============================================================================
+-- 7-B. PRIVILÉGIOS DE TABELA (GRANT) — fonte do erro 42501
+--      «permission denied for table assets»
+-- ----------------------------------------------------------------------------
+--      A política `p_all` só decide DEPOIS do GRANT: uma tabela sem privilégio
+--      para `anon`/`authenticated` responde `42501 permission denied for table
+--      assets` — e não `new row violates row-level security policy`, que é o
+--      sintoma de política a recusar. Sem este bloco, um projeto onde os
+--      privilégios foram revogados (ou a tabela foi recriada por outro dono)
+--      fica com a base a ler e a NÃO conseguir subir nada: o cartão do ativo
+--      mostra «FALHA DE ENVIO — Erro Supabase: [42501] permission denied for
+--      table assets» e o operador pensa que o problema é do aparelho.
+--      Os GRANTs são idempotentes. O mesmo bloco, com diagnóstico e prova,
+--      vive em scripts/assets-permissoes.sql (para corrigir uma base já criada).
+-- ============================================================================
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.assets             TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.inventory_config   TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.unit_configs       TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.audit_logs         TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.asset_logs         TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_permissions   TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.locations          TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.campaigns          TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.campaign_snapshots TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public."asset-photos"     TO anon, authenticated;
+GRANT SELECT                         ON public.base_generation    TO anon, authenticated;
+
+-- `service_role` ignora o RLS, mas continua a precisar do privilégio de tabela.
+GRANT ALL PRIVILEGES ON public.assets             TO service_role;
+GRANT ALL PRIVILEGES ON public.inventory_config   TO service_role;
+GRANT ALL PRIVILEGES ON public.unit_configs       TO service_role;
+GRANT ALL PRIVILEGES ON public.audit_logs         TO service_role;
+GRANT ALL PRIVILEGES ON public.asset_logs         TO service_role;
+GRANT ALL PRIVILEGES ON public.user_permissions   TO service_role;
+GRANT ALL PRIVILEGES ON public.locations          TO service_role;
+GRANT ALL PRIVILEGES ON public.campaigns          TO service_role;
+GRANT ALL PRIVILEGES ON public.campaign_snapshots TO service_role;
+GRANT ALL PRIVILEGES ON public."asset-photos"     TO service_role;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT ALL ON TABLES TO service_role;
+
+-- ============================================================================
 -- 8. SELO DE GERAÇÃO DA BASE (uma linha) — ver docs/GERACAO_BASE.md
 -- ----------------------------------------------------------------------------
 -- Depois de um reset da nuvem, um aparelho com a base antiga reenviaria as
