@@ -103,9 +103,12 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
   // falta de sessão (inclusive o carimbo de ciclos anteriores) lê-se assim, não
   // como «Falha de envio». Sem sessão no aparelho, todos os pendentes esperam.
   const sessaoAusente = useSyncStore((estado) => estado.sessaoNuvemAusente);
+  // BASE LOCAL: nada sai do aparelho. Um carimbo de recusa antiga continua
+  // guardado, mas não é uma falha de agora — o cartão diz que fica por subir.
+  const baseLocal = useSyncStore((estado) => estado.baseLocal);
   const falhaDeSessao = Boolean(falha && pareceFaltaDeSessao(falha.motivo));
   const esperaDeSessao =
-    Boolean(pendencia) && (falhaDeSessao || (!falha && sessaoAusente));
+    Boolean(pendencia) && !baseLocal && (falhaDeSessao || (!falha && sessaoAusente));
   const idadeDaEspera = falha?.idade ?? pendencia?.idade ?? null;
 
   const isAdopted = visualStatus === TagInventario.ADOTADO || visualStatus === TagInventario.RE_ADOTADO;
@@ -247,7 +250,19 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
                 </span>
               </span>
             )}
-            {falha && !esperaDeSessao && (
+            {baseLocal && (falha || pendencia) && (
+              <span
+                data-testid="badge-base-local"
+                className="max-w-full text-[9px] font-bold text-amber-600 uppercase tracking-tight bg-amber-50/60 border border-amber-200 px-1.5 py-0.5 rounded-md flex flex-wrap items-center gap-1"
+              >
+                <span className="w-1 h-1 shrink-0 bg-amber-400 rounded-full" />
+                Por subir
+                <span className="min-w-0 break-words text-amber-700/80 normal-case tracking-normal font-semibold">
+                  · BASE LOCAL — a nuvem não é consultada
+                </span>
+              </span>
+            )}
+            {falha && !esperaDeSessao && !baseLocal && (
               <span className="max-w-full text-[9px] font-bold text-red-600 uppercase tracking-tight bg-red-50/60 border border-red-200 px-1.5 py-0.5 rounded-md flex flex-wrap items-center gap-1 animate-pulse">
                 <AlertTriangle size={10} className="shrink-0" />
                 Falha de envio
@@ -257,7 +272,7 @@ export const AssetListItem: React.FC<AssetListItemProps> = ({
                 </span>
               </span>
             )}
-            {pendencia && !falha && !esperaDeSessao && (
+            {pendencia && !falha && !esperaDeSessao && !baseLocal && (
               <span className="max-w-full text-[9px] font-bold text-amber-500 uppercase tracking-tight bg-amber-50/60 border border-amber-100 px-1.5 py-0.5 rounded-md flex flex-wrap items-center gap-1 animate-pulse">
                 <span className="w-1 h-1 shrink-0 bg-amber-400 rounded-full animate-ping"></span>
                 Pendente Nuvem

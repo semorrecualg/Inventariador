@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — em BASE LOCAL o Gestor não consulta a nuvem e o cartão não acusa falha
+
+- **Placar do SRE:** `DatabaseManagerScreen` pedia `countCloudAssets` sempre que
+  o build tinha credenciais, mesmo com o aparelho em BASE LOCAL. O painel
+  mostrava «SUPABASE — · ERRO NA LEITURA» com o corpo vazio do servidor
+  (`{"message":""}`) enquanto o contador da trilha, ao lado, dizia «nuvem não
+  consultada (BASE LOCAL)». O placar passa a decidir pelo modo
+  (`isOnlineDatabaseMode(getDatabaseMode())`) e mostra «BASE LOCAL»: a base
+  local é hermética, nada é lido nem alterado.
+- **Cartão do ativo:** o carimbo de uma recusa da nuvem (`_syncFailAt`) continua
+  guardado, mas em BASE LOCAL deixa de aparecer como «Falha de envio» activa
+  (ficava vermelho para sempre, com a idade a crescer, sem nada a ser enviado).
+  Mostra «Por subir · BASE LOCAL — a nuvem não é consultada» até o modo voltar à
+  Base Oficial, quando o motivo real reaparece.
+- **Testes:** `basesBaseLocal` fixa as duas leituras do placar e a ordem do
+  portão; o selo do cartão ganha o caso de BASE LOCAL.
+
 ### Corrigido — o pull e a sincronização mostram o código e o motivo reais
 
 - **Pull deixa de culpar a rede:** a paginação do pull lançava o erro do
