@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Adicionado — runbook da matriz S1–S9 (H1 · Fase 5)
+
+- `docs/RUNBOOK-FASE5-S1-S9.md`: procedimento para fechar o H1.5 com dois
+  aparelhos reais — estado de partida, instrumentos, os nove cenários com
+  preparação, passos, o que registar e o critério que os reprova, folha de
+  recolha e critérios de saída.
+- O documento diz também o que **não** está coberto: o harness de dois
+  dispositivos previsto no diagnóstico não existe em `main`, por isso a matriz é
+  manual até ele existir — e não se apresenta como provada por teste.
+
 ### Alterado — a troca de modo e o fim do onboarding gravam só configuração (H1 · Fase 4)
 
 - **O que era:** dois caminhos chamavam `saveInventory(state)` sem lista sem que
