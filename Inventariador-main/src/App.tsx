@@ -21,6 +21,7 @@ import {
 } from './utils/dedupAssets';
 import { marcarAlteracaoLocal, preservarPendenciaLocal, mesclarComExclusao, devePreservarPendencia } from './utils/pendencia';
 import { mesclarConflitoPorCampo } from './utils/mergePorCampo';
+import { ativoTemPendencia, avancarCheckpoint, idsComPendencia, mesclarEventoDeAtivo } from './utils/realtimeAtivos';
 import { isSystemLocked } from './utils/systemLock';
 import { useBackgroundSyncTimer } from './hooks/useBackgroundSyncTimer';
 import { isConferido, marcaLocalConferida, marcarConferido, statusAoDesmarcar } from './utils/conferencia';
@@ -98,6 +99,7 @@ import {
   readCheckpointForDelta,
   clearSyncCheckpoint,
   clearAllSyncCheckpoints,
+  computeMaxUpdatedAt,
   resolveDeltaMode,
   syncCheckpointKey
 } from './utils/syncCheckpoint';
@@ -142,7 +144,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly, checkInventoryIntegrity } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, flushAncorasPendentes, fetchCampaigns, isInternalMode, getInitialDatabaseMode, isOnlineDatabaseMode } from './services/supabaseService';
+import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, fetchAssetsChangedSince, mapCloudAssetRow, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, flushAncorasPendentes, fetchCampaigns, isInternalMode, getInitialDatabaseMode, isOnlineDatabaseMode } from './services/supabaseService';
 import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { checkNativeBiometry, isBiometricSupported, hasBiometricRegistered, isNativeAppShell } from './services/biometricService';
@@ -3300,6 +3302,47 @@ useEffect(() => {
       }
     }, realtimeTenantId);
 
+    // RECONCILIAÇÃO POR CHECKPOINT (H1 · Fase 4): um evento emitido enquanto o
+    // canal está em baixo não volta a ser entregue. Ao reconectar, o que mudou
+    // desde o último carimbo conhecido é relido da nuvem e aplicado com o mesmo
+    // merge do delta (`mergeDeltaPull`) — a janela de perda deixa de existir. O
+    // piso é o checkpoint do último pull; sem ele, o arranque do canal. Só
+    // corre depois do primeiro `SUBSCRIBED`: a abertura normal já vem coberta
+    // pelo pull de arranque.
+    let checkpointRealtime =
+      readCheckpointForDelta(realtimeTenantId)?.lastUpdatedAt || new Date().toISOString();
+    let canalJaLigou = false;
+
+    const reconciliarPorCheckpoint = async () => {
+      // A blindagem também vale aqui: com «Pronto para Campo» ligado nenhuma
+      // linha alheia entra na base de campo, nem pela reconciliação.
+      if (isSystemLocked()) {
+        logger.info('>>> [Sync] Reconciliação do tempo real ignorada: sistema blindado (Pronto para Campo).');
+        return;
+      }
+      const desde = checkpointRealtime;
+      const linhas = await fetchAssetsChangedSince(realtimeTenantId, desde);
+      // `null` = a leitura falhou: o checkpoint NÃO avança, para a próxima
+      // reconexão voltar a tentar a mesma janela.
+      if (linhas === null) return;
+      // Só o carimbo da nuvem conta; nunca a hora deste aparelho (que pode
+      // estar adiantada e abrir um buraco na janela).
+      checkpointRealtime = avancarCheckpoint(checkpointRealtime, computeMaxUpdatedAt(linhas));
+      if (linhas.length === 0) return;
+
+      logger.info(`>>> [Sync] Reconciliação do tempo real: ${linhas.length} ativo(s) alterado(s) desde ${desde}.`);
+      setInventory(prev => {
+        const resultado = mergeDeltaPull({
+          prevAssets: prev.assets,
+          cloudAssets: linhas,
+          dirtyIds: idsComPendencia(prev.assets, dirtyAssetsRef.current)
+        });
+        const newState = { ...prev, assets: resultado.assets };
+        saveInventory(newState).catch(e => logger.error('Erro ao salvar a reconciliação do tempo real:', e));
+        return newState;
+      });
+    };
+
     const assetSubscription = subscribeToAssetChanges(realtimeTenantId, (payload) => {
       // BLINDAGEM NOS DOIS SENTIDOS (H1 · Fase 3): a subida já estava fechada,
       // mas o realtime continuava a aplicar a linha da nuvem ao estado e ao
@@ -3310,34 +3353,52 @@ useEffect(() => {
         return;
       }
       const { eventType, new: newAssetData, old: oldAssetData } = payload;
-      const newAsset = newAssetData as unknown as Asset;
-      const oldAsset = oldAssetData as unknown as Asset;
-      
+      // O payload do canal é a linha CRUA do Postgres: passa pelo mesmo
+      // mapeamento do pull, senão o estado recebia `gps_lat`/`data_leitura`
+      // em vez de `latitude`/`_dataLeitura` e a ficha e o mapa ficavam vazios.
+      const nuvem = mapCloudAssetRow((newAssetData || {}) as Record<string, unknown>);
+      checkpointRealtime = avancarCheckpoint(checkpointRealtime, (newAssetData || {}).updated_at);
+
       setInventory(prev => {
         let updatedAssets = [...prev.assets];
         let hasChanges = false;
         
         if (eventType === 'INSERT') {
-          if (!updatedAssets.find(a => String(a.id) === String(newAsset.id))) {
-            updatedAssets.push(newAsset);
+          if (!updatedAssets.find(a => String(a.id) === String(nuvem.id))) {
+            updatedAssets.push(nuvem);
             hasChanges = true;
           }
         } else if (eventType === 'UPDATE') {
-          const index = updatedAssets.findIndex(a => String(a.id) === String(newAsset.id));
+          const index = updatedAssets.findIndex(a => String(a.id) === String(nuvem.id));
           if (index !== -1) {
-            // Só atualiza se não for um item que o usuário local acabou de mexer (dirty)
-            if (!dirtyAssetsRef.current.has(String(newAsset.id))) {
-              updatedAssets[index] = { ...updatedAssets[index], ...newAsset };
+            // CONFLITO POR CAMPO NO PRÓPRIO EVENTO (H1 · Fase 4): antes um ativo
+            // pendente neste aparelho era descartado por inteiro («o pull
+            // seguinte resolve»). Agora a conferência e o ponto de GPS decidem-se
+            // por tempo e o resto do registo continua a ser deste aparelho — os
+            // eventos que chegam com a pendência são os que mais interessam.
+            const decisao = mesclarEventoDeAtivo(
+              updatedAssets[index],
+              nuvem,
+              ativoTemPendencia(
+                updatedAssets[index] as unknown as Record<string, unknown>,
+                dirtyAssetsRef.current.has(String(nuvem.id))
+              )
+            );
+            if (decisao.conflitos.length > 0) {
+              logger.warn(`>>> [Sync] Conflito por campo em tempo real no ativo ${nuvem.etiqueta || nuvem.id}: ${decisao.conflitos.join(', ')}.`);
+            }
+            if (decisao.alterou) {
+              updatedAssets[index] = decisao.registo;
               hasChanges = true;
             }
           } else {
             // Se o item não existe localmente mas foi atualizado na nuvem, adicionamos
-            updatedAssets.push(newAsset);
+            updatedAssets.push(nuvem);
             hasChanges = true;
           }
         } else if (eventType === 'DELETE') {
           const initialLength = updatedAssets.length;
-          updatedAssets = updatedAssets.filter(a => String(a.id) !== String(oldAsset.id));
+          updatedAssets = updatedAssets.filter(a => String(a.id) !== String((oldAssetData || {}).id));
           if (updatedAssets.length !== initialLength) {
             hasChanges = true;
           }
@@ -3349,6 +3410,12 @@ useEffect(() => {
         saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado em tempo real:', e));
         return newState;
       });
+    }, (estado) => {
+      // Ao RECONECTAR (segundo `SUBSCRIBED`), relê o que passou enquanto o canal
+      // esteve em baixo. O primeiro é a abertura normal, já coberta pelo pull.
+      if (estado !== 'SUBSCRIBED') return;
+      if (canalJaLigou) void reconciliarPorCheckpoint();
+      canalJaLigou = true;
     });
 
     return () => {

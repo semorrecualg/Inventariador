@@ -1,8 +1,8 @@
 # Sincronização multi-agente — conflito por campo e blindagem
 
 > Complementa o diagnóstico «Sincronização multi-agente — diagnóstico e plano de
-> trabalho» (rev. 3), Fases 2 e 3. O que aqui se descreve é o comportamento que
-> o app tem hoje; o que falta das Fases 4 e 5 está no fim.
+> trabalho» (rev. 3), Fases 2, 3 e 4. O que aqui se descreve é o comportamento
+> que o app tem hoje; o que falta da Fase 5 está no fim.
 
 ## 1. Dois auditores no mesmo ativo
 
@@ -68,12 +68,38 @@ A regra vive em `utils/systemLock.ts` (`isSystemLocked`). Uma comparação à m�
 em qualquer outro sítio é regressão: o teste `src/__tests__/systemLock.test.ts`
 falha se a chave voltar a ser lida fora do módulo.
 
-## 4. O que ainda falta de H1
+## 4. Tempo real: evento por campo e releitura por checkpoint
 
-- **Fase 4 — realtime com revisão/reconciliação e sem janela de perda:** hoje o
-  evento de um ativo que este aparelho tem pendente é descartado (o pull
-  seguinte resolve) e não há revisão nem reconciliação depois de uma queda do
-  canal. Falta a leitura por checkpoint ao reconectar e o merge por campo no
-  próprio evento.
+O canal (`subscribeToAssetChanges`) era o caminho com janela de perda. Foram
+duas as correções (H1 · Fase 4):
+
+**No próprio evento** (`utils/realtimeAtivos`): o payload do canal é a linha
+CRUA do Postgres e passa por `mapCloudAssetRow` — antes entrava no estado sem
+mapeamento (`gps_lat`/`data_leitura` em vez de `latitude`/`_dataLeitura`). Se o
+ativo tem pendência neste aparelho (`_is_synced = 0` ou toque da sessão em
+`dirtyAssetsRef`), o evento passa pelo mesmo merge do pull
+(`mesclarConflitoPorCampo`): a conferência e o ponto de GPS ficam com a leitura
+mais recente — a da nuvem pode ser de outro auditor — e o resto do registo
+continua a ser deste aparelho. Sem pendência, a nuvem substitui como antes. Se
+o merge não altera nenhum campo local, não há escrita.
+
+**Ao reconectar** (`fetchAssetsChangedSince` + `mergeDeltaPull`): o segundo
+`SUBSCRIBED` do canal (o primeiro é a abertura normal, coberta pelo pull de
+arranque) dispara uma leitura de `assets` com `updated_at > checkpoint`, para o
+contrato, aplicada com o mesmo merge do delta — inclui a exclusão da nuvem, que
+vence a pendência local. O checkpoint começa no checkpoint do último pull e só
+avança com o `updated_at` da nuvem (nunca com a hora deste aparelho, que pode
+estar adiantada e abrir um buraco na janela). Se a leitura falhar, devolve
+`null` e o checkpoint **não** avança: a próxima reconexão repete a janela.
+
+A blindagem física vale também aqui: com `is_system_locked = 'true'` nem o
+evento nem a reconciliação aplicam linhas alheias.
+
+Limite conhecido: uma exclusão **física** (`DELETE` sem soft delete) não tem
+`updated_at` para ser relida pelo checkpoint. O app apaga com `is_deleted`, e
+essa linha desce normalmente.
+
+## 5. O que ainda falta de H1
+
 - **Fase 5 — matriz S1–S9 com dois agentes reais:** exige dois aparelhos e a
   nuvem de produção; não se substitui por teste de unidade.

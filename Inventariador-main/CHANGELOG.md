@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — o tempo real reconcilia o que perdeu (H1 · Fase 4)
+
+- **O que era:** o canal era o caminho com janela de perda. Um evento de ativo
+  que este aparelho tinha pendente era **descartado por inteiro** («o pull
+  seguinte resolve»), por isso a conferência que outro auditor acabara de gravar
+  não aparecia aqui; e os eventos emitidos enquanto o WebSocket esteve em baixo
+  não voltam a ser entregues — ficavam perdidos até ao pull seguinte, que podia
+  ser horas depois. A linha crua do canal também entrava no estado sem
+  mapeamento (`gps_lat`/`data_leitura` em vez de `latitude`/`_dataLeitura`).
+- **Agora:** o evento passa pelo `mapCloudAssetRow` e, com pendência local, pelo
+  merge por campo do pull (`utils/realtimeAtivos`): a conferência e o ponto de
+  GPS ficam com a leitura mais recente e o resto do registo continua a ser deste
+  aparelho. Ao reconectar (segundo `SUBSCRIBED`), o app relê
+  `assets` com `updated_at > checkpoint` (`fetchAssetsChangedSince`) e aplica o
+  mesmo merge do delta (`mergeDeltaPull`). O checkpoint começa no último pull e
+  só avança com o carimbo da nuvem; se a leitura falhar, não avança e a próxima
+  reconexão repete a janela. A blindagem trava também a reconciliação.
+
 ### Corrigido — conflito por campo na subida (H1 · Fase 2)
 
 - **O que era:** a descida já decidia a conferência e o ponto de GPS por tempo
