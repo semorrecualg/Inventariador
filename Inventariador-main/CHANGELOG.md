@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — pendentes «à espera de sessão» e reentrada a partir da barra
+
+- **Falta de sessão não é recusa:** o ciclo da fila deixa de gravar
+  `_syncFailAt`/`_syncFailReason` quando o 42501 vem de um pedido `anon` (sem
+  token) ou quando o portão `SessaoNuvemAusenteError` dispara a meio do envio. O
+  registo fica pendente e o ciclo para, em vez de gastar uma tentativa e uma
+  linha de auditoria por ativo.
+- **Cartão:** `pareceFaltaDeSessao` (`utils/sessaoNuvem`) reconhece o motivo e o
+  `AssetListItem` mostra «À espera de sessão · entre com e-mail e senha» em vez
+  de «Falha de envio» — inclusive nos carimbos de ciclos anteriores. Sem sessão
+  no aparelho (`syncStore.sessaoNuvemAusente`, alimentado pelo aviso da barra),
+  todos os pendentes aparecem assim; uma recusa de dados com sessão continua
+  vermelha.
+- **Reentrada na barra:** o aviso de sessão da barra de sincronização passa a
+  ser um botão («Sem sessão · Entrar») que fecha a sessão local e abre o
+  formulário de entrada; os outros bloqueios (cópias, selo de geração) mantêm o
+  selo «Erro» e a sua própria instrução.
+- **Testes:** `esperaDeSessao` (3) fixa que sem sessão nada é carimbado e que o
+  mesmo 42501 com sessão continua a ser recusa; `syncSessionNotice` (4) cobre o
+  botão; o selo do cartão ganha 3 casos; `pareceFaltaDeSessao` tem casos puros.
+
 ### Corrigido — em Base Oficial o login local abre a sessão da nuvem
 
 - **O que era:** o login por credencial local (Dexie, «Barreira Local») entrava

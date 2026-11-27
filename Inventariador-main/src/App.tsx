@@ -32,6 +32,8 @@ import { comTecto, TempoEsgotadoError } from './utils/comTecto';
 import { mergeDeltaPull } from './utils/mergeDeltaPull';
 import { canAccessDatabaseManager, isAppManagedSession, isLocalSessionProfile, resolveProfileUnitId } from './utils/authUtils';
 import { isUnitInScope } from './utils/unitScope';
+import { MENSAGEM_SESSAO_AUSENTE } from './utils/sessaoNuvem';
+import { useSyncStore } from './stores/syncStore';
 import { normalizeSearchFilters } from './utils/consultationFilters';
 import { isAdminUser, userHasPermission } from './services/rbacService';
 import { contarAuditoriaPendente } from './services/auditoriaNuvem';
@@ -939,6 +941,8 @@ useEffect(() => {
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  // Os cartões pendentes leem daqui se o aparelho está sem sessão da nuvem.
+  const setSessaoNuvemAusente = useSyncStore((estado) => estado.setSessaoNuvemAusente);
   const [lastQueryLog, setLastQueryLog] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [sqliteOperationalUnits, setSqliteOperationalUnits] = useState<Array<{ filial: string; displayName: string; total: number; checked: number; tenantid: string }>>([]);
@@ -1887,10 +1891,13 @@ useEffect(() => {
       const message = detail?.message || 'Envio à nuvem bloqueado: a base local tem cópias repetidas.';
       // Mesmo aviso repetido não volta a mexer no estado.
       setSyncError(prev => (prev === message ? prev : message));
+      // Sem sessão da nuvem os pendentes passam a «à espera de sessão» nos
+      // cartões (utils/sessaoNuvem). Outros bloqueios não mexem neste estado.
+      if (message === MENSAGEM_SESSAO_AUSENTE) setSessaoNuvemAusente(true);
     };
     window.addEventListener('gbr_cloud_push_blocked', handleCloudPushBlocked);
     return () => window.removeEventListener('gbr_cloud_push_blocked', handleCloudPushBlocked);
-  }, []);
+  }, [setSessaoNuvemAusente]);
 
   // SELO DE GERAÇÃO (utils/baseGeneration): a nuvem foi reiniciada e este
   // aparelho ainda tem a base antiga. O envio é recusado antes de qualquer
@@ -1913,6 +1920,30 @@ useEffect(() => {
     window.addEventListener('gbr_base_generation_adopted', handleBaseGenerationAdopted);
     return () => window.removeEventListener('gbr_base_generation_adopted', handleBaseGenerationAdopted);
   }, []);
+
+  // A espera de sessão termina quando deixa de haver erro de sincronização
+  // (login novo que abriu sessão, ciclo aceite): o cartão volta ao selo normal.
+  useEffect(() => {
+    if (!syncError) setSessaoNuvemAusente(false);
+  }, [syncError, setSessaoNuvemAusente]);
+
+  // REENTRADA NA NUVEM a partir do aviso da barra de sincronização: fecha a
+  // sessão (se existir), limpa o contexto local e devolve o operador ao
+  // formulário de entrada — o login volta a abrir a sessão do Supabase.
+  const reautenticarNaNuvem = useCallback(async () => {
+    try {
+      if (supabase) await supabase.auth.signOut();
+    } catch (err) {
+      logger.warn('[App] Reautenticação: falha ao fechar a sessão da nuvem:', err);
+    }
+    sessionStorage.removeItem('app_current_user');
+    clearPersistedSession();
+    clearTenantContext();
+    setSyncError(null);
+    setSessaoNuvemAusente(false);
+    setUser(null);
+    setHistory([AppScreen.LOGIN]);
+  }, [setHistory, setSessaoNuvemAusente]);
 
   useEffect(() => {
     // Check inicial
@@ -7993,6 +8024,7 @@ useEffect(() => {
             isSyncing={isSyncing}
             lastSyncTime={lastSyncTime}
             syncError={syncError}
+            onReautenticar={reautenticarNaNuvem}
             hasSupabase={!!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)}
             pendingPhotosCount={pendingPhotosCount}
             syncQueueLength={syncQueueLength}
