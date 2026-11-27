@@ -99,4 +99,41 @@ describe('contrato — o ecrã de sincronização nunca fica preso', () => {
     expect(app).toContain('>>> [Sync] Vigia:');
     expect(app).toContain("title: 'Sincronização interrompida'");
   });
+
+  // Campo (v3.1.0, terceira ocorrência): o ecrã continuava em «BAIXANDO DADOS
+  // DA NUVEM» com o tecto total já colocado. Faltavam as duas únicas formas de
+  // o pull em si ser infinito — o pedido de página pendurado (sem abort) e a
+  // paginação que recebe a MESMA página para sempre.
+  it('cada página do pull tem tecto próprio e abort real do pedido', () => {
+    expect(supabase).toContain('const PULL_PAGE_TIMEOUT_MS = 25_000;');
+    expect(supabase).toContain('setTimeout(() => controladorPagina.abort(), PULL_PAGE_TIMEOUT_MS)');
+    expect(supabase).toContain('await q.abortSignal(controladorPagina.signal)');
+    expect(supabase).toContain('new TempoEsgotadoError(`pull do contrato (página ${paginas + 1})`');
+  });
+
+  it('a paginação pára quando a mesma página se repete ou no tecto de páginas', () => {
+    expect(supabase).toContain('const PULL_MAX_PAGES = 200;');
+    expect(supabase).toContain('primeiroId === primeiroIdAnterior');
+    expect(supabase).toContain('Página repetida no pull');
+    expect(supabase).toContain('paginas >= PULL_MAX_PAGES');
+    // Os contadores são do corpo do impl, declarados ao lado de `from`.
+    const impl = supabase.slice(supabase.indexOf('const fetchFullInventoryImpl = async ('));
+    expect(impl).toContain('let paginas = 0;');
+    expect(impl).toContain('let primeiroIdAnterior: string | null = null;');
+  });
+
+  it('o ecrã diz o passo, o tempo e os ativos, e dá uma saída ao operador', () => {
+    expect(app).toContain('const [syncEtapa, setSyncEtapa] = useState<string>(');
+    expect(app).toContain('const [syncIniciadoEm, setSyncIniciadoEm] = useState<number | null>(null);');
+    expect(app).toContain('baixados => setSyncAtivosBaixados(baixados)');
+    expect(app).toContain("'A gravar a base no aparelho…'");
+    // Botão real no overlay (aparece depois de 12s) e o handler que o serve.
+    expect(app).toContain('Continuar com a base do aparelho');
+    expect(app).toContain('syncDecorridoS >= 12');
+    expect(app).toContain('onClick={handleContinuarSemNuvem}');
+    const handler = app.slice(app.indexOf('const handleContinuarSemNuvem = useCallback('));
+    expect(handler.slice(0, 900)).toContain('isSyncingRef.current = false;');
+    expect(handler.slice(0, 900)).toContain('setIsSyncing(false);');
+    expect(handler.slice(0, 900)).toContain("title: 'A continuar com a base do aparelho'");
+  });
 });

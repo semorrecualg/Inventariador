@@ -927,6 +927,14 @@ useEffect(() => {
   const [unitConfigs, setUnitConfigs] = useState<UnitConfig[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const isSyncingRef = useRef(false);
+  // ETAPA VISÍVEL DA SINCRONIZAÇÃO: o ecrã de «SINCRONIZANDO BASE» dizia
+  // sempre a mesma frase, mesmo com o sync parado numa página da nuvem. Estes
+  // estados dizem em que passo está, há quanto tempo e quantos ativos já
+  // desceram — a foto do ecrã passa a diagnosticar em vez de só tapar.
+  const [syncEtapa, setSyncEtapa] = useState<string>('');
+  const [syncIniciadoEm, setSyncIniciadoEm] = useState<number | null>(null);
+  const [syncAtivosBaixados, setSyncAtivosBaixados] = useState<number>(0);
+  const [syncDecorridoS, setSyncDecorridoS] = useState<number>(0);
   const [isCloudUpdatePending, setIsCloudUpdatePending] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastLocalSave, setLastLocalSave] = useState<string | null>(null);
@@ -2884,11 +2892,15 @@ useEffect(() => {
 
     setIsSyncing(true);
     setIsCloudUpdatePending(false); // Reset pending flag immediately
+    setSyncIniciadoEm(Date.now());
+    setSyncAtivosBaixados(0);
+    setSyncEtapa('A preparar a sincronização…');
     try {
       // 1. REGRA DE OURO: SINCRONISMO DE SAÍDA PRIMEIRO (AUDITOR -> SERVIDOR)
       // Tentamos enviar as alterações locais, mas não bloqueamos o pull se falhar
       // Isso resolve casos de RLS ou conflitos que impedem o push mas permitem o pull
       try {
+        setSyncEtapa('A enviar as alterações deste aparelho…');
         // O envio e a fila de fotos falam com a nuvem e com o nativo: sem tecto,
         // um pedido pendurado prendia o ecrã «SINCRONIZANDO BASE» antes de o
         // pull sequer começar. Esgotado o tempo, o pull segue — é ele que
@@ -2949,10 +2961,15 @@ useEffect(() => {
       if (incremental) {
         logger.info(`>>> [Sync] Delta ativo para ${ckKey} (checkpoint ${String(since)}). Baixando apenas o que mudou desde o último pull (Etapa 5b).`);
       }
-      const cloudData = await fetchFullInventory(tenantid, unitDoPull, undefined, undefined, {
-        since,
-        trackCheckpoint: true
-      });
+      setSyncEtapa(`A ler a nuvem${unitDoPull ? ` (filial ${unitDoPull})` : ''}…`);
+      const cloudData = await fetchFullInventory(
+        tenantid,
+        unitDoPull,
+        baixados => setSyncAtivosBaixados(baixados),
+        undefined,
+        { since, trackCheckpoint: true }
+      );
+      setSyncEtapa('A gravar a base no aparelho…');
       const syncTimestamp = new Date().toISOString();
 
       logger.info(`>>> [Sync] Dados recebidos da nuvem: ${cloudData?.assets?.length || 0} ativos.`);
@@ -3277,6 +3294,8 @@ useEffect(() => {
     } finally {
       isSyncingRef.current = false;
       setIsSyncing(false);
+      setSyncIniciadoEm(null);
+      setSyncEtapa('');
     }
   }, [databaseMode, screen, isSyncing, pushLocalChanges, user]);
 
@@ -3292,6 +3311,8 @@ useEffect(() => {
       logger.warn('>>> [Sync] Vigia: 3 minutos com o ecrã de sincronização aberto. Liberando o ecrã; a base local mantém-se.');
       isSyncingRef.current = false;
       setIsSyncing(false);
+      setSyncIniciadoEm(null);
+      setSyncEtapa('');
       setSyncError('A sincronização excedeu 3 minutos e foi interrompida. A base local mantém-se.');
       setModalConfig({
         isOpen: true,
@@ -3302,6 +3323,40 @@ useEffect(() => {
     }, VIGIA_MS);
     return () => clearTimeout(vigia);
   }, [isSyncing]);
+
+  // RELÓGIO DO ECRÃ DE SINCRONIZAÇÃO — o operador vê o tempo a passar e o
+  // passo em que o sync está. Sem isto, «BAIXANDO DADOS DA NUVEM» era
+  // indistinguível de um ecrã parado.
+  useEffect(() => {
+    if (!isSyncing || !syncIniciadoEm) {
+      setSyncDecorridoS(0);
+      return;
+    }
+    const decorrido = () => Math.max(0, Math.floor((Date.now() - syncIniciadoEm) / 1000));
+    setSyncDecorridoS(decorrido());
+    const tique = setInterval(() => setSyncDecorridoS(decorrido()), 1000);
+    return () => clearInterval(tique);
+  }, [isSyncing, syncIniciadoEm]);
+
+  // SAÍDA À MÃO DO ECRÃ DE SINCRONIZAÇÃO — a rede pode ser pior do que
+  // qualquer tecto prevê. Ao fim de alguns segundos o operador tem um botão
+  // real: a descarga é adiada, NADA é apagado e o Inventário abre com a base
+  // que já está gravada no aparelho. O pull que ficou a correr continua e, se
+  // chegar ao fim, os dados entram na mesma.
+  const handleContinuarSemNuvem = useCallback(() => {
+    logger.warn('>>> [Sync] Operador escolheu continuar com a base do aparelho com o ecrã de sincronização aberto.');
+    isSyncingRef.current = false;
+    setIsSyncing(false);
+    setSyncIniciadoEm(null);
+    setSyncEtapa('');
+    setSyncError('Descarga da nuvem adiada. A base do aparelho mantém-se.');
+    setModalConfig({
+      isOpen: true,
+      title: 'A continuar com a base do aparelho',
+      message: 'Nada foi apagado. A descarga da nuvem foi adiada e o Inventário abre com a base que já está gravada neste aparelho. Quando a ligação estiver melhor, toque em SINCRONIZAR para voltar a tentar.',
+      type: 'warning'
+    });
+  }, []);
 
   // Contrato ativo dos canais de tempo real: só muda quando muda o contrato,
   // para o canal não ser desligado e religado a cada sincronização.
@@ -8632,7 +8687,7 @@ useEffect(() => {
       />
 
       {isSyncing && (
-        <div className="fixed inset-0 z-[10000] bg-white/80 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn">
+        <div className="fixed inset-0 z-[10000] bg-white/80 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn px-8 text-center">
           <div className="relative w-24 h-24 mb-6">
             <div className="absolute inset-0 border-4 border-accent/10 rounded-full"></div>
             <div className="absolute inset-0 border-4 border-accent border-t-transparent rounded-full animate-spin"></div>
@@ -8646,6 +8701,30 @@ useEffect(() => {
           <p className="text-[9px] font-bold text-ink-muted uppercase tracking-widest animate-pulse">
             {databaseMode === DatabaseMode.INTERNAL ? 'Aguarde, alternando modo de dados...' : 'Aguarde, baixando dados da nuvem...'}
           </p>
+          {/* PASSO + RELÓGIO: o ecrã diz o que está a acontecer e há quanto
+              tempo. Depois de alguns segundos dá ao operador uma saída real. */}
+          <div className="mt-4 w-full max-w-xs">
+            <p className="text-[10px] font-bold text-ink uppercase tracking-wider">
+              {syncEtapa || 'A preparar…'}
+            </p>
+            <p className="mt-1 text-[10px] font-medium text-ink-muted">
+              {syncDecorridoS}s{syncAtivosBaixados > 0 ? ` · ${syncAtivosBaixados} ativos já baixados` : ''}
+            </p>
+            {syncDecorridoS >= 12 && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleContinuarSemNuvem}
+                  className="mt-5 w-full py-3 bg-ink text-white rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all"
+                >
+                  Continuar com a base do aparelho
+                </button>
+                <p className="mt-2 text-[9px] font-medium text-ink-muted leading-snug">
+                  Nada é apagado. O Inventário abre com o que já está gravado; a descarga continua a correr e entra assim que concluir.
+                </p>
+              </>
+            )}
+          </div>
         </div>
       )}
 

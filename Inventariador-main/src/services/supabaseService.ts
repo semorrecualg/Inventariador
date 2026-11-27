@@ -23,7 +23,7 @@ import { buildUnitFlags, mergeUnitFlags } from '../utils/unitConfigFlags';
 import { isAdminEmail } from '../utils/authUtils';
 import { clearPersistedSession } from '../utils/sessionPersistence';
 import { pullDedupKey } from '../utils/syncDedup';
-import { comTecto } from '../utils/comTecto';
+import { comTecto, TempoEsgotadoError } from '../utils/comTecto';
 import { matchUnitKeys, normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
@@ -2673,6 +2673,28 @@ const pendingPulls = new Map<string, Promise<{ assets: Asset[]; config: Partial<
  */
 const PULL_TOTAL_TIMEOUT_MS = 120_000;
 
+/**
+ * Tecto de UMA página do pull — e, ao contrário do tecto total, com abort REAL.
+ *
+ * O tecto do pull inteiro liberta quem espera, mas deixa o `fetch` da página
+ * pendurado no WebView: o socket fica aberto e o pedido seguinte herda a mesma
+ * ligação morta. Aqui o `AbortController` mata o pedido — a página que não
+ * responde em 25 s é abandonada, o pull rejeita com `TempoEsgotadoError` e o
+ * ecrã devolve o controlo ao operador.
+ */
+const PULL_PAGE_TIMEOUT_MS = 25_000;
+
+/**
+ * Tecto de páginas de um pull (200 × 1.000 = 200.000 linhas).
+ *
+ * Existe para o caso em que o servidor devolve sempre a mesma página (proxy ou
+ * pooler que ignora o `Range`, `max-rows` diferente do esperado): aí
+ * `pageData.length === PAGE_SIZE` para sempre e o `while` nunca terminava —
+ * o ecrã ficava a «baixar dados da nuvem» indefinidamente e a memória crescia
+ * sem fim.
+ */
+const PULL_MAX_PAGES = 200;
+
 export const fetchFullInventory = async (
   tenantid?: string | string[], 
   unitid?: string,
@@ -2690,7 +2712,13 @@ export const fetchFullInventory = async (
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user?.email) {
-        const profile = await ensureUserProfile(session.user.email, undefined, session.user.id);
+        // Resolver o perfil é uma ida à rede ANTES do tecto do pull: sem
+        // limite, uma sessão pendurada prendia o ecrã antes de começar.
+        const profile = await comTecto(
+          ensureUserProfile(session.user.email, undefined, session.user.id),
+          15_000,
+          'perfil do usuário (resolução do contrato)'
+        );
         if (profile) {
           resolvedTenantid = profile.tenantid || undefined;
           logger.info(`>>> [Supabase Param resolved] tenantid sanitizado de undefined para perfil real: ${JSON.stringify(resolvedTenantid)}`);
@@ -2893,6 +2921,8 @@ const fetchFullInventoryImpl = async (
     const PAGE_SIZE = 1000;
     let from = 0;
     let hasMore = true;
+    let paginas = 0;
+    let primeiroIdAnterior: string | null = null;
 
     logger.info(`>>> [Supabase] Iniciando busca paginada de ativos...`);
 
@@ -2919,7 +2949,25 @@ const fetchFullInventoryImpl = async (
         q = q.gt('updated_at', options.since);
       }
 
-      const { data: pageData, error: assetsError } = await q;
+      // UMA PÁGINA COM TECTO E ABORT: página que não responde em
+      // `PULL_PAGE_TIMEOUT_MS` é abortada (o socket morre) e o pull rejeita —
+      // não fica nenhum pedido pendurado a segurar o ecrã.
+      const controladorPagina = new AbortController();
+      const timerPagina = setTimeout(() => controladorPagina.abort(), PULL_PAGE_TIMEOUT_MS);
+      let pageData: Record<string, unknown>[] | null = null;
+      let assetsError: { code?: string; message?: string } | null = null;
+      try {
+        const resposta = await q.abortSignal(controladorPagina.signal);
+        pageData = (resposta.data as Record<string, unknown>[] | null) ?? null;
+        assetsError = (resposta.error as { code?: string; message?: string } | null) ?? null;
+      } catch (erroPagina) {
+        if (controladorPagina.signal.aborted) {
+          throw new TempoEsgotadoError(`pull do contrato (página ${paginas + 1})`, PULL_PAGE_TIMEOUT_MS);
+        }
+        throw erroPagina;
+      } finally {
+        clearTimeout(timerPagina);
+      }
       
       if (assetsError) {
         logger.error(`[Supabase] Erro em fetchFullInventory (Paginação ${from}): ${assetsError.code} - ${assetsError.message}`, assetsError);
@@ -2927,6 +2975,19 @@ const fetchFullInventoryImpl = async (
       }
 
       if (pageData && pageData.length > 0) {
+        paginas += 1;
+        const primeiroId = String((pageData[0] as Record<string, unknown>).id ?? '');
+        // GUARDA DE PAGINAÇÃO: a mesma página duas vezes seguidas significa que
+        // o servidor ignorou o `Range` — sem esta paragem o `while` repetia a
+        // mesma descida para sempre.
+        if (primeiroId !== '' && primeiroId === primeiroIdAnterior) {
+          logger.error(`>>> [Supabase] Página repetida no pull (primeiro id ${primeiroId}). A encerrar a paginação para não repetir a mesma descida sem fim.`);
+          hasMore = false;
+        } else if (paginas >= PULL_MAX_PAGES) {
+          logger.error(`>>> [Supabase] Pull atingiu o tecto de ${PULL_MAX_PAGES} páginas (${assets.length} ativos). A encerrar a paginação; o que desceu fica gravado.`);
+          hasMore = false;
+        }
+        primeiroIdAnterior = primeiroId || primeiroIdAnterior;
         const mappedPage = pageData.map((a: Record<string, unknown>) => mapCloudAssetRow(a));
         
         assets = [...assets, ...mappedPage];
