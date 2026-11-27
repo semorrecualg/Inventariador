@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Alterado — o evento singular do tempo real grava só a linha que mudou (H1 · Fase 4)
+
+- **O que era:** cada evento do canal (`INSERT`/`UPDATE`/`DELETE` de um ativo)
+  montava o estado novo e chamava `saveInventory(newState)` sem lista de ativos.
+  Esse caminho grava a **base inteira** (`bulkInsertAssets` de todos os ativos,
+  nos dois espelhos) para aplicar uma linha — e o canal emite um evento por
+  linha alterada, pelo que uma carga externa de 500 ativos pagava 500 escritas
+  da base completa.
+- **Agora:** o evento grava só a linha que ele tocou e cujo registo final ficou
+  diferente do que já estava no estado (`linhasQueMudaram` com o id do evento):
+  `saveInventory` com `skipSqlAssetsInsert` e um `persistAssetsBatch` dessa
+  linha, sem reenvio à nuvem. Um `INSERT`/`UPDATE` grava uma linha; um `DELETE`
+  não grava nenhuma (`persistAssetsBatch` é upsert — o registo sai do estado,
+  como antes).
+
 ### Alterado — a reconciliação do tempo real grava só o delta (H1 · Fase 4)
 
 - **O que era:** cada reconexão do canal remontava o estado e chamava

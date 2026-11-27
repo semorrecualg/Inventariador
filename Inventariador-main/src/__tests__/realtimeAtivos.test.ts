@@ -201,6 +201,36 @@ describe('linhasQueMudaram — a reconciliação grava só o delta', () => {
   });
 });
 
+describe('linhasQueMudaram — o evento singular grava só a linha que tocou', () => {
+  it('num UPDATE devolve exactamente a linha do evento', () => {
+    const antes = [localPendente({ id: 'PK-1' }), localPendente({ id: 'PK-2' })];
+    const evento = localPendente({ id: 'PK-1', _auditor: 'BRUNO' });
+    // A outra linha também mudou no resultado: não é a do evento, não vai ao disco.
+    const depois = [evento, localPendente({ id: 'PK-2', _auditor: 'CARLOS' })];
+
+    const alteradas = linhasQueMudaram(antes, depois, ['PK-1']);
+
+    expect(alteradas).toHaveLength(1);
+    expect(alteradas[0]).toBe(evento);
+  });
+
+  it('num INSERT devolve a linha nova do evento', () => {
+    const nova = localPendente({ id: 'PK-NOVA', etiqueta: '009999' });
+
+    const alteradas = linhasQueMudaram([localPendente()], [localPendente(), nova], ['PK-NOVA']);
+
+    expect(alteradas).toHaveLength(1);
+    expect(alteradas[0]).toBe(nova);
+  });
+
+  it('num DELETE não sobra linha para gravar', () => {
+    const antes = [localPendente(), localPendente({ id: 'PK-2' })];
+    const depois = antes.filter(ativo => String(ativo.id) !== 'PK-2');
+
+    expect(linhasQueMudaram(antes, depois, ['PK-2'])).toEqual([]);
+  });
+});
+
 describe('idsComPendencia — flag persistida e toques da sessão, sem repetidos', () => {
   it('junta as duas provas e remove duplicados', () => {
     const ativos = [

@@ -3372,6 +3372,9 @@ useEffect(() => {
       // em vez de `latitude`/`_dataLeitura` e a ficha e o mapa ficavam vazios.
       const nuvem = mapCloudAssetRow((newAssetData || {}) as Record<string, unknown>);
       checkpointRealtime = avancarCheckpoint(checkpointRealtime, (newAssetData || {}).updated_at);
+      // A linha que este evento toca: num DELETE o payload `new` vem vazio e o
+      // id só existe no registo antigo.
+      const idDoEvento = eventType === 'DELETE' ? (oldAssetData || {}).id : nuvem.id;
 
       setInventory(prev => {
         let updatedAssets = [...prev.assets];
@@ -3421,7 +3424,20 @@ useEffect(() => {
         if (!hasChanges) return prev;
 
         const newState = { ...prev, assets: updatedAssets };
-        saveInventory(newState).catch(e => logger.error('Erro ao salvar inventário sincronizado em tempo real:', e));
+        // ESCRITA SÓ DA LINHA DO EVENTO: `saveInventory(newState)` sem lista
+        // regrava a base inteira a cada evento do canal. Aqui segue só a linha
+        // que este evento tocou e cujo registo final ficou diferente do que já
+        // estava no estado — o mesmo caminho do pull e da reconciliação
+        // (`skipSqlAssetsInsert` + `persistAssetsBatch`), sem reenvio à nuvem.
+        // Num DELETE não sobra linha para regravar (`persistAssetsBatch` é
+        // upsert), por isso não há escrita nenhuma.
+        const alteradas = linhasQueMudaram(prev.assets, updatedAssets, [String(idDoEvento ?? '')]);
+        if (alteradas.length > 0) {
+          saveInventory(newState, undefined, false, true)
+            .catch(e => logger.error('Erro ao salvar o evento do tempo real:', e));
+          sqliteService.persistAssetsBatch(alteradas as unknown as Record<string, unknown>[])
+            .catch(e => logger.error('Erro ao regravar a linha do evento do tempo real:', e));
+        }
         return newState;
       });
     }, (estado) => {
