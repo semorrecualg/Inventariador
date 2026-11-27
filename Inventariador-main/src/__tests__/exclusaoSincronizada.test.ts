@@ -11,6 +11,7 @@
 // devolve `_is_deleted` e a coluna existe no schema.
 // ============================================================================
 import 'fake-indexeddb/auto';
+import { autenticarClienteDeTeste } from './helpers/sessaoNuvemCliente';
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -70,6 +71,8 @@ describe('exclusão sincronizada — o soft delete chega à nuvem e aos outros a
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'SUPABASE');
+    // O envio exige sessão da nuvem: estes testes correm com utilizador autenticado.
+    autenticarClienteDeTeste(supabaseStub);
   });
 
   afterEach(() => {

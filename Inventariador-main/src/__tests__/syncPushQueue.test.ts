@@ -49,7 +49,10 @@ vi.mock('../services/supabaseService', async (importOriginal) => {
     fetchCloudDeletedKeys,
     fetchCloudConflictRows,
     registerCampaignSyncQueueDelegate: vi.fn(),
-    exigirGeracaoBaseCorrente: exigirGeracao
+    exigirGeracaoBaseCorrente: exigirGeracao,
+    // A sessão da nuvem tem teste próprio (sessaoNuvemEnvio): aqui o alvo é o
+    // envio em si, que corre como utilizador autenticado.
+    garantirSessaoNuvemParaEnvio: vi.fn(async () => {})
   };
 });
 

@@ -9,6 +9,7 @@
 // duas; só o MESMO registo repetido no payload bloqueia.
 // ============================================================================
 import 'fake-indexeddb/auto';
+import { autenticarClienteDeTeste } from './helpers/sessaoNuvemCliente';
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type * as SupabaseService from '../services/supabaseService';
 import type { Asset } from '../types';
@@ -77,6 +78,8 @@ describe('syncAssetsToCloud — guarda de registo repetido', () => {
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'SUPABASE');
+    // O envio exige sessão da nuvem: estes testes correm com utilizador autenticado.
+    autenticarClienteDeTeste(supabaseStub);
     resetNotice();
   });
 
@@ -188,6 +191,8 @@ describe('syncAssetsToCloud — identidade já existente na nuvem com outro prim
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'SUPABASE');
+    // O envio exige sessão da nuvem: estes testes correm com utilizador autenticado.
+    autenticarClienteDeTeste(supabaseStub);
     resetNotice();
   });
 
@@ -302,6 +307,8 @@ describe('syncAssetsToCloud — selo de geração da base', () => {
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'SUPABASE');
+    // O envio exige sessão da nuvem: estes testes correm com utilizador autenticado.
+    autenticarClienteDeTeste(supabaseStub);
     resetNotice();
     await db.local_assets.clear();
   });
@@ -404,6 +411,8 @@ describe('adotarGeracaoAtualDaNuvem', () => {
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem('app_database_mode', 'SUPABASE');
+    // O envio exige sessão da nuvem: estes testes correm com utilizador autenticado.
+    autenticarClienteDeTeste(supabaseStub);
     resetNotice();
   });
 

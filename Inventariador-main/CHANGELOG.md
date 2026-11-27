@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — em Base Oficial o login local abre a sessão da nuvem
+
+- **O que era:** o login por credencial local (Dexie, «Barreira Local») entrava
+  sem token do Supabase. O pull e o envio chegavam ao PostgREST como `anon` e,
+  com `assets` fechada a `anon` desde o #204, respondiam
+  `42501 permission denied for table assets` — o sintoma que o #236 tentou
+  «resolver» abrindo a tabela.
+- **Agora:** `estabelecerSessaoNuvem(email, senha)` (em
+  `src/services/supabaseService.ts`) reaproveita a sessão já aberta do mesmo
+  utilizador ou autentica no GoTrue com a credencial que o login local acabou de
+  validar. O `Login` chama-o nos dois caminhos locais, mas só em Base Oficial
+  com rede (`deveAbrirSessaoNuvemNoLogin`). Em Base Local, sem rede ou com a
+  credencial recusada na nuvem, o login local continua a entrar e a sessão fica
+  marcada como gerida pelo app, como antes.
+- **O envio deixou de tentar como `anon`:** `garantirSessaoNuvemParaEnvio()`
+  recusa o ciclo (`SessaoNuvemAusenteError`) quando não há token e pede nova
+  entrada na barra de sincronização — em vez de um 42501 por ativo. Vale para o
+  envio em massa (`syncAssetsToCloud`) e para a fila (`processDataSyncQueue`).
+- **Testes:** `sessaoNuvemEnvio` (8) fixa o reaproveitamento da sessão, a
+  entrada com a credencial local, a recusa de credencial errada, o portão e o
+  envio em massa que não toca em `assets` sem sessão; `sessaoNuvem` ganha a
+  regra de quando abrir a sessão no login.
+
 ### Corrigido — o 42501 do envio era o pedido a chegar como `anon`, não falta de GRANT
 
 - **Revertido o #236:** o script de privilégios que esse PR acrescentou (removido
