@@ -24,6 +24,7 @@ import { isAdminEmail } from '../utils/authUtils';
 import { clearPersistedSession } from '../utils/sessionPersistence';
 import { pullDedupKey } from '../utils/syncDedup';
 import { comTecto, TempoEsgotadoError } from '../utils/comTecto';
+import { classificarSessao, type EstadoSessaoNuvem } from '../utils/sessaoNuvem';
 import { matchUnitKeys, normalizeKey } from '../utils/schema';
 import { advanceSyncCheckpoint, computeMaxUpdatedAt } from '../utils/syncCheckpoint';
 import { assetUuid } from './uuidV5';
@@ -481,6 +482,40 @@ const rawSupabase = createClient(supabaseUrl, supabaseAnonKey, {
 export const supabase = createSupabaseInterceptor(rawSupabase);
 
 /* eslint-enable @typescript-eslint/no-explicit-any */
+
+/**
+ * SESSÃO DA NUVEM — há um token do Supabase neste aparelho?
+ * ============================================================================
+ * O app aceita sessões sem token (login pelo Dexie/Barreira Local, biometria e
+ * os «fail-safe» de arranque que mantêm o utilizador na app quando a nuvem não
+ * responde). Nesse estado o supabase-js envia só a `apikey`, o PostgREST trata
+ * o pedido como `anon` e, com o RLS endurecido, `assets` responde
+ * `42501 permission denied` — que era lido como falta de GRANT.
+ *
+ * A leitura é local (o `getSession` lê o storage) e tem tecto: a fila chama
+ * isto uma vez por ciclo, no primeiro 42501, e nunca deixa a mensagem do cartão
+ * depender de uma resposta pendurada. Falha para `indeterminado`, nunca para
+ * uma excepção.
+ */
+const SESSION_PROBE_TIMEOUT_MS = 2_000;
+
+export const estadoDaSessaoNuvem = async (): Promise<EstadoSessaoNuvem> => {
+  try {
+    const cliente = supabase as unknown as {
+      auth?: { getSession?: () => Promise<{ data?: { session?: { access_token?: string | null } | null } }> };
+    };
+    const getSession = cliente?.auth?.getSession;
+    if (typeof getSession !== 'function') return 'indeterminado';
+    const resultado = await comTecto(
+      getSession.call(cliente.auth),
+      SESSION_PROBE_TIMEOUT_MS,
+      'sessão da nuvem'
+    );
+    return classificarSessao(resultado?.data?.session);
+  } catch {
+    return 'indeterminado';
+  }
+};
 
 /**
  * Realiza o logout completo do sistema, limpando sessões locais e da nuvem

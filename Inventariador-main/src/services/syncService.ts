@@ -1,6 +1,7 @@
 import localforage from 'localforage';
 import { SyncQueueItem } from '../types';
-import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys, fetchCloudConflictRows, chaveDaNuvem, exigirGeracaoBaseCorrente } from './supabaseService';
+import { isQuotaExceededError, supabase, registerCampaignSyncQueueDelegate, getDatabaseMode, fetchCloudDeletedKeys, fetchCloudConflictRows, chaveDaNuvem, exigirGeracaoBaseCorrente, estadoDaSessaoNuvem } from './supabaseService';
+import { mensagemDeRecusa42501, type EstadoSessaoNuvem } from '../utils/sessaoNuvem';
 import { BaseGenerationBlockedError } from '../utils/baseGeneration';
 import { canPushToCloud } from './pushGate';
 import { enviarFilaAuditoria } from './auditoriaNuvem';
@@ -822,6 +823,9 @@ const _syncService = {
       let failureSignatures: Set<string> | null = null;
       let exceptionSignatures: Set<string> | null = null;
       let conflictSignatures: Set<string> | null = null;
+      // Uma leitura da sessão por ciclo: todos os registos do ciclo recebem o
+      // mesmo 42501, e perguntar ao cliente por cada um não muda a resposta.
+      let estadoSessaoCiclo: EstadoSessaoNuvem | null = null;
 
       for (const record of tentaveis) {
         // GUARDA DE CONECTIVIDADE EM TEMPO REAL: Evita enchentes de erros caso o sinal caia no meio do laço
@@ -1018,15 +1022,28 @@ const _syncService = {
             failedRecords.push(record as unknown as RegistoParaOutbox);
             const errObj = supabaseErr as { status?: string | number; code?: string | number; message?: string };
             const statusStr = errObj.status || errObj.code || 'SYNC_FAIL';
+            const codigo = String(errObj.code ?? statusStr);
             const baseDetails = `Erro Supabase: [${statusStr}] ${supabaseErr.message || JSON.stringify(supabaseErr)}`;
+
+            // 42501 NÃO significa sempre «falta de GRANT na nuvem»: é o mesmo
+            // código para o pedido que chega como `anon` (sem sessão do
+            // Supabase neste aparelho) e para a política de RLS a recusar a
+            // linha. Sem esta separação, a mensagem do cartão mandava abrir a
+            // tabela a `anon` — o que desfaz o endurecimento de RLS.
+            if (codigo === '42501') {
+              estadoSessaoCiclo ??= await estadoDaSessaoNuvem();
+            }
+
             // 42P10: a nuvem não tem índice único em (tenantid, primarykey) e o
             // ON CONFLICT não encontra alvo. Repetir o ciclo não resolve — o
             // operador precisa de criar o índice (docs/supabase_bootstrap.sql).
             // A acção vem primeiro: o motivo do selo é cortado aos 90 caracteres
             // e é essa frase que o operador precisa de ler.
-            const detailsStr = String(errObj.code) === '42P10'
-              ? `Erro Supabase: [42P10] falta o índice único (tenantid, primarykey) na nuvem — ${supabaseErr.message || 'ON CONFLICT sem alvo'}`
-              : baseDetails;
+            const detailsStr = codigo === '42501'
+              ? mensagemDeRecusa42501(estadoSessaoCiclo ?? 'indeterminado', supabaseErr.message)
+              : codigo === '42P10'
+                ? `Erro Supabase: [42P10] falta o índice único (tenantid, primarykey) na nuvem — ${supabaseErr.message || 'ON CONFLICT sem alvo'}`
+                : baseDetails;
             
             logger.warn(`>>> [Sync Isolator] Erro Supabase detectado silenciosamente para chave ${pKey}:`, detailsStr);
             await marcarFalhaNoRegisto(String(pKey), detailsStr, record as unknown as Record<string, unknown>);
