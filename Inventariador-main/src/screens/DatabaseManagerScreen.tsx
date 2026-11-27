@@ -4,7 +4,7 @@ import { showRecoveryToast as originalShowRecoveryToast } from '../services/Navi
 import { AppScreen, Asset } from '../types';
 import { DatabaseLoaderService } from '../services/DatabaseLoaderService';
 import { saveSnapshotToWorkspace, saveVirtualSnapshot, readVirtualSnapshot, clearVirtualSnapshot } from '../services/localDbService';
-import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets, estadoDaSessaoNuvem, estabelecerSessaoNuvem, SessaoNuvemAusenteError } from '../services/supabaseService';
+import { syncAssetsToCloud, isInternalMode, logAuditEvent, countCloudAssets, estadoDaSessaoNuvem, estabelecerSessaoNuvem, SessaoNuvemAusenteError, marcarSessaoDeEnvioEmMassa, encerrarSessaoDeEnvioEmMassa } from '../services/supabaseService';
 import { contarAuditoriaPendente, contarAuditoriaNuvem, type ContagemAuditoriaNuvem } from '../services/auditoriaNuvem';
 import { isAdminUser } from '../utils/authUtils';
 import { CloudPushPolicyError } from '../utils/cloudPushGuard';
@@ -512,6 +512,11 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       return;
     }
     setIsOpeningCloudSession(true);
+    const sessaoJaAberta = (await estadoDaSessaoNuvem()) === 'autenticada';
+    // A sessão é aberta no cliente partilhado: sem esta marca o App recebia
+    // SIGNED_IN e podia reprocessar login/modo/pull. No fim, a sessão aberta
+    // aqui é encerrada para a BASE LOCAL voltar a estar hermética.
+    marcarSessaoDeEnvioEmMassa(true);
     try {
       const ok = await estabelecerSessaoNuvem(email, password);
       if (!ok) {
@@ -525,6 +530,11 @@ export const DatabaseManagerScreen: React.FC<DatabaseManagerScreenProps> = ({ on
       const errMsg = err instanceof Error ? err.message : String(err);
       setCloudLogin({ ...cloudLogin, error: errMsg });
     } finally {
+      if (sessaoJaAberta) {
+        marcarSessaoDeEnvioEmMassa(false);
+      } else {
+        await encerrarSessaoDeEnvioEmMassa();
+      }
       setIsOpeningCloudSession(false);
     }
   };

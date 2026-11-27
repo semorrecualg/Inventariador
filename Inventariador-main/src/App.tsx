@@ -148,7 +148,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly, checkInventoryIntegrity } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, fetchAssetsChangedSince, mapCloudAssetRow, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, flushAncorasPendentes, fetchCampaigns, isInternalMode, getInitialDatabaseMode, isOnlineDatabaseMode } from './services/supabaseService';
+import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, fetchAssetsChangedSince, mapCloudAssetRow, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, flushAncorasPendentes, fetchCampaigns, isInternalMode, getInitialDatabaseMode, isOnlineDatabaseMode, isSessaoDeEnvioEmMassa } from './services/supabaseService';
 import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { checkNativeBiometry, isBiometricSupported, hasBiometricRegistered, isNativeAppShell } from './services/biometricService';
@@ -5166,6 +5166,14 @@ useEffect(() => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       logger.info('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
+
+      // Envio em massa da BASE LOCAL: a sessão aberta pelo Gestor serve só
+      // para subir a base. O login, o modo e o pull deste App não podem ser
+      // reprocessados por esses eventos (o Gestor encerra a sessão no fim).
+      if (isSessaoDeEnvioEmMassa()) {
+        logger.info('[Supabase Auth Listener] Evento da sessão de envio em massa ignorado:', event);
+        return;
+      }
 
       // PASSWORD_RECOVERY: o link do e-mail abriu uma sessão temporária. Login
       // suspenso até a senha nova ser definida no ecrã de recuperação.

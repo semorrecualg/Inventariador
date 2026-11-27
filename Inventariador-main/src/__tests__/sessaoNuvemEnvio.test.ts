@@ -30,6 +30,7 @@ let mod: typeof SupabaseService;
 let auth: {
   getSession: () => Promise<unknown>;
   signInWithPassword: (credenciais: { email: string; password: string }) => Promise<unknown>;
+  signOut: () => Promise<unknown>;
 };
 
 const sessao = (email = 'auditor@cicopal.com', token = 'jwt-válido') => ({
@@ -143,5 +144,49 @@ describe('portão de sessão do envio', () => {
     ).rejects.toBeInstanceOf(mod.SessaoNuvemAusenteError);
 
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+describe('sessão do envio em massa não chega ao App', () => {
+  beforeAll(async () => {
+    mod = await import('../services/supabaseService');
+    auth = mod.supabase.auth as unknown as typeof auth;
+  }, 120000);
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    localStorage.setItem('app_database_mode', 'INTERNAL');
+    mod.marcarSessaoDeEnvioEmMassa(false);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    mod.marcarSessaoDeEnvioEmMassa(false);
+  });
+
+  it('a marca começa desligada e alterna', () => {
+    expect(mod.isSessaoDeEnvioEmMassa()).toBe(false);
+    mod.marcarSessaoDeEnvioEmMassa(true);
+    expect(mod.isSessaoDeEnvioEmMassa()).toBe(true);
+    mod.marcarSessaoDeEnvioEmMassa(false);
+    expect(mod.isSessaoDeEnvioEmMassa()).toBe(false);
+  });
+
+  it('encerra a sessão e limpa a marca no sucesso', async () => {
+    mod.marcarSessaoDeEnvioEmMassa(true);
+    const signOut = vi.spyOn(auth, 'signOut').mockResolvedValue({ error: null } as never);
+
+    await expect(mod.encerrarSessaoDeEnvioEmMassa()).resolves.toBeUndefined();
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(mod.isSessaoDeEnvioEmMassa()).toBe(false);
+  });
+
+  it('limpa a marca mesmo quando a saída da nuvem falha (o App não fica cego)', async () => {
+    mod.marcarSessaoDeEnvioEmMassa(true);
+    vi.spyOn(auth, 'signOut').mockRejectedValue(new Error('sem rede'));
+
+    await expect(mod.encerrarSessaoDeEnvioEmMassa()).resolves.toBeUndefined();
+    expect(mod.isSessaoDeEnvioEmMassa()).toBe(false);
   });
 });

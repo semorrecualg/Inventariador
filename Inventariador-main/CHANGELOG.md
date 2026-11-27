@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a nuvem só é contactada nesse instante, o modo não muda e nada é lido em
   segundo plano. Um portão puro (`motivoDoBloqueioDoEnvioEmMassa`) decide
   sem-credenciais / offline / sem-sessão, com precedência nessa ordem.
+- **Sem efeitos colaterais no App:** a sessão aberta pelo Gestor é marcada
+  (`marcarSessaoDeEnvioEmMassa`) e o `onAuthStateChange` do App ignora os
+  eventos enquanto a marca estiver ativa; no fim do envio a sessão é encerrada
+  (`supabase.auth.signOut`), para a BASE LOCAL voltar a ficar hermética.
 - **Testes:** `entradaNuvemEnvio` (6) fixa a decisão do portão.
 
 ### Corrigido — pendentes «à espera de sessão» e reentrada a partir da barra
