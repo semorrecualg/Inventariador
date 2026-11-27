@@ -106,6 +106,14 @@ linha; um `UPDATE` cujo merge não alterou nada e um `DELETE` não gravam
 nenhuma — no `DELETE` o registo sai do estado e o espelho não ganha escrita
 (`persistAssetsBatch` é upsert), como já acontecia com o save completo.
 
+A normalização de `_dataLeitura` do arranque (leituras anteriores a 15/03/2026
+passam a «ontem») deixou de gravar a base inteira: a regra passou para
+`utils/normalizacaoLeitura` (`normalizarLeiturasDeConferencia`), devolve só as
+linhas que mudaram e é **idempotente** — só normaliza o que ainda está antes do
+alvo, por isso a segunda passagem não tem nada a fazer. Antes a data gravada
+(`2026-03-15T12:00:00Z`) continuava «anterior a 2026-03-16» e o arranque
+reescrevia a base em todos os arranques. O JSON legado usa a mesma regra.
+
 O pull do arranque também deixou de regravar a base: `fetchFullInventory` já
 escreve as linhas com `markSynced: true` e o estado é montado com essas mesmas
 linhas, que não trazem `_is_synced` (`mapCloudAssetRow` não o produz). Regravá-
