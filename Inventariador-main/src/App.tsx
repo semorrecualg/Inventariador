@@ -9,7 +9,7 @@ import { startSecurityMonitor, checkRuntimeIntegrity } from './services/security
 import { validateAndPushRoute, registerToastCallback } from './services/NavigationGuardService';
 import { AppModule, AppScreen, User, Asset, InventoryState, DatabaseStatus, TagInventario, ScannerMode, InventorySearchMode, ScanFeedbackMode, DatabaseMode, SearchFilters, UserRole, AuditLogEntry, TransactionOrigin, InventoryCampaign, UnitConfig, ModalConfig, NavigationParams } from './types';
 import { getAssetUnit, normalizeKey } from './utils/schema';
-import { effectiveAssetAddress, rotuloDePara } from './utils/assetAddress';
+import { effectiveAssetAddress, localDaConferencia, rotuloDePara } from './utils/assetAddress';
 import { unitContextKey, splitUnitContextKey, matchTenantUnit, UNIT_SEPARATOR } from './utils/unitContextUtils';
 import { collectGpsAnchorsFromStorage, isConfiguredAnchorRecord } from './utils/gpsAnchors';
 import { recordPerf, savePerfBaseline, scheduleIdle, startBootPerf } from './utils/perfMetrics';
@@ -1367,16 +1367,22 @@ useEffect(() => {
   useBackgroundSyncTimer(user);
 
   // Rastreamento Autônomo v24.50
+  //
+  // O watch tem de estar ligado EXACTAMENTE quando o auditor está a inventariar
+  // — e é no Modo de Campo (suspensão de sincronismo) que isso acontece. O
+  // efeito estava invertido (`if (!isFieldMode) start()`), pelo que o rastreio
+  // morria ao entrar em Modo de Campo: a conferência ficava sem nenhuma posição
+  // em cache e dependia de uma leitura fria do sensor, que em recinto fechado
+  // não fecha dentro dos 10 s nativo / 5 s web e devolvia `null` — o ativo era
+  // gravado sem `latitude`/`longitude`. Passa a arrancar sempre (o watch usa
+  // `enableHighAccuracy: false` e no máximo uma leitura por minuto) e só pára no
+  // unmount.
   useEffect(() => {
-    if (!isFieldMode) {
-      startAutonomousTracking();
-    } else {
-      stopAutonomousTracking();
-    }
+    startAutonomousTracking();
     return () => {
       void stopAutonomousTracking();
     };
-  }, [isFieldMode]);
+  }, []);
 
 
   // Monitor de Segurança e Integridade (Blindagem Técnica)
@@ -5790,6 +5796,17 @@ useEffect(() => {
     }
     updates._auditor = user?.name || user?.username || user?.email || 'SISTEMA';
     updates._origemTransacao = origin; // Aplica o código fixo
+
+    // O LOCAL DA CONFERÊNCIA NÃO PODE FICAR SÓ NO HISTÓRICO
+    // O `targetLoc` acima já alimentava a linha de auditoria; o registo ficava
+    // sem `_localMaster` quando a conferência chegava pela ficha do ativo (o
+    // inventário e o lote escrevem-no no próprio patch). Resultado: data,
+    // auditor e TAG preenchidos, «LOCAL ONDE FOI ENCONTRADO» vazio. Regra única
+    // em `localDaConferencia`, que nunca reescreve um local já registado.
+    if (isConferido(updates)) {
+      const localAuditado = localDaConferencia(updates, targetLoc);
+      if (localAuditado) updates._localMaster = localAuditado;
+    }
     
     // Garantir que tenant e unit estão definidos de forma dinâmica
     if (!updates.tenantid) {

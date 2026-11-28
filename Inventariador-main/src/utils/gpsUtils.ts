@@ -236,8 +236,20 @@ let lastLocation: GpsLocation | null = null;
 let lastTimestamp: number = 0;
 let watchId: string | null = null;
 let isReconnectingGps = false;
-/** Filtro anti-jitter compartilhado pelo rastreamento autônomo (ver gpsCore.ts). */
-const jitterFilter = new GpsJitterFilter();
+/**
+ * Filtro anti-jitter do rastreamento autónomo (ver gpsCore.ts).
+ *
+ * O limite é o de DESCARTE (150 m), não o de COLETA (50 m) que o filtro usa por
+ * omissão. O watch é registado com `enableHighAccuracy: false` — precisão de
+ * rede/Wi-Fi, justamente para gastar pouca bateria — e as leituras de rede num
+ * armazém ficam quase sempre entre 60 e 150 m. Com o limite de 50 m o filtro
+ * recusava TODAS elas, a última posição nunca era guardada e cada conferência
+ * ficava dependente de uma leitura fria do sensor, que em recinto fechado não
+ * fecha dentro dos 10 s nativo / 5 s web e devolvia `null`: o ativo era gravado
+ * sem latitude nem longitude. Acima de 150 m continua a ser ruído e é recusado,
+ * como no resto do contrato de GPS.
+ */
+const jitterFilter = new GpsJitterFilter({ maxAccuracyM: GPS_ACCURACY.DISCARD });
 
 /**
  * Inicia o rastreamento autônomo em segundo plano

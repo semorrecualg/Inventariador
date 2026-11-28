@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — conferência gravava o item sem GPS e sem o local onde foi encontrado
+
+- **O que era:** no campo, todo o inventariado saía com `LATITUDE`/`LONGITUDE`
+  a `---` e alguns registos conferidos ficavam também sem «LOCAL ONDE FOI
+  ENCONTRADO».
+- **Sem GPS — o rastreio contínuo morria no Modo de Campo:** o efeito do
+  `startAutonomousTracking` estava invertido (`if (!isFieldMode) start()`), por
+  isso o `watchPosition` parava exactamente quando o auditor entra em Modo de
+  Campo para inventariar. Sem posição em cache, cada conferência dependia de
+  uma leitura fria do sensor — que em recinto fechado não fecha dentro dos 10 s
+  nativo / 5 s web — e o registo seguia para a nuvem sem coordenada. O rastreio
+  passa a arrancar sempre (watch de rede, `enableHighAccuracy: false`, no máximo
+  uma leitura por minuto) e só pára no unmount.
+- **Sem GPS — o filtro recusava as leituras do próprio watch:** o filtro
+  anti-jitter usava o limite de COLETA (50 m), mas o watch é registado em
+  precisão de rede e num armazém as leituras ficam entre 60 e 150 m — todas
+  descartadas, e a última posição nunca chegava a ser guardada. Passa a usar o
+  limite de DESCARTE (150 m), o mesmo do resto do contrato de GPS; acima disso
+  continua a ser ruído.
+- **Sem local registado:** o `commitAssetUpdate` calculava o local da auditoria
+  (`targetLoc`) e usava-o só na linha de histórico; a conferência feita pela
+  ficha do ativo gravava data, auditor e TAG, mas deixava `_localMaster` vazio
+  (o inventário e o lote escrevem-no no próprio patch). A regra passa a estar
+  em `localDaConferencia` (`utils/assetAddress`): local já registado não se
+  reescreve, senão vale o endereço do inventário aberto, senão o do próprio
+  ativo — e sem nada a afirmar não se inventa local.
+- **Testes:** `gpsRastreioContinuo` (2) fixa a leitura de rede de 120 m a
+  entrar como última posição e o efeito do rastreio a não depender do Modo de
+  Campo; `localDaConferencia` (4) fixa a precedência do local.
+
 ### Corrigido — pendentes «à espera de sessão» e reentrada a partir da barra
 
 - **Falta de sessão não é recusa:** o ciclo da fila deixa de gravar
