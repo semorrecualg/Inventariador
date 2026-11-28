@@ -509,6 +509,44 @@ export const supabase = createSupabaseInterceptor(rawSupabase);
  * depender de uma resposta pendurada. Falha para `indeterminado`, nunca para
  * uma excepção.
  */
+/**
+ * SESSÃO ABERTA SÓ PARA O ENVIO EM MASSA (BASE LOCAL)
+ * ============================================================================
+ * O envio em massa do Gestor de Base abre a sessão no cliente partilhado
+ * (`estabelecerSessaoNuvem`). O supabase-js notifica todos os listeners com
+ * `SIGNED_IN` — inclusive o `onAuthStateChange` do App, que pode reprocessar o
+ * login, mudar o modo de base e disparar um pull.
+ *
+ * Enquanto esta marca estiver ativa, o App ignora os eventos de auth da nuvem.
+ * O Gestor liga-a antes de abrir a sessão e desliga-a depois de a encerrar.
+ */
+let sessaoDeEnvioEmMassaAtiva = false;
+
+export const marcarSessaoDeEnvioEmMassa = (ativa: boolean): void => {
+  sessaoDeEnvioEmMassaAtiva = ativa;
+};
+
+export const isSessaoDeEnvioEmMassa = (): boolean => sessaoDeEnvioEmMassaAtiva;
+
+/**
+ * Encerra a sessão aberta só para o envio em massa e limpa a marca sempre —
+ * mesmo se a saída da nuvem falhar ou ficar pendurada (tecto de 5 s).
+ */
+export const encerrarSessaoDeEnvioEmMassa = async (): Promise<void> => {
+  try {
+    const cliente = supabase as unknown as {
+      auth?: { signOut?: () => Promise<unknown> };
+    };
+    if (typeof cliente?.auth?.signOut === 'function') {
+      await comTecto(cliente.auth.signOut.call(cliente.auth), 5_000, 'saída da sessão do envio em massa');
+    }
+  } catch (err) {
+    logger.warn('>>> [Supabase] Não foi possível encerrar a sessão do envio em massa:', err);
+  } finally {
+    marcarSessaoDeEnvioEmMassa(false);
+  }
+};
+
 const SESSION_PROBE_TIMEOUT_MS = 2_000;
 
 export const estadoDaSessaoNuvem = async (): Promise<EstadoSessaoNuvem> => {

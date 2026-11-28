@@ -75,7 +75,7 @@ import Labeling from './components/Labeling';
 import GPSComplianceGuard from './components/GPSComplianceGuard';
 import Signature from './components/Signature';
 import localforage from 'localforage';
-import { getCurrentLocation, persistableAssetGps, shouldAttemptAssetGpsCapture, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
+import { deveRastrearGpsContinuo, getCurrentLocation, persistableAssetGps, shouldAttemptAssetGpsCapture, startAutonomousTracking, stopAutonomousTracking } from './utils/gpsUtils';
 import AddressSelector from './components/AddressSelector';
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
 import UserManagement from './components/UserManagement';
@@ -148,7 +148,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import * as XLSX from 'xlsx';
 import { saveInventory, loadInventory, clearInventory, clearMultipleInventories, backupInventory, restoreInventory, saveConfigOnly, checkInventoryIntegrity } from './services/persistenceService';
 import { Session, type AuthChangeEvent } from '@supabase/supabase-js';
-import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, fetchAssetsChangedSince, mapCloudAssetRow, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, flushAncorasPendentes, fetchCampaigns, isInternalMode, getInitialDatabaseMode, isOnlineDatabaseMode } from './services/supabaseService';
+import { fetchUnitNamesFromCloud, getAssetByTag, fetchFullInventory, fetchAssetsChangedSince, mapCloudAssetRow, clearCloudInventory, subscribeToInventoryChanges, subscribeToAssetChanges, syncAssetsToCloud, syncAssetsToCloudAndMark, syncConfigToCloud, resetCloudPushBlockedNotice, syncUsersToCloud, fetchUsersFromCloud, supabase, ensureUserProfile, logAuditEvent, fetchUnitConfigs, flushAncorasPendentes, fetchCampaigns, isInternalMode, getInitialDatabaseMode, isOnlineDatabaseMode, isSessaoDeEnvioEmMassa } from './services/supabaseService';
 import { CloudPushPolicyError, nextCloudPushBlockedBackoff } from './utils/cloudPushGuard';
 import { getPendingSyncItems, processSyncQueue } from './services/syncService';
 import { checkNativeBiometry, isBiometricSupported, hasBiometricRegistered, isNativeAppShell } from './services/biometricService';
@@ -1368,21 +1368,24 @@ useEffect(() => {
 
   // Rastreamento Autônomo v24.50
   //
-  // O watch tem de estar ligado EXACTAMENTE quando o auditor está a inventariar
-  // — e é no Modo de Campo (suspensão de sincronismo) que isso acontece. O
-  // efeito estava invertido (`if (!isFieldMode) start()`), pelo que o rastreio
-  // morria ao entrar em Modo de Campo: a conferência ficava sem nenhuma posição
-  // em cache e dependia de uma leitura fria do sensor, que em recinto fechado
-  // não fecha dentro dos 10 s nativo / 5 s web e devolvia `null` — o ativo era
-  // gravado sem `latitude`/`longitude`. Passa a arrancar sempre (o watch usa
-  // `enableHighAccuracy: false` e no máximo uma leitura por minuto) e só pára no
-  // unmount.
+  // O watch corre SÓ enquanto o ecrã aberto é de conferência — os que gravam
+  // `latitude`/`longitude` no ativo (ver `deveRastrearGpsContinuo`). Ligado o
+  // dia inteiro gastava bateria sem nada a carimbar.
+  //
+  // Antes disto o efeito estava invertido (`if (!isFieldMode) start()` com
+  // `else stop()`): o watch morria exactamente no Modo de Campo, quando o
+  // auditor está a inventariar. Sem posição em cache, cada conferência dependia
+  // de uma leitura fria do sensor, que em recinto fechado não fecha dentro dos
+  // 10 s nativo / 5 s web e devolvia `null` — o ativo era gravado sem
+  // `latitude`/`longitude`.
+  const inventariandoAgora = deveRastrearGpsContinuo(screen);
   useEffect(() => {
+    if (!inventariandoAgora) return;
     startAutonomousTracking();
     return () => {
       void stopAutonomousTracking();
     };
-  }, []);
+  }, [inventariandoAgora]);
 
 
   // Monitor de Segurança e Integridade (Blindagem Técnica)
@@ -5172,6 +5175,14 @@ useEffect(() => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       logger.info('[App] Evento de Autenticação Supabase:', event, session?.user?.email);
+
+      // Envio em massa da BASE LOCAL: a sessão aberta pelo Gestor serve só
+      // para subir a base. O login, o modo e o pull deste App não podem ser
+      // reprocessados por esses eventos (o Gestor encerra a sessão no fim).
+      if (isSessaoDeEnvioEmMassa()) {
+        logger.info('[Supabase Auth Listener] Evento da sessão de envio em massa ignorado:', event);
+        return;
+      }
 
       // PASSWORD_RECOVERY: o link do e-mail abriu uma sessão temporária. Login
       // suspenso até a senha nova ser definida no ecrã de recuperação.

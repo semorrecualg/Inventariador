@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { AppScreen } from '../types';
 
 /**
  * RASTREIO CONTÍNUO — a última posição tem de existir ANTES da conferência
@@ -15,6 +15,9 @@ import { readFileSync } from 'node:fs';
  * E o efeito do rastreio em `App.tsx` estava invertido (`if (!isFieldMode)`):
  * o watch morria exactamente no Modo de Campo, que é quando o auditor está a
  * inventariar. Os dois defeitos juntos explicam «nenhum inventariado com GPS».
+ *
+ * O rastreio também não pode ficar ligado o dia inteiro: corre só nos ecrãs em
+ * que se confere, e é `deveRastrearGpsContinuo` quem decide.
  */
 const sensor = vi.hoisted(() => ({
   latitude: -16.6869,
@@ -36,6 +39,7 @@ vi.mock('@capacitor/geolocation', () => ({
 }));
 
 import {
+  deveRastrearGpsContinuo,
   getCurrentLocation,
   persistableAssetGps,
   startAutonomousTracking
@@ -61,22 +65,28 @@ describe('rastreio contínuo', () => {
     });
   });
 
-  it('o efeito do rastreio não depende do Modo de Campo', () => {
-    const fonte = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
-    const bloco = fonte.match(/\/\/ Rastreamento Autônomo[\s\S]*?\}, \[[^\]]*\]\);/);
+  it('liga o rastreio nos ecrãs em que se confere', () => {
+    for (const ecra of [
+      AppScreen.INVENTORY,
+      AppScreen.ASSET_DETAIL,
+      AppScreen.LABELING,
+      AppScreen.ACCOUNT_RECONCILIATION
+    ]) {
+      expect(deveRastrearGpsContinuo(ecra), ecra).toBe(true);
+    }
+  });
 
-    expect(bloco, 'bloco do rastreio autónomo não encontrado em App.tsx').not.toBeNull();
-
-    // Só o código interessa: o comentário do efeito cita o defeito para o
-    // explicar, e não pode ser ele a reprovar o teste.
-    const codigo = bloco![0]
-      .split('\n')
-      .filter((linha) => !linha.trim().startsWith('//'))
-      .join('\n');
-
-    expect(codigo).toContain('startAutonomousTracking()');
-    // O que não pode voltar é a condição: `if (!isFieldMode) start()` parava o
-    // watch exactamente quando o auditor entra em Modo de Campo.
-    expect(codigo).not.toMatch(/isFieldMode/);
+  it('não deixa o rastreio ligado o dia inteiro', () => {
+    for (const ecra of [
+      AppScreen.MAIN_MENU,
+      AppScreen.DASHBOARD,
+      AppScreen.DATABASE_MANAGER,
+      AppScreen.ASSET_MAP,
+      AppScreen.LOGIN
+    ]) {
+      expect(deveRastrearGpsContinuo(ecra), ecra).toBe(false);
+    }
+    expect(deveRastrearGpsContinuo(null)).toBe(false);
+    expect(deveRastrearGpsContinuo(undefined)).toBe(false);
   });
 });

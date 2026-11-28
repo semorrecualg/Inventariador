@@ -2,6 +2,7 @@ import { Geolocation } from '@capacitor/geolocation';
 import { logger } from './logger';
 import { canonicalRole } from './roles';
 import { GPS_ACCURACY, GpsJitterFilter, isPreciseFix, isValidCoordinate, toGpsFix } from './gpsCore';
+import { AppScreen } from '../types';
 
 /**
  * Utilitário para captura de geolocalização (GPS)
@@ -54,6 +55,34 @@ export const shouldAttemptAssetGpsCapture = (opts: {
   bypassed: boolean;
   battery: number | undefined;
 }): boolean => !opts.bypassed && Number(opts.battery) > 5;
+
+/**
+ * Ecrãs em que a conferência pode acontecer.
+ *
+ * São os únicos que gravam `latitude`/`longitude` no ativo — pelo toque no
+ * inventário, pela ficha do ativo, pela etiquetagem ou pela conciliação.
+ */
+export const ECRAS_DE_CONFERENCIA: readonly AppScreen[] = [
+  AppScreen.INVENTORY,
+  AppScreen.ASSET_DETAIL,
+  AppScreen.LABELING,
+  AppScreen.ACCOUNT_RECONCILIATION
+];
+
+/**
+ * O RASTREIO CONTÍNUO SÓ EXISTE ENQUANTO SE INVENTARIA
+ * ============================================================================
+ * O `watchPosition` mantém uma posição recente em cache, e é dela que a
+ * conferência se serve quando o sensor não entrega um fix a tempo. Mas um watch
+ * ligado o dia inteiro gasta bateria sem servir para nada: fora dos ecrãs de
+ * conferência não há coordenada nenhuma a carimbar.
+ *
+ * Este predicado é a regra única do "quando": o App liga o rastreio quando o
+ * ecrã aberto é de conferência e pára-o ao sair. Sem ecrã (boot, ecrãs
+ * públicos), fica desligado.
+ */
+export const deveRastrearGpsContinuo = (ecraAtual?: AppScreen | string | null): boolean =>
+  !!ecraAtual && ECRAS_DE_CONFERENCIA.includes(ecraAtual as AppScreen);
 
 function showFloatingBypassToast(lat: number, lng: number, reason: string) {
   if (typeof document === 'undefined') return;
