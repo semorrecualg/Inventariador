@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrigido — conferência gravava o item sem GPS e sem o local onde foi encontrado
+
+- **O que era:** no campo, todo o inventariado saía com `LATITUDE`/`LONGITUDE`
+  a `---` e alguns registos conferidos ficavam também sem «LOCAL ONDE FOI
+  ENCONTRADO».
+- **Sem GPS — o rastreio contínuo morria no Modo de Campo:** o efeito do
+  `startAutonomousTracking` estava invertido (`if (!isFieldMode) start()`), por
+  isso o `watchPosition` parava exactamente quando o auditor entra em Modo de
+  Campo para inventariar. Sem posição em cache, cada conferência dependia de
+  uma leitura fria do sensor — que em recinto fechado não fecha dentro dos 10 s
+  nativo / 5 s web — e o registo seguia para a nuvem sem coordenada. O rastreio
+  passa a estar ligado **só enquanto o ecrã aberto é de conferência**
+  (`INVENTORY`, `ASSET_DETAIL`, `LABELING`, `ACCOUNT_RECONCILIATION`), decidido
+  por `deveRastrearGpsContinuo`; fora desses ecrãs o watch pára, para não ficar
+  a consumir bateria o dia inteiro sem nada a carimbar.
+- **Sem GPS — o filtro recusava as leituras do próprio watch:** o filtro
+  anti-jitter usava o limite de COLETA (50 m), mas o watch é registado em
+  precisão de rede e num armazém as leituras ficam entre 60 e 150 m — todas
+  descartadas, e a última posição nunca chegava a ser guardada. Passa a usar o
+  limite de DESCARTE (150 m), o mesmo do resto do contrato de GPS; acima disso
+  continua a ser ruído.
+- **Sem local registado:** o `commitAssetUpdate` calculava o local da auditoria
+  (`targetLoc`) e usava-o só na linha de histórico; a conferência feita pela
+  ficha do ativo gravava data, auditor e TAG, mas deixava `_localMaster` vazio
+  (o inventário e o lote escrevem-no no próprio patch). A regra passa a estar
+  em `localDaConferencia` (`utils/assetAddress`): local já registado não se
+  reescreve, senão vale o endereço do inventário aberto, senão o do próprio
+  ativo — e sem nada a afirmar não se inventa local.
+- **Testes:** `gpsRastreioContinuo` (3) fixa a leitura de rede de 120 m a
+  entrar como última posição e os ecrãs em que o rastreio pode correr;
+  `localDaConferencia` (4) fixa a precedência do local.
+
+### Corrigido — envio em massa da base local pede a credencial da nuvem sem trocar de modo
+- **O que era:** ao premir «ENVIAR BASE PARA A NUVEM» no Gestor de Base de
+  Dados em BASE LOCAL, o envio falhava com `SessaoNuvemAusenteError` e a
+  instrução «saia e entre com e-mail e senha» era impossível de cumprir sem
+  trocar de modo — beco sem saída.
+- **Agora:** o botão pede o e-mail e a senha do Supabase num modal do próprio
+  Gestor só quando é premido (acção explícita do operador), abre a sessão com
+  `estabelecerSessaoNuvem` e só então envia. A BASE LOCAL permanece hermética:
+  a nuvem só é contactada nesse instante, o modo não muda e nada é lido em
+  segundo plano. Um portão puro (`motivoDoBloqueioDoEnvioEmMassa`) decide
+  sem-credenciais / offline / sem-sessão, com precedência nessa ordem.
+- **Sem efeitos colaterais no App:** a sessão aberta pelo Gestor é marcada
+  (`marcarSessaoDeEnvioEmMassa`) e o `onAuthStateChange` do App ignora os
+  eventos enquanto a marca estiver ativa; no fim do envio a sessão é encerrada
+  (`supabase.auth.signOut`), para a BASE LOCAL voltar a ficar hermética.
+- **Testes:** `entradaNuvemEnvio` (6) fixa a decisão do portão.
+
 ### Corrigido — pendentes «à espera de sessão» e reentrada a partir da barra
 
 - **Falta de sessão não é recusa:** o ciclo da fila deixa de gravar
